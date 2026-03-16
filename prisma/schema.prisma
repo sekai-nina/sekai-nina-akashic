@@ -1,0 +1,282 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  admin
+  member
+  viewer
+}
+
+enum AssetKind {
+  image
+  video
+  audio
+  text
+  document
+  other
+}
+
+enum AssetStatus {
+  inbox
+  triaging
+  organized
+  archived
+}
+
+enum TrustLevel {
+  unverified
+  low
+  medium
+  high
+  official
+}
+
+enum SourceType {
+  web
+  manual
+  discord
+  import
+}
+
+enum StorageProvider {
+  gdrive
+  discord_url
+  external_url
+  local_none
+}
+
+enum EntityType {
+  person
+  place
+  source
+  event
+  tag
+}
+
+enum TextType {
+  title
+  body
+  description
+  message_body
+  ocr
+  transcript
+  note
+  extracted
+}
+
+enum SourceKind {
+  url
+  discord_message
+  drive_file
+  manual
+  other
+}
+
+enum AnnotationKind {
+  note
+  time_range
+  text_span
+  region
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         Role     @default(member)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  createdAssets  Asset[]      @relation("AssetCreatedBy")
+  updatedAssets  Asset[]      @relation("AssetUpdatedBy")
+  assetTexts     AssetText[]  @relation("AssetTextCreatedBy")
+  annotations    Annotation[] @relation("AnnotationCreatedBy")
+  collections    Collection[]
+  auditLogs      AuditLog[]
+}
+
+model Asset {
+  id               String          @id @default(cuid())
+  kind             AssetKind
+  title            String          @default("")
+  description      String          @default("")
+  status           AssetStatus     @default(inbox)
+  trustLevel       TrustLevel      @default(unverified)
+  canonicalDate    DateTime?
+  originalFilename String?
+  mimeType         String?
+  fileSize         Int?
+  sha256           String?
+  sourceType       SourceType      @default(manual)
+  storageProvider  StorageProvider  @default(local_none)
+  storageKey       String?
+  storageUrl       String?
+  thumbnailUrl     String?
+  messageBodyPreview String?
+
+  // Discord metadata
+  discordGuildId    String?
+  discordChannelId  String?
+  discordMessageId  String?
+  discordMessageUrl String?
+  discordAuthorId   String?
+  discordAuthorName String?
+  discordPostedAt   DateTime?
+
+  createdById String?
+  createdBy   User?   @relation("AssetCreatedBy", fields: [createdById], references: [id])
+  updatedById String?
+  updatedBy   User?   @relation("AssetUpdatedBy", fields: [updatedById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  texts           AssetText[]
+  entities        AssetEntity[]
+  sourceRecords   SourceRecord[]
+  annotations     Annotation[]
+  collectionItems CollectionItem[]
+
+  @@index([sha256])
+  @@index([status])
+  @@index([kind])
+  @@index([sourceType])
+  @@index([trustLevel])
+  @@index([canonicalDate])
+  @@index([createdAt])
+}
+
+model AssetText {
+  id                String   @id @default(cuid())
+  assetId           String
+  asset             Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  textType          TextType
+  content           String
+  normalizedContent String   @default("")
+  language          String?
+
+  createdById String?
+  createdBy   User?   @relation("AssetTextCreatedBy", fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([assetId])
+}
+
+model Entity {
+  id             String     @id @default(cuid())
+  type           EntityType
+  canonicalName  String
+  normalizedName String     @default("")
+  aliases        Json       @default("[]")
+  description    String     @default("")
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  assets AssetEntity[]
+
+  @@unique([type, canonicalName])
+}
+
+model AssetEntity {
+  id        String   @id @default(cuid())
+  assetId   String
+  asset     Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  entityId  String
+  entity    Entity   @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  roleLabel String?
+  createdAt DateTime @default(now())
+
+  @@unique([assetId, entityId])
+  @@index([assetId])
+  @@index([entityId])
+}
+
+model SourceRecord {
+  id          String     @id @default(cuid())
+  assetId     String
+  asset       Asset      @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  sourceKind  SourceKind
+  title       String     @default("")
+  url         String?
+  publisher   String?
+  publishedAt DateTime?
+  metadata    Json       @default("{}")
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([assetId])
+}
+
+model Annotation {
+  id        String         @id @default(cuid())
+  assetId   String
+  asset     Asset          @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  kind      AnnotationKind
+  body      String
+  startMs   Int?
+  endMs     Int?
+  textStart Int?
+  textEnd   Int?
+  bbox      Json?
+
+  createdById String
+  createdBy   User   @relation("AnnotationCreatedBy", fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([assetId])
+}
+
+model Collection {
+  id          String @id @default(cuid())
+  ownerId     String
+  owner       User   @relation(fields: [ownerId], references: [id])
+  name        String
+  description String @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items CollectionItem[]
+
+  @@index([ownerId])
+}
+
+model CollectionItem {
+  id           String @id @default(cuid())
+  collectionId String
+  collection   Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  assetId      String
+  asset        Asset      @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  note         String     @default("")
+  sortOrder    Int        @default(0)
+  createdAt    DateTime   @default(now())
+
+  @@unique([collectionId, assetId])
+  @@index([collectionId])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  actor      User?    @relation(fields: [actorId], references: [id])
+  action     String
+  targetType String
+  targetId   String
+  metadata   Json     @default("{}")
+  createdAt  DateTime @default(now())
+
+  @@index([actorId])
+  @@index([targetType, targetId])
+  @@index([createdAt])
+}
