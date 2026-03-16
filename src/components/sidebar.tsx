@@ -32,9 +32,12 @@ export function Sidebar({ user }: SidebarProps) {
 
   return (
     <aside className="flex w-56 flex-col border-r border-slate-200 bg-white">
-      <div className="border-b border-slate-200 px-4 py-4">
-        <h1 className="text-sm font-bold tracking-tight">Akashic</h1>
-        <p className="text-xs text-slate-500">Sekai Nina</p>
+      <div className="border-b border-slate-200 px-4 py-3 flex items-center gap-2.5">
+        <img src="/icon.jpg" alt="" className="w-8 h-8 rounded-md" />
+        <div>
+          <h1 className="text-sm font-bold tracking-tight leading-tight">Akashic</h1>
+          <p className="text-xs text-slate-500 leading-tight">Sekai Nina</p>
+        </div>
       </div>
       <nav className="flex-1 space-y-1 px-2 py-3">
         {navItems.map((item) => {

@@ -31,6 +31,7 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center">
       <div className="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
+        <img src="/icon.jpg" alt="" className="w-12 h-12 rounded-lg mb-4" />
         <h1 className="mb-1 text-xl font-bold">Sekai Nina Akashic</h1>
         <p className="mb-6 text-sm text-slate-500">ログイン</p>
         <form onSubmit={handleSubmit} className="space-y-4">

@@ -4,9 +4,9 @@ services:
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_USER: akashic
-      POSTGRES_PASSWORD: akashic
-      POSTGRES_DB: akashic
+      POSTGRES_USER: ${POSTGRES_USER:-akashic}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-akashic}
+      POSTGRES_DB: ${POSTGRES_DB:-akashic}
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: always
