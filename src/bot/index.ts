@@ -28,8 +28,6 @@ if (!BOT_TOKEN || !CLIENT_ID) {
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
   ],
 });
 
@@ -40,6 +38,9 @@ async function registerCommands() {
   const slashCommand = new SlashCommandBuilder()
     .setName("akashic")
     .setDescription("メッセージをAkashicに登録")
+    .addStringOption((opt) =>
+      opt.setName("message_id").setDescription("登録するメッセージのID").setRequired(true)
+    )
     .addStringOption((opt) =>
       opt.setName("title").setDescription("タイトル（省略時はメッセージ本文から自動生成）")
     );
@@ -221,17 +222,16 @@ client.on("interactionCreate", async (interaction) => {
     await cmd.deferReply({ ephemeral: true });
 
     try {
+      const messageId = cmd.options.getString("message_id", true);
       const channel = await cmd.client.channels.fetch(cmd.channelId);
       if (!channel || !channel.isTextBased()) {
         await cmd.editReply("テキストチャンネルでのみ使用できます");
         return;
       }
 
-      // Get the most recent message in the channel (before the command)
-      const messages = await channel.messages.fetch({ limit: 1, before: cmd.id });
-      const message = messages.first();
+      const message = await channel.messages.fetch(messageId).catch(() => null);
       if (!message) {
-        await cmd.editReply("対象メッセージが見つかりません");
+        await cmd.editReply("メッセージが見つかりません。IDを確認してください。");
         return;
       }
 

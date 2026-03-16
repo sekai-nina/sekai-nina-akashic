@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
-import { quickCreateAsset, updateAssetStatus } from "@/lib/actions";
+import { updateAssetStatus } from "@/lib/actions";
 import { ASSET_KIND_LABELS, ASSET_STATUS_LABELS, formatDate } from "@/lib/utils";
+import { QuickUploadForm } from "@/components/quick-upload-form";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
@@ -43,48 +44,7 @@ export default async function InboxPage() {
         <p className="text-slate-500 text-sm mt-1">未整理のアセット一覧</p>
       </div>
 
-      {/* Quick create form */}
-      <div className="bg-white border border-slate-200 rounded-lg p-4 mb-6">
-        <h2 className="text-sm font-semibold text-slate-700 mb-3">クイック登録</h2>
-        <form action={quickCreateAsset} className="flex flex-wrap gap-3 items-end">
-          <div className="flex-1 min-w-[180px]">
-            <label className="block text-xs text-slate-500 mb-1">タイトル</label>
-            <input
-              type="text"
-              name="title"
-              placeholder="タイトルを入力"
-              className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              required
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-slate-500 mb-1">種別</label>
-            <select
-              name="kind"
-              className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              {Object.entries(ASSET_KIND_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
-              ))}
-            </select>
-          </div>
-          <div className="flex-1 min-w-[200px]">
-            <label className="block text-xs text-slate-500 mb-1">URL（任意）</label>
-            <input
-              type="url"
-              name="storageUrl"
-              placeholder="https://..."
-              className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <button
-            type="submit"
-            className="bg-blue-600 text-white px-4 py-1.5 rounded text-sm font-medium hover:bg-blue-700 transition-colors"
-          >
-            登録
-          </button>
-        </form>
-      </div>
+      <QuickUploadForm />
 
       {/* Asset list */}
       {assets.length === 0 ? (
