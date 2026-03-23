@@ -100,6 +100,7 @@ model User {
   annotations    Annotation[] @relation("AnnotationCreatedBy")
   collections    Collection[]
   auditLogs      AuditLog[]
+  apiKeys        ApiKey[]
 }
 
 model Asset {
@@ -264,6 +265,21 @@ model CollectionItem {
 
   @@unique([collectionId, assetId])
   @@index([collectionId])
+}
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  name        String
+  keyHash     String    @unique
+  keyPrefix   String    // 先頭8文字を保持（UI表示用）
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  permissions Json      @default("[\"read\",\"write\"]") // 許可する操作
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([keyHash])
 }
 
 model AuditLog {
