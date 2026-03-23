@@ -30,6 +30,19 @@ export interface SearchResultItem {
   createdAt: Date;
 }
 
+/** Drive の直リンクをプロキシURLに変換する */
+function resolveImageUrl(
+  thumbnailUrl: string | null,
+  storageProvider: string | null,
+  storageKey: string | null,
+  kind: string
+): string | null {
+  if (kind === "image" && storageProvider === "gdrive" && storageKey) {
+    return `/api/drive-image/${storageKey}`;
+  }
+  return thumbnailUrl;
+}
+
 export interface SearchResult {
   items: SearchResultItem[];
   total: number;
@@ -91,6 +104,8 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
       status: AssetStatus;
       thumbnailUrl: string | null;
       storageUrl: string | null;
+      storageProvider: string | null;
+      storageKey: string | null;
       messageBodyPreview: string | null;
       createdAt: Date;
       title_sim: number;
@@ -98,7 +113,8 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
     }>>`
       SELECT
         a."id", a."title", a."description", a."kind", a."status",
-        a."thumbnailUrl", a."storageUrl", a."messageBodyPreview", a."createdAt",
+        a."thumbnailUrl", a."storageUrl", a."storageProvider", a."storageKey",
+        a."messageBodyPreview", a."createdAt",
         COALESCE(similarity(a."title", ${q}), 0) as title_sim,
         COALESCE(similarity(a."description", ${q}), 0) as desc_sim
       FROM "Asset" a
@@ -131,7 +147,7 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
         assetTitle: row.title || "(無題)",
         assetKind: row.kind,
         assetStatus: row.status,
-        thumbnailUrl: row.thumbnailUrl,
+        thumbnailUrl: resolveImageUrl(row.thumbnailUrl, row.storageProvider, row.storageKey, row.kind),
         storageUrl: row.storageUrl,
         snippet: buildSnippet(matchText, q),
         matchField,
@@ -154,6 +170,8 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
       asset_status: AssetStatus;
       asset_thumbnailUrl: string | null;
       asset_storageUrl: string | null;
+      asset_storageProvider: string | null;
+      asset_storageKey: string | null;
       asset_createdAt: Date;
     }>>`
       SELECT
@@ -161,6 +179,7 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
         COALESCE(similarity(t."content", ${q}), 0) as content_sim,
         a."title" as asset_title, a."kind" as asset_kind, a."status" as asset_status,
         a."thumbnailUrl" as "asset_thumbnailUrl", a."storageUrl" as "asset_storageUrl",
+        a."storageProvider" as "asset_storageProvider", a."storageKey" as "asset_storageKey",
         a."createdAt" as "asset_createdAt"
       FROM "AssetText" t
       JOIN "Asset" a ON a."id" = t."assetId"
@@ -184,7 +203,7 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
         assetTitle: row.asset_title || "(無題)",
         assetKind: row.asset_kind,
         assetStatus: row.asset_status,
-        thumbnailUrl: row.asset_thumbnailUrl,
+        thumbnailUrl: resolveImageUrl(row.asset_thumbnailUrl, row.asset_storageProvider, row.asset_storageKey, row.asset_kind),
         storageUrl: row.asset_storageUrl,
         snippet: buildSnippet(row.content, q),
         matchField: row.textType,
@@ -203,6 +222,8 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
       asset_status: AssetStatus;
       asset_thumbnailUrl: string | null;
       asset_storageUrl: string | null;
+      asset_storageProvider: string | null;
+      asset_storageKey: string | null;
       asset_createdAt: Date;
       entity_name: string;
       name_sim: number;
@@ -211,6 +232,7 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
         ae."assetId",
         a."title" as asset_title, a."kind" as asset_kind, a."status" as asset_status,
         a."thumbnailUrl" as "asset_thumbnailUrl", a."storageUrl" as "asset_storageUrl",
+        a."storageProvider" as "asset_storageProvider", a."storageKey" as "asset_storageKey",
         a."createdAt" as "asset_createdAt",
         e."canonicalName" as entity_name,
         COALESCE(similarity(e."canonicalName", ${q}), 0) as name_sim
@@ -235,7 +257,7 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
           assetTitle: row.asset_title || "(無題)",
           assetKind: row.asset_kind,
           assetStatus: row.asset_status,
-          thumbnailUrl: row.asset_thumbnailUrl,
+          thumbnailUrl: resolveImageUrl(row.asset_thumbnailUrl, row.asset_storageProvider, row.asset_storageKey, row.asset_kind),
           storageUrl: row.asset_storageUrl,
           snippet: `タグ/人物: ${row.entity_name}`,
           matchField: "entity",

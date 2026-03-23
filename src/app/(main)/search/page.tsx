@@ -1,5 +1,6 @@
 import { search } from "@/lib/search";
-import { ASSET_KIND_LABELS, ASSET_STATUS_LABELS, TRUST_LEVEL_LABELS } from "@/lib/utils";
+import { prisma } from "@/lib/db";
+import { ASSET_KIND_LABELS, ASSET_STATUS_LABELS, TRUST_LEVEL_LABELS, ENTITY_TYPE_LABELS } from "@/lib/utils";
 import Link from "next/link";
 import type { AssetKind, AssetStatus, TrustLevel } from "@prisma/client";
 
@@ -46,6 +47,7 @@ export default async function SearchPage({
     kind?: string;
     status?: string;
     trustLevel?: string;
+    entityId?: string;
     dateFrom?: string;
     dateTo?: string;
     view?: string;
@@ -58,6 +60,10 @@ export default async function SearchPage({
   const view = params.view === "gallery" ? "gallery" : "list";
   const page = Math.max(1, parseInt(params.page ?? "1"));
 
+  const entities = await prisma.entity.findMany({
+    orderBy: [{ type: "asc" }, { canonicalName: "asc" }],
+  });
+
   let results = null;
   if (q.trim()) {
     results = await search({
@@ -66,6 +72,7 @@ export default async function SearchPage({
       kind: params.kind as AssetKind | undefined,
       status: params.status as AssetStatus | undefined,
       trustLevel: params.trustLevel as TrustLevel | undefined,
+      entityId: params.entityId || undefined,
       dateFrom: params.dateFrom ? new Date(params.dateFrom) : undefined,
       dateTo: params.dateTo ? new Date(params.dateTo) : undefined,
       page,
@@ -81,6 +88,7 @@ export default async function SearchPage({
     if (merged.kind) p.set("kind", merged.kind);
     if (merged.status) p.set("status", merged.status);
     if (merged.trustLevel) p.set("trustLevel", merged.trustLevel);
+    if (merged.entityId) p.set("entityId", merged.entityId);
     if (merged.dateFrom) p.set("dateFrom", merged.dateFrom);
     if (merged.dateTo) p.set("dateTo", merged.dateTo);
     if (merged.view && merged.view !== "list") p.set("view", merged.view);
@@ -169,6 +177,21 @@ export default async function SearchPage({
               <option value="">すべて</option>
               {Object.entries(TRUST_LEVEL_LABELS).map(([v, l]) => (
                 <option key={v} value={v}>{l}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-500 mb-1">エンティティ</label>
+            <select
+              name="entityId"
+              defaultValue={params.entityId ?? ""}
+              className="border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">すべて</option>
+              {entities.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {`[${ENTITY_TYPE_LABELS[e.type] ?? e.type}] ${e.canonicalName}`}
+                </option>
               ))}
             </select>
           </div>
