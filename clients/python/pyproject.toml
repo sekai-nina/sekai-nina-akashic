@@ -1,0 +1,10 @@
+[project]
+name = "akashic"
+version = "0.1.0"
+description = "Python client for Akashic REST API v1"
+requires-python = ">=3.10"
+dependencies = ["requests>=2.28"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
