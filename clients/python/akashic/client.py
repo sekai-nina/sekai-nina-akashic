@@ -175,14 +175,33 @@ class AkashicClient:
             body["sourceRecords"] = source_records
         return self._request("POST", "/assets", json=body)
 
-    def update_asset(self, asset_id: str, **fields: Any) -> dict[str, Any]:
+    def update_asset(
+        self,
+        asset_id: str,
+        *,
+        entities: list[dict[str, Any]] | None = None,
+        source_records: list[dict[str, Any]] | None = None,
+        **fields: Any,
+    ) -> dict[str, Any]:
         """アセットを部分更新する。
 
         キーワード引数でフィールドを指定する。snake_case は camelCase に変換される。
+        entities と source_records はリレーションの追加・更新ができる。
 
         Example::
 
-            client.update_asset(id, status="organized", trust_level="high")
+            client.update_asset(
+                id,
+                status="organized",
+                trust_level="high",
+                entities=[{"entityId": "cm_xxx", "roleLabel": "author"}],
+                source_records=[{
+                    "sourceKind": "url",
+                    "url": "https://example.com/blog/1",
+                    "title": "ブログタイトル",
+                    "publisher": "Ameba",
+                }],
+            )
         """
         # snake_case → camelCase 変換
         camel_map = {
@@ -205,9 +224,13 @@ class AkashicClient:
             "discord_author_name": "discordAuthorName",
             "discord_posted_at": "discordPostedAt",
         }
-        body = {}
+        body: dict[str, Any] = {}
         for k, v in fields.items():
             body[camel_map.get(k, k)] = v
+        if entities is not None:
+            body["entities"] = entities
+        if source_records is not None:
+            body["sourceRecords"] = source_records
         return self._request("PATCH", f"/assets/{asset_id}", json=body)
 
     # ------------------------------------------------------------------

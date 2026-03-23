@@ -79,6 +79,18 @@ export interface UpdateAssetData {
   discordAuthorId?: string | null;
   discordAuthorName?: string | null;
   discordPostedAt?: Date | null;
+  entities?: Array<{
+    entityId: string;
+    roleLabel?: string;
+  }>;
+  sourceRecords?: Array<{
+    sourceKind: SourceKind;
+    title?: string;
+    url?: string | null;
+    publisher?: string | null;
+    publishedAt?: Date | null;
+    metadata?: Record<string, unknown>;
+  }>;
 }
 
 export interface ListAssetsFilters {
@@ -158,12 +170,61 @@ export async function updateAsset(
   data: UpdateAssetData,
   userId?: string | null
 ) {
-  const asset = await prisma.asset.update({
-    where: { id },
-    data: {
-      ...data,
-      updatedById: userId ?? null,
-    },
+  const { entities, sourceRecords, ...assetFields } = data;
+
+  const asset = await prisma.$transaction(async (tx) => {
+    // トップレベルフィールドの更新
+    const updated = await tx.asset.update({
+      where: { id },
+      data: {
+        ...assetFields,
+        updatedById: userId ?? null,
+      },
+    });
+
+    // entities: upsert（既存は roleLabel を更新、新規は追加）
+    if (entities) {
+      for (const e of entities) {
+        await tx.assetEntity.upsert({
+          where: {
+            assetId_entityId: { assetId: id, entityId: e.entityId },
+          },
+          update: { roleLabel: e.roleLabel ?? null },
+          create: {
+            assetId: id,
+            entityId: e.entityId,
+            roleLabel: e.roleLabel ?? null,
+          },
+        });
+      }
+    }
+
+    // sourceRecords: 追加方式
+    if (sourceRecords && sourceRecords.length > 0) {
+      await tx.sourceRecord.createMany({
+        data: sourceRecords.map((s) => ({
+          assetId: id,
+          sourceKind: s.sourceKind,
+          title: s.title ?? "",
+          url: s.url,
+          publisher: s.publisher,
+          publishedAt: s.publishedAt,
+          metadata: (s.metadata ?? {}) as object,
+        })),
+      });
+    }
+
+    // リレーション込みで返す
+    return tx.asset.findUniqueOrThrow({
+      where: { id },
+      include: {
+        texts: true,
+        entities: { include: { entity: true } },
+        sourceRecords: true,
+        annotations: true,
+        collectionItems: true,
+      },
+    });
   });
 
   await logAudit({
@@ -171,7 +232,11 @@ export async function updateAsset(
     action: "asset.update",
     targetType: "Asset",
     targetId: id,
-    metadata: { updatedFields: Object.keys(data) },
+    metadata: {
+      updatedFields: Object.keys(data),
+      entitiesAdded: entities?.length ?? 0,
+      sourceRecordsAdded: sourceRecords?.length ?? 0,
+    },
   });
 
   return asset;
