@@ -5,11 +5,14 @@ Akashic REST API v1 の Python クライアント。
 ## インストール
 
 ```bash
-# GitHub から直接インストール（subdirectory 指定）
+# SSH（推奨 — privateリポジトリなのでSSHキーが必要）
+pip install "akashic @ git+ssh://git@github.com/sekai-nina/sekai-nina-akashic.git#subdirectory=clients/python"
+
+# HTTPS（GitHub PAT等でのトークン認証が必要）
 pip install "akashic @ git+https://github.com/sekai-nina/sekai-nina-akashic.git#subdirectory=clients/python"
 
 # requirements.txt に書く場合
-# akashic @ git+https://github.com/sekai-nina/sekai-nina-akashic.git#subdirectory=clients/python
+# akashic @ git+ssh://git@github.com/sekai-nina/sekai-nina-akashic.git#subdirectory=clients/python
 
 # このリポジトリをローカルに持っている場合
 pip install -e clients/python
