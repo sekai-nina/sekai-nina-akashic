@@ -102,6 +102,7 @@ export async function updateAsset(id: string, formData: FormData) {
   revalidatePath(`/assets/${id}`);
   revalidatePath("/assets");
   revalidatePath("/inbox");
+  redirect(`/assets/${id}`);
 }
 
 export async function updateAssetStatus(id: string, status: AssetStatus) {
