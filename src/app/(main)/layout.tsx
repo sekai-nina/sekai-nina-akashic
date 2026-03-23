@@ -13,7 +13,7 @@ export default async function MainLayout({
   return (
     <div className="flex h-screen">
       <Sidebar user={session.user} />
-      <main className="flex-1 overflow-auto p-6">{children}</main>
+      <main className="flex-1 overflow-auto p-4 pt-14 md:p-6 md:pt-6">{children}</main>
     </div>
   );
 }
