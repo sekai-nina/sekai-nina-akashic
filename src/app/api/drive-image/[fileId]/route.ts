@@ -73,8 +73,20 @@ export async function GET(
         "Cache-Control": "public, max-age=3600",
       },
     });
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("Drive image proxy error:", err);
-    return NextResponse.json({ error: "Failed to fetch file" }, { status: 500 });
+    const detail =
+      err instanceof Error ? err.message : String(err);
+    // GAxios errors have response.status and response.data
+    const gaxiosStatus =
+      (err as { response?: { status?: number } })?.response?.status;
+    return NextResponse.json(
+      {
+        error: "Failed to fetch file",
+        detail,
+        ...(gaxiosStatus ? { driveStatus: gaxiosStatus } : {}),
+      },
+      { status: 500 }
+    );
   }
 }
