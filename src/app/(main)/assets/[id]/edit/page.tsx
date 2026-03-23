@@ -1,14 +1,48 @@
 import { prisma } from "@/lib/db";
-import { updateAsset } from "@/lib/actions";
+import {
+  updateAsset,
+  removeEntityFromAsset,
+  deleteAssetText,
+  deleteSourceRecord,
+  deleteAnnotation,
+} from "@/lib/actions";
 import {
   ASSET_KIND_LABELS,
   ASSET_STATUS_LABELS,
   TRUST_LEVEL_LABELS,
+  ENTITY_TYPE_LABELS,
+  formatDate,
 } from "@/lib/utils";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
 export const dynamic = "force-dynamic";
+
+const TEXT_TYPE_LABELS: Record<string, string> = {
+  title: "タイトル",
+  body: "本文",
+  description: "説明",
+  message_body: "メッセージ本文",
+  ocr: "OCR",
+  transcript: "文字起こし",
+  note: "メモ",
+  extracted: "抽出テキスト",
+};
+
+const SOURCE_KIND_LABELS: Record<string, string> = {
+  url: "URL",
+  discord_message: "Discordメッセージ",
+  drive_file: "Driveファイル",
+  manual: "手動",
+  other: "その他",
+};
+
+const ANNOTATION_KIND_LABELS: Record<string, string> = {
+  note: "メモ",
+  time_range: "時間範囲",
+  text_span: "テキストスパン",
+  region: "リージョン",
+};
 
 export default async function AssetEditPage({
   params,
@@ -17,7 +51,18 @@ export default async function AssetEditPage({
 }) {
   const { id } = await params;
 
-  const asset = await prisma.asset.findUnique({ where: { id } });
+  const asset = await prisma.asset.findUnique({
+    where: { id },
+    include: {
+      texts: { orderBy: { createdAt: "asc" } },
+      entities: {
+        include: { entity: true },
+        orderBy: { createdAt: "asc" },
+      },
+      sourceRecords: { orderBy: { createdAt: "asc" } },
+      annotations: { orderBy: { createdAt: "asc" } },
+    },
+  });
   if (!asset) notFound();
 
   const action = updateAsset.bind(null, id);
@@ -181,6 +226,116 @@ export default async function AssetEditPage({
           </Link>
         </div>
       </form>
+
+      {/* Entities */}
+      {asset.entities.length > 0 && (
+        <div className="bg-white border border-slate-200 rounded-lg p-5">
+          <h2 className="text-sm font-semibold text-slate-700 mb-3">エンティティ</h2>
+          <ul className="space-y-2">
+            {asset.entities.map((ae) => {
+              const removeAction = removeEntityFromAsset.bind(null, id, ae.entity.id);
+              return (
+                <li key={ae.entityId} className="flex items-center gap-3 text-sm">
+                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                    {ENTITY_TYPE_LABELS[ae.entity.type] ?? ae.entity.type}
+                  </span>
+                  <span className="text-slate-800 font-medium">{ae.entity.canonicalName}</span>
+                  {ae.roleLabel && <span className="text-slate-400 text-xs">({ae.roleLabel})</span>}
+                  <form action={removeAction} className="ml-auto">
+                    <button type="submit" className="text-xs text-red-500 hover:text-red-700">
+                      削除
+                    </button>
+                  </form>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
+      {/* Texts */}
+      {asset.texts.length > 0 && (
+        <div className="bg-white border border-slate-200 rounded-lg p-5">
+          <h2 className="text-sm font-semibold text-slate-700 mb-3">テキスト</h2>
+          <ul className="space-y-3">
+            {asset.texts.map((text) => {
+              const deleteAction = deleteAssetText.bind(null, text.id);
+              return (
+                <li key={text.id} className="border border-slate-100 rounded p-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-medium bg-teal-100 text-teal-700 px-2 py-0.5 rounded">
+                      {TEXT_TYPE_LABELS[text.textType] ?? text.textType}
+                    </span>
+                    <form action={deleteAction}>
+                      <button type="submit" className="text-xs text-red-500 hover:text-red-700">
+                        削除
+                      </button>
+                    </form>
+                  </div>
+                  <p className="text-sm text-slate-700 whitespace-pre-wrap line-clamp-3">{text.content}</p>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
+      {/* Source Records */}
+      {asset.sourceRecords.length > 0 && (
+        <div className="bg-white border border-slate-200 rounded-lg p-5">
+          <h2 className="text-sm font-semibold text-slate-700 mb-3">出典記録</h2>
+          <ul className="space-y-3">
+            {asset.sourceRecords.map((src) => {
+              const deleteAction = deleteSourceRecord.bind(null, src.id);
+              return (
+                <li key={src.id} className="border border-slate-100 rounded p-3 text-sm">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-medium bg-orange-100 text-orange-700 px-2 py-0.5 rounded">
+                      {SOURCE_KIND_LABELS[src.sourceKind] ?? src.sourceKind}
+                    </span>
+                    <form action={deleteAction}>
+                      <button type="submit" className="text-xs text-red-500 hover:text-red-700">
+                        削除
+                      </button>
+                    </form>
+                  </div>
+                  <p className="font-medium text-slate-800">{src.title || "(タイトルなし)"}</p>
+                  {src.url && (
+                    <span className="text-xs text-slate-500 break-all">{src.url}</span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
+      {/* Annotations */}
+      {asset.annotations.length > 0 && (
+        <div className="bg-white border border-slate-200 rounded-lg p-5">
+          <h2 className="text-sm font-semibold text-slate-700 mb-3">アノテーション</h2>
+          <ul className="space-y-3">
+            {asset.annotations.map((ann) => {
+              const deleteAction = deleteAnnotation.bind(null, ann.id);
+              return (
+                <li key={ann.id} className="border border-slate-100 rounded p-3 text-sm">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-medium bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded">
+                      {ANNOTATION_KIND_LABELS[ann.kind] ?? ann.kind}
+                    </span>
+                    <form action={deleteAction}>
+                      <button type="submit" className="text-xs text-red-500 hover:text-red-700">
+                        削除
+                      </button>
+                    </form>
+                  </div>
+                  <p className="text-slate-700 whitespace-pre-wrap line-clamp-3">{ann.body}</p>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

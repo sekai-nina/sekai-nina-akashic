@@ -2,14 +2,10 @@ import { prisma } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import {
   updateAssetStatus,
-  removeEntityFromAsset,
   addEntityToAsset,
   addAssetText,
-  deleteAssetText,
   addSourceRecord,
-  deleteSourceRecord,
   addAnnotation,
-  deleteAnnotation,
   addToCollection,
 } from "@/lib/actions";
 import {
@@ -317,23 +313,15 @@ export default async function AssetDetailPage({
           <p className="text-sm text-slate-400 mb-3">エンティティなし</p>
         ) : (
           <ul className="space-y-2 mb-4">
-            {asset.entities.map((ae) => {
-              const removeAction = removeEntityFromAsset.bind(null, id, ae.entity.id);
-              return (
+            {asset.entities.map((ae) => (
                 <li key={ae.entityId} className="flex items-center gap-3 text-sm">
                   <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
                     {ENTITY_TYPE_LABELS[ae.entity.type] ?? ae.entity.type}
                   </span>
                   <span className="text-slate-800 font-medium">{ae.entity.canonicalName}</span>
                   {ae.roleLabel && <span className="text-slate-400 text-xs">({ae.roleLabel})</span>}
-                  <form action={removeAction} className="ml-auto">
-                    <button type="submit" className="text-xs text-red-400 hover:text-red-600">
-                      削除
-                    </button>
-                  </form>
                 </li>
-              );
-            })}
+            ))}
           </ul>
         )}
         <details className="border border-slate-200 rounded p-3">
@@ -386,24 +374,16 @@ export default async function AssetDetailPage({
           <p className="text-sm text-slate-400 mb-3">テキストなし</p>
         ) : (
           <ul className="space-y-3 mb-4">
-            {asset.texts.map((text) => {
-              const deleteAction = deleteAssetText.bind(null, text.id);
-              return (
+            {asset.texts.map((text) => (
                 <li key={text.id} className="border border-slate-100 rounded p-3">
-                  <div className="flex items-center justify-between mb-1">
+                  <div className="mb-1">
                     <span className="text-xs font-medium bg-teal-100 text-teal-700 px-2 py-0.5 rounded">
                       {TEXT_TYPE_LABELS[text.textType] ?? text.textType}
                     </span>
-                    <form action={deleteAction}>
-                      <button type="submit" className="text-xs text-red-400 hover:text-red-600">
-                        削除
-                      </button>
-                    </form>
                   </div>
                   <p className="text-sm text-slate-700 whitespace-pre-wrap">{text.content}</p>
                 </li>
-              );
-            })}
+            ))}
           </ul>
         )}
         <details className="border border-slate-200 rounded p-3">
@@ -446,19 +426,12 @@ export default async function AssetDetailPage({
           <p className="text-sm text-slate-400 mb-3">出典記録なし</p>
         ) : (
           <ul className="space-y-3 mb-4">
-            {asset.sourceRecords.map((src) => {
-              const deleteAction = deleteSourceRecord.bind(null, src.id);
-              return (
+            {asset.sourceRecords.map((src) => (
                 <li key={src.id} className="border border-slate-100 rounded p-3 text-sm">
-                  <div className="flex items-center justify-between mb-1">
+                  <div className="mb-1">
                     <span className="text-xs font-medium bg-orange-100 text-orange-700 px-2 py-0.5 rounded">
                       {SOURCE_KIND_LABELS[src.sourceKind] ?? src.sourceKind}
                     </span>
-                    <form action={deleteAction}>
-                      <button type="submit" className="text-xs text-red-400 hover:text-red-600">
-                        削除
-                      </button>
-                    </form>
                   </div>
                   <p className="font-medium text-slate-800">{src.title || "(タイトルなし)"}</p>
                   {src.url && (
@@ -471,8 +444,7 @@ export default async function AssetDetailPage({
                     {src.publishedAt && <span>{formatDate(src.publishedAt)}</span>}
                   </div>
                 </li>
-              );
-            })}
+            ))}
           </ul>
         )}
         <details className="border border-slate-200 rounded p-3">
@@ -543,24 +515,16 @@ export default async function AssetDetailPage({
           <p className="text-sm text-slate-400 mb-3">アノテーションなし</p>
         ) : (
           <ul className="space-y-3 mb-4">
-            {asset.annotations.map((ann) => {
-              const deleteAction = deleteAnnotation.bind(null, ann.id);
-              return (
+            {asset.annotations.map((ann) => (
                 <li key={ann.id} className="border border-slate-100 rounded p-3 text-sm">
-                  <div className="flex items-center justify-between mb-1">
+                  <div className="mb-1">
                     <span className="text-xs font-medium bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded">
                       {ANNOTATION_KIND_LABELS[ann.kind] ?? ann.kind}
                     </span>
-                    <form action={deleteAction}>
-                      <button type="submit" className="text-xs text-red-400 hover:text-red-600">
-                        削除
-                      </button>
-                    </form>
                   </div>
                   <p className="text-slate-700 whitespace-pre-wrap">{ann.body}</p>
                 </li>
-              );
-            })}
+            ))}
           </ul>
         )}
         <details className="border border-slate-200 rounded p-3">
