@@ -132,55 +132,78 @@ export default async function AssetsPage({
         )}
       </div>
 
-      {/* Asset table */}
+      {/* Asset list */}
       {assets.length === 0 ? (
         <div className="text-center py-16 text-slate-400">
           <p>アセットが見つかりません</p>
         </div>
       ) : (
-        <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
-              <tr>
-                <th className="text-left px-4 py-2 text-xs font-semibold text-slate-600">タイトル</th>
-                <th className="text-left px-4 py-2 text-xs font-semibold text-slate-600">種別</th>
-                <th className="text-left px-4 py-2 text-xs font-semibold text-slate-600">ステータス</th>
-                <th className="text-left px-4 py-2 text-xs font-semibold text-slate-600">信頼度</th>
-                <th className="text-left px-4 py-2 text-xs font-semibold text-slate-600">日付</th>
-                <th className="text-left px-4 py-2 text-xs font-semibold text-slate-600">出典</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {assets.map((asset) => (
-                <tr key={asset.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-2.5">
-                    <Link
-                      href={`/assets/${asset.id}`}
-                      className="font-medium text-slate-900 hover:text-blue-700 line-clamp-1"
-                    >
-                      {asset.title || "(無題)"}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <KindBadge kind={asset.kind} />
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <StatusBadge status={asset.status} />
-                  </td>
-                  <td className="px-4 py-2.5 text-xs text-slate-500">
-                    {TRUST_LEVEL_LABELS[asset.trustLevel] ?? asset.trustLevel}
-                  </td>
-                  <td className="px-4 py-2.5 text-xs text-slate-500">
-                    {formatDate(asset.createdAt)}
-                  </td>
-                  <td className="px-4 py-2.5 text-xs text-slate-400">
-                    {asset.sourceRecords[0]?.sourceKind ?? asset.sourceType}
-                  </td>
+        <>
+          {/* Desktop: table */}
+          <div className="hidden md:block bg-white border border-slate-200 rounded-lg overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="text-left px-4 py-2 text-xs font-semibold text-slate-600">タイトル</th>
+                  <th className="text-left px-4 py-2 text-xs font-semibold text-slate-600">種別</th>
+                  <th className="text-left px-4 py-2 text-xs font-semibold text-slate-600">ステータス</th>
+                  <th className="text-left px-4 py-2 text-xs font-semibold text-slate-600">信頼度</th>
+                  <th className="text-left px-4 py-2 text-xs font-semibold text-slate-600">日付</th>
+                  <th className="text-left px-4 py-2 text-xs font-semibold text-slate-600">出典</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {assets.map((asset) => (
+                  <tr key={asset.id} className="hover:bg-slate-50">
+                    <td className="px-4 py-2.5">
+                      <Link
+                        href={`/assets/${asset.id}`}
+                        className="font-medium text-slate-900 hover:text-blue-700 line-clamp-1"
+                      >
+                        {asset.title || "(無題)"}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <KindBadge kind={asset.kind} />
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <StatusBadge status={asset.status} />
+                    </td>
+                    <td className="px-4 py-2.5 text-xs text-slate-500">
+                      {TRUST_LEVEL_LABELS[asset.trustLevel] ?? asset.trustLevel}
+                    </td>
+                    <td className="px-4 py-2.5 text-xs text-slate-500">
+                      {formatDate(asset.createdAt)}
+                    </td>
+                    <td className="px-4 py-2.5 text-xs text-slate-400">
+                      {asset.sourceRecords[0]?.sourceKind ?? asset.sourceType}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile: card list */}
+          <div className="md:hidden bg-white border border-slate-200 rounded-lg divide-y divide-slate-100">
+            {assets.map((asset) => (
+              <Link
+                key={asset.id}
+                href={`/assets/${asset.id}`}
+                className="block px-4 py-3 hover:bg-slate-50 transition-colors"
+              >
+                <p className="text-sm font-medium text-slate-900 truncate">
+                  {asset.title || "(無題)"}
+                </p>
+                <div className="flex items-center gap-2 flex-wrap mt-1.5">
+                  <KindBadge kind={asset.kind} />
+                  <StatusBadge status={asset.status} />
+                  <span className="text-xs text-slate-400">{formatDate(asset.createdAt)}</span>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </>
       )}
 
       {/* Pagination */}
