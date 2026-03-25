@@ -441,7 +441,7 @@ export default async function AssetDetailPage({
                   )}
                   <div className="text-xs text-slate-400 mt-1 flex gap-3">
                     {src.publisher && <span>{src.publisher}</span>}
-                    {src.publishedAt && <span>{formatDate(src.publishedAt)}</span>}
+                    {src.publishedAt && <span>{formatDate(src.publishedAt, true)}</span>}
                   </div>
                 </li>
             ))}
