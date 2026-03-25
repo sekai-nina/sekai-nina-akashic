@@ -65,6 +65,126 @@ export async function backupTextToDrive(
   return uploadToDrive(buffer, filename, "text/plain");
 }
 
+/**
+ * 指定フォルダ内にサブフォルダを作成（または既存を返す）する。
+ */
+export async function getOrCreateDriveFolder(
+  parentFolderId: string,
+  folderName: string
+): Promise<string | null> {
+  const auth = getAuth();
+  if (!auth) return null;
+
+  const drive = google.drive({ version: "v3", auth: auth as Parameters<typeof google.drive>[0]["auth"] });
+
+  // 既存フォルダを検索
+  const query = `name='${folderName}' and '${parentFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+  const list = await drive.files.list({
+    q: query,
+    fields: "files(id)",
+    supportsAllDrives: true,
+  });
+
+  if (list.data.files && list.data.files.length > 0) {
+    return list.data.files[0].id!;
+  }
+
+  // 作成
+  const res = await drive.files.create({
+    requestBody: {
+      name: folderName,
+      mimeType: "application/vnd.google-apps.folder",
+      parents: [parentFolderId],
+    },
+    fields: "id",
+    supportsAllDrives: true,
+  });
+
+  return res.data.id ?? null;
+}
+
+/**
+ * 指定フォルダ内のファイル一覧を取得する。
+ */
+export async function listDriveFiles(
+  folderId: string
+): Promise<Array<{ id: string; name: string }>> {
+  const auth = getAuth();
+  if (!auth) return [];
+
+  const drive = google.drive({ version: "v3", auth: auth as Parameters<typeof google.drive>[0]["auth"] });
+  const files: Array<{ id: string; name: string }> = [];
+  let pageToken: string | undefined;
+
+  do {
+    const res = await drive.files.list({
+      q: `'${folderId}' in parents and trashed=false`,
+      fields: "nextPageToken, files(id, name)",
+      pageSize: 100,
+      pageToken,
+      supportsAllDrives: true,
+    });
+    for (const f of res.data.files ?? []) {
+      if (f.id && f.name) files.push({ id: f.id, name: f.name });
+    }
+    pageToken = res.data.nextPageToken ?? undefined;
+  } while (pageToken);
+
+  return files;
+}
+
+/**
+ * Driveからファイルのバイナリをダウンロードする。
+ */
+export async function downloadFromDrive(fileId: string): Promise<Buffer | null> {
+  const auth = getAuth();
+  if (!auth) return null;
+
+  const drive = google.drive({ version: "v3", auth: auth as Parameters<typeof google.drive>[0]["auth"] });
+  const res = await drive.files.get(
+    { fileId, alt: "media", supportsAllDrives: true },
+    { responseType: "arraybuffer" }
+  );
+  return Buffer.from(res.data as ArrayBuffer);
+}
+
+/**
+ * 指定フォルダにファイルをアップロードする（フォルダID指定版）。
+ */
+export async function uploadToFolder(
+  folderId: string,
+  buffer: Buffer,
+  filename: string,
+  mimeType: string
+): Promise<DriveUploadResult | null> {
+  const auth = getAuth();
+  if (!auth) return null;
+
+  const drive = google.drive({ version: "v3", auth: auth as Parameters<typeof google.drive>[0]["auth"] });
+
+  const stream = new Readable();
+  stream.push(buffer);
+  stream.push(null);
+
+  const res = await drive.files.create({
+    requestBody: {
+      name: filename,
+      parents: [folderId],
+    },
+    media: { mimeType, body: stream },
+    fields: "id, webViewLink",
+    supportsAllDrives: true,
+  });
+
+  if (!res.data.id) return null;
+
+  return {
+    fileId: res.data.id,
+    webViewLink: res.data.webViewLink || `https://drive.google.com/file/d/${res.data.id}/view`,
+    directUrl: `https://drive.google.com/uc?export=view&id=${res.data.id}`,
+  };
+}
+
 export async function uploadToDrive(
   buffer: Buffer,
   filename: string,

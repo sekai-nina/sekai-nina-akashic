@@ -15,7 +15,9 @@
     "db:generate": "prisma generate",
     "typecheck": "tsc --noEmit",
     "cli:keygen": "tsx src/cli/generate-api-key.ts",
-    "cli:import": "tsx src/cli/import-assets.ts"
+    "cli:import": "tsx src/cli/import-assets.ts",
+    "cli:backup": "tsx src/cli/backup.ts",
+    "cli:restore": "tsx src/cli/restore.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
