@@ -50,6 +50,21 @@ export function isDriveEnabled(): boolean {
   return hasOAuth || hasServiceAccount;
 }
 
+/**
+ * テキストコンテンツを .txt ファイルとしてDriveにバックアップする。
+ * レスポンスをブロックしないよう、呼び出し側で .catch() して使う想定。
+ */
+export async function backupTextToDrive(
+  assetId: string,
+  textType: string,
+  content: string
+): Promise<DriveUploadResult | null> {
+  if (!isDriveEnabled()) return null;
+  const filename = `${assetId}_${textType}_${Date.now()}.txt`;
+  const buffer = Buffer.from(content, "utf-8");
+  return uploadToDrive(buffer, filename, "text/plain");
+}
+
 export async function uploadToDrive(
   buffer: Buffer,
   filename: string,

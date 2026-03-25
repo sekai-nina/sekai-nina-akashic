@@ -11,7 +11,7 @@ import {
   type Message,
 } from "discord.js";
 import { PrismaClient } from "@prisma/client";
-import { uploadToDrive, isDriveEnabled } from "../lib/drive/index.js";
+import { uploadToDrive, isDriveEnabled, backupTextToDrive } from "../lib/drive/index.js";
 import { createHash } from "crypto";
 
 const prisma = new PrismaClient();
@@ -159,6 +159,9 @@ async function registerMessage(
             normalizedContent: normalizeText(messageBody),
           },
         });
+        backupTextToDrive(asset.id, "message_body", messageBody).catch((err) =>
+          console.error("Text backup to Drive failed:", err)
+        );
       }
 
       await prisma.auditLog.create({
@@ -197,6 +200,9 @@ async function registerMessage(
           normalizedContent: normalizeText(messageBody),
         },
       });
+      backupTextToDrive(asset.id, "message_body", messageBody).catch((err) =>
+        console.error("Text backup to Drive failed:", err)
+      );
     }
 
     await prisma.auditLog.create({

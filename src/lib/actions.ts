@@ -8,6 +8,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { hash } from "bcryptjs";
 import type { AssetKind, AssetStatus, TrustLevel, SourceType, StorageProvider, EntityType, TextType, SourceKind, AnnotationKind } from "@prisma/client";
+import { backupTextToDrive } from "@/lib/drive";
 
 async function requireUser() {
   const session = await auth();
@@ -190,6 +191,9 @@ export async function addAssetText(assetId: string, formData: FormData) {
       createdById: user.id,
     },
   });
+  backupTextToDrive(assetId, textType, content).catch((err) =>
+    console.error("Text backup to Drive failed:", err)
+  );
   revalidatePath(`/assets/${assetId}`);
 }
 
