@@ -17,6 +17,7 @@ import {
 } from "@/lib/utils";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ArrowLeft } from "lucide-react";
 
 
 async function addToCollectionAction(assetId: string, formData: FormData) {
@@ -172,7 +173,10 @@ export default async function AssetDetailPage({
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-sm text-slate-400 mb-2">
-            <Link href="/assets" className="hover:text-slate-600">アセット一覧</Link>
+            <Link href="/assets" className="flex items-center gap-1 hover:text-slate-600">
+              <ArrowLeft size={14} />
+              アセット一覧
+            </Link>
             <span>/</span>
             <span className="text-slate-600 truncate">{asset.title || "(無題)"}</span>
           </div>
@@ -188,6 +192,7 @@ export default async function AssetDetailPage({
         </div>
         <Link
           href={`/assets/${id}/edit`}
+          replace
           className="shrink-0 border border-slate-300 text-slate-700 px-3 py-1.5 rounded text-sm hover:bg-slate-50 transition-colors"
         >
           編集

@@ -16,6 +16,7 @@ import {
 } from "@/lib/utils";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ArrowLeft } from "lucide-react";
 
 
 const TEXT_TYPE_LABELS: Record<string, string> = {
@@ -72,13 +73,10 @@ export default async function AssetEditPage({
     <div className="max-w-2xl mx-auto space-y-6">
       <div>
         <div className="flex items-center gap-2 text-sm text-slate-400 mb-2">
-          <Link href="/assets" className="hover:text-slate-600">アセット一覧</Link>
-          <span>/</span>
-          <Link href={`/assets/${id}`} className="hover:text-slate-600 truncate">
-            {asset.title || "(無題)"}
+          <Link href={`/assets/${id}`} replace className="flex items-center gap-1 hover:text-slate-600">
+            <ArrowLeft size={14} />
+            戻る
           </Link>
-          <span>/</span>
-          <span className="text-slate-600">編集</span>
         </div>
         <h1 className="text-2xl font-bold text-slate-900">アセットを編集</h1>
       </div>
@@ -221,6 +219,7 @@ export default async function AssetEditPage({
           </button>
           <Link
             href={`/assets/${id}`}
+            replace
             className="text-sm text-slate-500 hover:text-slate-700"
           >
             キャンセル
