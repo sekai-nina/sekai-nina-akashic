@@ -58,24 +58,22 @@ export default async function InboxPage() {
             const toOrganized = updateAssetStatus.bind(null, asset.id, "organized");
 
             return (
-              <div key={asset.id} className="flex items-center gap-4 px-4 py-3 hover:bg-slate-50">
-                <div className="flex-1 min-w-0">
-                  <Link
-                    href={`/assets/${asset.id}`}
-                    className="text-sm font-medium text-slate-900 hover:text-blue-700 truncate block"
-                  >
-                    {asset.title || "(無題)"}
-                  </Link>
-                  <div className="flex items-center gap-2 mt-1">
-                    <KindBadge kind={asset.kind} />
-                    <StatusBadge status={asset.status} />
-                    <span className="text-xs text-slate-400">{formatDate(asset.createdAt)}</span>
-                    {asset.sourceRecords[0] && (
-                      <span className="text-xs text-slate-400">{asset.sourceRecords[0].sourceKind}</span>
-                    )}
-                  </div>
+              <div key={asset.id} className="px-4 py-3 hover:bg-slate-50 space-y-2">
+                <Link
+                  href={`/assets/${asset.id}`}
+                  className="text-sm font-medium text-slate-900 hover:text-blue-700 truncate block"
+                >
+                  {asset.title || "(無題)"}
+                </Link>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <KindBadge kind={asset.kind} />
+                  <StatusBadge status={asset.status} />
+                  <span className="text-xs text-slate-400">{formatDate(asset.createdAt)}</span>
+                  {asset.sourceRecords[0] && (
+                    <span className="text-xs text-slate-400">{asset.sourceRecords[0].sourceKind}</span>
+                  )}
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-2">
                   <form action={toTriaging}>
                     <button
                       type="submit"
@@ -94,7 +92,7 @@ export default async function InboxPage() {
                   </form>
                   <Link
                     href={`/assets/${asset.id}`}
-                    className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1"
+                    className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 ml-auto"
                   >
                     詳細
                   </Link>
