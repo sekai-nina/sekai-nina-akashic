@@ -233,6 +233,10 @@ class AkashicClient:
             body["sourceRecords"] = source_records
         return self._request("PATCH", f"/assets/{asset_id}", json=body)
 
+    def delete_asset(self, asset_id: str) -> dict[str, Any]:
+        """アセットを削除する。"""
+        return self._request("DELETE", f"/assets/{asset_id}")
+
     # ------------------------------------------------------------------
     # Search
     # ------------------------------------------------------------------

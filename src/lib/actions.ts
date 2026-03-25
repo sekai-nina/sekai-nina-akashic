@@ -105,6 +105,18 @@ export async function updateAsset(id: string, formData: FormData) {
   redirect(`/assets/${id}`);
 }
 
+export async function deleteAsset(id: string) {
+  const user = await requireRole(["admin", "member"]);
+  const asset = await prisma.asset.findUnique({ where: { id } });
+  if (!asset) throw new Error("Asset not found");
+  await prisma.asset.delete({ where: { id } });
+  await logAudit({ actorId: user.id, action: "asset.delete", targetType: "Asset", targetId: id, metadata: { title: asset.title } });
+  revalidatePath("/assets");
+  revalidatePath("/inbox");
+  revalidatePath("/search");
+  redirect("/assets");
+}
+
 export async function updateAssetStatus(id: string, status: AssetStatus) {
   const user = await requireRole(["admin", "member"]);
   await prisma.asset.update({ where: { id }, data: { status, updatedById: user.id } });

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import {
   updateAsset,
+  deleteAsset,
   removeEntityFromAsset,
   deleteAssetText,
   deleteSourceRecord,
@@ -65,6 +66,7 @@ export default async function AssetEditPage({
   if (!asset) notFound();
 
   const action = updateAsset.bind(null, id);
+  const deleteAction = deleteAsset.bind(null, id);
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -335,6 +337,22 @@ export default async function AssetEditPage({
           </ul>
         </div>
       )}
+
+      {/* Danger zone */}
+      <div className="border border-red-200 rounded-lg p-5">
+        <h2 className="text-sm font-semibold text-red-600 mb-2">アセットの削除</h2>
+        <p className="text-xs text-slate-500 mb-3">
+          このアセットとそれに紐づくすべてのデータ（テキスト、出典、アノテーション等）が完全に削除されます。この操作は取り消せません。
+        </p>
+        <form action={deleteAction}>
+          <button
+            type="submit"
+            className="text-xs bg-red-600 text-white px-3 py-1.5 rounded hover:bg-red-700 transition-colors"
+          >
+            このアセットを削除する
+          </button>
+        </form>
+      </div>
     </div>
   );
 }

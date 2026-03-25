@@ -280,6 +280,19 @@ export async function listAssets(filters: ListAssetsFilters = {}) {
   return { items, total };
 }
 
+export async function deleteAsset(id: string, userId?: string | null) {
+  const asset = await prisma.asset.findUnique({ where: { id } });
+  if (!asset) throw new Error("Asset not found");
+  await prisma.asset.delete({ where: { id } });
+  await logAudit({
+    actorId: userId,
+    action: "asset.delete",
+    targetType: "Asset",
+    targetId: id,
+    metadata: { title: asset.title },
+  });
+}
+
 export async function checkDuplicateHash(sha256: string) {
   return prisma.asset.findMany({
     where: { sha256 },
