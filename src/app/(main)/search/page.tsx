@@ -4,7 +4,6 @@ import { ASSET_KIND_LABELS, ASSET_STATUS_LABELS, TRUST_LEVEL_LABELS, ENTITY_TYPE
 import Link from "next/link";
 import type { AssetKind, AssetStatus, TrustLevel } from "@prisma/client";
 
-export const dynamic = "force-dynamic";
 
 function KindBadge({ kind }: { kind: string }) {
   return (

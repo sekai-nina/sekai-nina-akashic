@@ -4,7 +4,6 @@ import { ASSET_KIND_LABELS, ASSET_STATUS_LABELS, formatDate } from "@/lib/utils"
 import { QuickUploadForm } from "@/components/quick-upload-form";
 import Link from "next/link";
 
-export const dynamic = "force-dynamic";
 
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {

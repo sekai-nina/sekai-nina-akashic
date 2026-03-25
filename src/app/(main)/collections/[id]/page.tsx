@@ -4,7 +4,6 @@ import { ASSET_KIND_LABELS, formatDate } from "@/lib/utils";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-export const dynamic = "force-dynamic";
 
 function KindBadge({ kind }: { kind: string }) {
   return (

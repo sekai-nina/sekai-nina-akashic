@@ -3,7 +3,6 @@ import { ASSET_KIND_LABELS, ASSET_STATUS_LABELS, TRUST_LEVEL_LABELS, formatDate 
 import Link from "next/link";
 import type { AssetKind, AssetStatus } from "@prisma/client";
 
-export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 30;
 

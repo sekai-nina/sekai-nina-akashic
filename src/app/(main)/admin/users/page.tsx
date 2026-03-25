@@ -4,7 +4,6 @@ import { createUser, updateUser, deleteUser } from "@/lib/actions";
 import { formatDate } from "@/lib/utils";
 import { redirect } from "next/navigation";
 
-export const dynamic = "force-dynamic";
 
 const ROLE_LABELS: Record<string, string> = {
   admin: "管理者",

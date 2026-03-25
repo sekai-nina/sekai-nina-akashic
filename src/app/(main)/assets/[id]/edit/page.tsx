@@ -16,7 +16,6 @@ import {
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-export const dynamic = "force-dynamic";
 
 const TEXT_TYPE_LABELS: Record<string, string> = {
   title: "タイトル",
