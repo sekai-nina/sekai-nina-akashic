@@ -4,13 +4,19 @@ import { ASSET_KIND_LABELS, formatDate } from "@/lib/utils";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-
 function KindBadge({ kind }: { kind: string }) {
   return (
     <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700">
       {ASSET_KIND_LABELS[kind] ?? kind}
     </span>
   );
+}
+
+function resolveImageUrl(asset: { thumbnailUrl: string | null; storageProvider: string; storageKey: string | null; storageUrl: string | null; kind: string }): string | null {
+  if (asset.kind === "image" && asset.storageProvider === "gdrive" && asset.storageKey) {
+    return `/api/drive-image/${asset.storageKey}`;
+  }
+  return asset.thumbnailUrl ?? (asset.kind === "image" ? asset.storageUrl : null);
 }
 
 export default async function CollectionDetailPage({
@@ -39,30 +45,29 @@ export default async function CollectionDetailPage({
   return (
     <div className="max-w-4xl mx-auto">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4 mb-6">
-        <div>
-          <div className="flex items-center gap-2 text-sm text-slate-400 mb-2">
-            <Link href="/collections" className="hover:text-slate-600">コレクション</Link>
-            <span>/</span>
-            <span className="text-slate-600">{collection.name}</span>
-          </div>
-          <h1 className="text-2xl font-bold text-slate-900">{collection.name}</h1>
-          {collection.description && (
-            <p className="text-slate-500 text-sm mt-1">{collection.description}</p>
-          )}
-          <p className="text-xs text-slate-400 mt-1">
-            {collection.items.length} 件 · 作成: {formatDate(collection.createdAt)}
-          </p>
+      <div className="mb-6">
+        <div className="flex items-center gap-2 text-sm text-slate-400 mb-2">
+          <Link href="/collections" className="hover:text-slate-600">コレクション</Link>
+          <span>/</span>
+          <span className="text-slate-600 truncate">{collection.name}</span>
         </div>
-        <form action={deleteCollectionAction}>
-          <button
-            type="submit"
-            className="border border-red-300 text-red-600 px-3 py-1.5 rounded text-sm hover:bg-red-50 transition-colors"
-            onClick={undefined}
-          >
-            コレクション削除
-          </button>
-        </form>
+        <h1 className="text-2xl font-bold text-slate-900">{collection.name}</h1>
+        {collection.description && (
+          <p className="text-slate-500 text-sm mt-1">{collection.description}</p>
+        )}
+        <div className="flex items-center gap-3 mt-2">
+          <span className="text-xs text-slate-400">
+            {collection.items.length} 件 · 作成: {formatDate(collection.createdAt)}
+          </span>
+          <form action={deleteCollectionAction}>
+            <button
+              type="submit"
+              className="text-xs text-red-400 hover:text-red-600"
+            >
+              削除
+            </button>
+          </form>
+        </div>
       </div>
 
       {/* Items */}
@@ -76,47 +81,31 @@ export default async function CollectionDetailPage({
           {collection.items.map((item) => {
             const removeAction = removeFromCollection.bind(null, id, item.assetId);
             const updateNoteAction = updateCollectionItem.bind(null, item.id);
+            const imageUrl = resolveImageUrl(item.asset);
 
             return (
-              <div key={item.id} className="px-4 py-3">
+              <div key={item.id} className="px-4 py-3 space-y-2">
                 <div className="flex items-start gap-3">
                   {/* Thumbnail */}
-                  {(item.asset.thumbnailUrl || (item.asset.kind === "image" && item.asset.storageUrl)) && (
+                  {imageUrl && (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                      src={item.asset.thumbnailUrl ?? item.asset.storageUrl!}
+                      src={imageUrl}
                       alt=""
-                      className="w-12 h-12 object-cover rounded shrink-0 bg-slate-100"
+                      className="w-10 h-10 object-cover rounded shrink-0 bg-slate-100"
                     />
                   )}
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <Link
-                        href={`/assets/${item.assetId}`}
-                        className="text-sm font-medium text-slate-900 hover:text-blue-700"
-                      >
-                        {item.asset.title || "(無題)"}
-                      </Link>
+                    <Link
+                      href={`/assets/${item.assetId}`}
+                      className="text-sm font-medium text-slate-900 hover:text-blue-700 truncate block"
+                    >
+                      {item.asset.title || "(無題)"}
+                    </Link>
+                    <div className="flex items-center gap-2 mt-0.5">
                       <KindBadge kind={item.asset.kind} />
+                      <span className="text-xs text-slate-400">{formatDate(item.asset.createdAt)}</span>
                     </div>
-                    <p className="text-xs text-slate-400 mt-0.5">{formatDate(item.asset.createdAt)}</p>
-
-                    {/* Note form */}
-                    <form action={updateNoteAction} className="mt-2 flex gap-2 items-center">
-                      <input
-                        type="text"
-                        name="note"
-                        defaultValue={item.note ?? ""}
-                        placeholder="メモを追加..."
-                        className="flex-1 border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      />
-                      <button
-                        type="submit"
-                        className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 border border-slate-200 rounded hover:bg-slate-50"
-                      >
-                        保存
-                      </button>
-                    </form>
                   </div>
                   <form action={removeAction} className="shrink-0">
                     <button type="submit" className="text-xs text-red-400 hover:text-red-600">
@@ -124,6 +113,23 @@ export default async function CollectionDetailPage({
                     </button>
                   </form>
                 </div>
+
+                {/* Note form */}
+                <form action={updateNoteAction} className="flex gap-2 items-center">
+                  <input
+                    type="text"
+                    name="note"
+                    defaultValue={item.note ?? ""}
+                    placeholder="メモを追加..."
+                    className="flex-1 border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                  <button
+                    type="submit"
+                    className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 border border-slate-200 rounded hover:bg-slate-50"
+                  >
+                    保存
+                  </button>
+                </form>
               </div>
             );
           })}
