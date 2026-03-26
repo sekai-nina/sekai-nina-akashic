@@ -11,7 +11,7 @@ import {
 import { prisma } from "@/lib/db";
 import { normalizeText } from "@/lib/utils";
 import { logAudit } from "./audit";
-import { backupTextToDrive } from "@/lib/drive";
+import { backupTextToDrive, backupAssetToDrive } from "@/lib/drive";
 
 export interface CreateAssetData {
   kind: AssetKind;
@@ -163,14 +163,10 @@ export async function createAsset(data: CreateAssetData, userId?: string | null)
     metadata: { kind: asset.kind, title: asset.title },
   });
 
-  // テキストをDriveにバックアップ（非同期・ノンブロッキング）
-  if (texts && texts.length > 0) {
-    for (const t of texts) {
-      backupTextToDrive(asset.id, t.textType, t.content).catch((err) =>
-        console.error("Text backup to Drive failed:", err)
-      );
-    }
-  }
+  // Driveにバックアップ（非同期・ノンブロッキング）
+  backupAssetToDrive(asset.id).catch((err) =>
+    console.error("Asset backup to Drive failed:", err)
+  );
 
   return asset;
 }
@@ -248,6 +244,11 @@ export async function updateAsset(
       sourceRecordsAdded: sourceRecords?.length ?? 0,
     },
   });
+
+  // Driveバックアップを更新（非同期・ノンブロッキング）
+  backupAssetToDrive(id).catch((err) =>
+    console.error("Asset backup to Drive failed:", err)
+  );
 
   return asset;
 }

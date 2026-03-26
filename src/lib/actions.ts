@@ -8,7 +8,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { hash } from "bcryptjs";
 import type { AssetKind, AssetStatus, TrustLevel, SourceType, StorageProvider, EntityType, TextType, SourceKind, AnnotationKind } from "@prisma/client";
-import { backupTextToDrive } from "@/lib/drive";
+import { backupAssetToDrive } from "@/lib/drive";
 
 async function requireUser() {
   const session = await auth();
@@ -154,12 +154,14 @@ export async function addEntityToAsset(assetId: string, formData: FormData) {
   });
 
   await logAudit({ actorId: user.id, action: "entity.add_to_asset", targetType: "AssetEntity", targetId: `${assetId}:${entity.id}` });
+  backupAssetToDrive(assetId).catch(() => {});
   revalidatePath(`/assets/${assetId}`);
 }
 
 export async function removeEntityFromAsset(assetId: string, entityId: string) {
   await requireRole(["admin", "member"]);
   await prisma.assetEntity.deleteMany({ where: { assetId, entityId } });
+  backupAssetToDrive(assetId).catch(() => {});
   revalidatePath(`/assets/${assetId}`);
 }
 
@@ -191,8 +193,8 @@ export async function addAssetText(assetId: string, formData: FormData) {
       createdById: user.id,
     },
   });
-  backupTextToDrive(assetId, textType, content).catch((err) =>
-    console.error("Text backup to Drive failed:", err)
+  backupAssetToDrive(assetId).catch((err) =>
+    console.error("Asset backup to Drive failed:", err)
   );
   revalidatePath(`/assets/${assetId}`);
 }
@@ -205,14 +207,20 @@ export async function updateAssetText(id: string, formData: FormData) {
     data: { content, normalizedContent: normalizeText(content) },
   });
   const text = await prisma.assetText.findUnique({ where: { id } });
-  if (text) revalidatePath(`/assets/${text.assetId}`);
+  if (text) {
+    backupAssetToDrive(text.assetId).catch(() => {});
+    revalidatePath(`/assets/${text.assetId}`);
+  }
 }
 
 export async function deleteAssetText(id: string) {
   await requireRole(["admin", "member"]);
   const text = await prisma.assetText.findUnique({ where: { id } });
   await prisma.assetText.delete({ where: { id } });
-  if (text) revalidatePath(`/assets/${text.assetId}`);
+  if (text) {
+    backupAssetToDrive(text.assetId).catch(() => {});
+    revalidatePath(`/assets/${text.assetId}`);
+  }
 }
 
 // ========== SourceRecord ==========
@@ -231,6 +239,7 @@ export async function addSourceRecord(assetId: string, formData: FormData) {
         : null,
     },
   });
+  backupAssetToDrive(assetId).catch(() => {});
   revalidatePath(`/assets/${assetId}`);
 }
 
@@ -238,7 +247,10 @@ export async function deleteSourceRecord(id: string) {
   await requireRole(["admin", "member"]);
   const src = await prisma.sourceRecord.findUnique({ where: { id } });
   await prisma.sourceRecord.delete({ where: { id } });
-  if (src) revalidatePath(`/assets/${src.assetId}`);
+  if (src) {
+    backupAssetToDrive(src.assetId).catch(() => {});
+    revalidatePath(`/assets/${src.assetId}`);
+  }
 }
 
 // ========== Annotation ==========
@@ -253,6 +265,7 @@ export async function addAnnotation(assetId: string, formData: FormData) {
       createdById: user.id,
     },
   });
+  backupAssetToDrive(assetId).catch(() => {});
   revalidatePath(`/assets/${assetId}`);
 }
 
@@ -260,7 +273,10 @@ export async function deleteAnnotation(id: string) {
   await requireRole(["admin", "member"]);
   const ann = await prisma.annotation.findUnique({ where: { id } });
   await prisma.annotation.delete({ where: { id } });
-  if (ann) revalidatePath(`/assets/${ann.assetId}`);
+  if (ann) {
+    backupAssetToDrive(ann.assetId).catch(() => {});
+    revalidatePath(`/assets/${ann.assetId}`);
+  }
 }
 
 // ========== Collections ==========

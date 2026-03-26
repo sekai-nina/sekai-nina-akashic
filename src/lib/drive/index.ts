@@ -66,6 +66,55 @@ export async function backupTextToDrive(
 }
 
 /**
+ * アセットのフルデータをJSONとしてDriveの akashic-backup/ にバックアップする。
+ * 同名ファイルがあれば上書き（削除して再作成）。
+ * 呼び出し側で .catch() して非同期で使う想定。
+ */
+export async function backupAssetToDrive(assetId: string): Promise<void> {
+  if (!isDriveEnabled()) return;
+
+  // 動的インポートでPrismaの循環依存を回避
+  const { prisma } = await import("@/lib/db");
+
+  const asset = await prisma.asset.findUnique({
+    where: { id: assetId },
+    include: {
+      texts: true,
+      entities: { include: { entity: true } },
+      sourceRecords: true,
+      annotations: true,
+      collectionItems: true,
+    },
+  });
+  if (!asset) return;
+
+  const rootFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
+  if (!rootFolderId) return;
+
+  const backupFolderId = await getOrCreateDriveFolder(rootFolderId, "akashic-backup");
+  if (!backupFolderId) return;
+
+  // 既存ファイルがあれば削除
+  const auth = getAuth();
+  if (!auth) return;
+  const drive = google.drive({ version: "v3", auth: auth as Parameters<typeof google.drive>[0]["auth"] });
+  const filename = `${assetId}.json`;
+  const existing = await drive.files.list({
+    q: `name='${filename}' and '${backupFolderId}' in parents and trashed=false`,
+    fields: "files(id)",
+    supportsAllDrives: true,
+  });
+  for (const f of existing.data.files ?? []) {
+    if (f.id) {
+      await drive.files.delete({ fileId: f.id, supportsAllDrives: true }).catch(() => {});
+    }
+  }
+
+  const json = JSON.stringify(asset, null, 2);
+  await uploadToFolder(backupFolderId, Buffer.from(json, "utf-8"), filename, "application/json");
+}
+
+/**
  * 指定フォルダ内にサブフォルダを作成（または既存を返す）する。
  */
 export async function getOrCreateDriveFolder(
