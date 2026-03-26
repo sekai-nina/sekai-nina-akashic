@@ -172,12 +172,12 @@ export default async function AssetDetailPage({
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <div className="flex items-center gap-2 text-sm text-slate-400 mb-2">
-            <Link href="/assets" className="flex items-center gap-1 hover:text-slate-600">
+          <div className="flex items-center gap-2 text-sm text-slate-400 mb-2 min-w-0">
+            <Link href="/assets" className="flex items-center gap-1 shrink-0 whitespace-nowrap hover:text-slate-600">
               <ArrowLeft size={14} />
-              アセット一覧
+              一覧
             </Link>
-            <span>/</span>
+            <span className="shrink-0">/</span>
             <span className="text-slate-600 truncate">{asset.title || "(無題)"}</span>
           </div>
           <h1 className="text-2xl font-bold text-slate-900">{asset.title || "(無題)"}</h1>
