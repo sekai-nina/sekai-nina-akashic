@@ -157,10 +157,15 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
     `;
 
     for (const row of assetResults) {
-      const titleMatch = hasKeyword && row.title.toLowerCase().includes(q.toLowerCase());
-      const descMatch = hasKeyword && row.description.toLowerCase().includes(q.toLowerCase());
-      const matchField = titleMatch ? "title" : descMatch ? "description" : hasKeyword ? "messageBodyPreview" : "title";
-      const matchText = titleMatch ? row.title : descMatch ? row.description : hasKeyword ? (row.messageBodyPreview || "") : row.title;
+      const qLower = q.toLowerCase();
+      const titleMatch = hasKeyword && row.title.toLowerCase().includes(qLower);
+      const descMatch = hasKeyword && row.description.toLowerCase().includes(qLower);
+      const previewMatch = hasKeyword && (row.messageBodyPreview || "").toLowerCase().includes(qLower);
+      const matchField = titleMatch ? "title" : descMatch ? "description" : previewMatch ? "messageBodyPreview" : "title";
+      const matchText = titleMatch ? row.title : descMatch ? row.description : previewMatch ? (row.messageBodyPreview || "") : row.title;
+      // ILIKE完全一致にはボーナススコアを付与（similarity は日本語で低くなりがち）
+      const exactBonus = titleMatch ? 3.0 : descMatch ? 2.0 : previewMatch ? 1.5 : 0;
+      const simScore = Math.max(Number(row.title_sim) * 3, Number(row.desc_sim) * 2);
       results.push({
         type: "asset",
         assetId: row.id,
@@ -171,7 +176,7 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
         storageUrl: row.storageUrl,
         snippet: hasKeyword ? buildSnippet(matchText, q) : row.title,
         matchField,
-        score: Math.max(Number(row.title_sim) * 3, Number(row.desc_sim) * 2),
+        score: Math.max(simScore, exactBonus),
         createdAt: row.createdAt,
       });
     }
@@ -217,6 +222,8 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
     `;
 
     for (const row of textResults) {
+      const contentMatch = row.content.toLowerCase().includes(q.toLowerCase());
+      const exactBonus = contentMatch ? 2.0 : 0;
       results.push({
         type: "text",
         assetId: row.assetId,
@@ -227,7 +234,7 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
         storageUrl: row.asset_storageUrl,
         snippet: buildSnippet(row.content, q),
         matchField: row.textType,
-        score: Number(row.content_sim),
+        score: Math.max(Number(row.content_sim), exactBonus),
         createdAt: row.asset_createdAt,
       });
     }
