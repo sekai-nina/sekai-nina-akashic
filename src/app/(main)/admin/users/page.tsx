@@ -115,9 +115,9 @@ export default async function AdminUsersPage() {
                 <span className="truncate">{user.email}</span>
                 <span className="shrink-0">{formatDate(user.createdAt)}</span>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3 text-xs">
                 <details className="relative">
-                  <summary className="text-xs text-blue-600 hover:text-blue-800 cursor-pointer list-none">
+                  <summary className="text-blue-600 hover:text-blue-800 cursor-pointer list-none">
                     編集
                   </summary>
                   <div className="absolute left-0 top-6 z-10 bg-white border border-slate-200 rounded-lg shadow-lg p-4 w-72">
@@ -177,7 +177,7 @@ export default async function AdminUsersPage() {
                   <form action={deleteAction}>
                     <button
                       type="submit"
-                      className="text-xs text-red-400 hover:text-red-600"
+                      className="text-red-400 hover:text-red-600"
                     >
                       削除
                     </button>
