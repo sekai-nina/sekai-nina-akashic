@@ -325,8 +325,17 @@ class AkashicClient:
         *,
         title: str | None = None,
         kind: str | None = None,
+        status: str | None = None,
+        canonical_date: str | None = None,
+        source_type: str | None = None,
+        entities: list[dict[str, Any]] | None = None,
+        source_records: list[dict[str, Any]] | None = None,
+        texts: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """ファイルをアップロードしてアセットを作成する。
+
+        メタデータ（entities, source_records, texts 等）を同時に渡すことで
+        アップロードとメタデータ付与を1リクエストで行える。
 
         Returns:
             {"id": "...", "duplicate": false}
@@ -334,11 +343,16 @@ class AkashicClient:
         """
         path = Path(file_path)
         mime = _guess_mime(path)
-        data: dict[str, Any] = {}
-        if title:
-            data["title"] = title
-        if kind:
-            data["kind"] = kind
+        data = _build_upload_data(
+            title=title,
+            kind=kind,
+            status=status,
+            canonical_date=canonical_date,
+            source_type=source_type,
+            entities=entities,
+            source_records=source_records,
+            texts=texts,
+        )
         with open(path, "rb") as f:
             return self._request(
                 "POST",
@@ -355,16 +369,29 @@ class AkashicClient:
         *,
         title: str | None = None,
         kind: str | None = None,
+        status: str | None = None,
+        canonical_date: str | None = None,
+        source_type: str | None = None,
+        entities: list[dict[str, Any]] | None = None,
+        source_records: list[dict[str, Any]] | None = None,
+        texts: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """バイト列からファイルをアップロードする。
 
         Discord等でダウンロード済みのバイナリをそのまま渡す場合に使う。
+        メタデータ（entities, source_records, texts 等）を同時に渡すことで
+        アップロードとメタデータ付与を1リクエストで行える。
         """
-        data: dict[str, Any] = {}
-        if title:
-            data["title"] = title
-        if kind:
-            data["kind"] = kind
+        data = _build_upload_data(
+            title=title,
+            kind=kind,
+            status=status,
+            canonical_date=canonical_date,
+            source_type=source_type,
+            entities=entities,
+            source_records=source_records,
+            texts=texts,
+        )
         return self._request(
             "POST",
             "/upload",
@@ -387,6 +414,40 @@ class AkashicClient:
         if url.startswith("/"):
             return f"{self.base_url}{url}"
         return url
+
+
+def _build_upload_data(
+    *,
+    title: str | None,
+    kind: str | None,
+    status: str | None,
+    canonical_date: str | None,
+    source_type: str | None,
+    entities: list[dict[str, Any]] | None,
+    source_records: list[dict[str, Any]] | None,
+    texts: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    """アップロード用の multipart form data フィールドを構築する."""
+    import json
+
+    data: dict[str, Any] = {}
+    if title:
+        data["title"] = title
+    if kind:
+        data["kind"] = kind
+    if status:
+        data["status"] = status
+    if canonical_date:
+        data["canonicalDate"] = canonical_date
+    if source_type:
+        data["sourceType"] = source_type
+    if entities:
+        data["entities"] = json.dumps(entities)
+    if source_records:
+        data["sourceRecords"] = json.dumps(source_records)
+    if texts:
+        data["texts"] = json.dumps(texts)
+    return data
 
 
 def _guess_mime(path: Path) -> str:

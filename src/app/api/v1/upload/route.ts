@@ -2,11 +2,12 @@ import { NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
 import { uploadToDrive, isDriveEnabled } from "@/lib/drive";
+import { createAsset, type CreateAssetData } from "@/lib/domain/assets";
 import { logAudit } from "@/lib/domain/audit";
 import { createHash } from "crypto";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
-import type { AssetKind, StorageProvider } from "@prisma/client";
+import type { AssetKind, AssetStatus, StorageProvider, SourceType } from "@prisma/client";
 
 function guessMimeKind(mimeType: string): AssetKind {
   if (mimeType.startsWith("image/")) return "image";
@@ -26,6 +27,12 @@ export async function POST(request: Request) {
   const file = formData.get("file") as File | null;
   const title = (formData.get("title") as string) || "";
   const kindOverride = formData.get("kind") as AssetKind | null;
+  const canonicalDateStr = formData.get("canonicalDate") as string | null;
+  const sourceTypeStr = formData.get("sourceType") as SourceType | null;
+  const statusStr = formData.get("status") as AssetStatus | null;
+  const entitiesJson = formData.get("entities") as string | null;
+  const sourceRecordsJson = formData.get("sourceRecords") as string | null;
+  const textsJson = formData.get("texts") as string | null;
 
   if (!file) {
     return NextResponse.json({ error: "file is required" }, { status: 400 });
@@ -85,13 +92,46 @@ export async function POST(request: Request) {
     thumbnailUrl = storageUrl;
   }
 
-  const asset = await prisma.asset.create({
-    data: {
+  // オプショナルなメタデータをパース
+  let entities: Array<{ entityId: string; roleLabel?: string }> | undefined;
+  let sourceRecords:
+    | Array<{
+        sourceKind: string;
+        title?: string;
+        url?: string | null;
+        publisher?: string | null;
+        publishedAt?: Date | null;
+        metadata?: Record<string, unknown>;
+      }>
+    | undefined;
+  let texts:
+    | Array<{ textType: string; content: string; language?: string }>
+    | undefined;
+
+  try {
+    if (entitiesJson) entities = JSON.parse(entitiesJson);
+    if (sourceRecordsJson) {
+      const raw = JSON.parse(sourceRecordsJson);
+      sourceRecords = raw.map((s: Record<string, unknown>) => ({
+        ...s,
+        publishedAt: s.publishedAt ? new Date(s.publishedAt as string) : null,
+      }));
+    }
+    if (textsJson) texts = JSON.parse(textsJson);
+  } catch {
+    return NextResponse.json(
+      { error: "Invalid JSON in entities, sourceRecords, or texts" },
+      { status: 400 }
+    );
+  }
+
+  const asset = await createAsset(
+    {
       kind,
       title: title || file.name,
       description: "",
-      status: "inbox",
-      sourceType: "import",
+      status: statusStr || "inbox",
+      sourceType: sourceTypeStr || "import",
       storageProvider,
       storageUrl,
       storageKey,
@@ -100,10 +140,13 @@ export async function POST(request: Request) {
       mimeType,
       fileSize: buffer.length,
       thumbnailUrl,
-      createdById: auth.id,
-      updatedById: auth.id,
+      canonicalDate: canonicalDateStr ? new Date(canonicalDateStr) : null,
+      entities,
+      sourceRecords: sourceRecords as CreateAssetData["sourceRecords"],
+      texts: texts as CreateAssetData["texts"],
     },
-  });
+    auth.id
+  );
 
   await logAudit({
     actorId: auth.id,
