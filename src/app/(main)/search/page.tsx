@@ -26,6 +26,37 @@ function ScoreBar({ score }: { score: number }) {
   );
 }
 
+function HighlightedSnippet({ text, query }: { text: string; query: string }) {
+  if (!query.trim()) return <>{text}</>;
+  const parts: Array<{ text: string; highlight: boolean }> = [];
+  const lower = text.toLowerCase();
+  const qLower = query.toLowerCase();
+  let cursor = 0;
+  while (cursor < text.length) {
+    const idx = lower.indexOf(qLower, cursor);
+    if (idx === -1) {
+      parts.push({ text: text.slice(cursor), highlight: false });
+      break;
+    }
+    if (idx > cursor) {
+      parts.push({ text: text.slice(cursor, idx), highlight: false });
+    }
+    parts.push({ text: text.slice(idx, idx + query.length), highlight: true });
+    cursor = idx + query.length;
+  }
+  return (
+    <>
+      {parts.map((p, i) =>
+        p.highlight ? (
+          <mark key={i} className="bg-yellow-200 text-yellow-900 rounded-sm px-0.5">{p.text}</mark>
+        ) : (
+          <span key={i}>{p.text}</span>
+        )
+      )}
+    </>
+  );
+}
+
 const MATCH_FIELD_LABELS: Record<string, string> = {
   title: "タイトル",
   description: "説明",
@@ -330,7 +361,9 @@ export default async function SearchPage({
                         {MATCH_FIELD_LABELS[item.matchField] ?? item.matchField}
                       </span>
                     </div>
-                    <p className="text-xs text-slate-500 mt-1 line-clamp-2">{item.snippet}</p>
+                    <p className="text-xs text-slate-500 mt-1 line-clamp-2">
+                      <HighlightedSnippet text={item.snippet} query={q} />
+                    </p>
                   </div>
                   <div className="shrink-0">
                     <ScoreBar score={item.score} />
