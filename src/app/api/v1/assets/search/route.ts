@@ -10,10 +10,6 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const q = url.searchParams.get("q") || "";
 
-  if (!q.trim()) {
-    return NextResponse.json({ items: [], total: 0, page: 1, perPage: 20 });
-  }
-
   const query: SearchQuery = {
     q,
     target: (url.searchParams.get("target") as SearchQuery["target"]) || "all",

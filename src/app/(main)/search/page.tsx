@@ -75,8 +75,13 @@ export default async function SearchPage({
   // 後方互換: entityId パラメータも対応
   if (params.entityId) selectedEntityIds.push(params.entityId);
 
+  // フィルタが1つでも指定されていれば検索実行
+  const hasFilters = !!(
+    params.kind || params.status || params.trustLevel ||
+    params.dateFrom || params.dateTo || selectedEntityIds.length > 0
+  );
   let results = null;
-  if (q.trim()) {
+  if (q.trim() || hasFilters) {
     results = await search({
       q,
       target,
@@ -369,9 +374,9 @@ export default async function SearchPage({
         </>
       )}
 
-      {!q.trim() && (
+      {!results && (
         <div className="text-center py-16 text-slate-400">
-          <p>キーワードを入力して検索してください</p>
+          <p>キーワードまたはフィルタを指定して検索してください</p>
         </div>
       )}
     </div>

@@ -68,11 +68,8 @@ function buildSnippet(text: string, query: string, contextLen = 80): string {
 export async function search(query: SearchQuery): Promise<SearchResult> {
   const { q, target = "all", page = 1, perPage = 20 } = query;
   const offset = (page - 1) * perPage;
-  const normalizedQ = normalizeText(q);
-
-  if (!q.trim()) {
-    return { items: [], total: 0, page, perPage };
-  }
+  const hasKeyword = q.trim().length > 0;
+  const normalizedQ = hasKeyword ? normalizeText(q) : "";
 
   const results: SearchResultItem[] = [];
 
@@ -105,8 +102,24 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
       )}`
     : Prisma.empty;
 
+  // キーワードなし＋フィルタもなし → 空結果
+  const hasFilters = assetWhereConditions.length > 0 || allEntityIds.length > 0;
+  if (!hasKeyword && !hasFilters) {
+    return { items: [], total: 0, page, perPage };
+  }
+
   // Search assets directly
   if (target === "all" || target === "assets") {
+    const keywordCondition = hasKeyword
+      ? Prisma.sql`(
+          a."title" ILIKE ${'%' + q + '%'}
+          OR a."description" ILIKE ${'%' + q + '%'}
+          OR a."messageBodyPreview" ILIKE ${'%' + q + '%'}
+          OR similarity(a."title", ${q}) > 0.1
+          OR similarity(a."description", ${q}) > 0.1
+        )`
+      : Prisma.sql`TRUE`;
+
     const assetResults = await prisma.$queryRaw<Array<{
       id: string;
       title: string;
@@ -126,32 +139,28 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
         a."id", a."title", a."description", a."kind", a."status",
         a."thumbnailUrl", a."storageUrl", a."storageProvider", a."storageKey",
         a."messageBodyPreview", a."createdAt",
-        COALESCE(similarity(a."title", ${q}), 0) as title_sim,
-        COALESCE(similarity(a."description", ${q}), 0) as desc_sim
+        ${hasKeyword ? Prisma.sql`COALESCE(similarity(a."title", ${q}), 0)` : Prisma.sql`0`} as title_sim,
+        ${hasKeyword ? Prisma.sql`COALESCE(similarity(a."description", ${q}), 0)` : Prisma.sql`0`} as desc_sim
       FROM "Asset" a
-      WHERE (
-        a."title" ILIKE ${'%' + q + '%'}
-        OR a."description" ILIKE ${'%' + q + '%'}
-        OR a."messageBodyPreview" ILIKE ${'%' + q + '%'}
-        OR similarity(a."title", ${q}) > 0.1
-        OR similarity(a."description", ${q}) > 0.1
-      )
+      WHERE ${keywordCondition}
       ${baseFilter}
       ${entityFilter}
       ORDER BY
-        GREATEST(
-          COALESCE(similarity(a."title", ${q}), 0) * 3,
-          COALESCE(similarity(a."description", ${q}), 0) * 2
-        ) DESC,
+        ${hasKeyword
+          ? Prisma.sql`GREATEST(
+              COALESCE(similarity(a."title", ${q}), 0) * 3,
+              COALESCE(similarity(a."description", ${q}), 0) * 2
+            ) DESC,`
+          : Prisma.empty}
         a."createdAt" DESC
       LIMIT ${perPage} OFFSET ${offset}
     `;
 
     for (const row of assetResults) {
-      const titleMatch = row.title.toLowerCase().includes(q.toLowerCase());
-      const descMatch = row.description.toLowerCase().includes(q.toLowerCase());
-      const matchField = titleMatch ? "title" : descMatch ? "description" : "messageBodyPreview";
-      const matchText = titleMatch ? row.title : descMatch ? row.description : (row.messageBodyPreview || "");
+      const titleMatch = hasKeyword && row.title.toLowerCase().includes(q.toLowerCase());
+      const descMatch = hasKeyword && row.description.toLowerCase().includes(q.toLowerCase());
+      const matchField = titleMatch ? "title" : descMatch ? "description" : hasKeyword ? "messageBodyPreview" : "title";
+      const matchText = titleMatch ? row.title : descMatch ? row.description : hasKeyword ? (row.messageBodyPreview || "") : row.title;
       results.push({
         type: "asset",
         assetId: row.id,
@@ -160,7 +169,7 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
         assetStatus: row.status,
         thumbnailUrl: resolveImageUrl(row.thumbnailUrl, row.storageProvider, row.storageKey, row.kind),
         storageUrl: row.storageUrl,
-        snippet: buildSnippet(matchText, q),
+        snippet: hasKeyword ? buildSnippet(matchText, q) : row.title,
         matchField,
         score: Math.max(Number(row.title_sim) * 3, Number(row.desc_sim) * 2),
         createdAt: row.createdAt,
@@ -168,8 +177,8 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
     }
   }
 
-  // Search AssetTexts
-  if (target === "all" || target === "texts") {
+  // Search AssetTexts (only when keyword is provided)
+  if (hasKeyword && (target === "all" || target === "texts")) {
     const textResults = await prisma.$queryRaw<Array<{
       id: string;
       assetId: string;
@@ -224,8 +233,8 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
     }
   }
 
-  // Search Entity matches → return linked assets
-  if (target === "all" || target === "assets") {
+  // Search Entity matches → return linked assets (only when keyword is provided)
+  if (hasKeyword && (target === "all" || target === "assets")) {
     const entityAssets = await prisma.$queryRaw<Array<{
       assetId: string;
       asset_title: string;
@@ -279,8 +288,8 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
     }
   }
 
-  // Sort by score descending
-  results.sort((a, b) => b.score - a.score);
+  // Sort by score descending, then by date
+  results.sort((a, b) => b.score - a.score || b.createdAt.getTime() - a.createdAt.getTime());
 
   return {
     items: results.slice(0, perPage),
