@@ -1,6 +1,7 @@
 import { search } from "@/lib/search";
 import { prisma } from "@/lib/db";
 import { ASSET_KIND_LABELS, ASSET_STATUS_LABELS, TRUST_LEVEL_LABELS, ENTITY_TYPE_LABELS } from "@/lib/utils";
+import { EntityFilter } from "./entity-filter";
 import Link from "next/link";
 import type { AssetKind, AssetStatus, TrustLevel } from "@prisma/client";
 
@@ -66,14 +67,16 @@ export default async function SearchPage({
     entityTypes.map((t) => [t, entities.filter((e) => e.type === t)])
   );
 
-  // タイプ別のエンティティ選択値を収集（entity_person, entity_tag, ...）
-  const selectedEntityIds: string[] = [];
+  // entityIds（カンマ区切り）から選択済みIDを収集
+  const selectedEntityIds: string[] = params.entityIds
+    ? params.entityIds.split(",").filter(Boolean)
+    : [];
+  // 後方互換: entityId / entity_{type} パラメータも対応
+  if (params.entityId) selectedEntityIds.push(params.entityId);
   for (const t of entityTypes) {
     const val = params[`entity_${t}`];
     if (val) selectedEntityIds.push(val);
   }
-  // 後方互換: entityId パラメータも対応
-  if (params.entityId) selectedEntityIds.push(params.entityId);
 
   // フィルタが1つでも指定されていれば検索実行
   const hasFilters = !!(
@@ -104,10 +107,7 @@ export default async function SearchPage({
     if (merged.kind) p.set("kind", merged.kind);
     if (merged.status) p.set("status", merged.status);
     if (merged.trustLevel) p.set("trustLevel", merged.trustLevel);
-    for (const t of entityTypes) {
-      const key = `entity_${t}`;
-      if (merged[key]) p.set(key, merged[key]!);
-    }
+    if (merged.entityIds) p.set("entityIds", merged.entityIds);
     if (merged.dateFrom) p.set("dateFrom", merged.dateFrom);
     if (merged.dateTo) p.set("dateTo", merged.dateTo);
     if (merged.view && merged.view !== "list") p.set("view", merged.view);
@@ -199,25 +199,18 @@ export default async function SearchPage({
               ))}
             </select>
           </div>
-          {entityTypes.map((t) => (
-            <div key={t}>
-              <label className="block text-xs text-slate-500 mb-1">
-                {ENTITY_TYPE_LABELS[t] ?? t}
-              </label>
-              <select
-                name={`entity_${t}`}
-                defaultValue={params[`entity_${t}`] ?? ""}
-                className="border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">すべて</option>
-                {entitiesByType[t].map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {e.canonicalName}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ))}
+        </div>
+
+        {/* Entity filters (multi-select) */}
+        <EntityFilter
+          entityTypes={entityTypes}
+          entitiesByType={entitiesByType}
+          typeLabels={ENTITY_TYPE_LABELS}
+          initialSelected={selectedEntityIds}
+        />
+
+        {/* Date filters */}
+        <div className="flex flex-wrap gap-3 items-end">
           <div>
             <label className="block text-xs text-slate-500 mb-1">開始日</label>
             <input
