@@ -22,6 +22,9 @@ export async function GET(request: Request) {
     trustLevel: (url.searchParams.get("trustLevel") as SearchQuery["trustLevel"]) || undefined,
     sourceType: (url.searchParams.get("sourceType") as SearchQuery["sourceType"]) || undefined,
     entityId: url.searchParams.get("entityId") || undefined,
+    entityIds: url.searchParams.get("entityIds")
+      ? url.searchParams.get("entityIds")!.split(",").filter(Boolean)
+      : undefined,
     dateFrom: url.searchParams.get("dateFrom") ? new Date(url.searchParams.get("dateFrom")!) : undefined,
     dateTo: url.searchParams.get("dateTo") ? new Date(url.searchParams.get("dateTo")!) : undefined,
     page: Number(url.searchParams.get("page")) || 1,

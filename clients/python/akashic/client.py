@@ -251,12 +251,15 @@ class AkashicClient:
         trust_level: str | None = None,
         source_type: str | None = None,
         entity_id: str | None = None,
+        entity_ids: list[str] | None = None,
         date_from: str | None = None,
         date_to: str | None = None,
         page: int = 1,
         per_page: int = 20,
     ) -> dict[str, Any]:
         """全文検索。
+
+        entity_ids を複数指定すると AND 検索になる。
 
         Returns:
             {"items": [...], "total": int, "page": int, "perPage": int}
@@ -272,6 +275,7 @@ class AkashicClient:
                 "trustLevel": trust_level,
                 "sourceType": source_type,
                 "entityId": entity_id,
+                "entityIds": ",".join(entity_ids) if entity_ids else None,
                 "dateFrom": date_from,
                 "dateTo": date_to,
                 "page": page,

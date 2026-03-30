@@ -47,10 +47,7 @@ export default async function SearchPage({
     status?: string;
     trustLevel?: string;
     entityId?: string;
-    dateFrom?: string;
-    dateTo?: string;
-    view?: string;
-    page?: string;
+    [key: string]: string | undefined;
   }>;
 }) {
   const params = await searchParams;
@@ -63,6 +60,21 @@ export default async function SearchPage({
     orderBy: [{ type: "asc" }, { canonicalName: "asc" }],
   });
 
+  // エンティティをタイプ別にグループ化
+  const entityTypes = [...new Set(entities.map((e) => e.type))];
+  const entitiesByType = Object.fromEntries(
+    entityTypes.map((t) => [t, entities.filter((e) => e.type === t)])
+  );
+
+  // タイプ別のエンティティ選択値を収集（entity_person, entity_tag, ...）
+  const selectedEntityIds: string[] = [];
+  for (const t of entityTypes) {
+    const val = params[`entity_${t}`];
+    if (val) selectedEntityIds.push(val);
+  }
+  // 後方互換: entityId パラメータも対応
+  if (params.entityId) selectedEntityIds.push(params.entityId);
+
   let results = null;
   if (q.trim()) {
     results = await search({
@@ -71,7 +83,7 @@ export default async function SearchPage({
       kind: params.kind as AssetKind | undefined,
       status: params.status as AssetStatus | undefined,
       trustLevel: params.trustLevel as TrustLevel | undefined,
-      entityId: params.entityId || undefined,
+      entityIds: selectedEntityIds.length > 0 ? selectedEntityIds : undefined,
       dateFrom: params.dateFrom ? new Date(params.dateFrom) : undefined,
       dateTo: params.dateTo ? new Date(params.dateTo) : undefined,
       page,
@@ -87,7 +99,10 @@ export default async function SearchPage({
     if (merged.kind) p.set("kind", merged.kind);
     if (merged.status) p.set("status", merged.status);
     if (merged.trustLevel) p.set("trustLevel", merged.trustLevel);
-    if (merged.entityId) p.set("entityId", merged.entityId);
+    for (const t of entityTypes) {
+      const key = `entity_${t}`;
+      if (merged[key]) p.set(key, merged[key]!);
+    }
     if (merged.dateFrom) p.set("dateFrom", merged.dateFrom);
     if (merged.dateTo) p.set("dateTo", merged.dateTo);
     if (merged.view && merged.view !== "list") p.set("view", merged.view);
@@ -179,21 +194,25 @@ export default async function SearchPage({
               ))}
             </select>
           </div>
-          <div>
-            <label className="block text-xs text-slate-500 mb-1">エンティティ</label>
-            <select
-              name="entityId"
-              defaultValue={params.entityId ?? ""}
-              className="border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="">すべて</option>
-              {entities.map((e) => (
-                <option key={e.id} value={e.id}>
-                  {`[${ENTITY_TYPE_LABELS[e.type] ?? e.type}] ${e.canonicalName}`}
-                </option>
-              ))}
-            </select>
-          </div>
+          {entityTypes.map((t) => (
+            <div key={t}>
+              <label className="block text-xs text-slate-500 mb-1">
+                {ENTITY_TYPE_LABELS[t] ?? t}
+              </label>
+              <select
+                name={`entity_${t}`}
+                defaultValue={params[`entity_${t}`] ?? ""}
+                className="border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">すべて</option>
+                {entitiesByType[t].map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.canonicalName}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ))}
           <div>
             <label className="block text-xs text-slate-500 mb-1">開始日</label>
             <input

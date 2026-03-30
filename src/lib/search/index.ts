@@ -10,6 +10,7 @@ export interface SearchQuery {
   trustLevel?: TrustLevel;
   sourceType?: SourceType;
   entityId?: string;
+  entityIds?: string[];
   dateFrom?: Date;
   dateTo?: Date;
   page?: number;
@@ -89,9 +90,19 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
     ? Prisma.sql`AND ${Prisma.join(assetWhereConditions, " AND ")}`
     : Prisma.empty;
 
-  // Entity filter as subquery
-  const entityFilter = query.entityId
-    ? Prisma.sql`AND EXISTS (SELECT 1 FROM "AssetEntity" ae WHERE ae."assetId" = a."id" AND ae."entityId" = ${query.entityId})`
+  // Entity filter as subquery (supports multiple entityIds with AND logic)
+  const allEntityIds = [
+    ...(query.entityId ? [query.entityId] : []),
+    ...(query.entityIds ?? []),
+  ];
+  const entityFilter = allEntityIds.length > 0
+    ? Prisma.sql`${Prisma.join(
+        allEntityIds.map(
+          (eid) =>
+            Prisma.sql`AND EXISTS (SELECT 1 FROM "AssetEntity" ae WHERE ae."assetId" = a."id" AND ae."entityId" = ${eid})`
+        ),
+        " "
+      )}`
     : Prisma.empty;
 
   // Search assets directly
