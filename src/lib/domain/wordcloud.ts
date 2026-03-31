@@ -6,22 +6,13 @@ export interface WordFrequency {
 }
 
 /**
- * ブログ・トークのテキストからPGroongaのTokenMecabを使って
- * 頻出単語を集計する。
- *
- * PGroongaの pgroonga_command('tokenize') を使って形態素解析し、
- * 助詞・助動詞・記号などを除外して名詞・動詞・形容詞を抽出する。
+ * ブログ・トークのnormalizedContent（MeCabベース正規化済み）を
+ * 空白分割して頻出単語を集計する。
  */
 export async function getWordFrequencies(limit = 100): Promise<WordFrequency[]> {
-  // pgroonga_command('tokenize') を使って各テキストをトークン化し、
-  // JSONとして返ってくるトークン列を集計する。
-  // ただしpgroonga_commandは1テキストずつなので、
-  // 代わりにnormalizedContentを空白で分割する簡易アプローチを使う。
-  // normalizedContentはMeCabベースで正規化済み。
-
   const rows = await prisma.$queryRaw<WordFrequency[]>`
     WITH tokens AS (
-      SELECT regexp_split_to_table(t."normalizedContent", E'[\\s　、。！？!?,.;:()（）「」『』\\[\\]【】─┈…・×＝+＋/\\\\→←↑↓♪♡★☆🎂🍨🥬🌸🩰🫧🍎🧀🍠💡💭✨️🔅🩵🎵🐛🌻🍁🍂🩷🫶🏻]+') AS word
+      SELECT unnest(string_to_array(t."normalizedContent", ' ')) AS word
       FROM "AssetText" t
       JOIN "Asset" a ON a.id = t."assetId"
       WHERE a."sourceType" IN ('web', 'import')
@@ -32,16 +23,19 @@ export async function getWordFrequencies(limit = 100): Promise<WordFrequency[]> 
     SELECT word, COUNT(*)::int AS count
     FROM tokens
     WHERE LENGTH(word) >= 2
-      AND word !~ '^[0-9a-zA-Zａ-ｚＡ-Ｚ０-９]+$'
-      AND word !~ '^[\x{3040}-\x{309F}]{1,2}$'
+      AND word !~ '^[0-9a-zA-Z_\-.:/?=&%#+@]+$'
       AND word NOT IN (
         'する', 'いる', 'ある', 'なる', 'れる', 'られる',
         'くる', 'いく', 'おる', 'できる', 'くれる', 'もらう',
-        'です', 'ます', 'ない', 'ある', 'この', 'その', 'あの',
-        'こと', 'もの', 'ところ', 'よう', 'ため', 'はず',
-        'から', 'まで', 'より', 'ほど', 'だけ', 'しか',
-        'とても', 'すごく', 'とても', 'やっぱり', 'ちょっと',
-        'https', 'www', 'com', 'hinatazaka46', 'official'
+        'です', 'ます', 'ない', 'この', 'その', 'あの', 'どの',
+        'こと', 'もの', 'ところ', 'よう', 'ため', 'はず', 'わけ',
+        'から', 'まで', 'より', 'ほど', 'だけ', 'しか', 'ばかり',
+        'とても', 'すごく', 'やっぱり', 'ちょっと', 'やはり',
+        'それ', 'これ', 'あれ', 'どれ', 'ここ', 'そこ', 'あそこ',
+        'そう', 'こう', 'ああ', 'どう', 'まだ', 'もう', 'とも',
+        'けど', 'でも', 'だけど', 'ただ', 'なんか', 'やっと',
+        'https', 'www', 'com', 'hinatazaka46', 'official',
+        'amp', 'nbsp', 'lt', 'gt', '&lt', '&gt'
       )
     GROUP BY word
     ORDER BY count DESC
