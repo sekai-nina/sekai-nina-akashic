@@ -51,39 +51,6 @@ export interface SearchResult {
   perPage: number;
 }
 
-/** クエリ文字列からバイグラム（2文字ペア）を生成する */
-function bigrams(text: string): string[] {
-  const chars = [...text.replace(/\s+/g, "")];
-  if (chars.length < 2) return chars.length === 1 ? [chars[0]] : [];
-  const result: string[] = [];
-  for (let i = 0; i < chars.length - 1; i++) {
-    result.push(chars[i] + chars[i + 1]);
-  }
-  return [...new Set(result)];
-}
-
-/**
- * バイグラムベースのあいまい検索条件を生成する。
- * 各バイグラムの一致数をスコアとして返すSQLと、
- * 閾値以上のバイグラムが一致する行のみフィルタするSQL。
- */
-function buildBigramCondition(
-  column: Prisma.Sql,
-  query: string,
-  minMatchRatio = 0.5
-): { condition: Prisma.Sql; scoreExpr: Prisma.Sql } | null {
-  const bgs = bigrams(query);
-  if (bgs.length === 0) return null;
-  const minMatches = Math.max(1, Math.ceil(bgs.length * minMatchRatio));
-
-  const cases = bgs.map(
-    (bg) => Prisma.sql`CASE WHEN ${column} ILIKE ${"%" + bg + "%"} THEN 1 ELSE 0 END`
-  );
-  const scoreExpr = Prisma.sql`(${Prisma.join(cases, " + ")})`;
-  const condition = Prisma.sql`${scoreExpr} >= ${minMatches}`;
-  return { condition, scoreExpr };
-}
-
 function buildSnippet(text: string, query: string, contextLen = 80): string {
   const lower = text.toLowerCase();
   const qLower = query.toLowerCase();
@@ -141,34 +108,18 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
     return { items: [], total: 0, page, perPage };
   }
 
-  // バイグラム条件を事前計算
-  const titleBigram = hasKeyword ? buildBigramCondition(Prisma.sql`a."title"`, q) : null;
-  const descBigram = hasKeyword ? buildBigramCondition(Prisma.sql`a."description"`, q) : null;
-  const previewBigram = hasKeyword ? buildBigramCondition(Prisma.sql`a."messageBodyPreview"`, q) : null;
+  // PGroonga スコア関数: pgroonga_score(tableoid, ctid) でスコアを取得
+  // &@~ 演算子: PGroonga の全文検索演算子（形態素解析 + N-gram）
 
   // Search assets directly
   if (target === "all" || target === "assets") {
-    const exactConditions = hasKeyword
-      ? [
-          Prisma.sql`a."title" ILIKE ${'%' + q + '%'}`,
-          Prisma.sql`a."description" ILIKE ${'%' + q + '%'}`,
-          Prisma.sql`a."messageBodyPreview" ILIKE ${'%' + q + '%'}`,
-          Prisma.sql`similarity(a."title", ${q}) > 0.1`,
-          Prisma.sql`similarity(a."description", ${q}) > 0.1`,
-        ]
-      : [];
-    // バイグラムあいまいマッチも OR に追加
-    if (titleBigram) exactConditions.push(titleBigram.condition);
-    if (descBigram) exactConditions.push(descBigram.condition);
-    if (previewBigram) previewBigram && exactConditions.push(previewBigram.condition);
-
-    const keywordCondition = exactConditions.length > 0
-      ? Prisma.sql`(${Prisma.join(exactConditions, " OR ")})`
+    const keywordCondition = hasKeyword
+      ? Prisma.sql`(
+          a."title" &@~ ${q}
+          OR a."description" &@~ ${q}
+          OR a."messageBodyPreview" &@~ ${q}
+        )`
       : Prisma.sql`TRUE`;
-
-    // バイグラムスコア: 一致バイグラム数 / 総バイグラム数 で 0〜1 に正規化
-    const bgs = bigrams(q);
-    const bigramTotal = Math.max(bgs.length, 1);
 
     const assetResults = await prisma.$queryRaw<Array<{
       id: string;
@@ -182,53 +133,30 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
       storageKey: string | null;
       messageBodyPreview: string | null;
       createdAt: Date;
-      title_sim: number;
-      desc_sim: number;
-      title_bigram_score: number;
-      desc_bigram_score: number;
-      preview_bigram_score: number;
+      pgroonga_score: number;
     }>>`
       SELECT
         a."id", a."title", a."description", a."kind", a."status",
         a."thumbnailUrl", a."storageUrl", a."storageProvider", a."storageKey",
         a."messageBodyPreview", a."createdAt",
-        ${hasKeyword ? Prisma.sql`COALESCE(similarity(a."title", ${q}), 0)` : Prisma.sql`0`} as title_sim,
-        ${hasKeyword ? Prisma.sql`COALESCE(similarity(a."description", ${q}), 0)` : Prisma.sql`0`} as desc_sim,
-        ${titleBigram ? Prisma.sql`(${titleBigram.scoreExpr}::float / ${bigramTotal})` : Prisma.sql`0`} as title_bigram_score,
-        ${descBigram ? Prisma.sql`(${descBigram.scoreExpr}::float / ${bigramTotal})` : Prisma.sql`0`} as desc_bigram_score,
-        ${previewBigram ? Prisma.sql`(${previewBigram.scoreExpr}::float / ${bigramTotal})` : Prisma.sql`0`} as preview_bigram_score
+        ${hasKeyword ? Prisma.sql`pgroonga_score(a.tableoid, a.ctid)` : Prisma.sql`0`} as pgroonga_score
       FROM "Asset" a
       WHERE ${keywordCondition}
       ${baseFilter}
       ${entityFilter}
       ORDER BY
-        ${hasKeyword
-          ? Prisma.sql`GREATEST(
-              COALESCE(similarity(a."title", ${q}), 0) * 3,
-              COALESCE(similarity(a."description", ${q}), 0) * 2,
-              ${titleBigram ? Prisma.sql`${titleBigram.scoreExpr}::float / ${bigramTotal} * 3` : Prisma.sql`0`},
-              ${descBigram ? Prisma.sql`${descBigram.scoreExpr}::float / ${bigramTotal} * 2` : Prisma.sql`0`}
-            ) DESC,`
-          : Prisma.empty}
+        ${hasKeyword ? Prisma.sql`pgroonga_score(a.tableoid, a.ctid) DESC,` : Prisma.empty}
         a."createdAt" DESC
       LIMIT ${perPage} OFFSET ${offset}
     `;
 
     for (const row of assetResults) {
-      const qLower = q.toLowerCase();
+      const qLower = hasKeyword ? q.toLowerCase() : "";
       const titleMatch = hasKeyword && row.title.toLowerCase().includes(qLower);
       const descMatch = hasKeyword && row.description.toLowerCase().includes(qLower);
       const previewMatch = hasKeyword && (row.messageBodyPreview || "").toLowerCase().includes(qLower);
       const matchField = titleMatch ? "title" : descMatch ? "description" : previewMatch ? "messageBodyPreview" : "title";
       const matchText = titleMatch ? row.title : descMatch ? row.description : previewMatch ? (row.messageBodyPreview || "") : row.title;
-      // スコア: 完全一致 > バイグラムあいまい > similarity
-      const exactBonus = titleMatch ? 3.0 : descMatch ? 2.0 : previewMatch ? 1.5 : 0;
-      const simScore = Math.max(Number(row.title_sim) * 3, Number(row.desc_sim) * 2);
-      const bigramScore = Math.max(
-        Number(row.title_bigram_score) * 3,
-        Number(row.desc_bigram_score) * 2,
-        Number(row.preview_bigram_score) * 1.5,
-      );
       results.push({
         type: "asset",
         assetId: row.id,
@@ -239,7 +167,7 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
         storageUrl: row.storageUrl,
         snippet: hasKeyword ? buildSnippet(matchText, q) : row.title,
         matchField,
-        score: Math.max(simScore, exactBonus, bigramScore),
+        score: Number(row.pgroonga_score),
         createdAt: row.createdAt,
       });
     }
@@ -247,27 +175,12 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
 
   // Search AssetTexts (only when keyword is provided)
   if (hasKeyword && (target === "all" || target === "texts")) {
-    const contentBigram = buildBigramCondition(Prisma.sql`t."content"`, q);
-    const normalizedBigram = buildBigramCondition(Prisma.sql`t."normalizedContent"`, normalizedQ);
-
-    const textWhereConditions = [
-      Prisma.sql`t."content" ILIKE ${'%' + q + '%'}`,
-      Prisma.sql`t."normalizedContent" ILIKE ${'%' + normalizedQ + '%'}`,
-      Prisma.sql`similarity(t."content", ${q}) > 0.1`,
-    ];
-    if (contentBigram) textWhereConditions.push(contentBigram.condition);
-    if (normalizedBigram) textWhereConditions.push(normalizedBigram.condition);
-
-    const bgs = bigrams(q);
-    const bigramTotal = Math.max(bgs.length, 1);
-
     const textResults = await prisma.$queryRaw<Array<{
       id: string;
       assetId: string;
       textType: string;
       content: string;
-      content_sim: number;
-      content_bigram_score: number;
+      pgroonga_score: number;
       asset_title: string;
       asset_kind: AssetKind;
       asset_status: AssetStatus;
@@ -279,30 +192,26 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
     }>>`
       SELECT
         t."id", t."assetId", t."textType", t."content",
-        COALESCE(similarity(t."content", ${q}), 0) as content_sim,
-        ${contentBigram ? Prisma.sql`(${contentBigram.scoreExpr}::float / ${bigramTotal})` : Prisma.sql`0`} as content_bigram_score,
+        pgroonga_score(t.tableoid, t.ctid) as pgroonga_score,
         a."title" as asset_title, a."kind" as asset_kind, a."status" as asset_status,
         a."thumbnailUrl" as "asset_thumbnailUrl", a."storageUrl" as "asset_storageUrl",
         a."storageProvider" as "asset_storageProvider", a."storageKey" as "asset_storageKey",
         a."createdAt" as "asset_createdAt"
       FROM "AssetText" t
       JOIN "Asset" a ON a."id" = t."assetId"
-      WHERE (${Prisma.join(textWhereConditions, " OR ")})
+      WHERE (
+        t."content" &@~ ${q}
+        OR t."normalizedContent" &@~ ${normalizedQ}
+      )
       ${baseFilter}
       ${entityFilter}
       ORDER BY
-        GREATEST(
-          COALESCE(similarity(t."content", ${q}), 0),
-          ${contentBigram ? Prisma.sql`${contentBigram.scoreExpr}::float / ${bigramTotal}` : Prisma.sql`0`}
-        ) DESC,
+        pgroonga_score(t.tableoid, t.ctid) DESC,
         a."createdAt" DESC
       LIMIT ${perPage} OFFSET ${offset}
     `;
 
     for (const row of textResults) {
-      const contentMatch = row.content.toLowerCase().includes(q.toLowerCase());
-      const exactBonus = contentMatch ? 2.0 : 0;
-      const bigramScore = Number(row.content_bigram_score) * 2;
       results.push({
         type: "text",
         assetId: row.assetId,
@@ -313,7 +222,7 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
         storageUrl: row.asset_storageUrl,
         snippet: buildSnippet(row.content, q),
         matchField: row.textType,
-        score: Math.max(Number(row.content_sim), exactBonus, bigramScore),
+        score: Number(row.pgroonga_score),
         createdAt: row.asset_createdAt,
       });
     }
@@ -332,7 +241,7 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
       asset_storageKey: string | null;
       asset_createdAt: Date;
       entity_name: string;
-      name_sim: number;
+      pgroonga_score: number;
     }>>`
       SELECT DISTINCT ON (ae."assetId")
         ae."assetId",
@@ -341,17 +250,16 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
         a."storageProvider" as "asset_storageProvider", a."storageKey" as "asset_storageKey",
         a."createdAt" as "asset_createdAt",
         e."canonicalName" as entity_name,
-        COALESCE(similarity(e."canonicalName", ${q}), 0) as name_sim
+        pgroonga_score(e.tableoid, e.ctid) as pgroonga_score
       FROM "Entity" e
       JOIN "AssetEntity" ae ON ae."entityId" = e."id"
       JOIN "Asset" a ON a."id" = ae."assetId"
       WHERE (
-        e."canonicalName" ILIKE ${'%' + q + '%'}
-        OR e."normalizedName" ILIKE ${'%' + normalizedQ + '%'}
-        OR similarity(e."canonicalName", ${q}) > 0.2
+        e."canonicalName" &@~ ${q}
+        OR e."normalizedName" &@~ ${normalizedQ}
       )
       ${baseFilter}
-      ORDER BY ae."assetId", COALESCE(similarity(e."canonicalName", ${q}), 0) DESC
+      ORDER BY ae."assetId", pgroonga_score(e.tableoid, e.ctid) DESC
       LIMIT ${perPage}
     `;
 
@@ -367,7 +275,7 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
           storageUrl: row.asset_storageUrl,
           snippet: `タグ/人物: ${row.entity_name}`,
           matchField: "entity",
-          score: Number(row.name_sim) * 2.5,
+          score: Number(row.pgroonga_score),
           createdAt: row.asset_createdAt,
         });
       }
