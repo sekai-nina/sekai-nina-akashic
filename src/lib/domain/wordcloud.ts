@@ -6,50 +6,33 @@ export interface WordFrequency {
 }
 
 const STOPWORDS = new Set([
-  // 動詞・助動詞
-  "する", "いる", "ある", "なる", "れる", "られる",
+  // 助詞
+  "の", "を", "に", "は", "が", "で", "と", "も", "や", "か",
+  "へ", "な", "よ", "ね", "わ", "て", "だ", "ば", "し", "から",
+  "まで", "より", "ほど", "だけ", "しか", "ばかり", "けど",
+  // 助動詞
+  "する", "いる", "ある", "なる", "れる", "られる", "せる", "させる",
+  "です", "ます", "ない", "た", "ぬ",
   "くる", "いく", "おる", "できる", "くれる", "もらう",
-  "思う", "行く", "言う", "見る", "知る", "来る", "出る",
-  "入る", "持つ", "使う", "聞く", "書く", "読む", "食べる",
-  // 助詞・接続詞・副詞
-  "です", "ます", "ない", "この", "その", "あの", "どの",
-  "こと", "もの", "ところ", "よう", "ため", "はず", "わけ",
-  "から", "まで", "より", "ほど", "だけ", "しか", "ばかり",
-  "とても", "すごく", "やっぱり", "ちょっと", "やはり",
-  "それ", "これ", "あれ", "どれ", "ここ", "そこ", "あそこ",
-  "そう", "こう", "ああ", "どう", "まだ", "もう", "とも",
-  "けど", "でも", "だけど", "ただ", "なんか", "やっと",
-  "いい", "よい", "ほしい", "たい", "られ", "せる",
-  "さん", "ちゃん", "くん", "たち", "など", "ぐらい",
-  "そして", "なので", "まずは", "ということで", "そういえば",
-  "そしてそして", "もうひとつ", "今日は",
-  // 定型文（ブログ挨拶等）
-  "おやすみ!", "おはよー!", "おはよう!", "おはよ!", "おーはよ!",
-  "ゆっくり休んでね", "ゆっくりねてね",
-  "です!", "頑張ります",
-  // 自己紹介定型
-  "神奈川県出身", "16歳", "17歳", "高校2年生", "高校二年生",
-  "高校二年生16歳", "高校二年生17歳",
-  "日向坂46", "櫻坂46",
-  // URL/HTML
-  "https", "www", "com", "hinatazaka46", "official",
-  "&lt;今日の発見&gt;", "【今日の発見】", "amp", "nbsp", "&lt", "&gt",
+  // 代名詞・指示詞
+  "この", "その", "あの", "どの", "こと", "もの", "ところ",
+  "それ", "これ", "あれ", "どれ", "ここ", "そこ",
+  // 副詞・接続詞
+  "そう", "こう", "どう", "まだ", "もう", "とても", "すごく",
+  "そして", "でも", "ただ", "なので", "ちょっと", "やっぱり",
+  // 形式名詞
+  "よう", "ため", "はず", "わけ", "ほう",
+  // 1文字漢字（意味薄）
+  "方", "事", "時", "人", "日", "中", "前", "後", "上", "下",
+  "気", "目", "手", "所", "回", "年", "今",
 ]);
 
-// 制御文字・合成文字（ combining marks）を含むか
-function hasControlOrCombining(s: string): boolean {
-  return /[\u0300-\u036F\u0340-\u0360\u1AB0-\u1AFF\u0600-\u06FF]/.test(s);
-}
-
-// 日本語の実質的な単語か（漢字・カタカナ・ひらがな3文字以上を含む）
-function hasJapanese(s: string): boolean {
-  return /[\u4E00-\u9FFF\u30A0-\u30FF]/.test(s) || /[\u3040-\u309F]{3,}/.test(s);
-}
-
 /**
- * ブログ・トークのnormalizedContentを集計して頻出単語を返す。
+ * PGroongaのTokenMecabで形態素解析し、頻出単語を集計する。
+ * テキストをチャンクに結合してまとめてtokenizeすることでクエリ数を削減。
  */
 export async function getWordFrequencies(limit = 100): Promise<WordFrequency[]> {
+  // 全テキストを取得
   const texts = await prisma.assetText.findMany({
     where: {
       textType: { in: ["body", "message_body"] },
@@ -59,34 +42,50 @@ export async function getWordFrequencies(limit = 100): Promise<WordFrequency[]> 
         kind: "text",
       },
     },
-    select: { normalizedContent: true },
+    select: { content: true },
   });
+
+  // テキストをチャンクに結合（1チャンク最大50000文字）
+  const CHUNK_SIZE = 50000;
+  const chunks: string[] = [];
+  let current = "";
+  for (const row of texts) {
+    if (!row.content) continue;
+    const text = row.content.slice(0, 5000); // 1テキスト最大5000文字
+    if (current.length + text.length > CHUNK_SIZE) {
+      chunks.push(current);
+      current = text;
+    } else {
+      current += "\n" + text;
+    }
+  }
+  if (current) chunks.push(current);
 
   const freq = new Map<string, number>();
 
-  for (const row of texts) {
-    if (!row.normalizedContent) continue;
-    const words = row.normalizedContent.split(/\s+/);
-    for (const w of words) {
-      if (w.length < 2) continue;
-      // ASCII-only
-      if (/^[a-zA-Z0-9_\-.:/?=&%#+@()]+$/.test(w)) continue;
-      // 制御文字・合成文字を含む
-      if (hasControlOrCombining(w)) continue;
-      // 絵文字のみ
-      if (/^[\p{Emoji_Presentation}\p{Extended_Pictographic}]+$/u.test(w)) continue;
-      // 記号のみ
-      if (/^[\p{S}\p{P}\s]+$/u.test(w)) continue;
-      // 日本語を含まない短い文字列
-      if (w.length <= 3 && !hasJapanese(w)) continue;
-      // ストップワード
-      if (STOPWORDS.has(w)) continue;
-      // 先頭・末尾のゴミを除去して正規化
-      const cleaned = w.replace(/^[%$#&*~`|\\]+/, "").replace(/[!！。、？?…)+\]]+$/, "");
-      if (cleaned.length < 2) continue;
-      if (STOPWORDS.has(cleaned)) continue;
+  for (const chunk of chunks) {
+    try {
+      const result = await prisma.$queryRawUnsafe<[{ pgroonga_command: string }]>(
+        `SELECT pgroonga_command('tokenize', ARRAY['string', $1, 'tokenizer', 'TokenMecab("use_base_form", true)'])`,
+        chunk
+      );
 
-      freq.set(cleaned, (freq.get(cleaned) || 0) + 1);
+      if (!result[0]?.pgroonga_command) continue;
+
+      const parsed = JSON.parse(result[0].pgroonga_command);
+      const tokens = parsed[1] as { value: string }[];
+      if (!tokens) continue;
+
+      for (const token of tokens) {
+        const w = token.value;
+        if (w.length < 2) continue;
+        if (/^[a-zA-Z0-9_\-.:/?=&%#+@()\[\]{}|\\<>,;'"` ]+$/.test(w)) continue;
+        if (/^[0-9０-９]+$/.test(w)) continue;
+        if (STOPWORDS.has(w)) continue;
+        freq.set(w, (freq.get(w) || 0) + 1);
+      }
+    } catch (e) {
+      console.error("Tokenize chunk error:", e);
     }
   }
 
