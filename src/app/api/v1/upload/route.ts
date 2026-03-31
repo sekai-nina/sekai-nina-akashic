@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
 import { uploadToDrive, isDriveEnabled } from "@/lib/drive";
-import { createAsset, type CreateAssetData } from "@/lib/domain/assets";
+import { createAsset, updateAsset, type CreateAssetData } from "@/lib/domain/assets";
 import { logAudit } from "@/lib/domain/audit";
 import { createHash } from "crypto";
 import { writeFile, mkdir } from "fs/promises";
@@ -43,9 +43,57 @@ export async function POST(request: Request) {
   const mimeType = file.type || "application/octet-stream";
   const kind = kindOverride || guessMimeKind(mimeType);
 
-  // 重複チェック
+  // オプショナルなメタデータをパース
+  let entities: Array<{ entityId: string; roleLabel?: string }> | undefined;
+  let sourceRecords:
+    | Array<{
+        sourceKind: string;
+        title?: string;
+        url?: string | null;
+        publisher?: string | null;
+        publishedAt?: Date | null;
+        metadata?: Record<string, unknown>;
+      }>
+    | undefined;
+  let texts:
+    | Array<{ textType: string; content: string; language?: string }>
+    | undefined;
+
+  try {
+    if (entitiesJson) entities = JSON.parse(entitiesJson);
+    if (sourceRecordsJson) {
+      const raw = JSON.parse(sourceRecordsJson);
+      sourceRecords = raw.map((s: Record<string, unknown>) => ({
+        ...s,
+        publishedAt: s.publishedAt ? new Date(s.publishedAt as string) : null,
+      }));
+    }
+    if (textsJson) texts = JSON.parse(textsJson);
+  } catch {
+    return NextResponse.json(
+      { error: "Invalid JSON in entities, sourceRecords, or texts" },
+      { status: 400 }
+    );
+  }
+
+  // 重複チェック — メタデータがあれば既存アセットに付与する
   const existing = await prisma.asset.findFirst({ where: { sha256 } });
   if (existing) {
+    const hasMetadata =
+      statusStr || sourceTypeStr || canonicalDateStr || entities || sourceRecords || texts;
+    if (hasMetadata) {
+      await updateAsset(
+        existing.id,
+        {
+          ...(statusStr && { status: statusStr }),
+          ...(sourceTypeStr && { sourceType: sourceTypeStr }),
+          ...(canonicalDateStr && { canonicalDate: new Date(canonicalDateStr) }),
+          entities,
+          sourceRecords: sourceRecords as CreateAssetData["sourceRecords"],
+        },
+        auth.id
+      );
+    }
     return NextResponse.json({
       duplicate: true,
       existingId: existing.id,
@@ -90,39 +138,6 @@ export async function POST(request: Request) {
 
   if (kind === "image" && storageUrl) {
     thumbnailUrl = storageUrl;
-  }
-
-  // オプショナルなメタデータをパース
-  let entities: Array<{ entityId: string; roleLabel?: string }> | undefined;
-  let sourceRecords:
-    | Array<{
-        sourceKind: string;
-        title?: string;
-        url?: string | null;
-        publisher?: string | null;
-        publishedAt?: Date | null;
-        metadata?: Record<string, unknown>;
-      }>
-    | undefined;
-  let texts:
-    | Array<{ textType: string; content: string; language?: string }>
-    | undefined;
-
-  try {
-    if (entitiesJson) entities = JSON.parse(entitiesJson);
-    if (sourceRecordsJson) {
-      const raw = JSON.parse(sourceRecordsJson);
-      sourceRecords = raw.map((s: Record<string, unknown>) => ({
-        ...s,
-        publishedAt: s.publishedAt ? new Date(s.publishedAt as string) : null,
-      }));
-    }
-    if (textsJson) texts = JSON.parse(textsJson);
-  } catch {
-    return NextResponse.json(
-      { error: "Invalid JSON in entities, sourceRecords, or texts" },
-      { status: 400 }
-    );
   }
 
   const asset = await createAsset(
