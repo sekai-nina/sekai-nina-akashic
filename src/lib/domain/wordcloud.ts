@@ -81,8 +81,8 @@ export async function getWordFrequencies(limit = 100): Promise<WordFrequency[]> 
       if (w.length <= 3 && !hasJapanese(w)) continue;
       // ストップワード
       if (STOPWORDS.has(w)) continue;
-      // 末尾の句読点・感嘆符を除去して正規化
-      const cleaned = w.replace(/[!！。、？?…]+$/, "");
+      // 先頭・末尾のゴミを除去して正規化
+      const cleaned = w.replace(/^[%$#&*~`|\\]+/, "").replace(/[!！。、？?…)+\]]+$/, "");
       if (cleaned.length < 2) continue;
       if (STOPWORDS.has(cleaned)) continue;
 
