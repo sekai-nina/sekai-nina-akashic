@@ -19,6 +19,14 @@ export interface DashboardStats {
   };
 }
 
+// 坂井新奈のperson entity ID
+const NINA_ENTITY_ID = "cmmtp8vrg0004mo381neyztvn";
+
+// 坂井新奈に紐づくアセットのフィルタ条件
+const ninaFilter = {
+  entities: { some: { entityId: NINA_ENTITY_ID } },
+};
+
 export async function getDashboardStats(): Promise<DashboardStats> {
   const [
     blogPostCount,
@@ -32,23 +40,25 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     talkCharsResult,
     discoveryCount,
   ] = await Promise.all([
-    prisma.asset.count({ where: { sourceType: "web", kind: "text" } }),
-    prisma.asset.count({ where: { sourceType: "web", kind: "image" } }),
+    prisma.asset.count({ where: { sourceType: "web", kind: "text", ...ninaFilter } }),
+    prisma.asset.count({ where: { sourceType: "web", kind: "image", ...ninaFilter } }),
     prisma.asset.count({ where: { sourceType: "import", kind: "text" } }),
     prisma.asset.count({ where: { sourceType: "import", kind: "image" } }),
     prisma.asset.count({ where: { sourceType: "import", kind: "video" } }),
     prisma.asset.count({ where: { sourceType: "import", kind: "audio" } }),
     prisma.asset.count(),
-    // ブログ（web）テキストの文字数合計
+    // 坂井新奈のブログ文字数合計
     prisma.$queryRaw<[{ total: bigint }]>`
       SELECT COALESCE(SUM(LENGTH(t.content)), 0) AS total
       FROM "AssetText" t
       JOIN "Asset" a ON a.id = t."assetId"
+      JOIN "AssetEntity" ae ON ae."assetId" = a.id
       WHERE a."sourceType" = 'web'
         AND a.kind = 'text'
         AND t."textType" IN ('body', 'message_body')
+        AND ae."entityId" = ${NINA_ENTITY_ID}
     `,
-    // トーク（import）テキストの文字数合計
+    // トーク文字数合計（トークは坂井新奈のみ）
     prisma.$queryRaw<[{ total: bigint }]>`
       SELECT COALESCE(SUM(LENGTH(t.content)), 0) AS total
       FROM "AssetText" t
