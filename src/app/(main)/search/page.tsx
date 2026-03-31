@@ -374,7 +374,7 @@ export default async function SearchPage({
           )}
 
           {/* Pagination */}
-          {results.total > results.perPage && (
+          {(page > 1 || results.items.length === results.perPage) && (
             <div className="flex items-center justify-between mt-4">
               <span className="text-sm text-slate-500">{page} ページ目</span>
               <div className="flex gap-2">
