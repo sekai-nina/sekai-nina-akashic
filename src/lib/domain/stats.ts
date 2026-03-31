@@ -5,6 +5,7 @@ export interface DashboardStats {
     postCount: number;
     imageCount: number;
     totalChars: number;
+    discoveryCount: number;
   };
   talk: {
     messageCount: number;
@@ -29,6 +30,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     totalAssetCount,
     blogCharsResult,
     talkCharsResult,
+    discoveryCount,
   ] = await Promise.all([
     prisma.asset.count({ where: { sourceType: "web", kind: "text" } }),
     prisma.asset.count({ where: { sourceType: "web", kind: "image" } }),
@@ -55,6 +57,15 @@ export async function getDashboardStats(): Promise<DashboardStats> {
         AND a.kind = 'text'
         AND t."textType" IN ('body', 'message_body')
     `,
+    // 「今日の発見」タグがついたアセット数
+    prisma.assetEntity.count({
+      where: {
+        entity: {
+          type: "tag",
+          normalizedName: "今日の発見",
+        },
+      },
+    }),
   ]);
 
   return {
@@ -62,6 +73,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
       postCount: blogPostCount,
       imageCount: blogImageCount,
       totalChars: Number(blogCharsResult[0].total),
+      discoveryCount,
     },
     talk: {
       messageCount: talkMessageCount,
