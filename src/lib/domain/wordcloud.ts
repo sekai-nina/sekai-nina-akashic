@@ -30,7 +30,7 @@ export async function getWordFrequencies(limit = 100): Promise<WordFrequency[]> 
   const texts = await prisma.assetText.findMany({
     where: {
       textType: { in: ["body", "message_body"] },
-      normalizedContent: { not: null },
+      NOT: { normalizedContent: null },
       asset: {
         sourceType: { in: ["web", "import"] },
         kind: "text",
