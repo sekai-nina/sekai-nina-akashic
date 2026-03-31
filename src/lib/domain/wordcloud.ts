@@ -90,7 +90,11 @@ const NINA_ENTITY_ID = "cmmtp8vrg0004mo381neyztvn";
  * → 全メンバーに共通する語（挨拶、定型文）のスコアが下がり、
  *   坂井新奈に特徴的な語が浮かび上がる。
  */
-export async function getWordFrequencies(limit = 100): Promise<WordFrequency[]> {
+/**
+ * @param limit 返却する単語数の上限
+ * @param since この日付以降のブログを対象にする（省略時は全期間）
+ */
+export async function getWordFrequencies(limit = 100, since?: Date): Promise<WordFrequency[]> {
   // 坂井新奈のブログのアセットID一覧
   const ninaAssetEntities = await prisma.assetEntity.findMany({
     where: { entityId: NINA_ENTITY_ID },
@@ -98,11 +102,12 @@ export async function getWordFrequencies(limit = 100): Promise<WordFrequency[]> 
   });
   const ninaAssetIds = new Set(ninaAssetEntities.map((ae) => ae.assetId));
 
-  // 全メンバーのブログテキストを取得
+  // 全メンバーのブログテキストを取得（期間フィルタあり）
+  const dateFilter = since ? { canonicalDate: { gte: since } } : {};
   const allBlogTexts = await prisma.assetText.findMany({
     where: {
       textType: "body",
-      asset: { sourceType: "web", kind: "text" },
+      asset: { sourceType: "web", kind: "text", ...dateFilter },
     },
     select: { content: true, assetId: true },
   });
