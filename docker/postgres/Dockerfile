@@ -12,5 +12,6 @@ RUN apt-get update \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
        postgresql-16-pgdg-pgroonga \
+       groonga-tokenizer-mecab \
     && apt-get purge -y --auto-remove wget gnupg lsb-release \
     && rm -rf /var/lib/apt/lists/*
