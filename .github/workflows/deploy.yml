@@ -31,7 +31,10 @@ jobs:
           script: |
             cd ~/sekai-nina-akashic
             git pull
+            docker compose build --quiet
+            docker compose up -d
             pnpm install --frozen-lockfile
+            npx prisma migrate deploy
             NODE_OPTIONS="--max-old-space-size=1536" pnpm build
             pm2 restart akashic
             pm2 restart akashic-bot
