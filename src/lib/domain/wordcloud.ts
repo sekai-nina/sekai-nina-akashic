@@ -39,8 +39,21 @@ const STOPWORDS = new Set([
 
 function isValidWord(w: string): boolean {
   if (w.length < 2) return false;
+  // ASCII記号・数字のみ
   if (/^[a-zA-Z0-9_\-.:/?=&%#+@()\[\]{}|\\<>,;'"` ]+$/.test(w)) return false;
   if (/^[0-9０-９]+$/.test(w)) return false;
+  // 罫線・装飾文字の繰り返し（┈┈┈, ───, ═══ 等）
+  if (/^[┈─━═┃│┊┄┅┆┇┉╌╍╎╏═]{2,}$/.test(w)) return false;
+  // 絵文字のみ
+  if (/^[\p{Emoji_Presentation}\p{Extended_Pictographic}\uFE0F\u200D]+$/u.test(w)) return false;
+  // 合成文字・修飾記号のみ（˘͈ᵕ˘͈, ·‪ 等）
+  if (/[\u0300-\u036F\u0340-\u0360\u02B0-\u02FF]/.test(w)) return false;
+  // 制御文字・ゼロ幅文字を含む
+  if (/[\u200B-\u200F\u2028-\u202F\uFEFF\u00A0]/.test(w)) return false;
+  // 記号のみ（🔅·‪ 等）
+  if (/^[\p{S}\p{P}\p{M}\p{Z}]+$/u.test(w)) return false;
+  // 日本語（漢字・カタカナ・ひらがな3文字以上）を含まない短い語
+  if (w.length <= 2 && !/[\u4E00-\u9FFF\u30A0-\u30FF]/.test(w) && !/[\u3040-\u309F]{2,}/.test(w)) return false;
   if (STOPWORDS.has(w)) return false;
   return true;
 }
