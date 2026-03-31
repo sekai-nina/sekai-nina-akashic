@@ -45,9 +45,6 @@ function isValidWord(w: string): boolean {
   return true;
 }
 
-/**
- * テキストをPGroonga TokenMecabでトークン化し、有効な単語のリストを返す。
- */
 async function tokenizeText(text: string): Promise<string[]> {
   const words: string[] = [];
   try {
@@ -68,83 +65,63 @@ async function tokenizeText(text: string): Promise<string[]> {
   return words;
 }
 
+// 坂井新奈のperson entity ID
+const NINA_ENTITY_ID = "cmmtp8vrg0004mo381neyztvn";
+
 /**
  * TF-IDFベースのワードクラウドデータを生成。
  *
- * 文書単位:
- *   - ブログ: 1記事 = 1文書
- *   - トーク: 1週間分 = 1文書
+ * TF: 坂井新奈のブログでの出現回数
+ * IDF: log(全メンバーのブログ総数 / その語が出現するブログ数)
  *
- * TF = 単語の全文書での総出現回数
- * IDF = log(総文書数 / その単語が出現する文書数)
- * スコア = TF * IDF
+ * → 全メンバーに共通する語（挨拶、定型文）のスコアが下がり、
+ *   坂井新奈に特徴的な語が浮かび上がる。
  */
 export async function getWordFrequencies(limit = 100): Promise<WordFrequency[]> {
-  // ブログテキストを取得（1記事 = 1文書）
-  const blogTexts = await prisma.assetText.findMany({
+  // 坂井新奈のブログのアセットID一覧
+  const ninaAssetEntities = await prisma.assetEntity.findMany({
+    where: { entityId: NINA_ENTITY_ID },
+    select: { assetId: true },
+  });
+  const ninaAssetIds = new Set(ninaAssetEntities.map((ae) => ae.assetId));
+
+  // 全メンバーのブログテキストを取得
+  const allBlogTexts = await prisma.assetText.findMany({
     where: {
       textType: "body",
       asset: { sourceType: "web", kind: "text" },
     },
-    select: { content: true },
+    select: { content: true, assetId: true },
   });
 
-  // トークテキストを日付付きで取得
-  const talkTexts = await prisma.assetText.findMany({
-    where: {
-      textType: { in: ["body", "message_body"] },
-      asset: { sourceType: "import", kind: "text" },
-    },
-    select: {
-      content: true,
-      asset: { select: { canonicalDate: true } },
-    },
-  });
-
-  // トークを1週間単位でグループ化
-  const talkWeeks = new Map<string, string[]>();
-  for (const t of talkTexts) {
-    if (!t.content) continue;
-    const date = t.asset.canonicalDate ?? new Date();
-    const d = new Date(date);
-    // ISO週の月曜日を算出
-    const day = d.getDay();
-    const monday = new Date(d);
-    monday.setDate(d.getDate() - ((day + 6) % 7));
-    const weekKey = monday.toISOString().slice(0, 10);
-    if (!talkWeeks.has(weekKey)) talkWeeks.set(weekKey, []);
-    talkWeeks.get(weekKey)!.push(t.content);
+  // 坂井新奈のブログと全ブログに分ける
+  const ninaDocs: string[] = [];
+  const allDocs: string[] = [];
+  for (const row of allBlogTexts) {
+    if (!row.content) continue;
+    allDocs.push(row.content);
+    if (ninaAssetIds.has(row.assetId)) {
+      ninaDocs.push(row.content);
+    }
   }
 
-  // 全文書リスト: ブログ各記事 + トーク週まとめ
-  const documents: string[] = [];
-  for (const b of blogTexts) {
-    if (b.content) documents.push(b.content);
-  }
-  for (const [, texts] of talkWeeks) {
-    documents.push(texts.join("\n"));
-  }
+  const totalDocs = allDocs.length;
+  if (totalDocs === 0 || ninaDocs.length === 0) return [];
 
-  const totalDocs = documents.length;
-  if (totalDocs === 0) return [];
-
-  // 各文書をトークン化
-  const docTokens: string[][] = [];
-  for (const doc of documents) {
-    docTokens.push(await tokenizeText(doc));
-  }
-
-  // TF: 全文書での総出現回数
+  // 坂井新奈のブログをトークン化 → TF
   const tf = new Map<string, number>();
-  // DF: その単語が出現する文書数
-  const df = new Map<string, number>();
-
-  for (const tokens of docTokens) {
-    const seen = new Set<string>();
+  for (const doc of ninaDocs) {
+    const tokens = await tokenizeText(doc);
     for (const w of tokens) {
       tf.set(w, (tf.get(w) || 0) + 1);
-      seen.add(w);
     }
+  }
+
+  // 全ブログをトークン化 → DF（各語が出現する文書数）
+  const df = new Map<string, number>();
+  for (const doc of allDocs) {
+    const tokens = await tokenizeText(doc);
+    const seen = new Set(tokens);
     for (const w of seen) {
       df.set(w, (df.get(w) || 0) + 1);
     }
@@ -154,9 +131,11 @@ export async function getWordFrequencies(limit = 100): Promise<WordFrequency[]> 
   const scores: [string, number][] = [];
   for (const [word, termFreq] of tf) {
     const docFreq = df.get(word) || 1;
-    // 1文書にしか出ない語も除外（ノイズの可能性が高い）
-    if (docFreq < 2) continue;
+    // 坂井新奈のブログに1回しか出ない語は除外
+    if (termFreq < 2) continue;
     const idf = Math.log(totalDocs / docFreq);
+    // IDFが0に近い（全文書に出る）語はスキップ
+    if (idf < 0.1) continue;
     scores.push([word, termFreq * idf]);
   }
 
