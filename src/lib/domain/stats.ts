@@ -14,6 +14,13 @@ export interface DashboardStats {
     audioCount: number;
     totalChars: number;
   };
+  media: {
+    hinaai: number;
+    hinanari: number;
+    hinach: number;
+    official: number;
+    magazine: number;
+  };
   total: {
     assetCount: number;
   };
@@ -28,6 +35,12 @@ const ninaFilter = {
 };
 
 export async function getDashboardStats(): Promise<DashboardStats> {
+  // エンティティ名でアセット数をカウントするヘルパー
+  const countByTag = (name: string) =>
+    prisma.assetEntity.count({
+      where: { entity: { type: "tag", normalizedName: name } },
+    });
+
   const [
     blogPostCount,
     blogImageCount,
@@ -39,6 +52,11 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     blogCharsResult,
     talkCharsResult,
     discoveryCount,
+    hinaaiCount,
+    hinanariCount,
+    hinachCount,
+    officialCount,
+    magazineCount,
   ] = await Promise.all([
     prisma.asset.count({ where: { sourceType: "web", kind: "text", ...ninaFilter } }),
     prisma.asset.count({ where: { sourceType: "web", kind: "image", ...ninaFilter } }),
@@ -68,14 +86,13 @@ export async function getDashboardStats(): Promise<DashboardStats> {
         AND t."textType" IN ('body', 'message_body')
     `,
     // 「今日の発見」タグがついたアセット数
-    prisma.assetEntity.count({
-      where: {
-        entity: {
-          type: "tag",
-          normalizedName: "今日の発見",
-        },
-      },
-    }),
+    countByTag("今日の発見"),
+    // メディア出演カウント
+    countByTag("日向坂で会いましょう"),
+    countByTag("日向坂になりましょう"),
+    countByTag("日向坂ちゃんねる"),
+    countByTag("日向坂46公式チャンネル"),
+    countByTag("雑誌"),
   ]);
 
   return {
@@ -91,6 +108,13 @@ export async function getDashboardStats(): Promise<DashboardStats> {
       videoCount: talkVideoCount,
       audioCount: talkAudioCount,
       totalChars: Number(talkCharsResult[0].total),
+    },
+    media: {
+      hinaai: hinaaiCount,
+      hinanari: hinanariCount,
+      hinach: hinachCount,
+      official: officialCount,
+      magazine: magazineCount,
     },
     total: {
       assetCount: totalAssetCount,
