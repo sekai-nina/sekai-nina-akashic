@@ -21,6 +21,11 @@ export interface DashboardStats {
     official: number;
     magazine: number;
   };
+  live: {
+    count: number;
+    totalSongs: number;
+    centerSongs: number;
+  };
   total: {
     assetCount: number;
   };
@@ -57,6 +62,9 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     hinachCount,
     officialCount,
     magazineCount,
+    liveCount,
+    liveSongsResult,
+    liveCenterResult,
   ] = await Promise.all([
     prisma.asset.count({ where: { sourceType: "web", kind: "text", ...ninaFilter } }),
     prisma.asset.count({ where: { sourceType: "web", kind: "image", ...ninaFilter } }),
@@ -93,6 +101,28 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     countByTag("日向坂ちゃんねる"),
     countByTag("日向坂46公式チャンネル"),
     countByTag("雑誌"),
+    // ライブ: 参加数、披露曲数（セミコロン区切りのbodyテキストから集計）、センター曲数（noteテキストから集計）
+    countByTag("ライブ"),
+    prisma.$queryRaw<[{ total: bigint }]>`
+      SELECT COALESCE(SUM(
+        array_length(string_to_array(t.content, ';'), 1)
+      ), 0) AS total
+      FROM "AssetText" t
+      JOIN "AssetEntity" ae ON ae."assetId" = t."assetId"
+      JOIN "Entity" e ON e.id = ae."entityId"
+      WHERE e."canonicalName" = 'ライブ' AND e.type = 'tag'
+        AND t."textType" = 'body' AND t.content != ''
+    `,
+    prisma.$queryRaw<[{ total: bigint }]>`
+      SELECT COALESCE(SUM(
+        array_length(string_to_array(t.content, ';'), 1)
+      ), 0) AS total
+      FROM "AssetText" t
+      JOIN "AssetEntity" ae ON ae."assetId" = t."assetId"
+      JOIN "Entity" e ON e.id = ae."entityId"
+      WHERE e."canonicalName" = 'ライブ' AND e.type = 'tag'
+        AND t."textType" = 'note' AND t.content != ''
+    `,
   ]);
 
   return {
@@ -115,6 +145,11 @@ export async function getDashboardStats(): Promise<DashboardStats> {
       hinach: hinachCount,
       official: officialCount,
       magazine: magazineCount,
+    },
+    live: {
+      count: liveCount,
+      totalSongs: Number(liveSongsResult[0].total),
+      centerSongs: Number(liveCenterResult[0].total),
     },
     total: {
       assetCount: totalAssetCount,
