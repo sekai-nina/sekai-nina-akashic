@@ -13,7 +13,7 @@ export default async function MainLayout({
   if (!session?.user) redirect("/login");
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-dvh">
       <Suspense>
         <NavigationProgress />
       </Suspense>
