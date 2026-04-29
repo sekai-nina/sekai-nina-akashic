@@ -309,6 +309,18 @@ class AkashicClient:
             "GET", "/entities", params={"q": q, "type": type}
         )
 
+    def get_entity(self, entity_id: str) -> dict[str, Any]:
+        """エンティティをIDで取得する（aliases含む）。"""
+        return self._request("GET", f"/entities/{entity_id}")
+
+    def get_entity_aliases(self, entity_id: str) -> list[str]:
+        """エンティティのcanonicalName + aliasesをリストで返す。"""
+        entity = self.get_entity(entity_id)
+        aliases = entity.get("aliases", [])
+        if not isinstance(aliases, list):
+            aliases = []
+        return [entity["canonicalName"], *aliases]
+
     def create_entity(
         self, type: str, canonical_name: str
     ) -> dict[str, Any]:

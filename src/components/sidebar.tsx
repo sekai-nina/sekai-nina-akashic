@@ -13,6 +13,8 @@ import {
   LogOut,
   Menu,
   X,
+  Home,
+  Tag,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -20,10 +22,12 @@ interface SidebarProps {
 }
 
 const navItems = [
-  { href: "/search", label: "検索", icon: Search },
+  { href: "/dashboard", label: "ダッシュボード", icon: Home },
   { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/assets", label: "Assets", icon: Archive },
+  { href: "/entities", label: "エンティティ", icon: Tag },
   { href: "/collections", label: "コレクション", icon: FolderOpen },
+  { href: "/search", label: "検索", icon: Search },
 ];
 
 const adminItems = [
@@ -84,6 +88,22 @@ export function Sidebar({ user }: SidebarProps) {
             <h1 className="text-sm font-bold tracking-tight leading-tight">Akashic</h1>
             <p className="text-xs text-slate-500 leading-tight">Sekai Nina</p>
           </div>
+        </div>
+        {/* Search bar */}
+        <div className="px-3 py-2 border-b border-slate-200">
+          <form
+            action="/search"
+            method="GET"
+            className="relative"
+          >
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              name="q"
+              placeholder="検索..."
+              className="w-full bg-slate-50 border border-slate-200 rounded-md pl-8 pr-3 py-1.5 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white"
+            />
+          </form>
         </div>
         <nav className="flex-1 space-y-1 px-2 py-3">
           {navItems.map((item) => {

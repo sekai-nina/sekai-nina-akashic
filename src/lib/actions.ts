@@ -400,3 +400,55 @@ export async function deleteUser(id: string) {
   await prisma.user.delete({ where: { id } });
   revalidatePath("/admin/users");
 }
+
+// ========== Entity Aliases ==========
+
+export async function updateEntityAliases(entityId: string, formData: FormData) {
+  await requireRole(["admin", "member"]);
+  const aliasesRaw = formData.get("aliases") as string;
+  const aliases = aliasesRaw
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  await prisma.entity.update({
+    where: { id: entityId },
+    data: { aliases },
+  });
+
+  revalidatePath(`/entities/${entityId}`);
+}
+
+export async function addEntityAlias(entityId: string, formData: FormData) {
+  await requireRole(["admin", "member"]);
+  const alias = (formData.get("alias") as string).trim();
+  if (!alias) return;
+
+  const entity = await prisma.entity.findUnique({ where: { id: entityId } });
+  if (!entity) throw new Error("Entity not found");
+
+  const current = (entity.aliases as string[]) || [];
+  if (current.includes(alias)) return;
+
+  await prisma.entity.update({
+    where: { id: entityId },
+    data: { aliases: [...current, alias] },
+  });
+
+  revalidatePath(`/entities/${entityId}`);
+}
+
+export async function removeEntityAlias(entityId: string, alias: string) {
+  await requireRole(["admin", "member"]);
+
+  const entity = await prisma.entity.findUnique({ where: { id: entityId } });
+  if (!entity) throw new Error("Entity not found");
+
+  const current = (entity.aliases as string[]) || [];
+  await prisma.entity.update({
+    where: { id: entityId },
+    data: { aliases: current.filter((a) => a !== alias) },
+  });
+
+  revalidatePath(`/entities/${entityId}`);
+}
