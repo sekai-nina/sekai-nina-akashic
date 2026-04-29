@@ -5,8 +5,6 @@ import { uploadToDrive, isDriveEnabled } from "@/lib/drive";
 import { createAsset, updateAsset, type CreateAssetData } from "@/lib/domain/assets";
 import { logAudit } from "@/lib/domain/audit";
 import { createHash } from "crypto";
-import { writeFile, mkdir } from "fs/promises";
-import { join } from "path";
 import type { AssetKind, AssetStatus, StorageProvider, SourceType } from "@prisma/client";
 
 function guessMimeKind(mimeType: string): AssetKind {
@@ -106,34 +104,29 @@ export async function POST(request: Request) {
   let storageKey: string | null = null;
   let thumbnailUrl: string | null = null;
 
-  if (isDriveEnabled()) {
-    try {
-      const driveResult = await uploadToDrive(buffer, file.name, mimeType);
-      if (driveResult) {
-        storageProvider = "gdrive";
-        storageUrl = driveResult.webViewLink;
-        storageKey = driveResult.fileId;
-        if (kind === "image") {
-          thumbnailUrl = `/api/drive-image/${driveResult.fileId}`;
-        }
-      }
-    } catch (err) {
-      console.error("Drive upload failed, falling back to local:", err);
-    }
+  if (!isDriveEnabled()) {
+    return NextResponse.json(
+      { error: "Google Drive is not configured. File upload requires Google Drive." },
+      { status: 503 }
+    );
   }
 
-  if (storageProvider === "local_none") {
-    const uploadsDir = join(process.cwd(), "uploads");
-    await mkdir(uploadsDir, { recursive: true });
-    const ext = file.name.includes(".")
-      ? file.name.slice(file.name.lastIndexOf("."))
-      : "";
-    const filename = `${sha256}${ext}`;
-    const filepath = join(uploadsDir, filename);
-    await writeFile(filepath, buffer);
-    storageProvider = "external_url";
-    storageUrl = `/api/files/${filename}`;
-    storageKey = filename;
+  try {
+    const driveResult = await uploadToDrive(buffer, file.name, mimeType);
+    if (driveResult) {
+      storageProvider = "gdrive";
+      storageUrl = driveResult.webViewLink;
+      storageKey = driveResult.fileId;
+      if (kind === "image") {
+        thumbnailUrl = `/api/drive-image/${driveResult.fileId}`;
+      }
+    }
+  } catch (err) {
+    console.error("Drive upload failed:", err);
+    return NextResponse.json(
+      { error: "Failed to upload to Google Drive" },
+      { status: 500 }
+    );
   }
 
   if (kind === "image" && storageUrl) {

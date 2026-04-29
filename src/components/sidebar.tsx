@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { signOut } from "next-auth/react";
+import { usePathname, useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 import { useState, useEffect } from "react";
 import {
   Search,
@@ -32,12 +32,20 @@ const adminItems = [
 
 export function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
 
   // ページ遷移時にメニューを閉じる
   useEffect(() => {
     setOpen(false);
   }, [pathname]);
+
+  async function handleSignOut() {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.push("/login");
+    router.refresh();
+  }
 
   return (
     <>
@@ -121,7 +129,7 @@ export function Sidebar({ user }: SidebarProps) {
         <div className="border-t border-slate-200 px-4 py-3">
           <p className="text-xs font-medium">{user.name}</p>
           <button
-            onClick={() => signOut({ callbackUrl: "/login" })}
+            onClick={handleSignOut}
             className="mt-1 flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700"
           >
             <LogOut size={12} />

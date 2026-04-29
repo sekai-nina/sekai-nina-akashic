@@ -1,10 +1,7 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { normalizeText } from "@/lib/utils";
 import { uploadToDrive, isDriveEnabled } from "@/lib/drive";
 import { createHash } from "crypto";
-import { writeFile, mkdir } from "fs/promises";
-import { join } from "path";
 import { NextResponse } from "next/server";
 import type { AssetKind, StorageProvider } from "@prisma/client";
 
@@ -56,34 +53,29 @@ export async function POST(request: Request) {
   let storageKey: string | null = null;
   let thumbnailUrl: string | null = null;
 
-  // Try Google Drive first
-  if (isDriveEnabled()) {
-    try {
-      const driveResult = await uploadToDrive(buffer, file.name, mimeType);
-      if (driveResult) {
-        storageProvider = "gdrive";
-        storageUrl = driveResult.webViewLink;
-        storageKey = driveResult.fileId;
-        if (kind === "image") {
-          thumbnailUrl = `/api/drive-image/${driveResult.fileId}`;
-        }
-      }
-    } catch (err) {
-      console.error("Drive upload failed, falling back to local:", err);
-    }
+  if (!isDriveEnabled()) {
+    return NextResponse.json(
+      { error: "Google Driveが設定されていません。ファイルアップロードにはGoogle Driveの設定が必要です。" },
+      { status: 503 }
+    );
   }
 
-  // Fall back to local storage
-  if (storageProvider === "local_none") {
-    const uploadsDir = join(process.cwd(), "uploads");
-    await mkdir(uploadsDir, { recursive: true });
-    const ext = file.name.includes(".") ? file.name.slice(file.name.lastIndexOf(".")) : "";
-    const filename = `${sha256}${ext}`;
-    const filepath = join(uploadsDir, filename);
-    await writeFile(filepath, buffer);
-    storageProvider = "external_url";
-    storageUrl = `/api/files/${filename}`;
-    storageKey = filename;
+  try {
+    const driveResult = await uploadToDrive(buffer, file.name, mimeType);
+    if (driveResult) {
+      storageProvider = "gdrive";
+      storageUrl = driveResult.webViewLink;
+      storageKey = driveResult.fileId;
+      if (kind === "image") {
+        thumbnailUrl = `/api/drive-image/${driveResult.fileId}`;
+      }
+    }
+  } catch (err) {
+    console.error("Drive upload failed:", err);
+    return NextResponse.json(
+      { error: "Google Driveへのアップロードに失敗しました" },
+      { status: 500 }
+    );
   }
 
   if (kind === "image" && storageUrl) {

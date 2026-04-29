@@ -18,11 +18,11 @@ jobs:
       - run: pnpm db:generate
       - run: pnpm typecheck
 
-  deploy:
+  deploy-bot:
     needs: check
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy via SSH
+      - name: Deploy Discord Bot via SSH
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -31,10 +31,6 @@ jobs:
           script: |
             cd ~/sekai-nina-akashic
             git pull
-            docker compose build --quiet
-            docker compose up -d
             pnpm install --frozen-lockfile
-            npx prisma migrate deploy
-            NODE_OPTIONS="--max-old-space-size=1536" pnpm build
-            pm2 restart akashic
+            npx prisma generate
             pm2 restart akashic-bot

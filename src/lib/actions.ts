@@ -4,9 +4,9 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { normalizeText } from "@/lib/utils";
 import { logAudit } from "@/lib/domain/audit";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { hash } from "bcryptjs";
 import type { AssetKind, AssetStatus, TrustLevel, SourceType, StorageProvider, EntityType, TextType, SourceKind, AnnotationKind } from "@prisma/client";
 import { backupAssetToDrive } from "@/lib/drive";
 
@@ -333,36 +333,70 @@ export async function deleteCollection(id: string) {
 
 export async function createUser(formData: FormData) {
   await requireRole(["admin"]);
+  const email = formData.get("email") as string;
   const password = formData.get("password") as string;
-  const passwordHash = await hash(password, 12);
+  const name = formData.get("name") as string;
+  const role = (formData.get("role") as "admin" | "member" | "viewer") || "member";
+
+  // Create user in Supabase Auth
+  const supabase = createAdminClient();
+  const { error } = await supabase.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+  });
+  if (error) throw new Error(`Supabase Auth: ${error.message}`);
+
+  // Create user in our User table
   await prisma.user.create({
-    data: {
-      email: formData.get("email") as string,
-      name: formData.get("name") as string,
-      passwordHash,
-      role: (formData.get("role") as "admin" | "member" | "viewer") || "member",
-    },
+    data: { email, name, passwordHash: "", role },
   });
   revalidatePath("/admin/users");
 }
 
 export async function updateUser(id: string, formData: FormData) {
   await requireRole(["admin"]);
-  const data: Record<string, unknown> = {
-    email: formData.get("email") as string,
-    name: formData.get("name") as string,
-    role: formData.get("role") as string,
-  };
+  const user = await prisma.user.findUnique({ where: { id } });
+  if (!user) throw new Error("User not found");
+
+  const newEmail = formData.get("email") as string;
+  const name = formData.get("name") as string;
+  const role = formData.get("role") as string;
   const password = formData.get("password") as string;
-  if (password) {
-    data.passwordHash = await hash(password, 12);
+
+  // Update Supabase Auth user if email or password changed
+  const supabase = createAdminClient();
+  const { data: authUsers } = await supabase.auth.admin.listUsers();
+  const authUser = authUsers?.users.find((u) => u.email === user.email);
+  if (authUser) {
+    const updates: Record<string, string> = {};
+    if (newEmail !== user.email) updates.email = newEmail;
+    if (password) updates.password = password;
+    if (Object.keys(updates).length > 0) {
+      await supabase.auth.admin.updateUserById(authUser.id, updates);
+    }
   }
-  await prisma.user.update({ where: { id }, data: data as never });
+
+  await prisma.user.update({
+    where: { id },
+    data: { email: newEmail, name, role: role as "admin" | "member" | "viewer" },
+  });
   revalidatePath("/admin/users");
 }
 
 export async function deleteUser(id: string) {
   await requireRole(["admin"]);
+  const user = await prisma.user.findUnique({ where: { id } });
+  if (!user) throw new Error("User not found");
+
+  // Delete from Supabase Auth
+  const supabase = createAdminClient();
+  const { data: authUsers } = await supabase.auth.admin.listUsers();
+  const authUser = authUsers?.users.find((u) => u.email === user.email);
+  if (authUser) {
+    await supabase.auth.admin.deleteUser(authUser.id);
+  }
+
   await prisma.user.delete({ where: { id } });
   revalidatePath("/admin/users");
 }

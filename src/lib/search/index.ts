@@ -70,6 +70,8 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
   const offset = (page - 1) * perPage;
   const hasKeyword = q.trim().length > 0;
   const normalizedQ = hasKeyword ? normalizeText(q) : "";
+  const likePattern = hasKeyword ? `%${q}%` : "";
+  const normalizedLikePattern = hasKeyword ? `%${normalizedQ}%` : "";
 
   const results: SearchResultItem[] = [];
 
@@ -108,16 +110,13 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
     return { items: [], total: 0, page, perPage };
   }
 
-  // PGroonga スコア関数: pgroonga_score(tableoid, ctid) でスコアを取得
-  // &@~ 演算子: PGroonga の全文検索演算子（形態素解析 + N-gram）
-
   // Search assets directly
   if (target === "all" || target === "assets") {
     const keywordCondition = hasKeyword
       ? Prisma.sql`(
-          a."title" &@~ ${q}
-          OR a."description" &@~ ${q}
-          OR a."messageBodyPreview" &@~ ${q}
+          a."title" ILIKE ${likePattern}
+          OR a."description" ILIKE ${likePattern}
+          OR a."messageBodyPreview" ILIKE ${likePattern}
         )`
       : Prisma.sql`TRUE`;
 
@@ -133,20 +132,16 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
       storageKey: string | null;
       messageBodyPreview: string | null;
       createdAt: Date;
-      pgroonga_score: number;
     }>>`
       SELECT
         a."id", a."title", a."description", a."kind", a."status",
         a."thumbnailUrl", a."storageUrl", a."storageProvider", a."storageKey",
-        a."messageBodyPreview", a."createdAt",
-        ${hasKeyword ? Prisma.sql`pgroonga_score(a.tableoid, a.ctid)` : Prisma.sql`0`} as pgroonga_score
+        a."messageBodyPreview", a."createdAt"
       FROM "Asset" a
       WHERE ${keywordCondition}
       ${baseFilter}
       ${entityFilter}
-      ORDER BY
-        ${hasKeyword ? Prisma.sql`pgroonga_score(a.tableoid, a.ctid) DESC,` : Prisma.empty}
-        a."createdAt" DESC
+      ORDER BY a."createdAt" DESC
       LIMIT ${perPage} OFFSET ${offset}
     `;
 
@@ -167,7 +162,7 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
         storageUrl: row.storageUrl,
         snippet: hasKeyword ? buildSnippet(matchText, q) : row.title,
         matchField,
-        score: Number(row.pgroonga_score),
+        score: titleMatch ? 3 : descMatch ? 2 : previewMatch ? 1 : 0,
         createdAt: row.createdAt,
       });
     }
@@ -180,7 +175,6 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
       assetId: string;
       textType: string;
       content: string;
-      pgroonga_score: number;
       asset_title: string;
       asset_kind: AssetKind;
       asset_status: AssetStatus;
@@ -192,7 +186,6 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
     }>>`
       SELECT
         t."id", t."assetId", t."textType", t."content",
-        pgroonga_score(t.tableoid, t.ctid) as pgroonga_score,
         a."title" as asset_title, a."kind" as asset_kind, a."status" as asset_status,
         a."thumbnailUrl" as "asset_thumbnailUrl", a."storageUrl" as "asset_storageUrl",
         a."storageProvider" as "asset_storageProvider", a."storageKey" as "asset_storageKey",
@@ -200,14 +193,12 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
       FROM "AssetText" t
       JOIN "Asset" a ON a."id" = t."assetId"
       WHERE (
-        t."content" &@~ ${q}
-        OR t."normalizedContent" &@~ ${normalizedQ}
+        t."content" ILIKE ${likePattern}
+        OR t."normalizedContent" ILIKE ${normalizedLikePattern}
       )
       ${baseFilter}
       ${entityFilter}
-      ORDER BY
-        pgroonga_score(t.tableoid, t.ctid) DESC,
-        a."createdAt" DESC
+      ORDER BY a."createdAt" DESC
       LIMIT ${perPage} OFFSET ${offset}
     `;
 
@@ -222,7 +213,7 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
         storageUrl: row.asset_storageUrl,
         snippet: buildSnippet(row.content, q),
         matchField: row.textType,
-        score: Number(row.pgroonga_score),
+        score: 1,
         createdAt: row.asset_createdAt,
       });
     }
@@ -241,7 +232,6 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
       asset_storageKey: string | null;
       asset_createdAt: Date;
       entity_name: string;
-      pgroonga_score: number;
     }>>`
       SELECT DISTINCT ON (ae."assetId")
         ae."assetId",
@@ -249,17 +239,16 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
         a."thumbnailUrl" as "asset_thumbnailUrl", a."storageUrl" as "asset_storageUrl",
         a."storageProvider" as "asset_storageProvider", a."storageKey" as "asset_storageKey",
         a."createdAt" as "asset_createdAt",
-        e."canonicalName" as entity_name,
-        pgroonga_score(e.tableoid, e.ctid) as pgroonga_score
+        e."canonicalName" as entity_name
       FROM "Entity" e
       JOIN "AssetEntity" ae ON ae."entityId" = e."id"
       JOIN "Asset" a ON a."id" = ae."assetId"
       WHERE (
-        e."canonicalName" &@~ ${q}
-        OR e."normalizedName" &@~ ${normalizedQ}
+        e."canonicalName" ILIKE ${likePattern}
+        OR e."normalizedName" ILIKE ${normalizedLikePattern}
       )
       ${baseFilter}
-      ORDER BY ae."assetId", pgroonga_score(e.tableoid, e.ctid) DESC
+      ORDER BY ae."assetId", a."createdAt" DESC
       LIMIT ${perPage}
     `;
 
@@ -275,7 +264,7 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
           storageUrl: row.asset_storageUrl,
           snippet: `タグ/人物: ${row.entity_name}`,
           matchField: "entity",
-          score: Number(row.pgroonga_score),
+          score: 2,
           createdAt: row.asset_createdAt,
         });
       }

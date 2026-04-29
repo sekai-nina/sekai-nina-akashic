@@ -1,20 +1,18 @@
 import { PrismaClient } from "@prisma/client";
-import { hash } from "bcryptjs";
 
 const prisma = new PrismaClient();
 
 async function main() {
   console.log("Seeding database...");
 
-  // Admin user
-  const passwordHash = await hash("admin123", 12);
+  // Admin user (password is managed by Supabase Auth)
   const admin = await prisma.user.upsert({
     where: { email: "admin@akashic.local" },
     update: {},
     create: {
       email: "admin@akashic.local",
       name: "管理者",
-      passwordHash,
+      passwordHash: "",
       role: "admin",
     },
   });
