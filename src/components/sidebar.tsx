@@ -61,7 +61,7 @@ export function Sidebar({ user }: SidebarProps) {
         >
           {open ? <X size={20} /> : <Menu size={20} />}
         </button>
-        <img src="/icon.jpg" alt="" className="w-6 h-6 rounded-md" />
+        <img src="/icon-96.jpg" alt="" className="w-6 h-6 rounded-md" />
         <span className="text-sm font-bold tracking-tight">Akashic</span>
       </header>
 
@@ -83,7 +83,7 @@ export function Sidebar({ user }: SidebarProps) {
         `}
       >
         <div className="border-b border-slate-200 px-4 py-3 flex items-center gap-2.5">
-          <img src="/icon.jpg" alt="" className="w-8 h-8 rounded-md" />
+          <img src="/icon-96.jpg" alt="" className="w-8 h-8 rounded-md" />
           <div>
             <h1 className="text-sm font-bold tracking-tight leading-tight">Akashic</h1>
             <p className="text-xs text-slate-500 leading-tight">Sekai Nina</p>
