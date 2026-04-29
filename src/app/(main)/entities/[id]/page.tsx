@@ -5,6 +5,8 @@ import { ENTITY_TYPE_LABELS, ASSET_KIND_LABELS, formatDate } from "@/lib/utils";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Download } from "lucide-react";
+import { SubmitButton } from "@/components/submit-button";
+import { LoadingLink } from "@/components/loading-link";
 
 const TEXT_TYPE_LABELS: Record<string, string> = {
   title: "タイトル",
@@ -101,13 +103,12 @@ export default async function EntityDetailPage({
                 <form key={alias} action={removeAction} className="inline-flex">
                   <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm bg-slate-100 text-slate-700">
                     {alias}
-                    <button
-                      type="submit"
+                    <SubmitButton
                       className="text-slate-400 hover:text-red-500 transition-colors"
                       title="削除"
                     >
                       &times;
-                    </button>
+                    </SubmitButton>
                   </span>
                 </form>
               );
@@ -122,12 +123,9 @@ export default async function EntityDetailPage({
             placeholder="別名を入力（例: にーな、Nina）"
             className="flex-1 border border-slate-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
-          <button
-            type="submit"
-            className="bg-slate-700 text-white px-3 py-1.5 rounded text-sm hover:bg-slate-800 transition-colors"
-          >
+          <SubmitButton className="bg-slate-700 text-white px-3 py-1.5 rounded text-sm hover:bg-slate-800 transition-colors">
             追加
-          </button>
+          </SubmitButton>
         </form>
       </div>
 
@@ -182,12 +180,12 @@ export default async function EntityDetailPage({
               </a>
             )}
             {showMentions !== "1" ? (
-              <Link
+              <LoadingLink
                 href={`/entities/${id}?showMentions=1`}
                 className="text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 transition-colors"
               >
                 言及を検索
-              </Link>
+              </LoadingLink>
             ) : (
               <Link
                 href={`/entities/${id}`}

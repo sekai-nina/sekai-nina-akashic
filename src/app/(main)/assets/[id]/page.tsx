@@ -15,6 +15,7 @@ import {
   ENTITY_TYPE_LABELS,
   formatDate,
 } from "@/lib/utils";
+import { SubmitButton } from "@/components/submit-button";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
@@ -47,12 +48,9 @@ function AddToCollectionForm({
           ))}
         </select>
       </div>
-      <button
-        type="submit"
-        className="bg-slate-700 text-white px-3 py-1.5 rounded text-sm hover:bg-slate-800 transition-colors"
-      >
+      <SubmitButton className="bg-slate-700 text-white px-3 py-1.5 rounded text-sm hover:bg-slate-800 transition-colors">
         追加
-      </button>
+      </SubmitButton>
     </form>
   );
 }
@@ -186,7 +184,7 @@ export default async function AssetDetailPage({
             <StatusBadge status={asset.status} />
             <span className="text-xs text-slate-400">登録: {formatDate(asset.createdAt)}</span>
             {asset.canonicalDate && (
-              <span className="text-xs text-slate-400">基準日: {formatDate(asset.canonicalDate)}</span>
+              <span className="text-xs text-slate-400">日付: {formatDate(asset.canonicalDate)}</span>
             )}
           </div>
         </div>
@@ -297,12 +295,9 @@ export default async function AssetDetailPage({
               const action = updateAssetStatus.bind(null, id, t.to);
               return (
                 <form key={t.to} action={action}>
-                  <button
-                    type="submit"
-                    className="border border-slate-300 text-slate-700 px-3 py-1.5 rounded text-sm hover:bg-slate-50 transition-colors"
-                  >
+                  <SubmitButton className="border border-slate-300 text-slate-700 px-3 py-1.5 rounded text-sm hover:bg-slate-50 transition-colors">
                     {t.label}
-                  </button>
+                  </SubmitButton>
                 </form>
               );
             })}
@@ -361,12 +356,9 @@ export default async function AssetDetailPage({
                 placeholder="例: 主体"
               />
             </div>
-            <button
-              type="submit"
-              className="bg-purple-600 text-white px-3 py-1 rounded text-sm hover:bg-purple-700 transition-colors"
-            >
+            <SubmitButton className="bg-purple-600 text-white px-3 py-1 rounded text-sm hover:bg-purple-700 transition-colors">
               追加
-            </button>
+            </SubmitButton>
           </form>
         </details>
       </div>
@@ -413,12 +405,9 @@ export default async function AssetDetailPage({
                 className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
-            <button
-              type="submit"
-              className="bg-teal-600 text-white px-3 py-1 rounded text-sm hover:bg-teal-700 transition-colors"
-            >
+            <SubmitButton className="bg-teal-600 text-white px-3 py-1 rounded text-sm hover:bg-teal-700 transition-colors">
               追加
-            </button>
+            </SubmitButton>
           </form>
         </details>
       </div>
@@ -502,12 +491,9 @@ export default async function AssetDetailPage({
                 />
               </div>
             </div>
-            <button
-              type="submit"
-              className="bg-orange-600 text-white px-3 py-1 rounded text-sm hover:bg-orange-700 transition-colors"
-            >
+            <SubmitButton className="bg-orange-600 text-white px-3 py-1 rounded text-sm hover:bg-orange-700 transition-colors">
               追加
-            </button>
+            </SubmitButton>
           </form>
         </details>
       </div>
@@ -554,12 +540,9 @@ export default async function AssetDetailPage({
                 className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
-            <button
-              type="submit"
-              className="bg-indigo-600 text-white px-3 py-1 rounded text-sm hover:bg-indigo-700 transition-colors"
-            >
+            <SubmitButton className="bg-indigo-600 text-white px-3 py-1 rounded text-sm hover:bg-indigo-700 transition-colors">
               追加
-            </button>
+            </SubmitButton>
           </form>
         </details>
       </div>

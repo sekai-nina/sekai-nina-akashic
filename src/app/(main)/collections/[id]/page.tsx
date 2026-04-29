@@ -3,6 +3,7 @@ import { removeFromCollection, deleteCollection, updateCollectionItem } from "@/
 import { ASSET_KIND_LABELS, formatDate } from "@/lib/utils";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { SubmitButton } from "@/components/submit-button";
 
 function KindBadge({ kind }: { kind: string }) {
   return (
@@ -60,12 +61,9 @@ export default async function CollectionDetailPage({
             {collection.items.length} 件 · 作成: {formatDate(collection.createdAt)}
           </span>
           <form action={deleteCollectionAction}>
-            <button
-              type="submit"
-              className="text-xs text-red-400 hover:text-red-600"
-            >
+            <SubmitButton className="text-xs text-red-400 hover:text-red-600">
               削除
-            </button>
+            </SubmitButton>
           </form>
         </div>
       </div>
@@ -108,9 +106,9 @@ export default async function CollectionDetailPage({
                     </div>
                   </div>
                   <form action={removeAction} className="shrink-0">
-                    <button type="submit" className="text-xs text-red-400 hover:text-red-600">
+                    <SubmitButton className="text-xs text-red-400 hover:text-red-600">
                       削除
-                    </button>
+                    </SubmitButton>
                   </form>
                 </div>
 
@@ -123,12 +121,9 @@ export default async function CollectionDetailPage({
                     placeholder="メモを追加..."
                     className="flex-1 border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
-                  <button
-                    type="submit"
-                    className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 border border-slate-200 rounded hover:bg-slate-50"
-                  >
+                  <SubmitButton className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 border border-slate-200 rounded hover:bg-slate-50">
                     保存
-                  </button>
+                  </SubmitButton>
                 </form>
               </div>
             );

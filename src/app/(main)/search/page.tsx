@@ -243,6 +243,7 @@ export default async function SearchPage({
           {SEARCH_MODES.map((m) => (
             <Link
               key={m.key}
+              scroll={false}
               href={buildUrl({ mode: m.key === "all" ? undefined : m.key, page: "1", kind: undefined, status: undefined, trustLevel: undefined, sourceType: undefined, entityIds: undefined, target: undefined, view: undefined })}
               className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
                 mode === m.key
@@ -267,6 +268,7 @@ export default async function SearchPage({
               return (
                 <Link
                   key={opt.label}
+                  scroll={false}
                   href={buildUrl({ sourceType: opt.value, page: "1" })}
                   className={`px-2.5 py-1 rounded-full text-xs transition-colors ${
                     isActive
@@ -292,6 +294,7 @@ export default async function SearchPage({
               return (
                 <Link
                   key={e.id}
+                  scroll={false}
                   href={buildUrl({ entityIds: newIds.join(",") || undefined, page: "1" })}
                   className={`px-2.5 py-1 rounded-full text-xs transition-colors ${
                     isActive
@@ -492,6 +495,7 @@ export default async function SearchPage({
             </span>
             <div className="flex gap-1">
               <Link
+                scroll={false}
                 href={buildUrl({ view: "list", page: "1" })}
                 className={`px-3 py-1 rounded text-sm border transition-colors ${
                   effectiveView === "list"
@@ -502,6 +506,7 @@ export default async function SearchPage({
                 リスト
               </Link>
               <Link
+                scroll={false}
                 href={buildUrl({ view: "gallery", page: "1" })}
                 className={`px-3 py-1 rounded text-sm border transition-colors ${
                   effectiveView === "gallery"
@@ -600,6 +605,7 @@ export default async function SearchPage({
               <div className="flex gap-2">
                 {page > 1 && (
                   <Link
+                    scroll={false}
                     href={buildUrl({ page: String(page - 1) })}
                     className="border border-slate-300 text-slate-700 px-3 py-1.5 rounded text-sm hover:bg-slate-50"
                   >
@@ -608,6 +614,7 @@ export default async function SearchPage({
                 )}
                 {results.items.length === results.perPage && (
                   <Link
+                    scroll={false}
                     href={buildUrl({ page: String(page + 1) })}
                     className="border border-slate-300 text-slate-700 px-3 py-1.5 rounded text-sm hover:bg-slate-50"
                   >

@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { createCollection } from "@/lib/actions";
 import { formatDate } from "@/lib/utils";
 import Link from "next/link";
+import { SubmitButton } from "@/components/submit-button";
 
 
 export default async function CollectionsPage() {
@@ -47,12 +48,9 @@ export default async function CollectionsPage() {
               placeholder="説明（任意）"
             />
           </div>
-          <button
-            type="submit"
-            className="bg-blue-600 text-white px-4 py-1.5 rounded text-sm font-medium hover:bg-blue-700 transition-colors"
-          >
+          <SubmitButton className="bg-blue-600 text-white px-4 py-1.5 rounded text-sm font-medium hover:bg-blue-700 transition-colors">
             作成
-          </button>
+          </SubmitButton>
         </form>
       </div>
 

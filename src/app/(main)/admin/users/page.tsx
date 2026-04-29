@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { createUser, updateUser, deleteUser } from "@/lib/actions";
 import { formatDate } from "@/lib/utils";
 import { redirect } from "next/navigation";
+import { SubmitButton } from "@/components/submit-button";
 
 
 const ROLE_LABELS: Record<string, string> = {
@@ -88,12 +89,9 @@ export default async function AdminUsersPage() {
               </select>
             </div>
           </div>
-          <button
-            type="submit"
-            className="bg-blue-600 text-white px-4 py-1.5 rounded text-sm font-medium hover:bg-blue-700 transition-colors"
-          >
+          <SubmitButton className="bg-blue-600 text-white px-4 py-1.5 rounded text-sm font-medium hover:bg-blue-700 transition-colors">
             ユーザーを作成
-          </button>
+          </SubmitButton>
         </form>
       </div>
 
@@ -163,24 +161,18 @@ export default async function AdminUsersPage() {
                           <option value="admin">管理者</option>
                         </select>
                       </div>
-                      <button
-                        type="submit"
-                        className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700 transition-colors"
-                      >
+                      <SubmitButton className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700 transition-colors">
                         保存
-                      </button>
+                      </SubmitButton>
                     </form>
                   </div>
                 </details>
 
                 {!isSelf && (
                   <form action={deleteAction}>
-                    <button
-                      type="submit"
-                      className="text-red-400 hover:text-red-600"
-                    >
+                    <SubmitButton className="text-red-400 hover:text-red-600">
                       削除
-                    </button>
+                    </SubmitButton>
                   </form>
                 )}
               </div>

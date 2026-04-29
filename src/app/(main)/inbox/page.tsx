@@ -2,8 +2,11 @@ import { prisma } from "@/lib/db";
 import { updateAssetStatus } from "@/lib/actions";
 import { ASSET_KIND_LABELS, ASSET_STATUS_LABELS, formatDate } from "@/lib/utils";
 import { QuickUploadForm } from "@/components/quick-upload-form";
+import { SubmitButton } from "@/components/submit-button";
 import Link from "next/link";
 
+
+const PAGE_SIZE = 30;
 
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
@@ -27,20 +30,34 @@ function KindBadge({ kind }: { kind: string }) {
   );
 }
 
-export default async function InboxPage() {
-  const assets = await prisma.asset.findMany({
-    where: { status: "inbox" },
-    orderBy: { createdAt: "desc" },
-    include: {
-      sourceRecords: { take: 1 },
-    },
-  });
+export default async function InboxPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
+  const params = await searchParams;
+  const page = Math.max(1, parseInt(params.page ?? "1"));
+
+  const [assets, total] = await Promise.all([
+    prisma.asset.findMany({
+      where: { status: "inbox" },
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
+      include: {
+        sourceRecords: { take: 1 },
+      },
+    }),
+    prisma.asset.count({ where: { status: "inbox" } }),
+  ]);
+
+  const totalPages = Math.ceil(total / PAGE_SIZE);
 
   return (
     <div className="max-w-4xl mx-auto">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-900">Inbox</h1>
-        <p className="text-slate-500 text-sm mt-1">未整理のアセット一覧</p>
+        <p className="text-slate-500 text-sm mt-1">未整理のアセット一覧 — {total} 件</p>
       </div>
 
       <QuickUploadForm />
@@ -75,20 +92,14 @@ export default async function InboxPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <form action={toTriaging}>
-                    <button
-                      type="submit"
-                      className="text-xs border border-blue-300 text-blue-700 px-2 py-1 rounded hover:bg-blue-50 transition-colors"
-                    >
+                    <SubmitButton className="text-xs border border-blue-300 text-blue-700 px-2 py-1 rounded hover:bg-blue-50 transition-colors">
                       整理中へ
-                    </button>
+                    </SubmitButton>
                   </form>
                   <form action={toOrganized}>
-                    <button
-                      type="submit"
-                      className="text-xs border border-green-300 text-green-700 px-2 py-1 rounded hover:bg-green-50 transition-colors"
-                    >
+                    <SubmitButton className="text-xs border border-green-300 text-green-700 px-2 py-1 rounded hover:bg-green-50 transition-colors">
                       整理済みへ
-                    </button>
+                    </SubmitButton>
                   </form>
                   <Link
                     href={`/assets/${asset.id}`}
@@ -103,9 +114,32 @@ export default async function InboxPage() {
         </div>
       )}
 
-      <div className="mt-4 text-sm text-slate-400">
-        {assets.length} 件
-      </div>
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between mt-4">
+          <span className="text-sm text-slate-500">
+            {page} / {totalPages} ページ
+          </span>
+          <div className="flex gap-2">
+            {page > 1 && (
+              <Link
+                href={`/inbox?page=${page - 1}`}
+                className="border border-slate-300 text-slate-700 px-3 py-1.5 rounded text-sm hover:bg-slate-50"
+              >
+                ← 前へ
+              </Link>
+            )}
+            {page < totalPages && (
+              <Link
+                href={`/inbox?page=${page + 1}`}
+                className="border border-slate-300 text-slate-700 px-3 py-1.5 rounded text-sm hover:bg-slate-50"
+              >
+                次へ →
+              </Link>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

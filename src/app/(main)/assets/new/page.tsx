@@ -167,7 +167,7 @@ export default function NewAssetPage() {
         {/* Canonical date */}
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">
-            基準日
+            日付
           </label>
           <input
             type="date"
@@ -189,7 +189,7 @@ export default function NewAssetPage() {
           >
             <Upload size={20} className="mx-auto text-slate-400 mb-1" />
             <p className="text-sm text-slate-500">
-              ファイルをドラッグ＆ドロッ���、またはクリックして選択
+              ファイルをドラッグ＆ドロップ、またはクリックして選択
             </p>
             <p className="text-xs text-slate-400 mt-0.5">複数ファイル選択可</p>
             <input

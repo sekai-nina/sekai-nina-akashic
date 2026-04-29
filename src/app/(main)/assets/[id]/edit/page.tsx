@@ -14,6 +14,7 @@ import {
   ENTITY_TYPE_LABELS,
   formatDate,
 } from "@/lib/utils";
+import { SubmitButton } from "@/components/submit-button";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
@@ -184,7 +185,7 @@ export default async function AssetEditPage({
         {/* Canonical Date */}
         <div>
           <label htmlFor="canonicalDate" className="block text-sm font-medium text-slate-700 mb-1">
-            基準日
+            日付
           </label>
           <input
             type="date"
@@ -211,12 +212,9 @@ export default async function AssetEditPage({
 
         {/* Actions */}
         <div className="flex items-center gap-3 pt-2">
-          <button
-            type="submit"
-            className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-medium hover:bg-blue-700 transition-colors"
-          >
+          <SubmitButton className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-medium hover:bg-blue-700 transition-colors">
             保存
-          </button>
+          </SubmitButton>
           <Link
             href={`/assets/${id}`}
             replace
@@ -242,9 +240,9 @@ export default async function AssetEditPage({
                   <span className="text-slate-800 font-medium">{ae.entity.canonicalName}</span>
                   {ae.roleLabel && <span className="text-slate-400 text-xs">({ae.roleLabel})</span>}
                   <form action={removeAction} className="ml-auto">
-                    <button type="submit" className="text-xs text-red-500 hover:text-red-700">
+                    <SubmitButton className="text-xs text-red-500 hover:text-red-700">
                       削除
-                    </button>
+                    </SubmitButton>
                   </form>
                 </li>
               );
@@ -344,12 +342,9 @@ export default async function AssetEditPage({
           このアセットとそれに紐づくすべてのデータ（テキスト、出典、アノテーション等）が完全に削除されます。この操作は取り消せません。
         </p>
         <form action={deleteAction}>
-          <button
-            type="submit"
-            className="text-xs bg-red-600 text-white px-3 py-1.5 rounded hover:bg-red-700 transition-colors"
-          >
+          <SubmitButton className="text-xs bg-red-600 text-white px-3 py-1.5 rounded hover:bg-red-700 transition-colors">
             このアセットを削除する
-          </button>
+          </SubmitButton>
         </form>
       </div>
     </div>
