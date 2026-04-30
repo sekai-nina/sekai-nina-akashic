@@ -190,7 +190,6 @@ export default async function AssetDetailPage({
         </div>
         <Link
           href={`/assets/${id}/edit`}
-          replace
           className="shrink-0 border border-slate-300 text-slate-700 px-3 py-1.5 rounded text-sm hover:bg-slate-50 transition-colors"
         >
           編集

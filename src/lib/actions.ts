@@ -7,7 +7,7 @@ import { logAudit } from "@/lib/domain/audit";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
 import { invalidateAssets, invalidateEntities, invalidateCollections } from "@/lib/cache";
-import { redirect } from "next/navigation";
+import { redirect, RedirectType } from "next/navigation";
 import type { AssetKind, AssetStatus, TrustLevel, SourceType, StorageProvider, EntityType, TextType, SourceKind, AnnotationKind } from "@prisma/client";
 import { backupAssetToDrive } from "@/lib/drive";
 
@@ -107,7 +107,7 @@ export async function updateAsset(id: string, formData: FormData) {
   revalidatePath(`/assets/${id}`);
   revalidatePath("/assets");
   revalidatePath("/inbox");
-  redirect(`/assets/${id}`);
+  redirect(`/assets/${id}`, RedirectType.replace);
 }
 
 export async function deleteAsset(id: string) {
