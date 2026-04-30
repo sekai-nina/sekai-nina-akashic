@@ -16,6 +16,7 @@ import {
   formatDate,
 } from "@/lib/utils";
 import { SubmitButton } from "@/components/submit-button";
+import { StatusWorkflow } from "./status-workflow";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
@@ -154,16 +155,6 @@ export default async function AssetDetailPage({
     }
   }
 
-  // Status workflow
-  const statusWorkflow: Array<{ from: string; to: "inbox" | "triaging" | "organized" | "archived"; label: string }> = [
-    { from: "inbox", to: "triaging", label: "整理中へ" },
-    { from: "triaging", to: "organized", label: "整理済みへ" },
-    { from: "triaging", to: "inbox", label: "Inboxに戻す" },
-    { from: "organized", to: "archived", label: "アーカイブ" },
-    { from: "organized", to: "triaging", label: "整理中に戻す" },
-    { from: "archived", to: "organized", label: "整理済みに戻す" },
-  ];
-  const availableTransitions = statusWorkflow.filter((t) => t.from === asset.status);
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -286,23 +277,7 @@ export default async function AssetDetailPage({
       </div>
 
       {/* Status workflow */}
-      {availableTransitions.length > 0 && (
-        <div className="bg-white border border-slate-200 rounded-lg p-4">
-          <h2 className="text-sm font-semibold text-slate-700 mb-3">ステータス変更</h2>
-          <div className="flex gap-2 flex-wrap">
-            {availableTransitions.map((t) => {
-              const action = updateAssetStatus.bind(null, id, t.to);
-              return (
-                <form key={t.to} action={action}>
-                  <SubmitButton className="border border-slate-300 text-slate-700 px-3 py-1.5 rounded text-sm hover:bg-slate-50 transition-colors">
-                    {t.label}
-                  </SubmitButton>
-                </form>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      <StatusWorkflow assetId={id} initialStatus={asset.status} />
 
       {/* Entities section */}
       <div className="bg-white border border-slate-200 rounded-lg p-5">
