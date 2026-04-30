@@ -89,6 +89,51 @@ export const getCachedEntityById = unstable_cache(
   { tags: [CACHE_TAGS.entities], revalidate: 60 }
 );
 
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
+export const getCachedKindCountsRecent = unstable_cache(
+  () => {
+    const since = new Date(Date.now() - SEVEN_DAYS_MS);
+    return prisma.asset.groupBy({
+      by: ["kind"],
+      where: { createdAt: { gte: since } },
+      _count: true,
+    });
+  },
+  ["kind-counts-recent"],
+  { tags: [CACHE_TAGS.assets], revalidate: 60 }
+);
+
+export const getCachedNinaStatsRecent = unstable_cache(
+  async () => {
+    const since = new Date(Date.now() - SEVEN_DAYS_MS);
+    const ninaEntityId = "cmmtp8vrg0004mo381neyztvn";
+    const [blogPosts, talkMessages, media, lives] = await Promise.all([
+      prisma.asset.count({
+        where: { sourceType: "web", kind: "text", createdAt: { gte: since }, entities: { some: { entityId: ninaEntityId } } },
+      }),
+      prisma.asset.count({
+        where: { sourceType: "import", kind: "text", createdAt: { gte: since } },
+      }),
+      prisma.assetEntity.count({
+        where: {
+          createdAt: { gte: since },
+          entity: { type: "tag", canonicalName: { in: ["日向坂で会いましょう", "日向坂になりましょう", "日向坂ちゃんねる", "日向坂46公式チャンネル", "雑誌"] } },
+        },
+      }),
+      prisma.assetEntity.count({
+        where: {
+          createdAt: { gte: since },
+          entity: { type: "tag", canonicalName: "ライブ" },
+        },
+      }),
+    ]);
+    return { blogPosts, talkMessages, media, lives };
+  },
+  ["nina-stats-recent"],
+  { tags: [CACHE_TAGS.stats], revalidate: 60 }
+);
+
 export const getCachedAssetCount = unstable_cache(
   (where: Record<string, unknown>) => prisma.asset.count({ where }),
   ["asset-count"],

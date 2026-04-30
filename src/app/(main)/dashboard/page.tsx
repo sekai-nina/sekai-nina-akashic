@@ -4,19 +4,30 @@ import {
   getCachedStatusCounts,
   getCachedRecentAssets,
   getCachedInboxCount,
+  getCachedKindCountsRecent,
+  getCachedNinaStatsRecent,
 } from "@/lib/cache";
 import { ASSET_KIND_LABELS, ASSET_STATUS_LABELS, formatDate } from "@/lib/utils";
 import Link from "next/link";
 import { Inbox, Plus } from "lucide-react";
 
+function Delta({ value }: { value: number }) {
+  if (value <= 0) return null;
+  return (
+    <span className="text-xs text-green-600 font-medium">+{value}</span>
+  );
+}
+
 export default async function DashboardPage() {
-  const [stats, kindCounts, statusCounts, recentAssets, inboxCount] =
+  const [stats, kindCounts, statusCounts, recentAssets, inboxCount, kindCountsRecent, ninaRecent] =
     await Promise.all([
       getCachedDashboardStats(),
       getCachedKindCounts(),
       getCachedStatusCounts(),
       getCachedRecentAssets(),
       getCachedInboxCount(),
+      getCachedKindCountsRecent(),
+      getCachedNinaStatsRecent(),
     ]);
 
   const totalMedia =
@@ -25,6 +36,10 @@ export default async function DashboardPage() {
     stats.media.hinach +
     stats.media.official +
     stats.media.magazine;
+
+  const recentByKind = Object.fromEntries(
+    kindCountsRecent.map((k) => [k.kind, typeof k._count === "number" ? k._count : (k._count as Record<string, number>)?._all ?? 0])
+  );
 
   const statusColors: Record<string, string> = {
     inbox: "text-yellow-600",
@@ -74,7 +89,10 @@ export default async function DashboardPage() {
 
             {/* Kind inline list */}
             <div className="space-y-1.5">
-              {kindCounts.map(({ kind, _count }) => (
+              {kindCounts.map(({ kind, _count }) => {
+                const count = typeof _count === 'number' ? _count : ((_count as Record<string, number>)?._all ?? 0);
+                const recent = recentByKind[kind] ?? 0;
+                return (
                 <Link
                   key={kind}
                   href={`/assets?kind=${kind}`}
@@ -83,11 +101,13 @@ export default async function DashboardPage() {
                   <span className="text-sm text-slate-600">
                     {ASSET_KIND_LABELS[kind] ?? kind}
                   </span>
-                  <span className="text-sm font-semibold text-slate-900">
-                    {(typeof _count === 'number' ? _count : ((_count as Record<string, number>)?._all ?? 0)).toLocaleString()}
+                  <span className="text-sm font-semibold text-slate-900 flex items-center gap-1.5">
+                    {count.toLocaleString()}
+                    <Delta value={recent} />
                   </span>
                 </Link>
-              ))}
+                );
+              })}
             </div>
 
             {/* Status inline */}
@@ -122,8 +142,9 @@ export default async function DashboardPage() {
             </h2>
             <div className="grid grid-cols-2 gap-4">
               <Link href="/search?mode=text&sourceType=web" className="group">
-                <p className="text-2xl font-bold text-slate-900 group-hover:text-blue-600 transition-colors">
+                <p className="text-2xl font-bold text-slate-900 group-hover:text-blue-600 transition-colors flex items-center gap-1.5">
                   {stats.blog.postCount}
+                  <Delta value={ninaRecent.blogPosts} />
                 </p>
                 <p className="text-xs text-slate-500">ブログ</p>
                 <p className="text-xs text-slate-400">
@@ -131,8 +152,9 @@ export default async function DashboardPage() {
                 </p>
               </Link>
               <Link href="/search?mode=text&sourceType=import" className="group">
-                <p className="text-2xl font-bold text-slate-900 group-hover:text-blue-600 transition-colors">
+                <p className="text-2xl font-bold text-slate-900 group-hover:text-blue-600 transition-colors flex items-center gap-1.5">
                   {stats.talk.messageCount.toLocaleString()}
+                  <Delta value={ninaRecent.talkMessages} />
                 </p>
                 <p className="text-xs text-slate-500">トーク</p>
                 <p className="text-xs text-slate-400">
@@ -140,14 +162,16 @@ export default async function DashboardPage() {
                 </p>
               </Link>
               <Link href="/search?mode=media" className="group">
-                <p className="text-2xl font-bold text-slate-900 group-hover:text-blue-600 transition-colors">
+                <p className="text-2xl font-bold text-slate-900 group-hover:text-blue-600 transition-colors flex items-center gap-1.5">
                   {totalMedia}
+                  <Delta value={ninaRecent.media} />
                 </p>
                 <p className="text-xs text-slate-500">メディア出演</p>
               </Link>
               <Link href="/search?mode=live" className="group">
-                <p className="text-2xl font-bold text-slate-900 group-hover:text-blue-600 transition-colors">
+                <p className="text-2xl font-bold text-slate-900 group-hover:text-blue-600 transition-colors flex items-center gap-1.5">
                   {stats.live.count}
+                  <Delta value={ninaRecent.lives} />
                 </p>
                 <p className="text-xs text-slate-500">ライブ</p>
                 <p className="text-xs text-slate-400">
