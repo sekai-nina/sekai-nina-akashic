@@ -58,9 +58,11 @@ export function QuickCreateModal() {
     setTagInput("");
   }
 
-  function handleTagKeyDown(e: React.KeyboardEvent) {
+  function handleTagKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Enter") {
       e.preventDefault();
+      // IME変換中のEnterは無視（日本語入力の確定操作）
+      if (e.nativeEvent.isComposing || e.keyCode === 229) return;
       addTag();
     }
   }
