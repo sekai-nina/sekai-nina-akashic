@@ -16,6 +16,7 @@ import {
   Home,
   Tag,
 } from "lucide-react";
+import { QuickCreateModal } from "@/components/quick-create-modal";
 
 interface SidebarProps {
   user: { name: string; role: string };
@@ -63,6 +64,7 @@ export function Sidebar({ user }: SidebarProps) {
         </button>
         <img src="/icon-96.jpg" alt="" className="w-6 h-6 rounded-md" />
         <span className="text-sm font-bold tracking-tight">Akashic</span>
+        <QuickCreateModal />
       </header>
 
       {/* オーバーレイ */}
@@ -89,8 +91,8 @@ export function Sidebar({ user }: SidebarProps) {
             <p className="text-xs text-slate-500 leading-tight">Sekai Nina</p>
           </div>
         </div>
-        {/* Search bar */}
-        <div className="px-3 py-2 border-b border-slate-200">
+        {/* Search bar + New asset */}
+        <div className="px-3 py-2 border-b border-slate-200 space-y-2">
           <form
             action="/search"
             method="GET"
@@ -104,6 +106,7 @@ export function Sidebar({ user }: SidebarProps) {
               className="w-full bg-slate-50 border border-slate-200 rounded-md pl-8 pr-3 py-1.5 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white"
             />
           </form>
+          <QuickCreateModal />
         </div>
         <nav className="flex-1 space-y-1 px-2 py-3">
           {navItems.map((item) => {
