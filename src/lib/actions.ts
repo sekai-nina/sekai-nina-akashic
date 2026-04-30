@@ -6,6 +6,7 @@ import { normalizeText } from "@/lib/utils";
 import { logAudit } from "@/lib/domain/audit";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
+import { invalidateAssets, invalidateEntities, invalidateCollections } from "@/lib/cache";
 import { redirect } from "next/navigation";
 import type { AssetKind, AssetStatus, TrustLevel, SourceType, StorageProvider, EntityType, TextType, SourceKind, AnnotationKind } from "@prisma/client";
 import { backupAssetToDrive } from "@/lib/drive";
@@ -49,6 +50,7 @@ export async function createAsset(formData: FormData) {
   });
 
   await logAudit({ actorId: user.id, action: "asset.create", targetType: "Asset", targetId: asset.id });
+  invalidateAssets();
   revalidatePath("/inbox");
   revalidatePath("/assets");
   redirect(`/assets/${asset.id}`);
@@ -71,6 +73,7 @@ export async function quickCreateAsset(formData: FormData) {
   });
 
   await logAudit({ actorId: user.id, action: "asset.create", targetType: "Asset", targetId: asset.id });
+  invalidateAssets();
   revalidatePath("/inbox");
   revalidatePath("/assets");
   redirect(`/assets/${asset.id}`);
@@ -100,6 +103,7 @@ export async function updateAsset(id: string, formData: FormData) {
   });
 
   await logAudit({ actorId: user.id, action: "asset.update", targetType: "Asset", targetId: id });
+  invalidateAssets();
   revalidatePath(`/assets/${id}`);
   revalidatePath("/assets");
   revalidatePath("/inbox");
@@ -112,6 +116,7 @@ export async function deleteAsset(id: string) {
   if (!asset) throw new Error("Asset not found");
   await prisma.asset.delete({ where: { id } });
   await logAudit({ actorId: user.id, action: "asset.delete", targetType: "Asset", targetId: id, metadata: { title: asset.title } });
+  invalidateAssets();
   revalidatePath("/assets");
   revalidatePath("/inbox");
   revalidatePath("/search");
@@ -122,6 +127,7 @@ export async function updateAssetStatus(id: string, status: AssetStatus) {
   const user = await requireRole(["admin", "member"]);
   await prisma.asset.update({ where: { id }, data: { status, updatedById: user.id } });
   await logAudit({ actorId: user.id, action: "asset.update_status", targetType: "Asset", targetId: id, metadata: { status } });
+  invalidateAssets();
   revalidatePath(`/assets/${id}`);
   revalidatePath("/assets");
   revalidatePath("/inbox");
@@ -291,6 +297,7 @@ export async function createCollection(formData: FormData) {
     },
   });
   await logAudit({ actorId: user.id, action: "collection.create", targetType: "Collection", targetId: collection.id });
+  invalidateCollections();
   revalidatePath("/collections");
   redirect(`/collections/${collection.id}`);
 }
@@ -325,6 +332,7 @@ export async function updateCollectionItem(id: string, formData: FormData) {
 export async function deleteCollection(id: string) {
   await requireRole(["admin", "member"]);
   await prisma.collection.delete({ where: { id } });
+  invalidateCollections();
   revalidatePath("/collections");
   redirect("/collections");
 }
@@ -416,6 +424,7 @@ export async function updateEntityAliases(entityId: string, formData: FormData) 
     data: { aliases },
   });
 
+  invalidateEntities();
   revalidatePath(`/entities/${entityId}`);
 }
 
@@ -435,6 +444,7 @@ export async function addEntityAlias(entityId: string, formData: FormData) {
     data: { aliases: [...current, alias] },
   });
 
+  invalidateEntities();
   revalidatePath(`/entities/${entityId}`);
 }
 
@@ -450,5 +460,6 @@ export async function removeEntityAlias(entityId: string, alias: string) {
     data: { aliases: current.filter((a) => a !== alias) },
   });
 
+  invalidateEntities();
   revalidatePath(`/entities/${entityId}`);
 }

@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { getCachedEntityById } from "@/lib/cache";
 import { addEntityAlias, removeEntityAlias } from "@/lib/actions";
 import { searchMentions } from "@/lib/domain/mentions";
 import { ENTITY_TYPE_LABELS, ASSET_KIND_LABELS, formatDate } from "@/lib/utils";
@@ -37,12 +38,7 @@ export default async function EntityDetailPage({
   const { id } = await params;
   const { showMentions } = await searchParams;
 
-  const entity = await prisma.entity.findUnique({
-    where: { id },
-    include: {
-      _count: { select: { assets: true } },
-    },
-  });
+  const entity = await getCachedEntityById(id);
 
   if (!entity) notFound();
 

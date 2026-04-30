@@ -1,5 +1,5 @@
 import { search } from "@/lib/search";
-import { prisma } from "@/lib/db";
+import { getCachedEntities } from "@/lib/cache";
 import { ASSET_KIND_LABELS, ASSET_STATUS_LABELS, TRUST_LEVEL_LABELS, ENTITY_TYPE_LABELS } from "@/lib/utils";
 import { EntityFilter } from "./entity-filter";
 import Link from "next/link";
@@ -133,9 +133,8 @@ export default async function SearchPage({
   const effectiveView = params.view ? (params.view as "list" | "gallery") : (preset.view ?? "list");
 
   // Load entities for filter and mode-based entity resolution
-  const entities = await prisma.entity.findMany({
-    orderBy: [{ type: "asc" }, { canonicalName: "asc" }],
-  });
+  const allEntities = await getCachedEntities();
+  const entities = allEntities.map(({ _count, ...e }) => e);
 
   const entityTypes = [...new Set(entities.map((e) => e.type))];
   const entitiesByType = Object.fromEntries(

@@ -1,14 +1,9 @@
-import { prisma } from "@/lib/db";
+import { getCachedEntities } from "@/lib/cache";
 import { ENTITY_TYPE_LABELS } from "@/lib/utils";
 import Link from "next/link";
 
 export default async function EntitiesPage() {
-  const entities = await prisma.entity.findMany({
-    include: {
-      _count: { select: { assets: true } },
-    },
-    orderBy: [{ type: "asc" }, { canonicalName: "asc" }],
-  });
+  const entities = await getCachedEntities();
 
   const entityTypes = [...new Set(entities.map((e) => e.type))];
   const entitiesByType = Object.fromEntries(

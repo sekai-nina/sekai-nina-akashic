@@ -1,5 +1,10 @@
-import { prisma } from "@/lib/db";
-import { getDashboardStats } from "@/lib/domain/stats";
+import {
+  getCachedDashboardStats,
+  getCachedKindCounts,
+  getCachedStatusCounts,
+  getCachedRecentAssets,
+  getCachedInboxCount,
+} from "@/lib/cache";
 import { ASSET_KIND_LABELS, ASSET_STATUS_LABELS, formatDate } from "@/lib/utils";
 import Link from "next/link";
 import { Inbox, Plus } from "lucide-react";
@@ -7,22 +12,11 @@ import { Inbox, Plus } from "lucide-react";
 export default async function DashboardPage() {
   const [stats, kindCounts, statusCounts, recentAssets, inboxCount] =
     await Promise.all([
-      getDashboardStats(),
-      prisma.asset.groupBy({
-        by: ["kind"],
-        _count: true,
-        orderBy: { _count: { kind: "desc" } },
-      }),
-      prisma.asset.groupBy({
-        by: ["status"],
-        _count: true,
-      }),
-      prisma.asset.findMany({
-        orderBy: { createdAt: "desc" },
-        take: 8,
-        include: { sourceRecords: { take: 1 } },
-      }),
-      prisma.asset.count({ where: { status: "inbox" } }),
+      getCachedDashboardStats(),
+      getCachedKindCounts(),
+      getCachedStatusCounts(),
+      getCachedRecentAssets(),
+      getCachedInboxCount(),
     ]);
 
   const totalMedia =
@@ -90,7 +84,7 @@ export default async function DashboardPage() {
                     {ASSET_KIND_LABELS[kind] ?? kind}
                   </span>
                   <span className="text-sm font-semibold text-slate-900">
-                    {_count.toLocaleString()}
+                    {(typeof _count === 'number' ? _count : ((_count as Record<string, number>)?._all ?? 0)).toLocaleString()}
                   </span>
                 </Link>
               ))}
@@ -100,8 +94,8 @@ export default async function DashboardPage() {
             <div className="mt-4 pt-4 border-t border-slate-100 flex flex-wrap gap-x-4 gap-y-1">
               {(["inbox", "triaging", "organized", "archived"] as const).map(
                 (status) => {
-                  const count =
-                    statusCounts.find((s) => s.status === status)?._count ?? 0;
+                  const raw = statusCounts.find((s) => s.status === status)?._count;
+                  const count = typeof raw === 'number' ? raw : ((raw as Record<string, number>)?._all ?? 0);
                   return (
                     <Link
                       key={status}
