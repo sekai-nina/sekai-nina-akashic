@@ -14,7 +14,7 @@ function StatusBadge({ status }: { status: string }) {
     archived: "bg-slate-100 text-slate-600",
   };
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${colors[status] ?? "bg-slate-100 text-slate-600"}`}>
+    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap ${colors[status] ?? "bg-slate-100 text-slate-600"}`}>
       {ASSET_STATUS_LABELS[status] ?? status}
     </span>
   );
@@ -22,7 +22,7 @@ function StatusBadge({ status }: { status: string }) {
 
 function KindBadge({ kind }: { kind: string }) {
   return (
-    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700">
+    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap bg-slate-100 text-slate-700">
       {ASSET_KIND_LABELS[kind] ?? kind}
     </span>
   );
@@ -169,7 +169,7 @@ export default async function AssetsPage({
                     <td className="px-4 py-2.5">
                       <StatusBadge status={asset.status} />
                     </td>
-                    <td className="px-4 py-2.5 text-xs text-slate-500">
+                    <td className="px-4 py-2.5 text-xs text-slate-500 whitespace-nowrap">
                       {TRUST_LEVEL_LABELS[asset.trustLevel] ?? asset.trustLevel}
                     </td>
                     <td className="px-4 py-2.5 text-xs text-slate-500">
