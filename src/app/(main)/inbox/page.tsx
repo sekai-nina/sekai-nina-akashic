@@ -1,34 +1,9 @@
 import { prisma } from "@/lib/db";
-import { updateAssetStatus } from "@/lib/actions";
-import { ASSET_KIND_LABELS, ASSET_STATUS_LABELS, formatDate } from "@/lib/utils";
 import { QuickUploadForm } from "@/components/quick-upload-form";
-import { SubmitButton } from "@/components/submit-button";
+import { InboxList } from "./inbox-list";
 import Link from "next/link";
 
-
 const PAGE_SIZE = 30;
-
-function StatusBadge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    inbox: "bg-yellow-100 text-yellow-800",
-    triaging: "bg-blue-100 text-blue-800",
-    organized: "bg-green-100 text-green-800",
-    archived: "bg-slate-100 text-slate-600",
-  };
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${colors[status] ?? "bg-slate-100 text-slate-600"}`}>
-      {ASSET_STATUS_LABELS[status] ?? status}
-    </span>
-  );
-}
-
-function KindBadge({ kind }: { kind: string }) {
-  return (
-    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700">
-      {ASSET_KIND_LABELS[kind] ?? kind}
-    </span>
-  );
-}
 
 export default async function InboxPage({
   searchParams,
@@ -53,6 +28,16 @@ export default async function InboxPage({
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
+  // Serialize for client component
+  const serializedAssets = assets.map((a) => ({
+    id: a.id,
+    title: a.title,
+    kind: a.kind,
+    status: a.status,
+    createdAt: a.createdAt.toISOString(),
+    sourceKind: a.sourceRecords[0]?.sourceKind,
+  }));
+
   return (
     <div className="max-w-4xl mx-auto">
       <div className="mb-6">
@@ -62,57 +47,7 @@ export default async function InboxPage({
 
       <QuickUploadForm />
 
-      {/* Asset list */}
-      {assets.length === 0 ? (
-        <div className="text-center py-16 text-slate-400">
-          <p className="text-lg">Inboxは空です</p>
-          <p className="text-sm mt-1">上のフォームからアセットを登録してください</p>
-        </div>
-      ) : (
-        <div className="bg-white border border-slate-200 rounded-lg divide-y divide-slate-100">
-          {assets.map((asset) => {
-            const toTriaging = updateAssetStatus.bind(null, asset.id, "triaging");
-            const toOrganized = updateAssetStatus.bind(null, asset.id, "organized");
-
-            return (
-              <div key={asset.id} className="px-4 py-3 hover:bg-slate-50 space-y-2">
-                <Link
-                  href={`/assets/${asset.id}`}
-                  className="text-sm font-medium text-slate-900 hover:text-blue-700 truncate block"
-                >
-                  {asset.title || "(無題)"}
-                </Link>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <KindBadge kind={asset.kind} />
-                  <StatusBadge status={asset.status} />
-                  <span className="text-xs text-slate-400">{formatDate(asset.createdAt)}</span>
-                  {asset.sourceRecords[0] && (
-                    <span className="text-xs text-slate-400">{asset.sourceRecords[0].sourceKind}</span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <form action={toTriaging}>
-                    <SubmitButton className="text-xs border border-blue-300 text-blue-700 px-2 py-1 rounded hover:bg-blue-50 transition-colors">
-                      整理中へ
-                    </SubmitButton>
-                  </form>
-                  <form action={toOrganized}>
-                    <SubmitButton className="text-xs border border-green-300 text-green-700 px-2 py-1 rounded hover:bg-green-50 transition-colors">
-                      整理済みへ
-                    </SubmitButton>
-                  </form>
-                  <Link
-                    href={`/assets/${asset.id}`}
-                    className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 ml-auto"
-                  >
-                    詳細
-                  </Link>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      <InboxList assets={serializedAssets} />
 
       {/* Pagination */}
       {totalPages > 1 && (
