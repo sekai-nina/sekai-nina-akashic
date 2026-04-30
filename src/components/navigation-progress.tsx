@@ -42,11 +42,16 @@ export function NavigationProgress() {
     // form submit も検出（Server Action）
     function handleSubmit(e: Event) {
       const form = e.target as HTMLFormElement;
-      // GET フォーム（検索フィルタ等）もナビゲーションを伴う
-      if (form.tagName === "FORM") {
+      if (form.tagName !== "FORM") return;
+
+      // action属性が別パスへの遷移の場合のみプログレスバーを表示
+      const action = form.getAttribute("action");
+      if (action && action !== window.location.pathname) {
         setLoading(true);
         setProgress(20);
       }
+      // 同一パスへのGETフォーム（検索等）や、preventDefault済みの
+      // クライアントサイドsubmitではプログレスバーを出さない
     }
 
     document.addEventListener("click", handleClick, true);
@@ -57,7 +62,7 @@ export function NavigationProgress() {
     };
   }, []);
 
-  // ローディング中のプログレスアニメーション
+  // ローディング中のプログレスアニメーション + タイムアウト
   useEffect(() => {
     if (!loading) return;
 
@@ -68,7 +73,16 @@ export function NavigationProgress() {
       });
     }, 200);
 
-    return () => clearInterval(timer);
+    // 10秒経っても完了しない場合は強制終了
+    const timeout = setTimeout(() => {
+      setLoading(false);
+      setProgress(0);
+    }, 10000);
+
+    return () => {
+      clearInterval(timer);
+      clearTimeout(timeout);
+    };
   }, [loading]);
 
   if (!loading) return null;
