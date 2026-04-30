@@ -23,7 +23,7 @@ interface SidebarProps {
 }
 
 const navItems = [
-  { href: "/dashboard", label: "ダッシュボード", icon: Home },
+  { href: "/", label: "ダッシュボード", icon: Home, exact: true },
   { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/assets", label: "Assets", icon: Archive },
   { href: "/entities", label: "エンティティ", icon: Tag },
@@ -110,7 +110,9 @@ export function Sidebar({ user }: SidebarProps) {
         </div>
         <nav className="flex-1 space-y-1 px-2 py-3">
           {navItems.map((item) => {
-            const active = pathname.startsWith(item.href);
+            const active = "exact" in item && item.exact
+              ? pathname === item.href
+              : pathname.startsWith(item.href);
             return (
               <Link
                 key={item.href}
