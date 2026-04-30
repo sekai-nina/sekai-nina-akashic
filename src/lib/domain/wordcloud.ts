@@ -41,6 +41,12 @@ const EXCLUDED_POS_DETAIL = new Set([
   "非自立", "代名詞", "接尾", "数", "接続詞的", "助動詞語幹",
 ]);
 
+// URL / 英語ノイズ除去
+const URL_NOISE = new Set([
+  "https", "http", "www", "com", "jp", "co", "org", "net", "html",
+  "amp", "th", "st", "nd", "rd", "detail", "official", "hinatazaka",
+]);
+
 // Emoji / 記号除去パターン
 const SYMBOL_RE = /[\p{Emoji}\p{S}\p{P}\p{M}\u2500-\u257F\u2580-\u259F]/gu;
 
@@ -77,9 +83,12 @@ function extractWords(text: string, tokenizer: kuromoji.Tokenizer<kuromoji.Ipadi
     // フィルタ
     if (!word || word.length < 2) continue;
     if (STOPWORDS.has(word)) continue;
+    if (URL_NOISE.has(word.toLowerCase())) continue;
     if (SYMBOL_RE.test(word)) continue;
     // ひらがなのみで2文字以下は除外
     if (/^[\u3040-\u309F]{1,2}$/.test(word)) continue;
+    // ASCII英数のみの短い語を除外（URL断片など）
+    if (/^[a-zA-Z0-9]{1,4}$/.test(word)) continue;
 
     words.push(word);
   }
