@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   outputFileTracingIncludes: {
-    "/api/v1/stats/words": ["./node_modules/kuromoji/dict/**/*"],
+    "/api/v1/stats/words": ["./data/kuromoji-dict/**/*"],
   },
   experimental: {
     staleTimes: {

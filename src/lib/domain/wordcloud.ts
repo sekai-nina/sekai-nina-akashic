@@ -50,7 +50,7 @@ function getTokenizer(): Promise<kuromoji.Tokenizer<kuromoji.IpadicFeatures>> {
   if (!tokenizerPromise) {
     tokenizerPromise = new Promise((resolve, reject) => {
       kuromoji
-        .builder({ dicPath: path.join(process.cwd(), "node_modules/kuromoji/dict/") })
+        .builder({ dicPath: path.join(process.cwd(), "data/kuromoji-dict/") })
         .build((err, tokenizer) => {
           if (err) reject(err);
           else resolve(tokenizer);
