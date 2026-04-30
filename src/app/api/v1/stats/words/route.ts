@@ -9,8 +9,8 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const limit = Math.min(Number(url.searchParams.get("limit")) || 100, 300);
 
-  // since: 期間フィルタ（3m, 1y, または ISO日付文字列）
-  const sinceParam = url.searchParams.get("since");
+  // since / period: 期間フィルタ（3m, 1y, all, または ISO日付文字列）
+  const sinceParam = url.searchParams.get("since") ?? url.searchParams.get("period");
   let since: Date | undefined;
   if (sinceParam) {
     const now = new Date();
