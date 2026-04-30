@@ -47,6 +47,31 @@ const URL_NOISE = new Set([
   "amp", "th", "st", "nd", "rd", "detail", "official", "hinatazaka",
 ]);
 
+// ユーザー辞書（メンバー名・ニックネーム・グループ用語）
+// kuromojiはこれらを正しくトークナイズできないため、事前にマッチさせる
+const USER_DICT_ENTRIES = [
+  // フルネーム
+  "坂井新奈", "佐藤優羽", "大田美月", "松尾桜", "下田衣珠季",
+  "蔵盛妃那乃", "宮地すみれ", "片山紗希", "鶴崎仁香", "石塚瑶季",
+  "平尾帆夏", "藤嶌果歩", "竹内希来里", "山下葉留花", "正源司陽子",
+  "山口陽世", "上村ひなの", "小坂菜緒", "金村美玖", "森本茉莉",
+  "清水理央", "渡辺莉奈", "小西夏菜実", "平岡海月", "高井俐香",
+  "髙橋未来虹", "大野愛実",
+  // ニックネーム
+  "にいな", "にぃな", "さとうゆ", "いずきち", "まなみん",
+  "にこちゃん", "さきてぃ",
+  // グループ用語
+  "ひな誕祭", "日向坂", "ミーグリ", "オンラインミーグリ",
+];
+
+// ユーザー辞書の正規表現パターン（長い語を先にマッチ）
+const USER_DICT_PATTERN = new RegExp(
+  USER_DICT_ENTRIES.sort((a, b) => b.length - a.length)
+    .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|"),
+  "g"
+);
+
 // Emoji / 記号除去パターン
 const SYMBOL_RE = /[\p{Emoji}\p{S}\p{P}\p{M}\u2500-\u257F\u2580-\u259F]/gu;
 
@@ -67,8 +92,19 @@ function getTokenizer(): Promise<kuromoji.Tokenizer<kuromoji.IpadicFeatures>> {
 }
 
 function extractWords(text: string, tokenizer: kuromoji.Tokenizer<kuromoji.IpadicFeatures>): string[] {
-  const tokens = tokenizer.tokenize(text);
   const words: string[] = [];
+
+  // ユーザー辞書の語を先にマッチして収集
+  const userDictMatches = new Set<string>();
+  let match: RegExpExecArray | null;
+  USER_DICT_PATTERN.lastIndex = 0;
+  while ((match = USER_DICT_PATTERN.exec(text)) !== null) {
+    userDictMatches.add(match[0]);
+    words.push(match[0]);
+  }
+
+  // kuromojiでトークナイズ
+  const tokens = tokenizer.tokenize(text);
 
   for (const token of tokens) {
     const pos = token.pos;
@@ -85,6 +121,12 @@ function extractWords(text: string, tokenizer: kuromoji.Tokenizer<kuromoji.Ipadi
     if (STOPWORDS.has(word)) continue;
     if (URL_NOISE.has(word.toLowerCase())) continue;
     if (SYMBOL_RE.test(word)) continue;
+    // ユーザー辞書語の部分トークンを除外（例: 「坂井」「新奈」は「坂井新奈」として既に収集済み）
+    if (userDictMatches.size > 0) {
+      const surface = token.surface_form;
+      const isPartOfUserDict = [...userDictMatches].some((ud) => ud.includes(surface) && ud !== surface);
+      if (isPartOfUserDict) continue;
+    }
     // ひらがなのみで2文字以下は除外
     if (/^[\u3040-\u309F]{1,2}$/.test(word)) continue;
     // ASCII英数のみの短い語を除外（URL断片など）
