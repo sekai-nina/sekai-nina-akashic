@@ -16,10 +16,10 @@ import {
   formatDate,
 } from "@/lib/utils";
 import { SubmitButton } from "@/components/submit-button";
+import { BackButton } from "@/components/back-button";
 import { StatusWorkflow } from "./status-workflow";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
 
 
 async function addToCollectionAction(assetId: string, formData: FormData) {
@@ -161,13 +161,8 @@ export default async function AssetDetailPage({
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <div className="flex items-center gap-2 text-sm text-slate-400 mb-2 min-w-0">
-            <Link href="/assets" className="flex items-center gap-1 shrink-0 whitespace-nowrap hover:text-slate-600">
-              <ArrowLeft size={14} />
-              一覧
-            </Link>
-            <span className="shrink-0">/</span>
-            <span className="text-slate-600 truncate">{asset.title || "(無題)"}</span>
+          <div className="mb-2">
+            <BackButton />
           </div>
           <h1 className="text-2xl font-bold text-slate-900">{asset.title || "(無題)"}</h1>
           <div className="flex items-center gap-2 mt-2 flex-wrap">
