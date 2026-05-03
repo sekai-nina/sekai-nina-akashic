@@ -23,7 +23,7 @@ export async function GET(
   const mentions = await searchMentions(id, { excludeLinked });
 
   // Build CSV
-  const header = "アセットタイトル,種別,ソースタイプ,テキストタイプ,マッチしたエイリアス,紐づきエンティティ,ソース情報,スニペット,日付";
+  const header = "アセットタイトル,種別,ソースタイプ,テキストタイプ,マッチしたエイリアス,紐づきエンティティ,ソース情報,ブロック,日付";
   const rows = mentions.map((m) => {
     const date = m.canonicalDate
       ? m.canonicalDate.toISOString().split("T")[0]
@@ -33,10 +33,10 @@ export async function GET(
       csvEscape(m.assetKind),
       csvEscape(m.assetSourceType),
       csvEscape(m.textType),
-      csvEscape(m.matchedAlias),
+      csvEscape(m.matchedAliases.join(", ")),
       csvEscape(m.linkedEntities),
       csvEscape(m.sourceInfo),
-      csvEscape(m.snippet),
+      csvEscape(m.block),
       date,
     ].join(",");
   });

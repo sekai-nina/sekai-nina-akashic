@@ -8,8 +8,8 @@ export interface MentionResult {
   assetSourceType: string;
   textId: string;
   textType: string;
-  matchedAlias: string;
-  snippet: string;
+  matchedAliases: string[];
+  block: string;
   canonicalDate: Date | null;
   createdAt: Date;
   linkedEntities: string;
@@ -20,22 +20,9 @@ export interface SearchMentionsOptions {
   excludeLinked?: boolean;
 }
 
-function buildSnippet(text: string, query: string, contextLen = 100): string {
-  const lower = text.toLowerCase();
-  const qLower = query.toLowerCase();
-  const idx = lower.indexOf(qLower);
-  if (idx === -1) return text.slice(0, contextLen * 2) + (text.length > contextLen * 2 ? "…" : "");
-  const start = Math.max(0, idx - contextLen);
-  const end = Math.min(text.length, idx + query.length + contextLen);
-  let snippet = "";
-  if (start > 0) snippet += "…";
-  snippet += text.slice(start, end);
-  if (end < text.length) snippet += "…";
-  return snippet;
-}
-
 /**
  * Search all AssetText records for mentions of an entity's canonical name and aliases.
+ * Splits text into blocks by newlines and detects all matching aliases per block.
  */
 export async function searchMentions(
   entityId: string,
@@ -109,28 +96,32 @@ export async function searchMentions(
     ORDER BY a."canonicalDate" DESC NULLS LAST, a."createdAt" DESC
   `;
 
-  // For each row, determine which alias matched
+  // Split each text into blocks by newlines, detect all matching aliases per block
   const results: MentionResult[] = [];
   for (const row of rows) {
-    const contentLower = row.content.toLowerCase();
-    const matchedAlias = searchTerms.find((term) =>
-      contentLower.includes(term.toLowerCase())
-    ) ?? searchTerms[0];
+    const blocks = row.content.split(/\n+/).filter((b) => b.trim());
+    for (const block of blocks) {
+      const blockLower = block.toLowerCase();
+      const matched = searchTerms.filter((term) =>
+        blockLower.includes(term.toLowerCase())
+      );
+      if (matched.length === 0) continue;
 
-    results.push({
-      assetId: row.assetId,
-      assetTitle: row.assetTitle,
-      assetKind: row.assetKind,
-      assetSourceType: row.assetSourceType,
-      textId: row.textId,
-      textType: row.textType,
-      matchedAlias,
-      snippet: buildSnippet(row.content, matchedAlias),
-      canonicalDate: row.canonicalDate,
-      createdAt: row.createdAt,
-      linkedEntities: row.linkedEntities ?? "",
-      sourceInfo: row.sourceInfo ?? "",
-    });
+      results.push({
+        assetId: row.assetId,
+        assetTitle: row.assetTitle,
+        assetKind: row.assetKind,
+        assetSourceType: row.assetSourceType,
+        textId: row.textId,
+        textType: row.textType,
+        matchedAliases: matched,
+        block: block.trim(),
+        canonicalDate: row.canonicalDate,
+        createdAt: row.createdAt,
+        linkedEntities: row.linkedEntities ?? "",
+        sourceInfo: row.sourceInfo ?? "",
+      });
+    }
   }
 
   return results;

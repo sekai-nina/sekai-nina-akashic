@@ -235,9 +235,11 @@ export default async function EntityDetailPage({
                       <span className="text-xs bg-teal-100 text-teal-700 px-2 py-0.5 rounded">
                         {TEXT_TYPE_LABELS[m.textType] ?? m.textType}
                       </span>
-                      <span className="text-xs text-blue-600">
-                        「{m.matchedAlias}」
-                      </span>
+                      {m.matchedAliases.map((alias) => (
+                        <span key={alias} className="text-xs text-blue-600">
+                          「{alias}」
+                        </span>
+                      ))}
                       {m.canonicalDate && (
                         <span className="text-xs text-slate-400">
                           {formatDate(m.canonicalDate)}
@@ -249,7 +251,7 @@ export default async function EntityDetailPage({
                         関連: {m.linkedEntities}
                       </p>
                     )}
-                    <p className="text-xs text-slate-500 line-clamp-2">{m.snippet}</p>
+                    <p className="text-xs text-slate-500 line-clamp-2">{m.block}</p>
                   </Link>
                 ))}
               </div>
