@@ -1,7 +1,7 @@
 "use client";
 
 import { useOptimistic, useTransition } from "react";
-import { reviewTestimonial } from "@/lib/actions";
+import { reviewTestimonial, updateTestimonialCategory } from "@/lib/actions";
 
 interface Testimonial {
   id: string;
@@ -26,18 +26,38 @@ const CATEGORY_LABELS: Record<string, string> = {
   other: "その他",
 };
 
+const CATEGORIES = Object.keys(CATEGORY_LABELS);
+
+type OptimisticAction =
+  | { type: "status"; id: string; status: string }
+  | { type: "category"; id: string; category: string };
+
 export function TestimonialList({ items }: { items: Testimonial[] }) {
   const [isPending, startTransition] = useTransition();
   const [optimisticItems, updateOptimistic] = useOptimistic(
     items,
-    (current, { id, status }: { id: string; status: string }) =>
-      current.map((t) => (t.id === id ? { ...t, status } : t))
+    (current, action: OptimisticAction) => {
+      if (action.type === "status") {
+        return current.map((t) => (t.id === action.id ? { ...t, status: action.status } : t));
+      }
+      if (action.type === "category") {
+        return current.map((t) => (t.id === action.id ? { ...t, category: action.category } : t));
+      }
+      return current;
+    }
   );
 
-  function handleAction(id: string, status: "approved" | "rejected") {
-    updateOptimistic({ id, status });
+  function handleStatus(id: string, status: "approved" | "rejected") {
+    updateOptimistic({ type: "status", id, status });
     startTransition(async () => {
       await reviewTestimonial(id, status);
+    });
+  }
+
+  function handleCategory(id: string, category: string) {
+    updateOptimistic({ type: "category", id, category });
+    startTransition(async () => {
+      await updateTestimonialCategory(id, category);
     });
   }
 
@@ -60,9 +80,17 @@ export function TestimonialList({ items }: { items: Testimonial[] }) {
                 「{t.quote}」
               </p>
               <div className="flex items-center gap-2 mt-2 flex-wrap">
-                <span className="text-xs px-2 py-0.5 bg-slate-100 rounded-full text-slate-600">
-                  {CATEGORY_LABELS[t.category] || t.category}
-                </span>
+                <select
+                  value={t.category}
+                  onChange={(e) => handleCategory(t.id, e.target.value)}
+                  className="text-xs px-2 py-0.5 bg-slate-100 rounded-full text-slate-600 border-none cursor-pointer hover:bg-slate-200"
+                >
+                  {CATEGORIES.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {CATEGORY_LABELS[cat]}
+                    </option>
+                  ))}
+                </select>
                 {t.trait && (
                   <span className="text-xs px-2 py-0.5 bg-blue-50 rounded-full text-blue-700">
                     {t.trait}
@@ -95,7 +123,7 @@ export function TestimonialList({ items }: { items: Testimonial[] }) {
             <div className="flex gap-1 shrink-0 items-center">
               {t.status !== "approved" && (
                 <button
-                  onClick={() => handleAction(t.id, "approved")}
+                  onClick={() => handleStatus(t.id, "approved")}
                   className="px-3 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100"
                 >
                   承認
@@ -103,7 +131,7 @@ export function TestimonialList({ items }: { items: Testimonial[] }) {
               )}
               {t.status !== "rejected" && (
                 <button
-                  onClick={() => handleAction(t.id, "rejected")}
+                  onClick={() => handleStatus(t.id, "rejected")}
                   className="px-3 py-1 text-xs bg-red-50 text-red-700 rounded hover:bg-red-100"
                 >
                   却下

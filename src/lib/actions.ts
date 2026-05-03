@@ -476,3 +476,14 @@ export async function reviewTestimonial(id: string, status: "approved" | "reject
 
   revalidatePath("/testimonials");
 }
+
+export async function updateTestimonialCategory(id: string, category: string) {
+  await requireRole(["admin", "member"]);
+
+  await prisma.testimonial.update({
+    where: { id },
+    data: { category: category as "personality" },
+  });
+
+  revalidatePath("/testimonials");
+}
