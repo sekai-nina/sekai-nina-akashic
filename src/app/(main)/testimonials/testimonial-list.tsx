@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useOptimistic, useTransition } from "react";
+import { reviewTestimonial } from "@/lib/actions";
 
 interface Testimonial {
   id: string;
@@ -27,37 +27,36 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 export function TestimonialList({ items }: { items: Testimonial[] }) {
-  const router = useRouter();
-  const [loading, setLoading] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const [optimisticItems, updateOptimistic] = useOptimistic(
+    items,
+    (current, { id, status }: { id: string; status: string }) =>
+      current.map((t) => (t.id === id ? { ...t, status } : t))
+  );
 
-  async function handleAction(id: string, status: "approved" | "rejected") {
-    setLoading(id);
-    try {
-      await fetch("/api/v1/testimonials", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, status }),
-      });
-      router.refresh();
-    } finally {
-      setLoading(null);
-    }
+  function handleAction(id: string, status: "approved" | "rejected") {
+    updateOptimistic({ id, status });
+    startTransition(async () => {
+      await reviewTestimonial(id, status);
+    });
   }
 
-  if (items.length === 0) {
+  if (optimisticItems.length === 0) {
     return <p className="text-slate-400 py-8 text-center">該当なし</p>;
   }
 
   return (
     <div className="space-y-3">
-      {items.map((t) => (
+      {optimisticItems.map((t) => (
         <div
           key={t.id}
-          className="border border-slate-200 rounded-lg p-4 bg-white"
+          className={`border rounded-lg p-4 bg-white transition-opacity ${
+            t.status === "pending" ? "border-slate-200" : "border-slate-100 opacity-60"
+          }`}
         >
           <div className="flex items-start justify-between gap-4">
             <div className="flex-1 min-w-0">
-              <p className="text-slate-900 text-sm leading-relaxed">
+              <p className="text-slate-900 text-sm leading-relaxed whitespace-pre-wrap">
                 「{t.quote}」
               </p>
               <div className="flex items-center gap-2 mt-2 flex-wrap">
@@ -97,15 +96,13 @@ export function TestimonialList({ items }: { items: Testimonial[] }) {
               <div className="flex gap-1 shrink-0">
                 <button
                   onClick={() => handleAction(t.id, "approved")}
-                  disabled={loading === t.id}
-                  className="px-3 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100 disabled:opacity-50"
+                  className="px-3 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100"
                 >
                   承認
                 </button>
                 <button
                   onClick={() => handleAction(t.id, "rejected")}
-                  disabled={loading === t.id}
-                  className="px-3 py-1 text-xs bg-red-50 text-red-700 rounded hover:bg-red-100 disabled:opacity-50"
+                  className="px-3 py-1 text-xs bg-red-50 text-red-700 rounded hover:bg-red-100"
                 >
                   却下
                 </button>
@@ -113,12 +110,12 @@ export function TestimonialList({ items }: { items: Testimonial[] }) {
             )}
 
             {t.status === "approved" && (
-              <span className="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded-full">
+              <span className="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded-full shrink-0">
                 承認済
               </span>
             )}
             {t.status === "rejected" && (
-              <span className="text-xs px-2 py-0.5 bg-red-100 text-red-700 rounded-full">
+              <span className="text-xs px-2 py-0.5 bg-red-100 text-red-700 rounded-full shrink-0">
                 却下
               </span>
             )}

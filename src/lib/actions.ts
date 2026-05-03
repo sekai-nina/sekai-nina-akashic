@@ -463,3 +463,16 @@ export async function removeEntityAlias(entityId: string, alias: string) {
   invalidateEntities();
   revalidatePath(`/entities/${entityId}`);
 }
+
+// ========== Testimonials ==========
+
+export async function reviewTestimonial(id: string, status: "approved" | "rejected") {
+  await requireRole(["admin", "member"]);
+
+  await prisma.testimonial.update({
+    where: { id },
+    data: { status, reviewedAt: new Date() },
+  });
+
+  revalidatePath("/testimonials");
+}
