@@ -16,10 +16,8 @@ interface Testimonial {
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
-  personality: "性格",
-  appearance: "見た目",
+  personality: "人柄",
   performance: "パフォーマンス",
-  habit: "癖",
   relationship: "関係性",
 };
 

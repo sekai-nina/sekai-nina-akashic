@@ -308,9 +308,7 @@ enum TestimonialStatus {
 
 enum TestimonialCategory {
   personality
-  appearance
   performance
-  habit
   relationship
 }
 
@@ -323,7 +321,7 @@ model Testimonial {
 
   quote           String
   trait           String              @default("")
-  category        TestimonialCategory @default(habit)
+  category        TestimonialCategory @default(personality)
   speakerName     String
   speakerEntityId String?
   sourceUrl       String?
