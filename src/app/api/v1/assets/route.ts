@@ -1,7 +1,11 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
 import { createAsset, listAssets } from "@/lib/domain/assets";
+import { extractTestimonials } from "@/lib/domain/testimonials";
 import type { CreateAssetData, ListAssetsFilters } from "@/lib/domain/assets";
+
+// 坂井新奈のentityId（口コミ抽出対象）
+const NINA_ENTITY_ID = "cmmtp8vrg0004mo381neyztvn";
 
 export async function GET(request: Request) {
   const auth = await requireApiAuth(request, "read");
@@ -32,5 +36,20 @@ export async function POST(request: Request) {
   }
 
   const asset = await createAsset(body, auth.id);
+
+  // Trigger testimonial extraction in background for web (blog) assets
+  if (body.sourceType === "web" && process.env.OPENAI_API_KEY) {
+    after(async () => {
+      try {
+        await extractTestimonials({
+          entityId: NINA_ENTITY_ID,
+          limit: 20,
+        });
+      } catch (err) {
+        console.error("[testimonials] background extraction failed:", err);
+      }
+    });
+  }
+
   return NextResponse.json(asset, { status: 201 });
 }
