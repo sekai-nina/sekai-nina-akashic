@@ -13,7 +13,7 @@ export async function GET(
   }
 
   const { id } = await params;
-  const excludeLinked = request.nextUrl.searchParams.get("excludeLinked") === "1";
+  const excludeLinked = request.nextUrl.searchParams.get("excludeLinked") !== "0";
 
   const entity = await prisma.entity.findUnique({ where: { id } });
   if (!entity) {

@@ -5,9 +5,10 @@ import { searchMentions } from "@/lib/domain/mentions";
 import { ENTITY_TYPE_LABELS, ASSET_KIND_LABELS, formatDate } from "@/lib/utils";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Download } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { SubmitButton } from "@/components/submit-button";
 import { LoadingLink } from "@/components/loading-link";
+import { CsvDownloadButton } from "./csv-download-button";
 
 const TEXT_TYPE_LABELS: Record<string, string> = {
   title: "タイトル",
@@ -37,7 +38,8 @@ export default async function EntityDetailPage({
 }) {
   const { id } = await params;
   const { showMentions, excludeLinked } = await searchParams;
-  const isExcludeLinked = excludeLinked === "1";
+  // Default to excluding linked assets (opt-out with excludeLinked=0)
+  const isExcludeLinked = excludeLinked !== "0";
 
   const entity = await getCachedEntityById(id);
 
@@ -168,17 +170,13 @@ export default async function EntityDetailPage({
           <h2 className="text-sm font-semibold text-slate-700">言及検索</h2>
           <div className="flex gap-2">
             {mentions && (
-              <a
-                href={`/api/entities/${id}/mentions${isExcludeLinked ? "?excludeLinked=1" : ""}`}
-                className="flex items-center gap-1 text-xs border border-slate-300 text-slate-600 px-2.5 py-1 rounded hover:bg-slate-50 transition-colors"
-              >
-                <Download size={12} />
-                CSV
-              </a>
+              <CsvDownloadButton
+                href={`/api/entities/${id}/mentions${isExcludeLinked ? "" : "?excludeLinked=0"}`}
+              />
             )}
             {showMentions !== "1" ? (
               <LoadingLink
-                href={`/entities/${id}?showMentions=1`}
+                href={`/entities/${id}?showMentions=1${isExcludeLinked ? "" : "&excludeLinked=0"}`}
                 className="text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 transition-colors"
               >
                 言及を検索
@@ -196,25 +194,23 @@ export default async function EntityDetailPage({
         <p className="text-xs text-slate-400 mb-3">
           正規名「{entity.canonicalName}」{aliases.length > 0 ? `＋エイリアス（${aliases.join("、")}）` : ""}をテキスト本文から横断検索します
         </p>
-        {showMentions === "1" && (
-          <div className="flex items-center gap-4 mb-3">
-            <LoadingLink
-              href={`/entities/${id}?showMentions=1${isExcludeLinked ? "" : "&excludeLinked=1"}`}
-              className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border transition-colors ${
-                isExcludeLinked
-                  ? "bg-blue-50 border-blue-300 text-blue-700"
-                  : "border-slate-300 text-slate-500 hover:bg-slate-50"
-              }`}
-            >
-              <span className={`inline-block w-3.5 h-3.5 rounded border text-center leading-3.5 text-[10px] ${
-                isExcludeLinked ? "bg-blue-600 border-blue-600 text-white" : "border-slate-400"
-              }`}>
-                {isExcludeLinked ? "✓" : ""}
-              </span>
-              本人紐づきアセットを除外
-            </LoadingLink>
-          </div>
-        )}
+        <div className="flex items-center gap-4 mb-3">
+          <LoadingLink
+            href={`/entities/${id}?showMentions=1${isExcludeLinked ? "&excludeLinked=0" : ""}`}
+            className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border transition-colors ${
+              isExcludeLinked
+                ? "bg-blue-50 border-blue-300 text-blue-700"
+                : "border-slate-300 text-slate-500 hover:bg-slate-50"
+            }`}
+          >
+            <span className={`inline-block w-3.5 h-3.5 rounded border text-center leading-3.5 text-[10px] ${
+              isExcludeLinked ? "bg-blue-600 border-blue-600 text-white" : "border-slate-400"
+            }`}>
+              {isExcludeLinked ? "✓" : ""}
+            </span>
+            本人紐づきアセットを除外
+          </LoadingLink>
+        </div>
 
         {mentions && (
           <>
