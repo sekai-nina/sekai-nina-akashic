@@ -234,6 +234,100 @@ export async function uploadToFolder(
   };
 }
 
+/**
+ * Google Drive の resumable upload セッションを開始し、アップロード URL を返す。
+ * クライアントはこの URL に直接ファイルを PUT する（Vercel のボディサイズ制限を回避）。
+ */
+export async function createResumableUploadSession(
+  filename: string,
+  mimeType: string
+): Promise<string | null> {
+  const auth = getAuth();
+  const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
+  if (!auth || !folderId) return null;
+
+  // アクセストークンを取得
+  let accessToken: string | null | undefined;
+  if ("getAccessToken" in auth) {
+    const result = await (
+      auth as { getAccessToken: () => Promise<{ token?: string | null }> }
+    ).getAccessToken();
+    accessToken = result.token;
+  } else {
+    const client = await (
+      auth as { getClient: () => Promise<{ getAccessToken: () => Promise<{ token?: string | null }> }> }
+    ).getClient();
+    const result = await client.getAccessToken();
+    accessToken = result.token;
+  }
+
+  if (!accessToken) throw new Error("Failed to obtain access token");
+
+  const res = await fetch(
+    "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        name: filename,
+        parents: [folderId],
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(
+      `Failed to initiate resumable upload: ${res.status} ${text}`
+    );
+  }
+
+  return res.headers.get("location");
+}
+
+/**
+ * Drive にアップロード済みのファイルに公開権限を付与し、メタデータを返す。
+ */
+export async function finalizeDriveUpload(
+  fileId: string
+): Promise<DriveUploadResult> {
+  const auth = getAuth();
+  if (!auth)
+    throw new Error("Drive not configured");
+
+  const drive = google.drive({
+    version: "v3",
+    auth: auth as Parameters<typeof google.drive>[0]["auth"],
+  });
+
+  const file = await drive.files.get({
+    fileId,
+    fields: "id, webViewLink",
+    supportsAllDrives: true,
+  });
+
+  try {
+    await drive.permissions.create({
+      fileId,
+      requestBody: { role: "reader", type: "anyone" },
+      supportsAllDrives: true,
+    });
+  } catch (err) {
+    console.warn("Could not set public permission:", err);
+  }
+
+  return {
+    fileId,
+    webViewLink:
+      file.data.webViewLink ||
+      `https://drive.google.com/file/d/${fileId}/view`,
+    directUrl: `https://drive.google.com/uc?export=view&id=${fileId}`,
+  };
+}
+
 export async function uploadToDrive(
   buffer: Buffer,
   filename: string,

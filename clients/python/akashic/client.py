@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -359,7 +360,11 @@ class AkashicClient:
         """
         path = Path(file_path)
         mime = _guess_mime(path)
-        data = _build_upload_data(
+        content = path.read_bytes()
+        return self.upload_bytes(
+            content,
+            path.name,
+            mime,
             title=title,
             kind=kind,
             status=status,
@@ -369,13 +374,6 @@ class AkashicClient:
             source_records=source_records,
             texts=texts,
         )
-        with open(path, "rb") as f:
-            return self._request(
-                "POST",
-                "/upload",
-                data=data,
-                files={"file": (path.name, f, mime)},
-            )
 
     def upload_bytes(
         self,
@@ -397,23 +395,85 @@ class AkashicClient:
         Discord等でダウンロード済みのバイナリをそのまま渡す場合に使う。
         メタデータ（entities, source_records, texts 等）を同時に渡すことで
         アップロードとメタデータ付与を1リクエストで行える。
+
+        Google Drive への直接アップロード方式を使用し、
+        Vercel のボディサイズ制限（4.5MB）を回避する。
         """
-        data = _build_upload_data(
-            title=title,
-            kind=kind,
-            status=status,
-            canonical_date=canonical_date,
-            source_type=source_type,
-            entities=entities,
-            source_records=source_records,
-            texts=texts,
+        sha256 = hashlib.sha256(content).hexdigest()
+
+        # Step 1: initiate — 重複チェック & resumable upload URL 取得
+        initiate_body: dict[str, Any] = {
+            "filename": filename,
+            "mimeType": mime_type,
+            "sha256": sha256,
+        }
+        # 重複時にメタデータを更新するための情報
+        metadata: dict[str, Any] = {}
+        if status:
+            metadata["status"] = status
+        if source_type:
+            metadata["sourceType"] = source_type
+        if canonical_date:
+            metadata["canonicalDate"] = canonical_date
+        if entities:
+            metadata["entities"] = entities
+        if source_records:
+            metadata["sourceRecords"] = source_records
+        if metadata:
+            initiate_body["metadata"] = metadata
+
+        initiate_resp = self._request(
+            "POST", "/upload/initiate", json=initiate_body
         )
-        return self._request(
-            "POST",
-            "/upload",
-            data=data,
-            files={"file": (filename, content, mime_type)},
+
+        if initiate_resp.get("duplicate"):
+            return initiate_resp
+
+        upload_url = initiate_resp["uploadUrl"]
+
+        # Step 2: Google Drive に直接アップロード
+        put_resp = requests.put(
+            upload_url,
+            data=content,
+            headers={
+                "Content-Type": mime_type,
+                "Content-Length": str(len(content)),
+            },
+            timeout=max(self._timeout, 300),
         )
+        if put_resp.status_code >= 400:
+            raise AkashicError(
+                put_resp.status_code,
+                f"Direct Drive upload failed: {put_resp.text}",
+            )
+        drive_file_id = put_resp.json()["id"]
+
+        # Step 3: complete — アセットレコード作成
+        complete_body: dict[str, Any] = {
+            "driveFileId": drive_file_id,
+            "filename": filename,
+            "mimeType": mime_type,
+            "fileSize": len(content),
+            "sha256": sha256,
+        }
+        if title:
+            complete_body["title"] = title
+        if kind:
+            complete_body["kind"] = kind
+        if status:
+            complete_body["status"] = status
+        if canonical_date:
+            complete_body["canonicalDate"] = canonical_date
+        if source_type:
+            complete_body["sourceType"] = source_type
+        if entities:
+            complete_body["entities"] = entities
+        if source_records:
+            complete_body["sourceRecords"] = source_records
+        if texts:
+            complete_body["texts"] = texts
+
+        return self._request("POST", "/upload/complete", json=complete_body)
 
     # ------------------------------------------------------------------
     # File URL helper
@@ -431,39 +491,6 @@ class AkashicClient:
             return f"{self.base_url}{url}"
         return url
 
-
-def _build_upload_data(
-    *,
-    title: str | None,
-    kind: str | None,
-    status: str | None,
-    canonical_date: str | None,
-    source_type: str | None,
-    entities: list[dict[str, Any]] | None,
-    source_records: list[dict[str, Any]] | None,
-    texts: list[dict[str, Any]] | None,
-) -> dict[str, Any]:
-    """アップロード用の multipart form data フィールドを構築する."""
-    import json
-
-    data: dict[str, Any] = {}
-    if title:
-        data["title"] = title
-    if kind:
-        data["kind"] = kind
-    if status:
-        data["status"] = status
-    if canonical_date:
-        data["canonicalDate"] = canonical_date
-    if source_type:
-        data["sourceType"] = source_type
-    if entities:
-        data["entities"] = json.dumps(entities)
-    if source_records:
-        data["sourceRecords"] = json.dumps(source_records)
-    if texts:
-        data["texts"] = json.dumps(texts)
-    return data
 
 
 def _guess_mime(path: Path) -> str:
