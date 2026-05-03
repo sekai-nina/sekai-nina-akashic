@@ -59,7 +59,7 @@ const RESPONSE_SCHEMA = {
             is_personality: { type: "boolean" },
             quote: { type: "string", description: "性格に触れている部分のみ抜粋。100文字以内" },
             trait: { type: "string", description: "キーワード。例: 優しい, しなやかなダンス" },
-            category: { type: "string", enum: ["personality", "dance", "appearance", "habit", "preference", "skill", "relationship", "other"] },
+            category: { type: "string", enum: ["personality", "appearance", "performance", "habit", "relationship"] },
             confidence: { type: "number", description: "0-1" },
           },
           required: ["index", "is_personality", "quote", "trait", "category", "confidence"],
@@ -97,15 +97,17 @@ function parseSourceUrl(sourceInfo: string): string | null {
 function mapCategory(cat: string): TestimonialCategory {
   const map: Record<string, TestimonialCategory> = {
     personality: "personality",
-    dance: "dance",
     appearance: "appearance",
+    performance: "performance",
     habit: "habit",
-    preference: "preference",
-    skill: "skill",
     relationship: "relationship",
-    other: "other",
+    // Legacy mappings
+    dance: "performance",
+    skill: "performance",
+    preference: "habit",
+    other: "habit",
   };
-  return map[cat] || "other";
+  return map[cat] || "habit";
 }
 
 async function callOpenAI(

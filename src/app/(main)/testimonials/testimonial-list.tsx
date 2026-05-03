@@ -17,13 +17,10 @@ interface Testimonial {
 
 const CATEGORY_LABELS: Record<string, string> = {
   personality: "性格",
-  dance: "ダンス",
   appearance: "見た目",
+  performance: "パフォーマンス",
   habit: "癖",
-  preference: "好み",
-  skill: "特技",
   relationship: "関係性",
-  other: "その他",
 };
 
 const CATEGORIES = Object.keys(CATEGORY_LABELS);
