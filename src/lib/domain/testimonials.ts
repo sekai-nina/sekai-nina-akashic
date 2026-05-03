@@ -274,9 +274,13 @@ export async function extractTestimonials(options: ExtractOptions): Promise<{
   const existingSet = new Set(
     existingQuotes.map((t) => `${t.assetId}::${t.quote.slice(0, 50)}`)
   );
+  // Track assets that already have any testimonial (processed before)
+  const processedAssetIds = new Set(existingQuotes.map((t) => t.assetId));
 
   // Build windowed contexts (±1 blocks, merged)
-  const windows = await buildWindowedContexts(filtered);
+  // Exclude windows from assets already processed to ensure new windows get reached
+  const allWindows = await buildWindowedContexts(filtered);
+  const windows = allWindows.filter((w) => !processedAssetIds.has(w.assetId));
 
   // Limit processing
   const toProcess = windows.slice(0, limit);
