@@ -33,10 +33,11 @@ export default async function EntityDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ showMentions?: string }>;
+  searchParams: Promise<{ showMentions?: string; excludeLinked?: string }>;
 }) {
   const { id } = await params;
-  const { showMentions } = await searchParams;
+  const { showMentions, excludeLinked } = await searchParams;
+  const isExcludeLinked = excludeLinked === "1";
 
   const entity = await getCachedEntityById(id);
 
@@ -57,7 +58,7 @@ export default async function EntityDetailPage({
   });
 
   // Search mentions if requested
-  const mentions = showMentions === "1" ? await searchMentions(id) : null;
+  const mentions = showMentions === "1" ? await searchMentions(id, { excludeLinked: isExcludeLinked }) : null;
 
   const addAliasAction = addEntityAlias.bind(null, id);
   const color = typeColors[entity.type] ?? "bg-slate-100 text-slate-700";
@@ -168,7 +169,7 @@ export default async function EntityDetailPage({
           <div className="flex gap-2">
             {mentions && (
               <a
-                href={`/api/entities/${id}/mentions`}
+                href={`/api/entities/${id}/mentions${isExcludeLinked ? "?excludeLinked=1" : ""}`}
                 className="flex items-center gap-1 text-xs border border-slate-300 text-slate-600 px-2.5 py-1 rounded hover:bg-slate-50 transition-colors"
               >
                 <Download size={12} />
@@ -195,6 +196,25 @@ export default async function EntityDetailPage({
         <p className="text-xs text-slate-400 mb-3">
           正規名「{entity.canonicalName}」{aliases.length > 0 ? `＋エイリアス（${aliases.join("、")}）` : ""}をテキスト本文から横断検索します
         </p>
+        {showMentions === "1" && (
+          <div className="flex items-center gap-4 mb-3">
+            <LoadingLink
+              href={`/entities/${id}?showMentions=1${isExcludeLinked ? "" : "&excludeLinked=1"}`}
+              className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border transition-colors ${
+                isExcludeLinked
+                  ? "bg-blue-50 border-blue-300 text-blue-700"
+                  : "border-slate-300 text-slate-500 hover:bg-slate-50"
+              }`}
+            >
+              <span className={`inline-block w-3.5 h-3.5 rounded border text-center leading-3.5 text-[10px] ${
+                isExcludeLinked ? "bg-blue-600 border-blue-600 text-white" : "border-slate-400"
+              }`}>
+                {isExcludeLinked ? "✓" : ""}
+              </span>
+              本人紐づきアセットを除外
+            </LoadingLink>
+          </div>
+        )}
 
         {mentions && (
           <>
@@ -228,6 +248,11 @@ export default async function EntityDetailPage({
                         </span>
                       )}
                     </div>
+                    {m.linkedEntities && (
+                      <p className="text-xs text-amber-600 mb-0.5">
+                        関連: {m.linkedEntities}
+                      </p>
+                    )}
                     <p className="text-xs text-slate-500 line-clamp-2">{m.snippet}</p>
                   </Link>
                 ))}

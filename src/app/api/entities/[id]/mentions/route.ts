@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await auth();
@@ -13,16 +13,17 @@ export async function GET(
   }
 
   const { id } = await params;
+  const excludeLinked = request.nextUrl.searchParams.get("excludeLinked") === "1";
 
   const entity = await prisma.entity.findUnique({ where: { id } });
   if (!entity) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const mentions = await searchMentions(id);
+  const mentions = await searchMentions(id, { excludeLinked });
 
   // Build CSV
-  const header = "アセットタイトル,種別,テキストタイプ,マッチしたエイリアス,スニペット,日付";
+  const header = "アセットタイトル,種別,ソースタイプ,テキストタイプ,マッチしたエイリアス,紐づきエンティティ,ソース情報,スニペット,日付";
   const rows = mentions.map((m) => {
     const date = m.canonicalDate
       ? m.canonicalDate.toISOString().split("T")[0]
@@ -30,15 +31,19 @@ export async function GET(
     return [
       csvEscape(m.assetTitle),
       csvEscape(m.assetKind),
+      csvEscape(m.assetSourceType),
       csvEscape(m.textType),
       csvEscape(m.matchedAlias),
+      csvEscape(m.linkedEntities),
+      csvEscape(m.sourceInfo),
       csvEscape(m.snippet),
       date,
     ].join(",");
   });
 
   const csv = "\uFEFF" + [header, ...rows].join("\n");
-  const filename = `mentions_${entity.canonicalName}_${new Date().toISOString().split("T")[0]}.csv`;
+  const suffix = excludeLinked ? "_除外あり" : "";
+  const filename = `mentions_${entity.canonicalName}${suffix}_${new Date().toISOString().split("T")[0]}.csv`;
 
   return new NextResponse(csv, {
     headers: {
