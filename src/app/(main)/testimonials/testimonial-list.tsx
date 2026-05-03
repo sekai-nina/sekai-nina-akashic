@@ -92,33 +92,24 @@ export function TestimonialList({ items }: { items: Testimonial[] }) {
               </div>
             </div>
 
-            {t.status === "pending" && (
-              <div className="flex gap-1 shrink-0">
+            <div className="flex gap-1 shrink-0 items-center">
+              {t.status !== "approved" && (
                 <button
                   onClick={() => handleAction(t.id, "approved")}
                   className="px-3 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100"
                 >
                   承認
                 </button>
+              )}
+              {t.status !== "rejected" && (
                 <button
                   onClick={() => handleAction(t.id, "rejected")}
                   className="px-3 py-1 text-xs bg-red-50 text-red-700 rounded hover:bg-red-100"
                 >
                   却下
                 </button>
-              </div>
-            )}
-
-            {t.status === "approved" && (
-              <span className="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded-full shrink-0">
-                承認済
-              </span>
-            )}
-            {t.status === "rejected" && (
-              <span className="text-xs px-2 py-0.5 bg-red-100 text-red-700 rounded-full shrink-0">
-                却下
-              </span>
-            )}
+              )}
+            </div>
           </div>
         </div>
       ))}
