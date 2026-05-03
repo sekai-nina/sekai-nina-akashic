@@ -80,6 +80,16 @@ export function TestimonialList({ items }: { items: Testimonial[] }) {
                 <span className="text-xs text-slate-300">
                   conf: {(t.confidence * 100).toFixed(0)}%
                 </span>
+                {t.sourceUrl && (
+                  <a
+                    href={t.sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-blue-500 hover:underline ml-auto"
+                  >
+                    元ブログ →
+                  </a>
+                )}
               </div>
             </div>
 
