@@ -145,6 +145,7 @@ model Asset {
   sourceRecords   SourceRecord[]
   annotations     Annotation[]
   collectionItems CollectionItem[]
+  testimonials    Testimonial[]
 
   @@index([sha256])
   @@index([status])
@@ -183,7 +184,8 @@ model Entity {
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
-  assets AssetEntity[]
+  assets       AssetEntity[]
+  testimonials Testimonial[]
 
   @@unique([type, canonicalName])
 }
@@ -296,4 +298,49 @@ model AuditLog {
   @@index([actorId])
   @@index([targetType, targetId])
   @@index([createdAt])
+}
+
+enum TestimonialStatus {
+  pending
+  approved
+  rejected
+}
+
+enum TestimonialCategory {
+  personality
+  dance
+  appearance
+  habit
+  preference
+  skill
+  relationship
+  other
+}
+
+model Testimonial {
+  id              String              @id @default(cuid())
+  assetId         String
+  asset           Asset               @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  entityId        String
+  entity          Entity              @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  quote           String
+  trait           String              @default("")
+  category        TestimonialCategory @default(other)
+  speakerName     String
+  speakerEntityId String?
+  sourceUrl       String?
+  sourceDate      DateTime?
+
+  status          TestimonialStatus   @default(pending)
+  confidence      Float               @default(0)
+
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  reviewedAt      DateTime?
+
+  @@unique([assetId, entityId, quote])
+  @@index([entityId, status])
+  @@index([category])
+  @@index([status])
 }

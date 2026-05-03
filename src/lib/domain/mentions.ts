@@ -18,6 +18,7 @@ export interface MentionResult {
 
 export interface SearchMentionsOptions {
   excludeLinked?: boolean;
+  since?: Date; // Only return mentions from assets with canonicalDate/createdAt after this date
 }
 
 /**
@@ -47,6 +48,11 @@ export async function searchMentions(
         SELECT 1 FROM "AssetEntity" ae
         WHERE ae."assetId" = a."id" AND ae."entityId" = ${entityId}
       )`
+    : Prisma.empty;
+
+  // Optionally filter by date
+  const sinceClause = options.since
+    ? Prisma.sql`AND COALESCE(a."canonicalDate", a."createdAt") >= ${options.since}`
     : Prisma.empty;
 
   const rows = await prisma.$queryRaw<Array<{
@@ -93,6 +99,7 @@ export async function searchMentions(
     JOIN "Asset" a ON a."id" = t."assetId"
     WHERE (${Prisma.join(conditions, " OR ")})
     ${excludeClause}
+    ${sinceClause}
     ORDER BY a."canonicalDate" DESC NULLS LAST, a."createdAt" DESC
   `;
 
