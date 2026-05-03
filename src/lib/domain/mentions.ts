@@ -99,7 +99,7 @@ export async function searchMentions(
   // Split each text into blocks by newlines, detect all matching aliases per block
   const results: MentionResult[] = [];
   for (const row of rows) {
-    const blocks = row.content.split(/\n+/).filter((b) => b.trim());
+    const blocks = row.content.split(/\n{2,}/).filter((b) => b.trim());
     for (const block of blocks) {
       const blockLower = block.toLowerCase();
       const matched = searchTerms.filter((term) =>
