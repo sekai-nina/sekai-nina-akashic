@@ -5,7 +5,6 @@ import {
   addEntityToAsset,
   addAssetText,
   addSourceRecord,
-  addAnnotation,
   addToCollection,
 } from "@/lib/actions";
 import {
@@ -97,12 +96,6 @@ const SOURCE_KIND_LABELS: Record<string, string> = {
   other: "その他",
 };
 
-const ANNOTATION_KIND_LABELS: Record<string, string> = {
-  note: "メモ",
-  time_range: "時間範囲",
-  text_span: "テキストスパン",
-  region: "リージョン",
-};
 
 export default async function AssetDetailPage({
   params,
@@ -122,7 +115,6 @@ export default async function AssetDetailPage({
           orderBy: { createdAt: "asc" },
         },
         sourceRecords: { orderBy: { createdAt: "asc" } },
-        annotations: { orderBy: { createdAt: "asc" } },
       },
     }),
     session?.user
@@ -475,51 +467,6 @@ export default async function AssetDetailPage({
         </details>
       </div>
 
-      {/* Sticky annotation bar at bottom */}
-      <div className="sticky bottom-0 z-10 bg-white border border-slate-200 rounded-t-lg shadow-lg">
-        <details className="group">
-          <summary className="px-4 py-2.5 text-sm font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 flex items-center justify-between">
-            <span>アノテーション{asset.annotations.length > 0 ? ` (${asset.annotations.length})` : ""}</span>
-            <span className="text-xs text-slate-400 group-open:hidden">開く</span>
-          </summary>
-          <div className="px-4 pb-4 max-h-64 overflow-y-auto">
-            {asset.annotations.length > 0 && (
-              <ul className="space-y-2 mb-3">
-                {asset.annotations.map((ann) => (
-                    <li key={ann.id} className="border border-slate-100 rounded p-2 text-sm">
-                      <div className="mb-0.5">
-                        <span className="text-xs font-medium bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded">
-                          {ANNOTATION_KIND_LABELS[ann.kind] ?? ann.kind}
-                        </span>
-                      </div>
-                      <p className="text-slate-700 whitespace-pre-wrap text-xs">{ann.body}</p>
-                    </li>
-                ))}
-              </ul>
-            )}
-            <form action={addAnnotation.bind(null, id)} className="flex gap-2 items-end">
-              <select
-                name="annotationKind"
-                className="border border-slate-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                {Object.entries(ANNOTATION_KIND_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>{label}</option>
-                ))}
-              </select>
-              <input
-                type="text"
-                name="body"
-                required
-                placeholder="アノテーションを入力..."
-                className="flex-1 border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <SubmitButton className="bg-indigo-600 text-white px-3 py-1 rounded text-sm hover:bg-indigo-700 transition-colors">
-                追加
-              </SubmitButton>
-            </form>
-          </div>
-        </details>
-      </div>
     </div>
   );
 }
