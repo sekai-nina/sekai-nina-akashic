@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { Loader2 } from "lucide-react";
 import { ASSET_KIND_LABELS, ASSET_STATUS_LABELS, TRUST_LEVEL_LABELS, ENTITY_TYPE_LABELS } from "@/lib/utils";
 import { EntityFilter } from "./entity-filter";
 
@@ -41,6 +42,12 @@ export function SearchForm({
   const [sourceType, setSourceType] = useState<string | undefined>(initialSourceType);
   const [selectedEntityIds, setSelectedEntityIds] = useState<string[]>(initialEntityIds);
   const [ninaOnly, setNinaOnly] = useState(initialEntityIds.includes(NINA_ENTITY_ID));
+  const [searching, setSearching] = useState(false);
+
+  // 検索結果が返ってきたら（searchParamsが変化）ローディング解除
+  useEffect(() => {
+    setSearching(false);
+  }, [searchParams]);
 
   const entityTypes = [...new Set(entities.map((e) => e.type))];
   const entitiesByType = Object.fromEntries(
@@ -61,6 +68,7 @@ export function SearchForm({
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    setSearching(true);
     const formData = new FormData(e.currentTarget);
     const p = new URLSearchParams();
 
@@ -116,9 +124,10 @@ export function SearchForm({
         />
         <button
           type="submit"
-          className="bg-blue-600 text-white px-5 py-2 rounded text-sm font-medium hover:bg-blue-700 transition-colors"
+          disabled={searching}
+          className="bg-blue-600 text-white px-5 py-2 rounded text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 inline-flex items-center gap-1.5"
         >
-          検索
+          {searching ? <><Loader2 size={14} className="animate-spin" />検索中</> : "検索"}
         </button>
       </div>
 
