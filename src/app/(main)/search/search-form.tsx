@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ASSET_KIND_LABELS, ASSET_STATUS_LABELS, TRUST_LEVEL_LABELS, ENTITY_TYPE_LABELS } from "@/lib/utils";
 import { EntityFilter } from "./entity-filter";
 
+const NINA_ENTITY_ID = "cmmtp8vrg0004mo381neyztvn";
+
 type SearchMode = "all" | "text" | "media" | "image" | "live";
 
 const SEARCH_MODES: { key: SearchMode; label: string }[] = [
@@ -38,6 +40,7 @@ export function SearchForm({
   const [mode, setMode] = useState<SearchMode>(initialMode);
   const [sourceType, setSourceType] = useState<string | undefined>(initialSourceType);
   const [selectedEntityIds, setSelectedEntityIds] = useState<string[]>(initialEntityIds);
+  const [ninaOnly, setNinaOnly] = useState(initialEntityIds.includes(NINA_ENTITY_ID));
 
   const entityTypes = [...new Set(entities.map((e) => e.type))];
   const entitiesByType = Object.fromEntries(
@@ -65,7 +68,11 @@ export function SearchForm({
     if (q) p.set("q", q);
     if (mode !== "all") p.set("mode", mode);
     if (sourceType) p.set("sourceType", sourceType);
-    if (selectedEntityIds.length > 0) p.set("entityIds", selectedEntityIds.join(","));
+
+    // エンティティID: ninaOnlyトグル + モード別選択 + 詳細フィルタをマージ
+    const entityIds = new Set(selectedEntityIds);
+    if (ninaOnly) entityIds.add(NINA_ENTITY_ID);
+    if (entityIds.size > 0) p.set("entityIds", [...entityIds].join(","));
 
     // Date filters
     const dateFrom = formData.get("dateFrom") as string;
@@ -83,7 +90,12 @@ export function SearchForm({
     if (status) p.set("status", status);
     if (trustLevel) p.set("trustLevel", trustLevel);
     if (target && target !== "all") p.set("target", target);
-    if (advEntityIds) p.set("entityIds", advEntityIds);
+    // 詳細フィルタのエンティティIDをマージ
+    if (advEntityIds) {
+      const existing = p.get("entityIds");
+      const merged = new Set([...(existing?.split(",") ?? []), ...advEntityIds.split(",")].filter(Boolean));
+      p.set("entityIds", [...merged].join(","));
+    }
 
     // Preserve view
     const view = searchParams.get("view");
@@ -110,8 +122,8 @@ export function SearchForm({
         </button>
       </div>
 
-      {/* Mode chips — instant client-side switch */}
-      <div className="flex gap-1.5 flex-wrap">
+      {/* Mode chips + Nina toggle */}
+      <div className="flex gap-1.5 flex-wrap items-center">
         {SEARCH_MODES.map((m) => (
           <button
             key={m.key}
@@ -126,6 +138,18 @@ export function SearchForm({
             {m.label}
           </button>
         ))}
+        <span className="text-slate-300 mx-0.5">|</span>
+        <button
+          type="button"
+          onClick={() => setNinaOnly(!ninaOnly)}
+          className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+            ninaOnly
+              ? "bg-purple-600 text-white"
+              : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+          }`}
+        >
+          坂井新奈
+        </button>
       </div>
 
       {/* Text mode: blog/talk sub-filter */}
