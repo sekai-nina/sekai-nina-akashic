@@ -274,6 +274,100 @@ export default async function AssetDetailPage({
       {/* Status workflow */}
       <StatusWorkflow assetId={id} initialStatus={asset.status} />
 
+      {/* Source Records section — moved up for quick access */}
+      <div className="bg-white border border-slate-200 rounded-lg p-5">
+        <h2 className="text-sm font-semibold text-slate-700 mb-3">出典記録</h2>
+        {asset.sourceRecords.length === 0 ? (
+          <p className="text-sm text-slate-400 mb-3">出典記録なし</p>
+        ) : (
+          <ul className="space-y-3 mb-4">
+            {asset.sourceRecords.map((src) => (
+                <li key={src.id} className="border border-slate-100 rounded p-3 text-sm">
+                  <div className="mb-1">
+                    <span className="text-xs font-medium bg-orange-100 text-orange-700 px-2 py-0.5 rounded">
+                      {SOURCE_KIND_LABELS[src.sourceKind] ?? src.sourceKind}
+                    </span>
+                  </div>
+                  <p className="font-medium text-slate-800">{src.title || "(タイトルなし)"}</p>
+                  {src.url && (
+                    <a href={src.url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline break-all">
+                      {src.url}
+                    </a>
+                  )}
+                  <div className="text-xs text-slate-400 mt-1 flex gap-3">
+                    {src.publisher && <span>{src.publisher}</span>}
+                    {src.publishedAt && <span>{formatDate(src.publishedAt, true)}</span>}
+                  </div>
+                </li>
+            ))}
+          </ul>
+        )}
+        <details className="border border-slate-200 rounded p-3">
+          <summary className="text-sm text-slate-600 cursor-pointer hover:text-slate-800">出典を追加</summary>
+          <form action={addSourceRecord.bind(null, id)} className="mt-3 space-y-3">
+            <div className="flex flex-wrap gap-3">
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">種別</label>
+                <select
+                  name="sourceKind"
+                  className="border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {Object.entries(SOURCE_KIND_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex-1 min-w-[200px]">
+                <label className="block text-xs text-slate-500 mb-1">タイトル</label>
+                <input
+                  type="text"
+                  name="sourceTitle"
+                  className="w-full border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-500 mb-1">URL</label>
+              <input
+                type="url"
+                name="sourceUrl"
+                className="w-full border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="https://..."
+              />
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <div className="flex-1 min-w-[140px]">
+                <label className="block text-xs text-slate-500 mb-1">発行者</label>
+                <input
+                  type="text"
+                  name="publisher"
+                  className="w-full border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">発行日</label>
+                <input
+                  type="date"
+                  name="publishedAt"
+                  className="border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+            <SubmitButton className="bg-orange-600 text-white px-3 py-1 rounded text-sm hover:bg-orange-700 transition-colors">
+              追加
+            </SubmitButton>
+          </form>
+        </details>
+      </div>
+
+      {/* Add to collection — moved up */}
+      {collections.length > 0 && (
+        <div className="bg-white border border-slate-200 rounded-lg p-5">
+          <h2 className="text-sm font-semibold text-slate-700 mb-3">コレクションに追加</h2>
+          <AddToCollectionForm assetId={id} collections={collections} />
+        </div>
+      )}
+
       {/* Entities section */}
       <div className="bg-white border border-slate-200 rounded-lg p-5">
         <h2 className="text-sm font-semibold text-slate-700 mb-3">エンティティ</h2>
@@ -381,148 +475,51 @@ export default async function AssetDetailPage({
         </details>
       </div>
 
-      {/* Source Records section */}
-      <div className="bg-white border border-slate-200 rounded-lg p-5">
-        <h2 className="text-sm font-semibold text-slate-700 mb-3">出典記録</h2>
-        {asset.sourceRecords.length === 0 ? (
-          <p className="text-sm text-slate-400 mb-3">出典記録なし</p>
-        ) : (
-          <ul className="space-y-3 mb-4">
-            {asset.sourceRecords.map((src) => (
-                <li key={src.id} className="border border-slate-100 rounded p-3 text-sm">
-                  <div className="mb-1">
-                    <span className="text-xs font-medium bg-orange-100 text-orange-700 px-2 py-0.5 rounded">
-                      {SOURCE_KIND_LABELS[src.sourceKind] ?? src.sourceKind}
-                    </span>
-                  </div>
-                  <p className="font-medium text-slate-800">{src.title || "(タイトルなし)"}</p>
-                  {src.url && (
-                    <a href={src.url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline break-all">
-                      {src.url}
-                    </a>
-                  )}
-                  <div className="text-xs text-slate-400 mt-1 flex gap-3">
-                    {src.publisher && <span>{src.publisher}</span>}
-                    {src.publishedAt && <span>{formatDate(src.publishedAt, true)}</span>}
-                  </div>
-                </li>
-            ))}
-          </ul>
-        )}
-        <details className="border border-slate-200 rounded p-3">
-          <summary className="text-sm text-slate-600 cursor-pointer hover:text-slate-800">出典を追加</summary>
-          <form action={addSourceRecord.bind(null, id)} className="mt-3 space-y-3">
-            <div className="flex flex-wrap gap-3">
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">種別</label>
-                <select
-                  name="sourceKind"
-                  className="border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  {Object.entries(SOURCE_KIND_LABELS).map(([value, label]) => (
-                    <option key={value} value={value}>{label}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex-1 min-w-[200px]">
-                <label className="block text-xs text-slate-500 mb-1">タイトル</label>
-                <input
-                  type="text"
-                  name="sourceTitle"
-                  className="w-full border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="block text-xs text-slate-500 mb-1">URL</label>
-              <input
-                type="url"
-                name="sourceUrl"
-                className="w-full border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="https://..."
-              />
-            </div>
-            <div className="flex flex-wrap gap-3">
-              <div className="flex-1 min-w-[140px]">
-                <label className="block text-xs text-slate-500 mb-1">発行者</label>
-                <input
-                  type="text"
-                  name="publisher"
-                  className="w-full border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">発行日</label>
-                <input
-                  type="date"
-                  name="publishedAt"
-                  className="border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-            </div>
-            <SubmitButton className="bg-orange-600 text-white px-3 py-1 rounded text-sm hover:bg-orange-700 transition-colors">
-              追加
-            </SubmitButton>
-          </form>
-        </details>
-      </div>
-
-      {/* Annotations section */}
-      <div className="bg-white border border-slate-200 rounded-lg p-5">
-        <h2 className="text-sm font-semibold text-slate-700 mb-3">アノテーション</h2>
-        {asset.annotations.length === 0 ? (
-          <p className="text-sm text-slate-400 mb-3">アノテーションなし</p>
-        ) : (
-          <ul className="space-y-3 mb-4">
-            {asset.annotations.map((ann) => (
-                <li key={ann.id} className="border border-slate-100 rounded p-3 text-sm">
-                  <div className="mb-1">
-                    <span className="text-xs font-medium bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded">
-                      {ANNOTATION_KIND_LABELS[ann.kind] ?? ann.kind}
-                    </span>
-                  </div>
-                  <p className="text-slate-700 whitespace-pre-wrap">{ann.body}</p>
-                </li>
-            ))}
-          </ul>
-        )}
-        <details className="border border-slate-200 rounded p-3">
-          <summary className="text-sm text-slate-600 cursor-pointer hover:text-slate-800">アノテーションを追加</summary>
-          <form action={addAnnotation.bind(null, id)} className="mt-3 space-y-3">
-            <div>
-              <label className="block text-xs text-slate-500 mb-1">種別</label>
+      {/* Sticky annotation bar at bottom */}
+      <div className="sticky bottom-0 z-10 bg-white border border-slate-200 rounded-t-lg shadow-lg">
+        <details className="group">
+          <summary className="px-4 py-2.5 text-sm font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 flex items-center justify-between">
+            <span>アノテーション{asset.annotations.length > 0 ? ` (${asset.annotations.length})` : ""}</span>
+            <span className="text-xs text-slate-400 group-open:hidden">開く</span>
+          </summary>
+          <div className="px-4 pb-4 max-h-64 overflow-y-auto">
+            {asset.annotations.length > 0 && (
+              <ul className="space-y-2 mb-3">
+                {asset.annotations.map((ann) => (
+                    <li key={ann.id} className="border border-slate-100 rounded p-2 text-sm">
+                      <div className="mb-0.5">
+                        <span className="text-xs font-medium bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded">
+                          {ANNOTATION_KIND_LABELS[ann.kind] ?? ann.kind}
+                        </span>
+                      </div>
+                      <p className="text-slate-700 whitespace-pre-wrap text-xs">{ann.body}</p>
+                    </li>
+                ))}
+              </ul>
+            )}
+            <form action={addAnnotation.bind(null, id)} className="flex gap-2 items-end">
               <select
                 name="annotationKind"
-                className="border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="border border-slate-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 {Object.entries(ANNOTATION_KIND_LABELS).map(([value, label]) => (
                   <option key={value} value={value}>{label}</option>
                 ))}
               </select>
-            </div>
-            <div>
-              <label className="block text-xs text-slate-500 mb-1">内容 <span className="text-red-500">*</span></label>
-              <textarea
+              <input
+                type="text"
                 name="body"
-                rows={3}
                 required
-                className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="アノテーションを入力..."
+                className="flex-1 border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
-            </div>
-            <SubmitButton className="bg-indigo-600 text-white px-3 py-1 rounded text-sm hover:bg-indigo-700 transition-colors">
-              追加
-            </SubmitButton>
-          </form>
+              <SubmitButton className="bg-indigo-600 text-white px-3 py-1 rounded text-sm hover:bg-indigo-700 transition-colors">
+                追加
+              </SubmitButton>
+            </form>
+          </div>
         </details>
       </div>
-
-      {/* Add to collection */}
-      {collections.length > 0 && (
-        <div className="bg-white border border-slate-200 rounded-lg p-5">
-          <h2 className="text-sm font-semibold text-slate-700 mb-3">コレクションに追加</h2>
-          <AddToCollectionForm assetId={id} collections={collections} />
-        </div>
-      )}
     </div>
   );
 }
