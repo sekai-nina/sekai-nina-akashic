@@ -73,7 +73,7 @@ export function SearchForm({
     if (dateFrom) p.set("dateFrom", dateFrom);
     if (dateTo) p.set("dateTo", dateTo);
 
-    // Advanced filters (all mode)
+    // Advanced filters
     const kind = formData.get("kind") as string;
     const status = formData.get("status") as string;
     const trustLevel = formData.get("trustLevel") as string;
@@ -83,7 +83,7 @@ export function SearchForm({
     if (status) p.set("status", status);
     if (trustLevel) p.set("trustLevel", trustLevel);
     if (target && target !== "all") p.set("target", target);
-    if (advEntityIds && mode === "all") p.set("entityIds", advEntityIds);
+    if (advEntityIds) p.set("entityIds", advEntityIds);
 
     // Preserve view
     const view = searchParams.get("view");
