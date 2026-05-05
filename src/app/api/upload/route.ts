@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { uploadToDrive, isDriveEnabled } from "@/lib/drive";
+import { generateAndUploadThumbnails } from "@/lib/thumbnails";
 import { createHash } from "crypto";
 import { NextResponse } from "next/server";
 import type { AssetKind, StorageProvider } from "@prisma/client";
@@ -78,10 +79,6 @@ export async function POST(request: Request) {
     );
   }
 
-  if (kind === "image" && storageUrl) {
-    thumbnailUrl = storageUrl;
-  }
-
   const asset = await prisma.asset.create({
     data: {
       kind,
@@ -101,6 +98,17 @@ export async function POST(request: Request) {
       updatedById: session.user.id,
     },
   });
+
+  // Generate R2 thumbnails for images (async, non-blocking for response)
+  if (kind === "image") {
+    const r2Url = await generateAndUploadThumbnails(asset.id, buffer);
+    if (r2Url) {
+      await prisma.asset.update({
+        where: { id: asset.id },
+        data: { thumbnailUrl: r2Url },
+      });
+    }
+  }
 
   await prisma.auditLog.create({
     data: {
