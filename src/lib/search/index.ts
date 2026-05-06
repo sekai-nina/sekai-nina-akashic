@@ -26,6 +26,7 @@ export interface SearchResultItem {
   thumbnailUrl: string | null;
   storageUrl: string | null;
   snippets: string[];
+  matchCount: number;
   matchField: string;
   score: number;
   createdAt: Date;
@@ -57,9 +58,9 @@ export interface SearchResult {
  * Find all occurrences of query terms in text and return snippets.
  * Nearby occurrences are merged into a single snippet.
  */
-function buildSnippets(text: string, query: string, contextLen = 80): string[] {
+function buildSnippets(text: string, query: string, contextLen = 80): { snippets: string[]; matchCount: number } {
   const terms = query.split("|").map((t) => t.trim()).filter(Boolean);
-  if (terms.length === 0) return [text.slice(0, contextLen * 2) + (text.length > contextLen * 2 ? "…" : "")];
+  if (terms.length === 0) return { snippets: [text.slice(0, contextLen * 2) + (text.length > contextLen * 2 ? "…" : "")], matchCount: 0 };
 
   const lower = text.toLowerCase();
 
@@ -77,7 +78,7 @@ function buildSnippets(text: string, query: string, contextLen = 80): string[] {
   }
 
   if (positions.length === 0) {
-    return [text.slice(0, contextLen * 2) + (text.length > contextLen * 2 ? "…" : "")];
+    return { snippets: [text.slice(0, contextLen * 2) + (text.length > contextLen * 2 ? "…" : "")], matchCount: 0 };
   }
 
   // Sort by position
@@ -98,13 +99,15 @@ function buildSnippets(text: string, query: string, contextLen = 80): string[] {
     }
   }
 
-  return ranges.map((range) => {
+  const snippets = ranges.map((range) => {
     let snippet = "";
     if (range.start > 0) snippet += "…";
     snippet += text.slice(range.start, range.end);
     if (range.end < text.length) snippet += "…";
     return snippet;
   });
+
+  return { snippets, matchCount: positions.length };
 }
 
 /** Fetch person entity names for a list of asset IDs */
@@ -232,7 +235,7 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
         assetStatus: row.status,
         thumbnailUrl: resolveImageUrl(row.thumbnailUrl, row.storageProvider, row.storageKey, row.kind),
         storageUrl: row.storageUrl,
-        snippets: hasKeyword ? buildSnippets(matchText, q) : [row.title],
+        ...(hasKeyword ? buildSnippets(matchText, q) : { snippets: [row.title], matchCount: 0 }),
         matchField,
         score: titleMatch ? 3 : descMatch ? 2 : previewMatch ? 1 : 0,
         createdAt: row.createdAt,
@@ -289,7 +292,7 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
         assetStatus: row.asset_status,
         thumbnailUrl: resolveImageUrl(row.asset_thumbnailUrl, row.asset_storageProvider, row.asset_storageKey, row.asset_kind),
         storageUrl: row.asset_storageUrl,
-        snippets: buildSnippets(row.content, q),
+        ...buildSnippets(row.content, q),
         matchField: row.textType,
         score: 1,
         createdAt: row.asset_createdAt,
@@ -347,6 +350,7 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
           thumbnailUrl: resolveImageUrl(row.asset_thumbnailUrl, row.asset_storageProvider, row.asset_storageKey, row.asset_kind),
           storageUrl: row.asset_storageUrl,
           snippets: [`タグ/人物: ${row.entity_name}`],
+          matchCount: 1,
           matchField: "entity",
           score: 2,
           createdAt: row.asset_createdAt,

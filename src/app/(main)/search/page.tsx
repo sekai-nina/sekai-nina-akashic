@@ -157,7 +157,13 @@ export default async function SearchPage({
       {results && (
         <>
           <div className="flex items-center justify-between mb-3">
-            <span className="text-sm text-slate-500">{results.total} 件</span>
+            <span className="text-sm text-slate-500">
+              {results.total} 件
+              {q && (() => {
+                const totalMatches = results.items.reduce((sum, item) => sum + item.matchCount, 0);
+                return totalMatches > results.total ? ` (${totalMatches} 箇所)` : "";
+              })()}
+            </span>
             <div className="flex gap-1">
               <Link scroll={false} href={buildUrl({ view: "list", page: "1" })}
                 className={`px-3 py-1 rounded text-sm border transition-colors ${effectiveView === "list" ? "bg-slate-700 text-white border-slate-700" : "border-slate-300 text-slate-600 hover:bg-slate-50"}`}>
@@ -208,13 +214,13 @@ export default async function SearchPage({
                       <span className="text-sm font-medium text-slate-900">{item.assetTitle}</span>
                       <KindBadge kind={item.assetKind} />
                       <span className="text-xs text-slate-400">{MATCH_FIELD_LABELS[item.matchField] ?? item.matchField}</span>
-                      {item.snippets.length > 1 && (
-                        <span className="text-xs text-blue-500 font-medium">×{item.snippets.length}</span>
+                      {item.matchCount > 1 && (
+                        <span className="text-xs text-blue-500 font-medium">×{item.matchCount}</span>
                       )}
                     </div>
                     <div className="mt-1 space-y-0.5">
                       {item.snippets.map((snip, si) => (
-                        <p key={si} className="text-xs text-slate-500 line-clamp-2">
+                        <p key={si} className="text-xs text-slate-500">
                           <HighlightedSnippet text={snip} query={q} />
                         </p>
                       ))}
