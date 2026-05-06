@@ -99,14 +99,11 @@ export function AnalysisClient({ entities, defaultPersonId }: Props) {
     "volume" | "avgLength"
   >("volume");
 
-  const allEntityIds = [
-    ...(personId ? [personId] : []),
-    ...tagIds,
-  ];
   const filters = {
     sourceType: sourceType || undefined,
     textTypes: textTypes.length > 0 ? textTypes : undefined,
-    entityIds: allEntityIds.length > 0 ? allEntityIds : undefined,
+    personId: personId || undefined,
+    tagIds: tagIds.length > 0 ? tagIds : undefined,
     dateFrom: dateFrom || undefined,
     dateTo: dateTo || undefined,
     granularity,

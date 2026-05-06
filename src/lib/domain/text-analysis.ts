@@ -4,7 +4,8 @@ import { Prisma } from "@prisma/client";
 export interface AnalysisFilters {
   sourceType?: string;
   textTypes?: string[];
-  entityIds?: string[];
+  personId?: string;
+  tagIds?: string[];
   dateFrom?: string;
   dateTo?: string;
   granularity?: "month" | "week";
@@ -44,12 +45,22 @@ function buildConditions(filters: AnalysisFilters): Prisma.Sql {
     );
   }
 
-  if (filters.entityIds && filters.entityIds.length > 0) {
+  if (filters.personId) {
     conditions.push(
       Prisma.sql`EXISTS (
         SELECT 1 FROM "AssetEntity" ae
         WHERE ae."assetId" = a.id
-          AND ae."entityId"::text = ANY(${filters.entityIds})
+          AND ae."entityId" = ${filters.personId}
+      )`
+    );
+  }
+
+  if (filters.tagIds && filters.tagIds.length > 0) {
+    conditions.push(
+      Prisma.sql`EXISTS (
+        SELECT 1 FROM "AssetEntity" ae
+        WHERE ae."assetId" = a.id
+          AND ae."entityId"::text = ANY(${filters.tagIds})
       )`
     );
   }
