@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
   ResponsiveContainer,
   LineChart,
@@ -72,6 +73,7 @@ interface Props {
 }
 
 export function AnalysisClient({ entities, defaultPersonId }: Props) {
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
   // Filter state
@@ -143,6 +145,53 @@ export function AnalysisClient({ entities, defaultPersonId }: Props) {
       return bucket.slice(2, 10).replace(/-/g, "/");
     }
     return bucket.slice(0, 7).replace("-", "/");
+  }
+
+  function bucketToDateRange(bucket: string) {
+    const start = new Date(bucket);
+    let end: Date;
+    if (granularity === "month") {
+      end = new Date(start.getFullYear(), start.getMonth() + 1, 0);
+    } else {
+      end = new Date(start.getTime() + 6 * 24 * 60 * 60 * 1000);
+    }
+    return {
+      dateFrom: bucket,
+      dateTo: end.toISOString().slice(0, 10),
+    };
+  }
+
+  function navigateToSearch(bucket: string, word?: string) {
+    const { dateFrom: df, dateTo: dt } = bucketToDateRange(bucket);
+    const params = new URLSearchParams();
+    if (word) params.set("q", word);
+    params.set("mode", "text");
+    params.set("target", "texts");
+    params.set("dateFrom", df);
+    params.set("dateTo", dt);
+    if (sourceType) params.set("sourceType", sourceType);
+    const eIds = [
+      ...(personId ? [personId] : []),
+      ...tagIds,
+    ];
+    if (eIds.length > 0) params.set("entityIds", eIds.join(","));
+    router.push(`/search?${params.toString()}`);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function handleWordChartClick(state: any) {
+    const bucket = state?.activeLabel as string | undefined;
+    if (!bucket) return;
+    // Use first word as search query
+    const firstWord = wordData?.frequency.labels[0];
+    navigateToSearch(bucket, firstWord);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function handleVolumeChartClick(state: any) {
+    const bucket = state?.activeLabel as string | undefined;
+    if (!bucket) return;
+    navigateToSearch(bucket);
   }
 
   const personEntities = entities.filter((e) => e.type === "person");
@@ -361,6 +410,8 @@ export function AnalysisClient({ entities, defaultPersonId }: Props) {
                     ? wordData.frequency.points
                     : wordData.rate.points
                 }
+                onClick={handleWordChartClick}
+                style={{ cursor: "pointer" }}
               >
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis
@@ -397,11 +448,12 @@ export function AnalysisClient({ entities, defaultPersonId }: Props) {
             </ResponsiveContainer>
           </div>
 
-          {wordChartTab === "rate" && (
-            <p className="text-xs text-slate-400 mt-2">
-              各期間の投稿のうち、そのワードを含む投稿の割合（%）
-            </p>
-          )}
+          <p className="text-xs text-slate-400 mt-2">
+            {wordChartTab === "rate"
+              ? "各期間の投稿のうち、そのワードを含む投稿の割合（%）・"
+              : ""}
+            クリックで該当期間の実データを検索
+          </p>
         </div>
       )}
 
@@ -439,7 +491,7 @@ export function AnalysisClient({ entities, defaultPersonId }: Props) {
           <div className="h-80">
             {volumeChartTab === "volume" ? (
               <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={volumeData}>
+                <ComposedChart data={volumeData} onClick={handleVolumeChartClick} style={{ cursor: "pointer" }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                   <XAxis
                     dataKey="bucket"
@@ -498,7 +550,7 @@ export function AnalysisClient({ entities, defaultPersonId }: Props) {
               </ResponsiveContainer>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={volumeData}>
+                <LineChart data={volumeData} onClick={handleVolumeChartClick} style={{ cursor: "pointer" }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                   <XAxis
                     dataKey="bucket"
@@ -532,6 +584,9 @@ export function AnalysisClient({ entities, defaultPersonId }: Props) {
               </ResponsiveContainer>
             )}
           </div>
+          <p className="text-xs text-slate-400 mt-2">
+            クリックで該当期間の実データを検索
+          </p>
         </div>
       )}
 
