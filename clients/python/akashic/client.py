@@ -333,6 +333,60 @@ class AkashicClient:
         )
 
     # ------------------------------------------------------------------
+    # Relations
+    # ------------------------------------------------------------------
+
+    def list_relations(
+        self,
+        asset_id: str,
+        *,
+        relation_type: str | None = None,
+    ) -> dict[str, Any]:
+        """アセットのリレーション一覧を取得する。
+
+        Returns:
+            {"asSource": [...], "asTarget": [...]}
+        """
+        return self._request(
+            "GET",
+            f"/assets/{asset_id}/relations",
+            params={"relationType": relation_type},
+        )
+
+    def create_relation(
+        self,
+        source_id: str,
+        target_id: str,
+        relation_type: str,
+        *,
+        metadata: dict[str, Any] | None = None,
+        sort_order: int = 0,
+    ) -> dict[str, Any]:
+        """アセット間のリレーションを作成する。
+
+        Args:
+            source_id: 親・元側のアセットID
+            target_id: 子・先側のアセットID
+            relation_type: "parent_child", "derived_from", "reference", "same_content"
+        """
+        body: dict[str, Any] = {
+            "targetId": target_id,
+            "relationType": relation_type,
+            "sortOrder": sort_order,
+        }
+        if metadata:
+            body["metadata"] = metadata
+        return self._request("POST", f"/assets/{source_id}/relations", json=body)
+
+    def delete_relation(
+        self, asset_id: str, relation_id: str
+    ) -> dict[str, Any]:
+        """リレーションを削除する。"""
+        return self._request(
+            "DELETE", f"/assets/{asset_id}/relations/{relation_id}"
+        )
+
+    # ------------------------------------------------------------------
     # Upload
     # ------------------------------------------------------------------
 

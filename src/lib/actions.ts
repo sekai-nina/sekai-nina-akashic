@@ -8,8 +8,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
 import { invalidateAssets, invalidateEntities, invalidateCollections } from "@/lib/cache";
 import { redirect, RedirectType } from "next/navigation";
-import type { AssetKind, AssetStatus, TrustLevel, SourceType, StorageProvider, EntityType, TextType, SourceKind, AnnotationKind } from "@prisma/client";
+import type { AssetKind, AssetStatus, TrustLevel, SourceType, StorageProvider, EntityType, TextType, SourceKind, AnnotationKind, RelationType } from "@prisma/client";
 import { backupAssetToDrive } from "@/lib/drive";
+import { createAssetRelation, deleteAssetRelation } from "@/lib/domain/relations";
 
 async function requireUser() {
   const session = await auth();
@@ -131,6 +132,35 @@ export async function updateAssetStatus(id: string, status: AssetStatus) {
   revalidatePath(`/assets/${id}`);
   revalidatePath("/assets");
   revalidatePath("/inbox");
+}
+
+// ========== Asset Relations ==========
+
+export async function addAssetRelation(sourceId: string, formData: FormData) {
+  const user = await requireRole(["admin", "member"]);
+  const targetId = (formData.get("targetId") as string)?.trim();
+  const relationType = formData.get("relationType") as RelationType;
+
+  if (!targetId || !relationType) return;
+
+  await createAssetRelation(
+    { sourceId, targetId, relationType },
+    user.id,
+  );
+
+  invalidateAssets();
+  revalidatePath(`/assets/${sourceId}`);
+  revalidatePath(`/assets/${targetId}`);
+}
+
+export async function removeAssetRelation(relationId: string, assetId: string) {
+  const user = await requireRole(["admin", "member"]);
+  const relation = await deleteAssetRelation(relationId, user.id);
+
+  invalidateAssets();
+  revalidatePath(`/assets/${relation.sourceId}`);
+  revalidatePath(`/assets/${relation.targetId}`);
+  revalidatePath(`/assets/${assetId}`);
 }
 
 // ========== Entities ==========

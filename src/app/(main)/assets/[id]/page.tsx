@@ -6,18 +6,22 @@ import {
   addAssetText,
   addSourceRecord,
   addToCollection,
+  addAssetRelation,
 } from "@/lib/actions";
 import {
   ASSET_KIND_LABELS,
   ASSET_STATUS_LABELS,
   TRUST_LEVEL_LABELS,
   ENTITY_TYPE_LABELS,
+  RELATION_TYPE_LABELS,
   formatDate,
 } from "@/lib/utils";
+import { getAssetRelations } from "@/lib/domain/relations";
 import { SubmitButton } from "@/components/submit-button";
 import { BackButton } from "@/components/back-button";
 import { StatusWorkflow } from "./status-workflow";
 import { CopySourceRef } from "./copy-source-ref";
+import { ParentAssets, ChildAssets } from "./related-assets";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -142,7 +146,7 @@ export default async function AssetDetailPage({
   const { id } = await params;
   const session = await auth();
 
-  const [asset, collections] = await Promise.all([
+  const [asset, collections, relations] = await Promise.all([
     prisma.asset.findUnique({
       where: { id },
       include: {
@@ -160,6 +164,7 @@ export default async function AssetDetailPage({
           orderBy: { name: "asc" },
         })
       : Promise.resolve([]),
+    getAssetRelations(id),
   ]);
 
   if (!asset) notFound();
@@ -330,6 +335,82 @@ export default async function AssetDetailPage({
 
       {/* Status workflow */}
       <StatusWorkflow assetId={id} initialStatus={asset.status} />
+
+      {/* Parent assets */}
+      <ParentAssets
+        relations={relations.asTarget.map((r) => ({
+          id: r.id,
+          relationType: r.relationType,
+          sortOrder: r.sortOrder,
+          asset: r.source,
+        }))}
+        currentAssetId={id}
+      />
+
+      {/* Child / related assets */}
+      <ChildAssets
+        relations={relations.asSource.map((r) => ({
+          id: r.id,
+          relationType: r.relationType,
+          sortOrder: r.sortOrder,
+          asset: r.target,
+        }))}
+        currentAssetId={id}
+      />
+
+      {/* Add relation form */}
+      <div className="bg-white border border-slate-200 rounded-lg p-5">
+        <h2 className="text-sm font-semibold text-slate-700 mb-3">
+          リレーション
+          {(relations.asSource.length + relations.asTarget.length) > 0 && (
+            <span className="text-slate-400 font-normal ml-1">
+              ({relations.asSource.length + relations.asTarget.length})
+            </span>
+          )}
+        </h2>
+        {relations.asSource.length === 0 && relations.asTarget.length === 0 && (
+          <p className="text-sm text-slate-400 mb-3">リレーションなし</p>
+        )}
+        <details className="border border-slate-200 rounded p-3">
+          <summary className="text-sm text-slate-600 cursor-pointer hover:text-slate-800">リレーションを追加</summary>
+          <form action={addAssetRelation.bind(null, id)} className="mt-3 flex flex-wrap gap-3 items-end">
+            <div className="flex-1 min-w-[200px]">
+              <label className="block text-xs text-slate-500 mb-1">対象アセットID <span className="text-red-500">*</span></label>
+              <input
+                type="text"
+                name="targetId"
+                required
+                className="w-full border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                placeholder="cuid..."
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-500 mb-1">種別</label>
+              <select
+                name="relationType"
+                className="border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {Object.entries(RELATION_TYPE_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </div>
+            <SubmitButton className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700 transition-colors">
+              追加
+            </SubmitButton>
+          </form>
+        </details>
+        {(relations.asSource.length > 0 || relations.asTarget.length > 0) && (
+          <div className="mt-3">
+            <Link
+              href={`/graph?assetId=${id}`}
+              className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
+            >
+              グラフで表示 →
+            </Link>
+          </div>
+        )}
+      </div>
 
       {/* Source Records section — moved up for quick access */}
       <div className="bg-white border border-slate-200 rounded-lg p-5">
