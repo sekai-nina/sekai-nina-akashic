@@ -67,10 +67,9 @@ def main() -> None:
     errors = 0
 
     while True:
-        result = akashic.search(
-            "hinatazaka46.com/s/official/diary",
-            target="source",
+        result = akashic.list_assets(
             kind="text",
+            source_type="web",
             page=page,
             per_page=per_page,
         )
@@ -82,7 +81,7 @@ def main() -> None:
             if args.limit and processed >= args.limit:
                 break
 
-            asset_id = item.get("assetId") or item.get("id")
+            asset_id = item.get("id")
             if not asset_id:
                 continue
 
