@@ -116,7 +116,7 @@ export function GalleryGrid({
         <div className="space-y-8">
           {[...groups.entries()].map(([month, groupItems]) => (
             <div key={month}>
-              <h2 className="text-sm font-semibold text-slate-500 mb-3 sticky top-0 bg-slate-50 py-1 z-[1]">
+              <h2 className="text-sm font-semibold text-slate-500 mb-3 sticky top-0 bg-slate-50 py-1 z-[1] backdrop-blur-sm border-b border-slate-200/50">
                 {month}
               </h2>
               <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-1.5">

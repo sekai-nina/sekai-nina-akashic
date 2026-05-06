@@ -138,11 +138,10 @@ export default async function AssetDetailPage({
 
   const isImage = asset.kind === "image";
   let previewUrl = asset.thumbnailUrl;
-  if (isImage) {
+  if (isImage && !previewUrl) {
     if (asset.storageProvider === "gdrive" && asset.storageKey) {
-      // Drive の webViewLink は img src に使えないのでプロキシ経由にする
       previewUrl = `/api/drive-image/${asset.storageKey}`;
-    } else if (!previewUrl) {
+    } else {
       previewUrl = asset.storageUrl;
     }
   }
