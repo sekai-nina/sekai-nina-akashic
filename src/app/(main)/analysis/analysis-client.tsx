@@ -51,11 +51,11 @@ interface EntityOption {
 interface WordAnalysisResult {
   frequency: {
     points: Record<string, string | number>[];
-    words: string[];
+    labels: string[];
   };
   rate: {
     points: Record<string, string | number>[];
-    words: string[];
+    labels: string[];
   };
 }
 
@@ -112,19 +112,26 @@ export function AnalysisClient({ entities, defaultPersonId }: Props) {
     granularity,
   };
 
+  function parseWordGroups(input: string) {
+    return input
+      .split(/[,、]+/)
+      .map((group) => group.trim())
+      .filter(Boolean)
+      .map((group) => {
+        const variants = group
+          .split("/")
+          .map((v) => v.trim())
+          .filter(Boolean);
+        return { label: variants[0], variants };
+      });
+  }
+
   function handleAnalyze() {
-    const words = [
-      ...new Set(
-        wordInput
-          .split(/[,、\s]+/)
-          .map((w) => w.trim())
-          .filter(Boolean)
-      ),
-    ];
+    const groups = parseWordGroups(wordInput);
 
     startTransition(async () => {
       const [wordResult, volumeResult] = await Promise.all([
-        words.length > 0 ? analyzeWords(words, filters) : null,
+        groups.length > 0 ? analyzeWords(groups, filters) : null,
         analyzeVolume(filters),
       ]);
 
@@ -304,7 +311,7 @@ export function AnalysisClient({ entities, defaultPersonId }: Props) {
             type="text"
             value={wordInput}
             onChange={(e) => setWordInput(e.target.value)}
-            placeholder="追跡するワードをカンマ区切りで入力（例: ライブ, レッスン, 楽しい）"
+            placeholder="ワードをカンマ区切り、エイリアスは/区切り（例: 世界/せかい/セカイ/🌍, ライブ/らいぶ）"
             className="flex-1 border border-slate-300 rounded px-3 py-2 text-sm"
             onKeyDown={(e) => e.key === "Enter" && handleAnalyze()}
           />
@@ -319,7 +326,7 @@ export function AnalysisClient({ entities, defaultPersonId }: Props) {
       </div>
 
       {/* Word frequency charts */}
-      {wordData && wordData.frequency.words.length > 0 && (
+      {wordData && wordData.frequency.labels.length > 0 && (
         <div className="bg-white border border-slate-200 rounded-lg p-4">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-slate-700">
@@ -378,7 +385,7 @@ export function AnalysisClient({ entities, defaultPersonId }: Props) {
                   ]}
                 />
                 <Legend />
-                {wordData.frequency.words.map((word, i) => (
+                {wordData.frequency.labels.map((word, i) => (
                   <Line
                     key={word}
                     type="monotone"

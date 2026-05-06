@@ -6,17 +6,21 @@ import {
   getWordAppearanceRate,
   getVolumeOverTime,
   type AnalysisFilters,
+  type WordGroup,
 } from "@/lib/domain/text-analysis";
 
-export async function analyzeWords(words: string[], filters: AnalysisFilters) {
+export async function analyzeWords(
+  groups: WordGroup[],
+  filters: AnalysisFilters
+) {
   const session = await auth();
   if (!session?.user) throw new Error("Unauthorized");
 
-  const uniqueWords = [...new Set(words)].slice(0, 8);
+  const limited = groups.slice(0, 8);
 
   const [frequency, rate] = await Promise.all([
-    getWordFrequencyOverTime(uniqueWords, filters),
-    getWordAppearanceRate(uniqueWords, filters),
+    getWordFrequencyOverTime(limited, filters),
+    getWordAppearanceRate(limited, filters),
   ]);
 
   return { frequency, rate };

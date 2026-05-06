@@ -10,6 +10,11 @@ export interface AnalysisFilters {
   granularity?: "month" | "week";
 }
 
+export interface WordGroup {
+  label: string;
+  variants: string[];
+}
+
 function buildConditions(filters: AnalysisFilters): Prisma.Sql {
   const conditions: Prisma.Sql[] = [];
 
@@ -54,33 +59,48 @@ function buildConditions(filters: AnalysisFilters): Prisma.Sql {
     : Prisma.empty;
 }
 
+/** Build SQL expression that sums occurrence counts for all variants */
+function buildVariantCountExpr(variants: string[]): Prisma.Sql {
+  const exprs = variants.map(
+    (v) =>
+      Prisma.sql`(LENGTH(t.content) - LENGTH(REPLACE(t.content, ${v}, ''))) / GREATEST(LENGTH(${v}), 1)`
+  );
+  return Prisma.sql`(${Prisma.join(exprs, " + ")})`;
+}
+
+/** Build SQL expression that checks if any variant appears in content */
+function buildVariantMatchExpr(variants: string[]): Prisma.Sql {
+  const checks = variants.map(
+    (v) => Prisma.sql`POSITION(${v} IN t.content) > 0`
+  );
+  return Prisma.sql`(${Prisma.join(checks, " OR ")})`;
+}
+
 export async function getWordFrequencyOverTime(
-  words: string[],
+  groups: WordGroup[],
   filters: AnalysisFilters
-): Promise<{ points: Record<string, string | number>[]; words: string[] }> {
-  if (words.length === 0) return { points: [], words: [] };
+): Promise<{ points: Record<string, string | number>[]; labels: string[] }> {
+  if (groups.length === 0) return { points: [], labels: [] };
 
   const where = buildConditions(filters);
   const trunc = filters.granularity === "week" ? "week" : "month";
 
   const results = await Promise.all(
-    words.map(async (word) => {
+    groups.map(async (group) => {
+      const countExpr = buildVariantCountExpr(group.variants);
       const rows = await prisma.$queryRaw<
         Array<{ bucket: Date; count: bigint }>
       >`
         SELECT
           date_trunc(${trunc}, COALESCE(a."canonicalDate", a."createdAt")) AS bucket,
-          SUM(
-            (LENGTH(t.content) - LENGTH(REPLACE(t.content, ${word}, '')))
-            / GREATEST(LENGTH(${word}), 1)
-          )::bigint AS count
+          SUM(${countExpr})::bigint AS count
         FROM "AssetText" t
         JOIN "Asset" a ON a.id = t."assetId"
         ${where}
         GROUP BY bucket
         ORDER BY bucket
       `;
-      return { word, rows };
+      return { label: group.label, rows };
     })
   );
 
@@ -92,31 +112,33 @@ export async function getWordFrequencyOverTime(
   }
 
   const sortedBuckets = [...allBuckets].sort();
+  const labels = groups.map((g) => g.label);
   const points = sortedBuckets.map((bucket) => {
     const point: Record<string, string | number> = { bucket };
-    for (const { word, rows } of results) {
+    for (const { label, rows } of results) {
       const row = rows.find(
         (r) => r.bucket.toISOString().slice(0, 10) === bucket
       );
-      point[word] = row ? Number(row.count) : 0;
+      point[label] = row ? Number(row.count) : 0;
     }
     return point;
   });
 
-  return { points, words };
+  return { points, labels };
 }
 
 export async function getWordAppearanceRate(
-  words: string[],
+  groups: WordGroup[],
   filters: AnalysisFilters
-): Promise<{ points: Record<string, string | number>[]; words: string[] }> {
-  if (words.length === 0) return { points: [], words: [] };
+): Promise<{ points: Record<string, string | number>[]; labels: string[] }> {
+  if (groups.length === 0) return { points: [], labels: [] };
 
   const where = buildConditions(filters);
   const trunc = filters.granularity === "week" ? "week" : "month";
 
   const results = await Promise.all(
-    words.map(async (word) => {
+    groups.map(async (group) => {
+      const matchExpr = buildVariantMatchExpr(group.variants);
       const rows = await prisma.$queryRaw<
         Array<{
           bucket: Date;
@@ -126,9 +148,7 @@ export async function getWordAppearanceRate(
       >`
         SELECT
           date_trunc(${trunc}, COALESCE(a."canonicalDate", a."createdAt")) AS bucket,
-          COUNT(DISTINCT CASE
-            WHEN POSITION(${word} IN t.content) > 0 THEN a.id
-          END)::bigint AS posts_with_word,
+          COUNT(DISTINCT CASE WHEN ${matchExpr} THEN a.id END)::bigint AS posts_with_word,
           COUNT(DISTINCT a.id)::bigint AS total_posts
         FROM "AssetText" t
         JOIN "Asset" a ON a.id = t."assetId"
@@ -136,7 +156,7 @@ export async function getWordAppearanceRate(
         GROUP BY bucket
         ORDER BY bucket
       `;
-      return { word, rows };
+      return { label: group.label, rows };
     })
   );
 
@@ -148,25 +168,26 @@ export async function getWordAppearanceRate(
   }
 
   const sortedBuckets = [...allBuckets].sort();
+  const labels = groups.map((g) => g.label);
   const points = sortedBuckets.map((bucket) => {
     const point: Record<string, string | number> = { bucket };
-    for (const { word, rows } of results) {
+    for (const { label, rows } of results) {
       const row = rows.find(
         (r) => r.bucket.toISOString().slice(0, 10) === bucket
       );
       if (row && Number(row.total_posts) > 0) {
-        point[word] =
+        point[label] =
           Math.round(
             (Number(row.posts_with_word) / Number(row.total_posts)) * 1000
           ) / 10;
       } else {
-        point[word] = 0;
+        point[label] = 0;
       }
     }
     return point;
   });
 
-  return { points, words };
+  return { points, labels };
 }
 
 export async function getVolumeOverTime(
