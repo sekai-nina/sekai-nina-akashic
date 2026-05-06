@@ -16,6 +16,7 @@ import {
   Home,
   Tag,
   MessageCircle,
+  Image,
 } from "lucide-react";
 import { QuickCreateModal } from "@/components/quick-create-modal";
 
@@ -27,6 +28,7 @@ const navItems = [
   { href: "/", label: "ダッシュボード", icon: Home, exact: true },
   { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/assets", label: "Assets", icon: Archive },
+  { href: "/gallery", label: "ギャラリー", icon: Image },
   { href: "/entities", label: "エンティティ", icon: Tag },
   { href: "/testimonials", label: "口コミ管理", icon: MessageCircle },
   { href: "/collections", label: "コレクション", icon: FolderOpen },

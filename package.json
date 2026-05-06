@@ -17,7 +17,8 @@
     "cli:keygen": "tsx src/cli/generate-api-key.ts",
     "cli:import": "tsx src/cli/import-assets.ts",
     "cli:backup": "tsx src/cli/backup.ts",
-    "cli:restore": "tsx src/cli/restore.ts"
+    "cli:restore": "tsx src/cli/restore.ts",
+    "cli:thumbnails": "tsx src/cli/generate-thumbnails.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -27,6 +28,7 @@
   "license": "ISC",
   "packageManager": "pnpm@10.28.2",
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1042.0",
     "@prisma/client": "^6.19.2",
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.105.1",
@@ -43,6 +45,7 @@
     "prisma": "^6.19.2",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "sharp": "^0.34.5",
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "^4.2.1",
     "zod": "^4.3.6"

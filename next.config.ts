@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["@prisma/client", "kuromoji"],
+  serverExternalPackages: ["@prisma/client", "kuromoji", "sharp"],
   typescript: {
     ignoreBuildErrors: true,
   },
