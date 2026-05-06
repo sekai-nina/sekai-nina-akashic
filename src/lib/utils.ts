@@ -7,6 +7,7 @@ export function cn(...inputs: ClassValue[]) {
 
 export function normalizeText(text: string): string {
   return text
+    .replace(/\{\{IMG:[a-zA-Z0-9_-]+\}\}/g, "")
     .toLowerCase()
     .normalize("NFKC")
     .replace(/[\s\u3000]+/g, " ")
