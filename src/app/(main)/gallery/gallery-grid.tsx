@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Loader2, X, ChevronLeft, ChevronRight } from "lucide-react";
+import { Loader2, X, ChevronLeft, ChevronRight, Download } from "lucide-react";
 import Link from "next/link";
 
 interface GalleryItem {
@@ -90,11 +90,20 @@ export function GalleryGrid({
 
   const groups = groupByMonth(items);
 
-  function getFullImageUrl(item: GalleryItem): string {
+  function getGalleryImageUrl(item: GalleryItem): string {
+    // Use R2 thumbnail (640px webp) for viewing — fast and sufficient quality
+    if (item.thumbnailUrl) return item.thumbnailUrl;
     if (item.storageProvider === "gdrive" && item.storageKey) {
       return `/api/drive-image/${item.storageKey}`;
     }
-    return item.thumbnailUrl ?? "";
+    return "";
+  }
+
+  function getDownloadUrl(item: GalleryItem): string | null {
+    if (item.storageProvider === "gdrive" && item.storageKey) {
+      return `/api/drive-image/${item.storageKey}?download=1`;
+    }
+    return null;
   }
 
   return (
@@ -181,7 +190,7 @@ export function GalleryGrid({
 
           {/* Image */}
           <img
-            src={getFullImageUrl(items[lightbox])}
+            src={getGalleryImageUrl(items[lightbox])}
             alt={items[lightbox].title}
             className="max-h-[90vh] max-w-[90vw] object-contain"
           />
@@ -195,6 +204,16 @@ export function GalleryGrid({
               <span className="text-white/60 text-xs">
                 {new Date(items[lightbox].canonicalDate ?? items[lightbox].createdAt).toLocaleDateString("ja-JP")}
               </span>
+              {getDownloadUrl(items[lightbox]) && (
+                <a
+                  href={getDownloadUrl(items[lightbox])!}
+                  className="text-white/60 hover:text-white text-xs flex items-center gap-1"
+                  download
+                >
+                  <Download size={12} />
+                  原寸DL
+                </a>
+              )}
               <Link
                 href={`/assets/${items[lightbox].id}`}
                 className="text-blue-400 text-xs hover:text-blue-300"

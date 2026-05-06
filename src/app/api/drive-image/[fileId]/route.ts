@@ -37,6 +37,9 @@ export async function GET(
   }
 
   const { fileId } = await params;
+  const { searchParams } = new URL(_request.url);
+  const isDownload = searchParams.has("download");
+
   if (!fileId || fileId.includes("..")) {
     return NextResponse.json({ error: "Invalid fileId" }, { status: 400 });
   }
@@ -57,22 +60,26 @@ export async function GET(
       { responseType: "arraybuffer" }
     );
 
-    // Get file metadata for content type
+    // Get file metadata for content type and name
     const meta = await drive.files.get({
       fileId,
-      fields: "mimeType",
+      fields: "mimeType,name",
       supportsAllDrives: true,
     });
 
     const buffer = Buffer.from(res.data as ArrayBuffer);
     const contentType = meta.data.mimeType || "application/octet-stream";
+    const headers: Record<string, string> = {
+      "Content-Type": contentType,
+      "Cache-Control": "public, max-age=3600",
+    };
 
-    return new NextResponse(buffer, {
-      headers: {
-        "Content-Type": contentType,
-        "Cache-Control": "public, max-age=3600",
-      },
-    });
+    if (isDownload) {
+      const filename = meta.data.name || `${fileId}`;
+      headers["Content-Disposition"] = `attachment; filename="${filename}"`;
+    }
+
+    return new NextResponse(buffer, { headers });
   } catch (err: unknown) {
     console.error("Drive image proxy error:", err);
     const detail =
