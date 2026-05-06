@@ -32,6 +32,7 @@ export interface SearchResultItem {
   createdAt: Date;
   canonicalDate: Date | null;
   personNames: string[];
+  tagNames: string[];
 }
 
 /** Drive の直リンクをプロキシURLに変換する */
@@ -110,27 +111,30 @@ function buildSnippets(text: string, query: string, contextLen = 80): { snippets
   return { snippets, matchCount: positions.length };
 }
 
-/** Fetch person entity names for a list of asset IDs */
-async function getPersonNames(
+/** Fetch person and tag entity names for a list of asset IDs */
+async function getEntityNames(
   assetIds: string[]
-): Promise<Map<string, string[]>> {
-  if (assetIds.length === 0) return new Map();
+): Promise<{ persons: Map<string, string[]>; tags: Map<string, string[]> }> {
+  if (assetIds.length === 0)
+    return { persons: new Map(), tags: new Map() };
   const rows = await prisma.$queryRaw<
-    Array<{ assetId: string; name: string }>
+    Array<{ assetId: string; name: string; type: string }>
   >`
-    SELECT ae."assetId", e."canonicalName" as name
+    SELECT ae."assetId", e."canonicalName" as name, e.type
     FROM "AssetEntity" ae
     JOIN "Entity" e ON e.id = ae."entityId"
     WHERE ae."assetId"::text = ANY(${assetIds})
-      AND e.type = 'person'
+      AND e.type IN ('person', 'tag')
   `;
-  const map = new Map<string, string[]>();
+  const persons = new Map<string, string[]>();
+  const tags = new Map<string, string[]>();
   for (const row of rows) {
+    const map = row.type === "person" ? persons : tags;
     const names = map.get(row.assetId) ?? [];
     names.push(row.name);
     map.set(row.assetId, names);
   }
-  return map;
+  return { persons, tags };
 }
 
 export async function search(query: SearchQuery): Promise<SearchResult> {
@@ -155,8 +159,13 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
   if (query.status) assetWhereConditions.push(Prisma.sql`a."status" = ${query.status}::"AssetStatus"`);
   if (query.trustLevel) assetWhereConditions.push(Prisma.sql`a."trustLevel" = ${query.trustLevel}::"TrustLevel"`);
   if (query.sourceType) assetWhereConditions.push(Prisma.sql`a."sourceType" = ${query.sourceType}::"SourceType"`);
-  if (query.dateFrom) assetWhereConditions.push(Prisma.sql`a."canonicalDate" >= ${query.dateFrom}`);
-  if (query.dateTo) assetWhereConditions.push(Prisma.sql`a."canonicalDate" <= ${query.dateTo}`);
+  if (query.dateFrom) assetWhereConditions.push(Prisma.sql`COALESCE(a."canonicalDate", a."createdAt") >= ${query.dateFrom}`);
+  if (query.dateTo) {
+    // dateTo is a date without time — include the entire day
+    const endOfDay = new Date(query.dateTo);
+    endOfDay.setDate(endOfDay.getDate() + 1);
+    assetWhereConditions.push(Prisma.sql`COALESCE(a."canonicalDate", a."createdAt") < ${endOfDay}`);
+  }
 
   const baseFilter = assetWhereConditions.length > 0
     ? Prisma.sql`AND ${Prisma.join(assetWhereConditions, " AND ")}`
@@ -241,6 +250,7 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
         createdAt: row.createdAt,
         canonicalDate: row.canonicalDate,
         personNames: [],
+        tagNames: [],
       });
     }
   }
@@ -298,6 +308,7 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
         createdAt: row.asset_createdAt,
         canonicalDate: row.asset_canonicalDate,
         personNames: [],
+        tagNames: [],
       });
     }
   }
@@ -356,6 +367,7 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
           createdAt: row.asset_createdAt,
           canonicalDate: row.asset_canonicalDate,
           personNames: [],
+        tagNames: [],
         });
       }
     }
@@ -366,11 +378,12 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
 
   const sliced = results.slice(0, perPage);
 
-  // Batch fetch person names
+  // Batch fetch person and tag names
   const assetIds = [...new Set(sliced.map((r) => r.assetId))];
-  const personMap = await getPersonNames(assetIds);
+  const { persons, tags } = await getEntityNames(assetIds);
   for (const item of sliced) {
-    item.personNames = personMap.get(item.assetId) ?? [];
+    item.personNames = persons.get(item.assetId) ?? [];
+    item.tagNames = tags.get(item.assetId) ?? [];
   }
 
   return {

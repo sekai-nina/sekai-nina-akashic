@@ -225,11 +225,14 @@ export default async function SearchPage({
                         </p>
                       ))}
                     </div>
-                    <div className="flex items-center gap-2 mt-1 text-xs text-slate-400">
+                    <div className="flex items-center gap-2 mt-1 text-xs text-slate-400 flex-wrap">
                       {item.canonicalDate && <span>{formatDate(item.canonicalDate)}</span>}
                       {item.personNames.length > 0 && (
                         <span>{item.personNames.join(", ")}</span>
                       )}
+                      {item.tagNames.length > 0 && item.tagNames.map((tag) => (
+                        <span key={tag} className="bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">{tag}</span>
+                      ))}
                     </div>
                   </div>
                   <div className="shrink-0"><ScoreBar score={item.score} /></div>
