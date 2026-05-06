@@ -3,9 +3,15 @@ import { redirect } from "next/navigation";
 import { getCachedEntities } from "@/lib/cache";
 import { AnalysisClient } from "./analysis-client";
 
-export default async function AnalysisPage() {
+export default async function AnalysisPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | undefined }>;
+}) {
   const session = await auth();
   if (!session?.user) redirect("/login");
+
+  const params = await searchParams;
 
   const allEntities = await getCachedEntities();
   const entities = allEntities.map((e) => ({
@@ -24,6 +30,7 @@ export default async function AnalysisPage() {
       <AnalysisClient
         entities={entities}
         defaultPersonId={ninaEntity?.id}
+        initialParams={params}
       />
     </div>
   );

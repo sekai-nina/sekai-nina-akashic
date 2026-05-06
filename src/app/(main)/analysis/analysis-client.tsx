@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   ResponsiveContainer,
@@ -70,26 +70,43 @@ interface VolumePoint {
 interface Props {
   entities: EntityOption[];
   defaultPersonId?: string;
+  initialParams?: { [key: string]: string | undefined };
 }
 
-export function AnalysisClient({ entities, defaultPersonId }: Props) {
+export function AnalysisClient({
+  entities,
+  defaultPersonId,
+  initialParams,
+}: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const didAutoRun = useRef(false);
 
-  // Filter state
-  const [sourceType, setSourceType] = useState("");
-  const [textTypes, setTextTypes] = useState<string[]>([
-    "body",
-    "message_body",
-  ]);
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [personId, setPersonId] = useState(defaultPersonId ?? "");
-  const [tagIds, setTagIds] = useState<string[]>([]);
-  const [granularity, setGranularity] = useState<"month" | "week">("month");
+  // Initialize state from URL params or defaults
+  const [sourceType, setSourceType] = useState(
+    initialParams?.source ?? ""
+  );
+  const [textTypes, setTextTypes] = useState<string[]>(
+    initialParams?.types
+      ? initialParams.types.split(",")
+      : ["body", "message_body"]
+  );
+  const [dateFrom, setDateFrom] = useState(initialParams?.from ?? "");
+  const [dateTo, setDateTo] = useState(initialParams?.to ?? "");
+  const [personId, setPersonId] = useState(
+    initialParams?.person ?? defaultPersonId ?? ""
+  );
+  const [tagIds, setTagIds] = useState<string[]>(
+    initialParams?.tags ? initialParams.tags.split(",").filter(Boolean) : []
+  );
+  const [granularity, setGranularity] = useState<"month" | "week">(
+    initialParams?.g === "week" ? "week" : "month"
+  );
 
   // Word input
-  const [wordInput, setWordInput] = useState("");
+  const [wordInput, setWordInput] = useState(
+    initialParams?.w ?? ""
+  );
 
   // Results
   const [wordData, setWordData] = useState<WordAnalysisResult | null>(null);
@@ -125,20 +142,48 @@ export function AnalysisClient({ entities, defaultPersonId }: Props) {
       });
   }
 
-  function handleAnalyze() {
-    const groups = parseWordGroups(wordInput);
+  function persistToUrl() {
+    const p = new URLSearchParams();
+    if (personId) p.set("person", personId);
+    if (sourceType) p.set("source", sourceType);
+    if (textTypes.length > 0) p.set("types", textTypes.join(","));
+    if (dateFrom) p.set("from", dateFrom);
+    if (dateTo) p.set("to", dateTo);
+    if (tagIds.length > 0) p.set("tags", tagIds.join(","));
+    if (granularity !== "month") p.set("g", granularity);
+    if (wordInput.trim()) p.set("w", wordInput.trim());
+    const qs = p.toString();
+    router.replace(`/analysis${qs ? `?${qs}` : ""}`, { scroll: false });
+  }
 
+  function runAnalysis() {
+    const groups = parseWordGroups(wordInput);
     startTransition(async () => {
       const [wordResult, volumeResult] = await Promise.all([
         groups.length > 0 ? analyzeWords(groups, filters) : null,
         analyzeVolume(filters),
       ]);
-
       if (wordResult) setWordData(wordResult);
       else setWordData(null);
       setVolumeData(volumeResult);
     });
   }
+
+  function handleAnalyze() {
+    persistToUrl();
+    runAnalysis();
+  }
+
+  // Auto-run when returning via back button (URL has params)
+  useEffect(() => {
+    if (didAutoRun.current) return;
+    const hasParams = initialParams?.w || initialParams?.source || initialParams?.from || initialParams?.tags;
+    if (hasParams) {
+      didAutoRun.current = true;
+      runAnalysis();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function formatBucket(bucket: string) {
     if (granularity === "week") {
