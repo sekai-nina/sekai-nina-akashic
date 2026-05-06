@@ -16,12 +16,13 @@ import {
   RELATION_TYPE_LABELS,
   formatDate,
 } from "@/lib/utils";
-import { getAssetRelations } from "@/lib/domain/relations";
+import { getAssetRelations, getAssetGraph } from "@/lib/domain/relations";
 import { SubmitButton } from "@/components/submit-button";
 import { BackButton } from "@/components/back-button";
 import { StatusWorkflow } from "./status-workflow";
 import { CopySourceRef } from "./copy-source-ref";
 import { ParentAssets, ChildAssets } from "./related-assets";
+import { SubGraph } from "./sub-graph";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -146,7 +147,7 @@ export default async function AssetDetailPage({
   const { id } = await params;
   const session = await auth();
 
-  const [asset, collections, relations] = await Promise.all([
+  const [asset, collections, relations, graph] = await Promise.all([
     prisma.asset.findUnique({
       where: { id },
       include: {
@@ -165,6 +166,7 @@ export default async function AssetDetailPage({
         })
       : Promise.resolve([]),
     getAssetRelations(id),
+    getAssetGraph(id, 1),
   ]);
 
   if (!asset) notFound();
@@ -400,14 +402,30 @@ export default async function AssetDetailPage({
             </SubmitButton>
           </form>
         </details>
-        {(relations.asSource.length > 0 || relations.asTarget.length > 0) && (
-          <div className="mt-3">
-            <Link
-              href={`/graph?assetId=${id}`}
-              className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
-            >
-              グラフで表示 →
-            </Link>
+        {graph.nodes.length > 1 && (
+          <div className="mt-4">
+            <SubGraph
+              nodes={graph.nodes.map((n) => ({
+                id: n.id,
+                label: n.title,
+                kind: n.kind,
+                thumbnailUrl: n.thumbnailUrl,
+                isCurrent: n.id === id,
+              }))}
+              edges={graph.edges.map((e) => ({
+                from: e.source,
+                to: e.target,
+                relationType: e.relationType,
+              }))}
+            />
+            <div className="mt-2 text-right">
+              <Link
+                href="/graph"
+                className="text-xs text-blue-600 hover:text-blue-800 hover:underline"
+              >
+                全体グラフで見る →
+              </Link>
+            </div>
           </div>
         )}
       </div>

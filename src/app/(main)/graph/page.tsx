@@ -1,33 +1,66 @@
-import { getAssetGraph } from "@/lib/domain/relations";
-import { AssetGraph } from "./asset-graph";
+import { prisma } from "@/lib/db";
+import { FullGraph } from "./full-graph";
 
-export default async function GraphPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ assetId?: string; depth?: string }>;
-}) {
-  const { assetId, depth: depthStr } = await searchParams;
-  const depth = Math.min(parseInt(depthStr ?? "2", 10) || 2, 4);
+async function getFullGraphData() {
+  // Get all relations
+  const relations = await prisma.assetRelation.findMany({
+    select: {
+      sourceId: true,
+      targetId: true,
+      relationType: true,
+    },
+  });
 
-  if (!assetId) {
-    return (
-      <div className="flex items-center justify-center h-[calc(100vh-8rem)]">
-        <p className="text-slate-400 text-sm">
-          アセット詳細ページから「グラフで表示」を選択してください
-        </p>
-      </div>
-    );
+  if (relations.length === 0) return { nodes: [], edges: [] };
+
+  // Collect all unique asset IDs
+  const assetIds = new Set<string>();
+  for (const r of relations) {
+    assetIds.add(r.sourceId);
+    assetIds.add(r.targetId);
   }
 
-  const graph = await getAssetGraph(assetId, depth);
+  // Fetch asset summaries
+  const assets = await prisma.asset.findMany({
+    where: { id: { in: [...assetIds] } },
+    select: {
+      id: true,
+      title: true,
+      kind: true,
+      thumbnailUrl: true,
+      _count: { select: { relationsAsSource: true, relationsAsTarget: true } },
+    },
+  });
+
+  const nodes = assets.map((a) => ({
+    id: a.id,
+    label: a.title || "(無題)",
+    kind: a.kind,
+    thumbnailUrl: a.thumbnailUrl,
+    relationCount: a._count.relationsAsSource + a._count.relationsAsTarget,
+  }));
+
+  const edges = relations.map((r) => ({
+    from: r.sourceId,
+    to: r.targetId,
+    relationType: r.relationType,
+  }));
+
+  return { nodes, edges };
+}
+
+export default async function GraphPage() {
+  const { nodes, edges } = await getFullGraphData();
 
   return (
-    <div className="h-[calc(100vh-8rem)]">
-      <AssetGraph
-        initialNodes={graph.nodes}
-        initialEdges={graph.edges}
-        centerId={assetId}
-      />
+    <div className="max-w-6xl mx-auto py-6 space-y-4">
+      <div>
+        <h1 className="text-xl font-bold text-slate-900">グラフビュー</h1>
+        <p className="text-sm text-slate-500 mt-1">
+          {nodes.length} アセット / {edges.length} リレーション
+        </p>
+      </div>
+      <FullGraph nodes={nodes} edges={edges} />
     </div>
   );
 }
