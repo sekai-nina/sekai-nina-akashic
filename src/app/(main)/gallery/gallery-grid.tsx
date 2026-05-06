@@ -33,9 +33,11 @@ function groupByMonth(items: GalleryItem[]): Map<string, GalleryItem[]> {
 export function GalleryGrid({
   initialItems,
   initialCursor,
+  entityId,
 }: {
   initialItems: GalleryItem[];
   initialCursor: string | null;
+  entityId?: string;
 }) {
   const [items, setItems] = useState(initialItems);
   const [cursor, setCursor] = useState(initialCursor);
@@ -47,7 +49,9 @@ export function GalleryGrid({
     if (loading || !cursor) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/gallery?cursor=${cursor}`);
+      const params = new URLSearchParams({ cursor });
+      if (entityId) params.set("entityId", entityId);
+      const res = await fetch(`/api/gallery?${params}`);
       const data = await res.json();
       setItems((prev) => [...prev, ...data.items]);
       setCursor(data.nextCursor);
@@ -56,7 +60,7 @@ export function GalleryGrid({
     } finally {
       setLoading(false);
     }
-  }, [cursor, loading]);
+  }, [cursor, loading, entityId]);
 
   // Infinite scroll
   useEffect(() => {

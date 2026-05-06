@@ -1,9 +1,26 @@
 import { prisma } from "@/lib/db";
 import { FullGraph } from "./full-graph";
 
+const NINA_ENTITY_ID = "cmmtp8vrg0004mo381neyztvn";
+
 async function getFullGraphData() {
-  // Get all relations
+  // Get asset IDs linked to Nina
+  const ninaAssets = await prisma.assetEntity.findMany({
+    where: { entityId: NINA_ENTITY_ID },
+    select: { assetId: true },
+  });
+  const ninaAssetIds = new Set(ninaAssets.map((a) => a.assetId));
+
+  if (ninaAssetIds.size === 0) return { nodes: [], edges: [] };
+
+  // Get relations where at least one side is a Nina asset
   const relations = await prisma.assetRelation.findMany({
+    where: {
+      OR: [
+        { sourceId: { in: [...ninaAssetIds] } },
+        { targetId: { in: [...ninaAssetIds] } },
+      ],
+    },
     select: {
       sourceId: true,
       targetId: true,
@@ -13,14 +30,13 @@ async function getFullGraphData() {
 
   if (relations.length === 0) return { nodes: [], edges: [] };
 
-  // Collect all unique asset IDs
+  // Collect all unique asset IDs (including non-Nina neighbors)
   const assetIds = new Set<string>();
   for (const r of relations) {
     assetIds.add(r.sourceId);
     assetIds.add(r.targetId);
   }
 
-  // Fetch asset summaries
   const assets = await prisma.asset.findMany({
     where: { id: { in: [...assetIds] } },
     select: {

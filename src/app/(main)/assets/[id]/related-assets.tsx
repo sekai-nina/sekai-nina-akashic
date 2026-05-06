@@ -52,32 +52,40 @@ function RemoveButton({ relationId, assetId }: { relationId: string; assetId: st
 export function ParentAssets({
   relations,
   currentAssetId,
+  embedded,
 }: {
   relations: Relation[];
   currentAssetId: string;
+  embedded?: boolean;
 }) {
   if (relations.length === 0) return null;
+
+  const content = (
+    <ul className="space-y-2">
+      {relations.map((rel) => (
+        <li key={rel.id} className="flex items-center gap-3 text-sm">
+          <RelationTypeBadge type={rel.relationType} />
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700">
+            {ASSET_KIND_LABELS[rel.asset.kind] ?? rel.asset.kind}
+          </span>
+          <Link
+            href={`/assets/${rel.asset.id}`}
+            className="text-blue-600 hover:text-blue-800 hover:underline font-medium truncate"
+          >
+            {rel.asset.title || "(無題)"}
+          </Link>
+          <RemoveButton relationId={rel.id} assetId={currentAssetId} />
+        </li>
+      ))}
+    </ul>
+  );
+
+  if (embedded) return content;
 
   return (
     <div className="bg-white border border-slate-200 rounded-lg p-5">
       <h2 className="text-sm font-semibold text-slate-700 mb-3">親アセット</h2>
-      <ul className="space-y-2">
-        {relations.map((rel) => (
-          <li key={rel.id} className="flex items-center gap-3 text-sm">
-            <RelationTypeBadge type={rel.relationType} />
-            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700">
-              {ASSET_KIND_LABELS[rel.asset.kind] ?? rel.asset.kind}
-            </span>
-            <Link
-              href={`/assets/${rel.asset.id}`}
-              className="text-blue-600 hover:text-blue-800 hover:underline font-medium truncate"
-            >
-              {rel.asset.title || "(無題)"}
-            </Link>
-            <RemoveButton relationId={rel.id} assetId={currentAssetId} />
-          </li>
-        ))}
-      </ul>
+      {content}
     </div>
   );
 }
@@ -85,22 +93,19 @@ export function ParentAssets({
 export function ChildAssets({
   relations,
   currentAssetId,
+  embedded,
 }: {
   relations: Relation[];
   currentAssetId: string;
+  embedded?: boolean;
 }) {
   if (relations.length === 0) return null;
 
   const imageRelations = relations.filter((r) => r.asset.kind === "image" || r.asset.kind === "video");
   const otherRelations = relations.filter((r) => r.asset.kind !== "image" && r.asset.kind !== "video");
 
-  return (
-    <div className="bg-white border border-slate-200 rounded-lg p-5">
-      <h2 className="text-sm font-semibold text-slate-700 mb-3">
-        関連アセット ({relations.length})
-      </h2>
-
-      {/* Thumbnail grid for images/videos */}
+  const content = (
+    <>
       {imageRelations.length > 0 && (
         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2 mb-3">
           {imageRelations.map((rel) => (
@@ -122,15 +127,10 @@ export function ChildAssets({
               <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
                 <RemoveButton relationId={rel.id} assetId={currentAssetId} />
               </div>
-              <div className="absolute bottom-1 left-1">
-                <RelationTypeBadge type={rel.relationType} />
-              </div>
             </div>
           ))}
         </div>
       )}
-
-      {/* List for non-image assets */}
       {otherRelations.length > 0 && (
         <ul className="space-y-2">
           {otherRelations.map((rel) => (
@@ -150,6 +150,17 @@ export function ChildAssets({
           ))}
         </ul>
       )}
+    </>
+  );
+
+  if (embedded) return content;
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg p-5">
+      <h2 className="text-sm font-semibold text-slate-700 mb-3">
+        関連アセット ({relations.length})
+      </h2>
+      {content}
     </div>
   );
 }

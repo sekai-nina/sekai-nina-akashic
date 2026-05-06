@@ -2,12 +2,14 @@ import { prisma } from "@/lib/db";
 import { GalleryGrid } from "./gallery-grid";
 
 const PAGE_SIZE = 40;
+const NINA_ENTITY_ID = "cmmtp8vrg0004mo381neyztvn";
 
 export default async function GalleryPage() {
   const assets = await prisma.asset.findMany({
     where: {
       kind: { in: ["image", "video"] },
       thumbnailUrl: { not: null },
+      entities: { some: { entityId: NINA_ENTITY_ID } },
     },
     orderBy: [
       { canonicalDate: { sort: "desc", nulls: "last" } },
@@ -39,7 +41,7 @@ export default async function GalleryPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-900">ギャラリー</h1>
       </div>
-      <GalleryGrid initialItems={items} initialCursor={nextCursor} />
+      <GalleryGrid initialItems={items} initialCursor={nextCursor} entityId={NINA_ENTITY_ID} />
     </div>
   );
 }
