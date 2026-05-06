@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
-import { finalizeDriveUpload } from "@/lib/drive";
+import { finalizeDriveUpload, downloadFromDrive } from "@/lib/drive";
 import { createAsset, updateAsset, type CreateAssetData } from "@/lib/domain/assets";
 import { logAudit } from "@/lib/domain/audit";
+import { generateAndUploadThumbnails } from "@/lib/thumbnails";
 import type { AssetKind, AssetStatus, StorageProvider, SourceType } from "@prisma/client";
 
 function guessMimeKind(mimeType: string): AssetKind {
@@ -139,6 +140,25 @@ export async function POST(request: Request) {
     },
     auth.id
   );
+
+  // Generate R2 thumbnails for images
+  if (kind === "image" && storageKey) {
+    try {
+      const buffer = await downloadFromDrive(storageKey);
+      if (buffer) {
+        const r2Url = await generateAndUploadThumbnails(asset.id, buffer);
+        if (r2Url) {
+          await prisma.asset.update({
+            where: { id: asset.id },
+            data: { thumbnailUrl: r2Url },
+          });
+        }
+      }
+    } catch (err) {
+      console.error("R2 thumbnail generation failed:", err);
+      // Non-blocking — asset is still created
+    }
+  }
 
   await logAudit({
     actorId: auth.id,
