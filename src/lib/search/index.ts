@@ -25,10 +25,14 @@ export interface SearchResultItem {
   assetStatus: AssetStatus;
   thumbnailUrl: string | null;
   storageUrl: string | null;
-  snippet: string;
+  snippets: string[];
+  matchCount: number;
   matchField: string;
   score: number;
   createdAt: Date;
+  canonicalDate: Date | null;
+  personNames: string[];
+  tagNames: string[];
 }
 
 /** Drive の直リンクをプロキシURLに変換する */
@@ -51,27 +55,100 @@ export interface SearchResult {
   perPage: number;
 }
 
-function buildSnippet(text: string, query: string, contextLen = 80): string {
+/**
+ * Find all occurrences of query terms in text and return snippets.
+ * Nearby occurrences are merged into a single snippet.
+ */
+function buildSnippets(text: string, query: string, contextLen = 80): { snippets: string[]; matchCount: number } {
+  const terms = query.split("|").map((t) => t.trim()).filter(Boolean);
+  if (terms.length === 0) return { snippets: [text.slice(0, contextLen * 2) + (text.length > contextLen * 2 ? "…" : "")], matchCount: 0 };
+
   const lower = text.toLowerCase();
-  const qLower = query.toLowerCase();
-  const idx = lower.indexOf(qLower);
-  if (idx === -1) return text.slice(0, contextLen * 2) + (text.length > contextLen * 2 ? "…" : "");
-  const start = Math.max(0, idx - contextLen);
-  const end = Math.min(text.length, idx + query.length + contextLen);
-  let snippet = "";
-  if (start > 0) snippet += "…";
-  snippet += text.slice(start, end);
-  if (end < text.length) snippet += "…";
-  return snippet;
+
+  // Find all match positions
+  const positions: Array<{ start: number; end: number }> = [];
+  for (const term of terms) {
+    const termLower = term.toLowerCase();
+    let cursor = 0;
+    while (cursor < lower.length) {
+      const idx = lower.indexOf(termLower, cursor);
+      if (idx === -1) break;
+      positions.push({ start: idx, end: idx + term.length });
+      cursor = idx + term.length;
+    }
+  }
+
+  if (positions.length === 0) {
+    return { snippets: [text.slice(0, contextLen * 2) + (text.length > contextLen * 2 ? "…" : "")], matchCount: 0 };
+  }
+
+  // Sort by position
+  positions.sort((a, b) => a.start - b.start);
+
+  // Merge nearby positions into context ranges
+  const ranges: Array<{ start: number; end: number }> = [];
+  for (const pos of positions) {
+    const ctxStart = Math.max(0, pos.start - contextLen);
+    const ctxEnd = Math.min(text.length, pos.end + contextLen);
+    if (ranges.length > 0 && ctxStart <= ranges[ranges.length - 1].end) {
+      ranges[ranges.length - 1].end = Math.max(
+        ranges[ranges.length - 1].end,
+        ctxEnd
+      );
+    } else {
+      ranges.push({ start: ctxStart, end: ctxEnd });
+    }
+  }
+
+  const snippets = ranges.map((range) => {
+    let snippet = "";
+    if (range.start > 0) snippet += "…";
+    snippet += text.slice(range.start, range.end);
+    if (range.end < text.length) snippet += "…";
+    return snippet;
+  });
+
+  return { snippets, matchCount: positions.length };
+}
+
+/** Fetch person and tag entity names for a list of asset IDs */
+async function getEntityNames(
+  assetIds: string[]
+): Promise<{ persons: Map<string, string[]>; tags: Map<string, string[]> }> {
+  if (assetIds.length === 0)
+    return { persons: new Map(), tags: new Map() };
+  const rows = await prisma.$queryRaw<
+    Array<{ assetId: string; name: string; type: string }>
+  >`
+    SELECT ae."assetId", e."canonicalName" as name, e.type
+    FROM "AssetEntity" ae
+    JOIN "Entity" e ON e.id = ae."entityId"
+    WHERE ae."assetId"::text = ANY(${assetIds})
+      AND e.type IN ('person', 'tag')
+  `;
+  const persons = new Map<string, string[]>();
+  const tags = new Map<string, string[]>();
+  for (const row of rows) {
+    const map = row.type === "person" ? persons : tags;
+    const names = map.get(row.assetId) ?? [];
+    names.push(row.name);
+    map.set(row.assetId, names);
+  }
+  return { persons, tags };
 }
 
 export async function search(query: SearchQuery): Promise<SearchResult> {
   const { q, target = "all", page = 1, perPage = 20 } = query;
   const offset = (page - 1) * perPage;
   const hasKeyword = q.trim().length > 0;
-  const normalizedQ = hasKeyword ? normalizeText(q) : "";
-  const likePattern = hasKeyword ? `%${q}%` : "";
-  const normalizedLikePattern = hasKeyword ? `%${normalizedQ}%` : "";
+
+  // Support OR search with | separator
+  const terms = hasKeyword
+    ? q.split("|").map((t) => t.trim()).filter(Boolean)
+    : [];
+  const normalizedTerms = terms.map((t) => normalizeText(t));
+  const likePatterns = terms.map((t) => `%${t}%`);
+  const normalizedLikePatterns = normalizedTerms.map((t) => `%${t}%`);
 
   const results: SearchResultItem[] = [];
 
@@ -82,8 +159,13 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
   if (query.status) assetWhereConditions.push(Prisma.sql`a."status" = ${query.status}::"AssetStatus"`);
   if (query.trustLevel) assetWhereConditions.push(Prisma.sql`a."trustLevel" = ${query.trustLevel}::"TrustLevel"`);
   if (query.sourceType) assetWhereConditions.push(Prisma.sql`a."sourceType" = ${query.sourceType}::"SourceType"`);
-  if (query.dateFrom) assetWhereConditions.push(Prisma.sql`a."canonicalDate" >= ${query.dateFrom}`);
-  if (query.dateTo) assetWhereConditions.push(Prisma.sql`a."canonicalDate" <= ${query.dateTo}`);
+  if (query.dateFrom) assetWhereConditions.push(Prisma.sql`COALESCE(a."canonicalDate", a."createdAt") >= ${query.dateFrom}`);
+  if (query.dateTo) {
+    // dateTo is a date without time — include the entire day
+    const endOfDay = new Date(query.dateTo);
+    endOfDay.setDate(endOfDay.getDate() + 1);
+    assetWhereConditions.push(Prisma.sql`COALESCE(a."canonicalDate", a."createdAt") < ${endOfDay}`);
+  }
 
   const baseFilter = assetWhereConditions.length > 0
     ? Prisma.sql`AND ${Prisma.join(assetWhereConditions, " AND ")}`
@@ -113,11 +195,12 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
   // Search assets directly
   if (target === "all" || target === "assets") {
     const keywordCondition = hasKeyword
-      ? Prisma.sql`(
-          a."title" ILIKE ${likePattern}
-          OR a."description" ILIKE ${likePattern}
-          OR a."messageBodyPreview" ILIKE ${likePattern}
-        )`
+      ? Prisma.sql`(${Prisma.join(
+          likePatterns.map(
+            (pat) => Prisma.sql`a."title" ILIKE ${pat} OR a."description" ILIKE ${pat} OR a."messageBodyPreview" ILIKE ${pat}`
+          ),
+          " OR "
+        )})`
       : Prisma.sql`TRUE`;
 
     const assetResults = await prisma.$queryRaw<Array<{
@@ -132,11 +215,12 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
       storageKey: string | null;
       messageBodyPreview: string | null;
       createdAt: Date;
+      canonicalDate: Date | null;
     }>>`
       SELECT
         a."id", a."title", a."description", a."kind", a."status",
         a."thumbnailUrl", a."storageUrl", a."storageProvider", a."storageKey",
-        a."messageBodyPreview", a."createdAt"
+        a."messageBodyPreview", a."createdAt", a."canonicalDate"
       FROM "Asset" a
       WHERE ${keywordCondition}
       ${baseFilter}
@@ -146,10 +230,10 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
     `;
 
     for (const row of assetResults) {
-      const qLower = hasKeyword ? q.toLowerCase() : "";
-      const titleMatch = hasKeyword && row.title.toLowerCase().includes(qLower);
-      const descMatch = hasKeyword && row.description.toLowerCase().includes(qLower);
-      const previewMatch = hasKeyword && (row.messageBodyPreview || "").toLowerCase().includes(qLower);
+      const termsLower = terms.map((t) => t.toLowerCase());
+      const titleMatch = hasKeyword && termsLower.some((t) => row.title.toLowerCase().includes(t));
+      const descMatch = hasKeyword && termsLower.some((t) => row.description.toLowerCase().includes(t));
+      const previewMatch = hasKeyword && termsLower.some((t) => (row.messageBodyPreview || "").toLowerCase().includes(t));
       const matchField = titleMatch ? "title" : descMatch ? "description" : previewMatch ? "messageBodyPreview" : "title";
       const matchText = titleMatch ? row.title : descMatch ? row.description : previewMatch ? (row.messageBodyPreview || "") : row.title;
       results.push({
@@ -160,10 +244,13 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
         assetStatus: row.status,
         thumbnailUrl: resolveImageUrl(row.thumbnailUrl, row.storageProvider, row.storageKey, row.kind),
         storageUrl: row.storageUrl,
-        snippet: hasKeyword ? buildSnippet(matchText, q) : row.title,
+        ...(hasKeyword ? buildSnippets(matchText, q) : { snippets: [row.title], matchCount: 0 }),
         matchField,
         score: titleMatch ? 3 : descMatch ? 2 : previewMatch ? 1 : 0,
         createdAt: row.createdAt,
+        canonicalDate: row.canonicalDate,
+        personNames: [],
+        tagNames: [],
       });
     }
   }
@@ -183,19 +270,23 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
       asset_storageProvider: string | null;
       asset_storageKey: string | null;
       asset_createdAt: Date;
+      asset_canonicalDate: Date | null;
     }>>`
       SELECT
         t."id", t."assetId", t."textType", t."content",
         a."title" as asset_title, a."kind" as asset_kind, a."status" as asset_status,
         a."thumbnailUrl" as "asset_thumbnailUrl", a."storageUrl" as "asset_storageUrl",
         a."storageProvider" as "asset_storageProvider", a."storageKey" as "asset_storageKey",
-        a."createdAt" as "asset_createdAt"
+        a."createdAt" as "asset_createdAt", a."canonicalDate" as "asset_canonicalDate"
       FROM "AssetText" t
       JOIN "Asset" a ON a."id" = t."assetId"
-      WHERE (
-        t."content" ILIKE ${likePattern}
-        OR t."normalizedContent" ILIKE ${normalizedLikePattern}
-      )
+      WHERE (${Prisma.join(
+          likePatterns.flatMap((pat, i) => [
+            Prisma.sql`t."content" ILIKE ${pat}`,
+            Prisma.sql`t."normalizedContent" ILIKE ${normalizedLikePatterns[i]}`,
+          ]),
+          " OR "
+        )})
       ${baseFilter}
       ${entityFilter}
       ORDER BY a."createdAt" DESC
@@ -211,10 +302,13 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
         assetStatus: row.asset_status,
         thumbnailUrl: resolveImageUrl(row.asset_thumbnailUrl, row.asset_storageProvider, row.asset_storageKey, row.asset_kind),
         storageUrl: row.asset_storageUrl,
-        snippet: buildSnippet(row.content, q),
+        ...buildSnippets(row.content, q),
         matchField: row.textType,
         score: 1,
         createdAt: row.asset_createdAt,
+        canonicalDate: row.asset_canonicalDate,
+        personNames: [],
+        tagNames: [],
       });
     }
   }
@@ -231,6 +325,7 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
       asset_storageProvider: string | null;
       asset_storageKey: string | null;
       asset_createdAt: Date;
+      asset_canonicalDate: Date | null;
       entity_name: string;
     }>>`
       SELECT DISTINCT ON (ae."assetId")
@@ -238,15 +333,18 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
         a."title" as asset_title, a."kind" as asset_kind, a."status" as asset_status,
         a."thumbnailUrl" as "asset_thumbnailUrl", a."storageUrl" as "asset_storageUrl",
         a."storageProvider" as "asset_storageProvider", a."storageKey" as "asset_storageKey",
-        a."createdAt" as "asset_createdAt",
+        a."createdAt" as "asset_createdAt", a."canonicalDate" as "asset_canonicalDate",
         e."canonicalName" as entity_name
       FROM "Entity" e
       JOIN "AssetEntity" ae ON ae."entityId" = e."id"
       JOIN "Asset" a ON a."id" = ae."assetId"
-      WHERE (
-        e."canonicalName" ILIKE ${likePattern}
-        OR e."normalizedName" ILIKE ${normalizedLikePattern}
-      )
+      WHERE (${Prisma.join(
+          likePatterns.flatMap((pat, i) => [
+            Prisma.sql`e."canonicalName" ILIKE ${pat}`,
+            Prisma.sql`e."normalizedName" ILIKE ${normalizedLikePatterns[i]}`,
+          ]),
+          " OR "
+        )})
       ${baseFilter}
       ORDER BY ae."assetId", a."createdAt" DESC
       LIMIT ${perPage}
@@ -262,10 +360,14 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
           assetStatus: row.asset_status,
           thumbnailUrl: resolveImageUrl(row.asset_thumbnailUrl, row.asset_storageProvider, row.asset_storageKey, row.asset_kind),
           storageUrl: row.asset_storageUrl,
-          snippet: `タグ/人物: ${row.entity_name}`,
+          snippets: [`タグ/人物: ${row.entity_name}`],
+          matchCount: 1,
           matchField: "entity",
           score: 2,
           createdAt: row.asset_createdAt,
+          canonicalDate: row.asset_canonicalDate,
+          personNames: [],
+        tagNames: [],
         });
       }
     }
@@ -274,8 +376,18 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
   // Sort by score descending, then by date
   results.sort((a, b) => b.score - a.score || b.createdAt.getTime() - a.createdAt.getTime());
 
+  const sliced = results.slice(0, perPage);
+
+  // Batch fetch person and tag names
+  const assetIds = [...new Set(sliced.map((r) => r.assetId))];
+  const { persons, tags } = await getEntityNames(assetIds);
+  for (const item of sliced) {
+    item.personNames = persons.get(item.assetId) ?? [];
+    item.tagNames = tags.get(item.assetId) ?? [];
+  }
+
   return {
-    items: results.slice(0, perPage),
+    items: sliced,
     total: results.length,
     page,
     perPage,

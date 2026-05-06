@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { search } from "@/lib/search";
 import { getCachedEntities } from "@/lib/cache";
-import { ASSET_KIND_LABELS } from "@/lib/utils";
+import { ASSET_KIND_LABELS, formatDate } from "@/lib/utils";
 import { SearchForm } from "./search-form";
 import Link from "next/link";
 import type { AssetKind, AssetStatus, TrustLevel, SourceType } from "@prisma/client";
@@ -54,18 +54,12 @@ function ScoreBar({ score }: { score: number }) {
 
 function HighlightedSnippet({ text, query }: { text: string; query: string }) {
   if (!query.trim()) return <>{text}</>;
-  const parts: Array<{ text: string; highlight: boolean }> = [];
-  const lower = text.toLowerCase();
-  const qLower = query.toLowerCase();
-  let cursor = 0;
-  while (cursor < text.length) {
-    const idx = lower.indexOf(qLower, cursor);
-    if (idx === -1) { parts.push({ text: text.slice(cursor), highlight: false }); break; }
-    if (idx > cursor) parts.push({ text: text.slice(cursor, idx), highlight: false });
-    parts.push({ text: text.slice(idx, idx + query.length), highlight: true });
-    cursor = idx + query.length;
-  }
-  return <>{parts.map((p, i) => p.highlight ? <mark key={i} className="bg-yellow-200 text-yellow-900 rounded-sm px-0.5">{p.text}</mark> : <span key={i}>{p.text}</span>)}</>;
+  // Support OR terms separated by |
+  const terms = query.split("|").map((t) => t.trim()).filter(Boolean);
+  const pattern = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  const regex = new RegExp(`(${pattern})`, "gi");
+  const parts = text.split(regex);
+  return <>{parts.map((part, i) => regex.test(part) ? <mark key={i} className="bg-yellow-200 text-yellow-900 rounded-sm px-0.5">{part}</mark> : <span key={i}>{part}</span>)}</>;
 }
 
 const MATCH_FIELD_LABELS: Record<string, string> = {
@@ -163,7 +157,13 @@ export default async function SearchPage({
       {results && (
         <>
           <div className="flex items-center justify-between mb-3">
-            <span className="text-sm text-slate-500">{results.total} 件</span>
+            <span className="text-sm text-slate-500">
+              {results.total} 件
+              {q && (() => {
+                const totalMatches = results.items.reduce((sum, item) => sum + item.matchCount, 0);
+                return totalMatches > results.total ? ` (${totalMatches} 箇所)` : "";
+              })()}
+            </span>
             <div className="flex gap-1">
               <Link scroll={false} href={buildUrl({ view: "list", page: "1" })}
                 className={`px-3 py-1 rounded text-sm border transition-colors ${effectiveView === "list" ? "bg-slate-700 text-white border-slate-700" : "border-slate-300 text-slate-600 hover:bg-slate-50"}`}>
@@ -214,10 +214,26 @@ export default async function SearchPage({
                       <span className="text-sm font-medium text-slate-900">{item.assetTitle}</span>
                       <KindBadge kind={item.assetKind} />
                       <span className="text-xs text-slate-400">{MATCH_FIELD_LABELS[item.matchField] ?? item.matchField}</span>
+                      {item.matchCount > 1 && (
+                        <span className="text-xs text-blue-500 font-medium">×{item.matchCount}</span>
+                      )}
                     </div>
-                    <p className="text-xs text-slate-500 mt-1 line-clamp-2">
-                      <HighlightedSnippet text={item.snippet} query={q} />
-                    </p>
+                    <div className="mt-1 space-y-0.5">
+                      {item.snippets.map((snip, si) => (
+                        <p key={si} className="text-xs text-slate-500">
+                          <HighlightedSnippet text={snip} query={q} />
+                        </p>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2 mt-1 text-xs text-slate-400 flex-wrap">
+                      {item.canonicalDate && <span>{formatDate(item.canonicalDate)}</span>}
+                      {item.personNames.length > 0 && (
+                        <span>{item.personNames.join(", ")}</span>
+                      )}
+                      {item.tagNames.length > 0 && item.tagNames.map((tag) => (
+                        <span key={tag} className="bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">{tag}</span>
+                      ))}
+                    </div>
                   </div>
                   <div className="shrink-0"><ScoreBar score={item.score} /></div>
                 </Link>
