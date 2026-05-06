@@ -142,7 +142,9 @@ export function AnalysisClient({
       });
   }
 
-  function persistToUrl() {
+  const CACHE_KEY = "analysis-cache";
+
+  function buildQueryString() {
     const p = new URLSearchParams();
     if (personId) p.set("person", personId);
     if (sourceType) p.set("source", sourceType);
@@ -152,8 +154,40 @@ export function AnalysisClient({
     if (tagIds.length > 0) p.set("tags", tagIds.join(","));
     if (granularity !== "month") p.set("g", granularity);
     if (wordInput.trim()) p.set("w", wordInput.trim());
-    const qs = p.toString();
-    router.replace(`/analysis${qs ? `?${qs}` : ""}`, { scroll: false });
+    return p.toString();
+  }
+
+  function saveCache(
+    word: WordAnalysisResult | null,
+    volume: VolumePoint[] | null
+  ) {
+    try {
+      const qs = buildQueryString();
+      sessionStorage.setItem(
+        CACHE_KEY,
+        JSON.stringify({ qs, wordData: word, volumeData: volume })
+      );
+    } catch {
+      // sessionStorage full or unavailable
+    }
+  }
+
+  function loadCache(): {
+    wordData: WordAnalysisResult | null;
+    volumeData: VolumePoint[] | null;
+  } | null {
+    try {
+      const raw = sessionStorage.getItem(CACHE_KEY);
+      if (!raw) return null;
+      const cached = JSON.parse(raw);
+      const currentQs = buildQueryString();
+      if (cached.qs === currentQs) {
+        return { wordData: cached.wordData, volumeData: cached.volumeData };
+      }
+    } catch {
+      // parse error
+    }
+    return null;
   }
 
   function runAnalysis() {
@@ -163,24 +197,37 @@ export function AnalysisClient({
         groups.length > 0 ? analyzeWords(groups, filters) : null,
         analyzeVolume(filters),
       ]);
-      if (wordResult) setWordData(wordResult);
-      else setWordData(null);
-      setVolumeData(volumeResult);
+      const w = wordResult ?? null;
+      const v = volumeResult;
+      setWordData(w);
+      setVolumeData(v);
+      saveCache(w, v);
     });
   }
 
   function handleAnalyze() {
-    persistToUrl();
+    const qs = buildQueryString();
+    router.replace(`/analysis${qs ? `?${qs}` : ""}`, { scroll: false });
     runAnalysis();
   }
 
-  // Auto-run when returning via back button (URL has params)
+  // Restore from cache or re-run when returning via back button
   useEffect(() => {
     if (didAutoRun.current) return;
-    const hasParams = initialParams?.w || initialParams?.source || initialParams?.from || initialParams?.tags;
+    const hasParams =
+      initialParams?.w ||
+      initialParams?.source ||
+      initialParams?.from ||
+      initialParams?.tags;
     if (hasParams) {
       didAutoRun.current = true;
-      runAnalysis();
+      const cached = loadCache();
+      if (cached) {
+        setWordData(cached.wordData);
+        setVolumeData(cached.volumeData);
+      } else {
+        runAnalysis();
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
