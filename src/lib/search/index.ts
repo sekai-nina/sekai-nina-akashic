@@ -25,10 +25,12 @@ export interface SearchResultItem {
   assetStatus: AssetStatus;
   thumbnailUrl: string | null;
   storageUrl: string | null;
-  snippet: string;
+  snippets: string[];
   matchField: string;
   score: number;
   createdAt: Date;
+  canonicalDate: Date | null;
+  personNames: string[];
 }
 
 /** Drive の直リンクをプロキシURLに変換する */
@@ -51,27 +53,81 @@ export interface SearchResult {
   perPage: number;
 }
 
-function buildSnippet(text: string, query: string, contextLen = 80): string {
+/**
+ * Find all occurrences of query terms in text and return snippets.
+ * Nearby occurrences are merged into a single snippet.
+ */
+function buildSnippets(text: string, query: string, contextLen = 80): string[] {
+  const terms = query.split("|").map((t) => t.trim()).filter(Boolean);
+  if (terms.length === 0) return [text.slice(0, contextLen * 2) + (text.length > contextLen * 2 ? "…" : "")];
+
   const lower = text.toLowerCase();
-  // Support multiple terms separated by |
-  const queryTerms = query.split("|").map((t) => t.trim()).filter(Boolean);
-  let bestIdx = -1;
-  let bestTerm = queryTerms[0] || query;
-  for (const term of queryTerms) {
-    const idx = lower.indexOf(term.toLowerCase());
-    if (idx !== -1 && (bestIdx === -1 || idx < bestIdx)) {
-      bestIdx = idx;
-      bestTerm = term;
+
+  // Find all match positions
+  const positions: Array<{ start: number; end: number }> = [];
+  for (const term of terms) {
+    const termLower = term.toLowerCase();
+    let cursor = 0;
+    while (cursor < lower.length) {
+      const idx = lower.indexOf(termLower, cursor);
+      if (idx === -1) break;
+      positions.push({ start: idx, end: idx + term.length });
+      cursor = idx + term.length;
     }
   }
-  if (bestIdx === -1) return text.slice(0, contextLen * 2) + (text.length > contextLen * 2 ? "…" : "");
-  const start = Math.max(0, bestIdx - contextLen);
-  const end = Math.min(text.length, bestIdx + bestTerm.length + contextLen);
-  let snippet = "";
-  if (start > 0) snippet += "…";
-  snippet += text.slice(start, end);
-  if (end < text.length) snippet += "…";
-  return snippet;
+
+  if (positions.length === 0) {
+    return [text.slice(0, contextLen * 2) + (text.length > contextLen * 2 ? "…" : "")];
+  }
+
+  // Sort by position
+  positions.sort((a, b) => a.start - b.start);
+
+  // Merge nearby positions into context ranges
+  const ranges: Array<{ start: number; end: number }> = [];
+  for (const pos of positions) {
+    const ctxStart = Math.max(0, pos.start - contextLen);
+    const ctxEnd = Math.min(text.length, pos.end + contextLen);
+    if (ranges.length > 0 && ctxStart <= ranges[ranges.length - 1].end) {
+      ranges[ranges.length - 1].end = Math.max(
+        ranges[ranges.length - 1].end,
+        ctxEnd
+      );
+    } else {
+      ranges.push({ start: ctxStart, end: ctxEnd });
+    }
+  }
+
+  return ranges.map((range) => {
+    let snippet = "";
+    if (range.start > 0) snippet += "…";
+    snippet += text.slice(range.start, range.end);
+    if (range.end < text.length) snippet += "…";
+    return snippet;
+  });
+}
+
+/** Fetch person entity names for a list of asset IDs */
+async function getPersonNames(
+  assetIds: string[]
+): Promise<Map<string, string[]>> {
+  if (assetIds.length === 0) return new Map();
+  const rows = await prisma.$queryRaw<
+    Array<{ assetId: string; name: string }>
+  >`
+    SELECT ae."assetId", e."canonicalName" as name
+    FROM "AssetEntity" ae
+    JOIN "Entity" e ON e.id = ae."entityId"
+    WHERE ae."assetId"::text = ANY(${assetIds})
+      AND e.type = 'person'
+  `;
+  const map = new Map<string, string[]>();
+  for (const row of rows) {
+    const names = map.get(row.assetId) ?? [];
+    names.push(row.name);
+    map.set(row.assetId, names);
+  }
+  return map;
 }
 
 export async function search(query: SearchQuery): Promise<SearchResult> {
@@ -86,10 +142,6 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
   const normalizedTerms = terms.map((t) => normalizeText(t));
   const likePatterns = terms.map((t) => `%${t}%`);
   const normalizedLikePatterns = normalizedTerms.map((t) => `%${t}%`);
-
-  // Legacy single-term compat
-  const likePattern = likePatterns[0] ?? "";
-  const normalizedLikePattern = normalizedLikePatterns[0] ?? "";
 
   const results: SearchResultItem[] = [];
 
@@ -151,11 +203,12 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
       storageKey: string | null;
       messageBodyPreview: string | null;
       createdAt: Date;
+      canonicalDate: Date | null;
     }>>`
       SELECT
         a."id", a."title", a."description", a."kind", a."status",
         a."thumbnailUrl", a."storageUrl", a."storageProvider", a."storageKey",
-        a."messageBodyPreview", a."createdAt"
+        a."messageBodyPreview", a."createdAt", a."canonicalDate"
       FROM "Asset" a
       WHERE ${keywordCondition}
       ${baseFilter}
@@ -179,10 +232,12 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
         assetStatus: row.status,
         thumbnailUrl: resolveImageUrl(row.thumbnailUrl, row.storageProvider, row.storageKey, row.kind),
         storageUrl: row.storageUrl,
-        snippet: hasKeyword ? buildSnippet(matchText, q) : row.title,
+        snippets: hasKeyword ? buildSnippets(matchText, q) : [row.title],
         matchField,
         score: titleMatch ? 3 : descMatch ? 2 : previewMatch ? 1 : 0,
         createdAt: row.createdAt,
+        canonicalDate: row.canonicalDate,
+        personNames: [],
       });
     }
   }
@@ -202,13 +257,14 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
       asset_storageProvider: string | null;
       asset_storageKey: string | null;
       asset_createdAt: Date;
+      asset_canonicalDate: Date | null;
     }>>`
       SELECT
         t."id", t."assetId", t."textType", t."content",
         a."title" as asset_title, a."kind" as asset_kind, a."status" as asset_status,
         a."thumbnailUrl" as "asset_thumbnailUrl", a."storageUrl" as "asset_storageUrl",
         a."storageProvider" as "asset_storageProvider", a."storageKey" as "asset_storageKey",
-        a."createdAt" as "asset_createdAt"
+        a."createdAt" as "asset_createdAt", a."canonicalDate" as "asset_canonicalDate"
       FROM "AssetText" t
       JOIN "Asset" a ON a."id" = t."assetId"
       WHERE (${Prisma.join(
@@ -233,10 +289,12 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
         assetStatus: row.asset_status,
         thumbnailUrl: resolveImageUrl(row.asset_thumbnailUrl, row.asset_storageProvider, row.asset_storageKey, row.asset_kind),
         storageUrl: row.asset_storageUrl,
-        snippet: buildSnippet(row.content, q),
+        snippets: buildSnippets(row.content, q),
         matchField: row.textType,
         score: 1,
         createdAt: row.asset_createdAt,
+        canonicalDate: row.asset_canonicalDate,
+        personNames: [],
       });
     }
   }
@@ -253,6 +311,7 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
       asset_storageProvider: string | null;
       asset_storageKey: string | null;
       asset_createdAt: Date;
+      asset_canonicalDate: Date | null;
       entity_name: string;
     }>>`
       SELECT DISTINCT ON (ae."assetId")
@@ -260,7 +319,7 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
         a."title" as asset_title, a."kind" as asset_kind, a."status" as asset_status,
         a."thumbnailUrl" as "asset_thumbnailUrl", a."storageUrl" as "asset_storageUrl",
         a."storageProvider" as "asset_storageProvider", a."storageKey" as "asset_storageKey",
-        a."createdAt" as "asset_createdAt",
+        a."createdAt" as "asset_createdAt", a."canonicalDate" as "asset_canonicalDate",
         e."canonicalName" as entity_name
       FROM "Entity" e
       JOIN "AssetEntity" ae ON ae."entityId" = e."id"
@@ -287,10 +346,12 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
           assetStatus: row.asset_status,
           thumbnailUrl: resolveImageUrl(row.asset_thumbnailUrl, row.asset_storageProvider, row.asset_storageKey, row.asset_kind),
           storageUrl: row.asset_storageUrl,
-          snippet: `タグ/人物: ${row.entity_name}`,
+          snippets: [`タグ/人物: ${row.entity_name}`],
           matchField: "entity",
           score: 2,
           createdAt: row.asset_createdAt,
+          canonicalDate: row.asset_canonicalDate,
+          personNames: [],
         });
       }
     }
@@ -299,8 +360,17 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
   // Sort by score descending, then by date
   results.sort((a, b) => b.score - a.score || b.createdAt.getTime() - a.createdAt.getTime());
 
+  const sliced = results.slice(0, perPage);
+
+  // Batch fetch person names
+  const assetIds = [...new Set(sliced.map((r) => r.assetId))];
+  const personMap = await getPersonNames(assetIds);
+  for (const item of sliced) {
+    item.personNames = personMap.get(item.assetId) ?? [];
+  }
+
   return {
-    items: results.slice(0, perPage),
+    items: sliced,
     total: results.length,
     page,
     perPage,

@@ -240,16 +240,22 @@ export function AnalysisClient({
   }
 
   function bucketToDateRange(bucket: string) {
-    const start = new Date(bucket);
-    let end: Date;
+    // Parse as local date parts to avoid timezone issues
+    const [y, m, d] = bucket.split("-").map(Number);
     if (granularity === "month") {
-      end = new Date(start.getFullYear(), start.getMonth() + 1, 0);
-    } else {
-      end = new Date(start.getTime() + 6 * 24 * 60 * 60 * 1000);
+      // Last day of the month
+      const lastDay = new Date(y, m, 0).getDate();
+      return {
+        dateFrom: bucket,
+        dateTo: `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`,
+      };
     }
+    // Weekly: +6 days
+    const start = new Date(y, m - 1, d);
+    const end = new Date(y, m - 1, d + 6);
     return {
       dateFrom: bucket,
-      dateTo: end.toISOString().slice(0, 10),
+      dateTo: `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, "0")}-${String(end.getDate()).padStart(2, "0")}`,
     };
   }
 
@@ -542,9 +548,9 @@ export function AnalysisClient({
           </div>
 
           <p className="text-xs text-slate-400 mt-2">
-            {wordChartTab === "rate"
-              ? "各期間の投稿のうち、そのワードを含む投稿の割合（%）・"
-              : ""}
+            {wordChartTab === "count"
+              ? "同じ投稿内に複数回出現する場合もカウントされます・"
+              : "各期間の投稿のうち、そのワードを含む投稿の割合（%）・"}
             クリックで該当期間の実データを検索
           </p>
         </div>

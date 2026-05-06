@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { search } from "@/lib/search";
 import { getCachedEntities } from "@/lib/cache";
-import { ASSET_KIND_LABELS } from "@/lib/utils";
+import { ASSET_KIND_LABELS, formatDate } from "@/lib/utils";
 import { SearchForm } from "./search-form";
 import Link from "next/link";
 import type { AssetKind, AssetStatus, TrustLevel, SourceType } from "@prisma/client";
@@ -208,10 +208,23 @@ export default async function SearchPage({
                       <span className="text-sm font-medium text-slate-900">{item.assetTitle}</span>
                       <KindBadge kind={item.assetKind} />
                       <span className="text-xs text-slate-400">{MATCH_FIELD_LABELS[item.matchField] ?? item.matchField}</span>
+                      {item.snippets.length > 1 && (
+                        <span className="text-xs text-blue-500 font-medium">×{item.snippets.length}</span>
+                      )}
                     </div>
-                    <p className="text-xs text-slate-500 mt-1 line-clamp-2">
-                      <HighlightedSnippet text={item.snippet} query={q} />
-                    </p>
+                    <div className="mt-1 space-y-0.5">
+                      {item.snippets.map((snip, si) => (
+                        <p key={si} className="text-xs text-slate-500 line-clamp-2">
+                          <HighlightedSnippet text={snip} query={q} />
+                        </p>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2 mt-1 text-xs text-slate-400">
+                      {item.canonicalDate && <span>{formatDate(item.canonicalDate)}</span>}
+                      {item.personNames.length > 0 && (
+                        <span>{item.personNames.join(", ")}</span>
+                      )}
+                    </div>
                   </div>
                   <div className="shrink-0"><ScoreBar score={item.score} /></div>
                 </Link>
