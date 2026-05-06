@@ -66,7 +66,12 @@ interface VolumePoint {
   avgLength: number;
 }
 
-export function AnalysisClient({ entities }: { entities: EntityOption[] }) {
+interface Props {
+  entities: EntityOption[];
+  defaultPersonId?: string;
+}
+
+export function AnalysisClient({ entities, defaultPersonId }: Props) {
   const [isPending, startTransition] = useTransition();
 
   // Filter state
@@ -77,7 +82,8 @@ export function AnalysisClient({ entities }: { entities: EntityOption[] }) {
   ]);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const [entityIds, setEntityIds] = useState<string[]>([]);
+  const [personId, setPersonId] = useState(defaultPersonId ?? "");
+  const [tagIds, setTagIds] = useState<string[]>([]);
   const [granularity, setGranularity] = useState<"month" | "week">("month");
 
   // Word input
@@ -93,10 +99,14 @@ export function AnalysisClient({ entities }: { entities: EntityOption[] }) {
     "volume" | "avgLength"
   >("volume");
 
+  const allEntityIds = [
+    ...(personId ? [personId] : []),
+    ...tagIds,
+  ];
   const filters = {
     sourceType: sourceType || undefined,
     textTypes: textTypes.length > 0 ? textTypes : undefined,
-    entityIds: entityIds.length > 0 ? entityIds : undefined,
+    entityIds: allEntityIds.length > 0 ? allEntityIds : undefined,
     dateFrom: dateFrom || undefined,
     dateTo: dateTo || undefined,
     granularity,
@@ -131,13 +141,33 @@ export function AnalysisClient({ entities }: { entities: EntityOption[] }) {
     return bucket.slice(0, 7).replace("-", "/");
   }
 
+  const personEntities = entities.filter((e) => e.type === "person");
   const tagEntities = entities.filter((e) => e.type === "tag");
 
   return (
     <div className="space-y-6">
       {/* Filters */}
       <div className="bg-white border border-slate-200 rounded-lg p-4 space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          {/* Person filter */}
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">
+              人物
+            </label>
+            <select
+              value={personId}
+              onChange={(e) => setPersonId(e.target.value)}
+              className="w-full border border-slate-300 rounded px-3 py-1.5 text-sm"
+            >
+              <option value="">すべて</option>
+              {personEntities.map((ent) => (
+                <option key={ent.id} value={ent.id}>
+                  {ent.canonicalName}
+                </option>
+              ))}
+            </select>
+          </div>
+
           {/* Source type */}
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">
@@ -251,12 +281,12 @@ export function AnalysisClient({ entities }: { entities: EntityOption[] }) {
                 >
                   <input
                     type="checkbox"
-                    checked={entityIds.includes(ent.id)}
+                    checked={tagIds.includes(ent.id)}
                     onChange={(e) => {
                       if (e.target.checked) {
-                        setEntityIds([...entityIds, ent.id]);
+                        setTagIds([...tagIds, ent.id]);
                       } else {
-                        setEntityIds(entityIds.filter((id) => id !== ent.id));
+                        setTagIds(tagIds.filter((id) => id !== ent.id));
                       }
                     }}
                     className="rounded"
