@@ -452,7 +452,7 @@ export function AnalysisClient({
             onChange={(e) => setWordInput(e.target.value)}
             placeholder="ワードをカンマ区切り、エイリアスは/区切り（例: 世界/せかい/セカイ/🌍, ライブ/らいぶ）"
             className="flex-1 border border-slate-300 rounded px-3 py-2 text-sm"
-            onKeyDown={(e) => e.key === "Enter" && handleAnalyze()}
+            onKeyDown={(e) => e.key === "Enter" && !e.nativeEvent.isComposing && handleAnalyze()}
           />
           <button
             onClick={handleAnalyze}
