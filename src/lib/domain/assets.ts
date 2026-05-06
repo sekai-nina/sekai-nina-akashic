@@ -101,6 +101,7 @@ export interface ListAssetsFilters {
   sourceType?: SourceType;
   page?: number;
   perPage?: number;
+  include?: string[];
 }
 
 export async function createAsset(data: CreateAssetData, userId?: string | null) {
@@ -267,7 +268,7 @@ export async function getAsset(id: string) {
 }
 
 export async function listAssets(filters: ListAssetsFilters = {}) {
-  const { status, kind, trustLevel, sourceType, page = 1, perPage = 20 } = filters;
+  const { status, kind, trustLevel, sourceType, page = 1, perPage = 20, include } = filters;
 
   const where = {
     ...(status ? { status } : {}),
@@ -278,12 +279,21 @@ export async function listAssets(filters: ListAssetsFilters = {}) {
 
   const skip = (page - 1) * perPage;
 
+  const includeRelations = include?.length
+    ? {
+        ...(include.includes("sourceRecords") ? { sourceRecords: true } : {}),
+        ...(include.includes("texts") ? { texts: true } : {}),
+        ...(include.includes("entities") ? { entities: { include: { entity: true } } } : {}),
+      }
+    : undefined;
+
   const [items, total] = await prisma.$transaction([
     prisma.asset.findMany({
       where,
       skip,
       take: perPage,
       orderBy: { createdAt: "desc" },
+      ...(includeRelations ? { include: includeRelations } : {}),
     }),
     prisma.asset.count({ where }),
   ]);
