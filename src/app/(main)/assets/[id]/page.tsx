@@ -17,6 +17,7 @@ import {
 import { SubmitButton } from "@/components/submit-button";
 import { BackButton } from "@/components/back-button";
 import { StatusWorkflow } from "./status-workflow";
+import { CopySourceRef } from "./copy-source-ref";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -223,12 +224,19 @@ export default async function AssetDetailPage({
             )}
           </div>
         </div>
-        <Link
-          href={`/assets/${id}/edit`}
-          className="shrink-0 border border-slate-300 text-slate-700 px-3 py-1.5 rounded text-sm hover:bg-slate-50 transition-colors"
-        >
-          編集
-        </Link>
+        <div className="flex gap-2 shrink-0">
+          <CopySourceRef
+            assetId={asset.id}
+            title={asset.title || "(無題)"}
+            canonicalDate={asset.canonicalDate?.toISOString() ?? null}
+          />
+          <Link
+            href={`/assets/${id}/edit`}
+            className="border border-slate-300 text-slate-700 px-3 py-1.5 rounded text-sm hover:bg-slate-50 transition-colors"
+          >
+            編集
+          </Link>
+        </div>
       </div>
 
       {/* Duplicate warning */}
