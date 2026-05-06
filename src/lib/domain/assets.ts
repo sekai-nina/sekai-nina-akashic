@@ -99,6 +99,7 @@ export interface ListAssetsFilters {
   kind?: AssetKind;
   trustLevel?: TrustLevel;
   sourceType?: SourceType;
+  updatedSince?: Date;
   page?: number;
   perPage?: number;
   include?: string[];
@@ -268,13 +269,14 @@ export async function getAsset(id: string) {
 }
 
 export async function listAssets(filters: ListAssetsFilters = {}) {
-  const { status, kind, trustLevel, sourceType, page = 1, perPage = 20, include } = filters;
+  const { status, kind, trustLevel, sourceType, updatedSince, page = 1, perPage = 20, include } = filters;
 
   const where = {
     ...(status ? { status } : {}),
     ...(kind ? { kind } : {}),
     ...(trustLevel ? { trustLevel } : {}),
     ...(sourceType ? { sourceType } : {}),
+    ...(updatedSince ? { updatedAt: { gte: updatedSince } } : {}),
   };
 
   const skip = (page - 1) * perPage;

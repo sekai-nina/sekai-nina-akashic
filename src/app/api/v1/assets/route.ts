@@ -13,11 +13,13 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const includeParam = url.searchParams.get("include");
+  const updatedSinceParam = url.searchParams.get("updatedSince");
   const filters: ListAssetsFilters = {
     status: (url.searchParams.get("status") as ListAssetsFilters["status"]) || undefined,
     kind: (url.searchParams.get("kind") as ListAssetsFilters["kind"]) || undefined,
     trustLevel: (url.searchParams.get("trustLevel") as ListAssetsFilters["trustLevel"]) || undefined,
     sourceType: (url.searchParams.get("sourceType") as ListAssetsFilters["sourceType"]) || undefined,
+    updatedSince: updatedSinceParam ? new Date(updatedSinceParam) : undefined,
     page: Number(url.searchParams.get("page")) || 1,
     perPage: Math.min(Number(url.searchParams.get("perPage")) || 20, 100),
     include: includeParam ? includeParam.split(",") : undefined,
