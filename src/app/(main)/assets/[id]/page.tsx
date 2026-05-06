@@ -55,6 +55,42 @@ function AddToCollectionForm({
   );
 }
 
+function RichTextContent({
+  content,
+  embeddedImages,
+}: {
+  content: string;
+  embeddedImages: Record<string, { thumbnailUrl: string | null; title: string }>;
+}) {
+  const parts = content.split(/(\{\{IMG:[a-zA-Z0-9_-]+\}\})/);
+  return (
+    <div className="text-sm text-slate-700 whitespace-pre-wrap">
+      {parts.map((part, i) => {
+        const match = part.match(/^\{\{IMG:([a-zA-Z0-9_-]+)\}\}$/);
+        if (match) {
+          const assetId = match[1];
+          const img = embeddedImages[assetId];
+          if (img?.thumbnailUrl) {
+            return (
+              <Link key={i} href={`/assets/${assetId}`} className="block my-2">
+                <img
+                  src={img.thumbnailUrl}
+                  alt={img.title || ""}
+                  className="max-w-full rounded-lg border border-slate-200 hover:opacity-90 transition-opacity"
+                  loading="lazy"
+                />
+              </Link>
+            );
+          }
+          // Unresolved placeholder — show nothing
+          return null;
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </div>
+  );
+}
+
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
     inbox: "bg-yellow-100 text-yellow-800",
@@ -143,6 +179,28 @@ export default async function AssetDetailPage({
       previewUrl = `/api/drive-image/${asset.storageKey}`;
     } else {
       previewUrl = asset.storageUrl;
+    }
+  }
+
+  // Collect embedded image asset IDs from all text content
+  const imgPlaceholderRegex = /\{\{IMG:([a-zA-Z0-9_-]+)\}\}/g;
+  const embeddedImageIds = new Set<string>();
+  for (const text of asset.texts) {
+    for (const match of text.content.matchAll(imgPlaceholderRegex)) {
+      // Only collect non-numeric IDs (numeric = index placeholder, not yet resolved)
+      if (!/^\d+$/.test(match[1])) {
+        embeddedImageIds.add(match[1]);
+      }
+    }
+  }
+  const embeddedImages: Record<string, { thumbnailUrl: string | null; title: string }> = {};
+  if (embeddedImageIds.size > 0) {
+    const imageAssets = await prisma.asset.findMany({
+      where: { id: { in: [...embeddedImageIds] } },
+      select: { id: true, thumbnailUrl: true, title: true },
+    });
+    for (const img of imageAssets) {
+      embeddedImages[img.id] = { thumbnailUrl: img.thumbnailUrl, title: img.title };
     }
   }
 
@@ -431,7 +489,7 @@ export default async function AssetDetailPage({
                       {TEXT_TYPE_LABELS[text.textType] ?? text.textType}
                     </span>
                   </div>
-                  <p className="text-sm text-slate-700 whitespace-pre-wrap">{text.content}</p>
+                  <RichTextContent content={text.content} embeddedImages={embeddedImages} />
                 </li>
             ))}
           </ul>
