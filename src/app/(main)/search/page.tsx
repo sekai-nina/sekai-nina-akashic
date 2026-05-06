@@ -54,18 +54,12 @@ function ScoreBar({ score }: { score: number }) {
 
 function HighlightedSnippet({ text, query }: { text: string; query: string }) {
   if (!query.trim()) return <>{text}</>;
-  const parts: Array<{ text: string; highlight: boolean }> = [];
-  const lower = text.toLowerCase();
-  const qLower = query.toLowerCase();
-  let cursor = 0;
-  while (cursor < text.length) {
-    const idx = lower.indexOf(qLower, cursor);
-    if (idx === -1) { parts.push({ text: text.slice(cursor), highlight: false }); break; }
-    if (idx > cursor) parts.push({ text: text.slice(cursor, idx), highlight: false });
-    parts.push({ text: text.slice(idx, idx + query.length), highlight: true });
-    cursor = idx + query.length;
-  }
-  return <>{parts.map((p, i) => p.highlight ? <mark key={i} className="bg-yellow-200 text-yellow-900 rounded-sm px-0.5">{p.text}</mark> : <span key={i}>{p.text}</span>)}</>;
+  // Support OR terms separated by |
+  const terms = query.split("|").map((t) => t.trim()).filter(Boolean);
+  const pattern = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  const regex = new RegExp(`(${pattern})`, "gi");
+  const parts = text.split(regex);
+  return <>{parts.map((part, i) => regex.test(part) ? <mark key={i} className="bg-yellow-200 text-yellow-900 rounded-sm px-0.5">{part}</mark> : <span key={i}>{part}</span>)}</>;
 }
 
 const MATCH_FIELD_LABELS: Record<string, string> = {

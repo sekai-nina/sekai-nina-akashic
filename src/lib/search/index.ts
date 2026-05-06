@@ -53,11 +53,20 @@ export interface SearchResult {
 
 function buildSnippet(text: string, query: string, contextLen = 80): string {
   const lower = text.toLowerCase();
-  const qLower = query.toLowerCase();
-  const idx = lower.indexOf(qLower);
-  if (idx === -1) return text.slice(0, contextLen * 2) + (text.length > contextLen * 2 ? "…" : "");
-  const start = Math.max(0, idx - contextLen);
-  const end = Math.min(text.length, idx + query.length + contextLen);
+  // Support multiple terms separated by |
+  const queryTerms = query.split("|").map((t) => t.trim()).filter(Boolean);
+  let bestIdx = -1;
+  let bestTerm = queryTerms[0] || query;
+  for (const term of queryTerms) {
+    const idx = lower.indexOf(term.toLowerCase());
+    if (idx !== -1 && (bestIdx === -1 || idx < bestIdx)) {
+      bestIdx = idx;
+      bestTerm = term;
+    }
+  }
+  if (bestIdx === -1) return text.slice(0, contextLen * 2) + (text.length > contextLen * 2 ? "…" : "");
+  const start = Math.max(0, bestIdx - contextLen);
+  const end = Math.min(text.length, bestIdx + bestTerm.length + contextLen);
   let snippet = "";
   if (start > 0) snippet += "…";
   snippet += text.slice(start, end);
@@ -69,9 +78,18 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
   const { q, target = "all", page = 1, perPage = 20 } = query;
   const offset = (page - 1) * perPage;
   const hasKeyword = q.trim().length > 0;
-  const normalizedQ = hasKeyword ? normalizeText(q) : "";
-  const likePattern = hasKeyword ? `%${q}%` : "";
-  const normalizedLikePattern = hasKeyword ? `%${normalizedQ}%` : "";
+
+  // Support OR search with | separator
+  const terms = hasKeyword
+    ? q.split("|").map((t) => t.trim()).filter(Boolean)
+    : [];
+  const normalizedTerms = terms.map((t) => normalizeText(t));
+  const likePatterns = terms.map((t) => `%${t}%`);
+  const normalizedLikePatterns = normalizedTerms.map((t) => `%${t}%`);
+
+  // Legacy single-term compat
+  const likePattern = likePatterns[0] ?? "";
+  const normalizedLikePattern = normalizedLikePatterns[0] ?? "";
 
   const results: SearchResultItem[] = [];
 
@@ -113,11 +131,12 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
   // Search assets directly
   if (target === "all" || target === "assets") {
     const keywordCondition = hasKeyword
-      ? Prisma.sql`(
-          a."title" ILIKE ${likePattern}
-          OR a."description" ILIKE ${likePattern}
-          OR a."messageBodyPreview" ILIKE ${likePattern}
-        )`
+      ? Prisma.sql`(${Prisma.join(
+          likePatterns.map(
+            (pat) => Prisma.sql`a."title" ILIKE ${pat} OR a."description" ILIKE ${pat} OR a."messageBodyPreview" ILIKE ${pat}`
+          ),
+          " OR "
+        )})`
       : Prisma.sql`TRUE`;
 
     const assetResults = await prisma.$queryRaw<Array<{
@@ -146,10 +165,10 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
     `;
 
     for (const row of assetResults) {
-      const qLower = hasKeyword ? q.toLowerCase() : "";
-      const titleMatch = hasKeyword && row.title.toLowerCase().includes(qLower);
-      const descMatch = hasKeyword && row.description.toLowerCase().includes(qLower);
-      const previewMatch = hasKeyword && (row.messageBodyPreview || "").toLowerCase().includes(qLower);
+      const termsLower = terms.map((t) => t.toLowerCase());
+      const titleMatch = hasKeyword && termsLower.some((t) => row.title.toLowerCase().includes(t));
+      const descMatch = hasKeyword && termsLower.some((t) => row.description.toLowerCase().includes(t));
+      const previewMatch = hasKeyword && termsLower.some((t) => (row.messageBodyPreview || "").toLowerCase().includes(t));
       const matchField = titleMatch ? "title" : descMatch ? "description" : previewMatch ? "messageBodyPreview" : "title";
       const matchText = titleMatch ? row.title : descMatch ? row.description : previewMatch ? (row.messageBodyPreview || "") : row.title;
       results.push({
@@ -192,10 +211,13 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
         a."createdAt" as "asset_createdAt"
       FROM "AssetText" t
       JOIN "Asset" a ON a."id" = t."assetId"
-      WHERE (
-        t."content" ILIKE ${likePattern}
-        OR t."normalizedContent" ILIKE ${normalizedLikePattern}
-      )
+      WHERE (${Prisma.join(
+          likePatterns.flatMap((pat, i) => [
+            Prisma.sql`t."content" ILIKE ${pat}`,
+            Prisma.sql`t."normalizedContent" ILIKE ${normalizedLikePatterns[i]}`,
+          ]),
+          " OR "
+        )})
       ${baseFilter}
       ${entityFilter}
       ORDER BY a."createdAt" DESC
@@ -243,10 +265,13 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
       FROM "Entity" e
       JOIN "AssetEntity" ae ON ae."entityId" = e."id"
       JOIN "Asset" a ON a."id" = ae."assetId"
-      WHERE (
-        e."canonicalName" ILIKE ${likePattern}
-        OR e."normalizedName" ILIKE ${normalizedLikePattern}
-      )
+      WHERE (${Prisma.join(
+          likePatterns.flatMap((pat, i) => [
+            Prisma.sql`e."canonicalName" ILIKE ${pat}`,
+            Prisma.sql`e."normalizedName" ILIKE ${normalizedLikePatterns[i]}`,
+          ]),
+          " OR "
+        )})
       ${baseFilter}
       ORDER BY ae."assetId", a."createdAt" DESC
       LIMIT ${perPage}
