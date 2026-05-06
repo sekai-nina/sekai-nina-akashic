@@ -12,6 +12,7 @@ export async function GET(request: Request) {
   if (auth instanceof NextResponse) return auth;
 
   const url = new URL(request.url);
+  const includeParam = url.searchParams.get("include");
   const filters: ListAssetsFilters = {
     status: (url.searchParams.get("status") as ListAssetsFilters["status"]) || undefined,
     kind: (url.searchParams.get("kind") as ListAssetsFilters["kind"]) || undefined,
@@ -19,6 +20,7 @@ export async function GET(request: Request) {
     sourceType: (url.searchParams.get("sourceType") as ListAssetsFilters["sourceType"]) || undefined,
     page: Number(url.searchParams.get("page")) || 1,
     perPage: Math.min(Number(url.searchParams.get("perPage")) || 20, 100),
+    include: includeParam ? includeParam.split(",") : undefined,
   };
 
   const result = await listAssets(filters);
