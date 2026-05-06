@@ -69,3 +69,10 @@ export const ENTITY_TYPE_LABELS: Record<string, string> = {
   event: "イベント",
   tag: "タグ",
 };
+
+export const RELATION_TYPE_LABELS: Record<string, string> = {
+  parent_child: "親子",
+  derived_from: "派生元",
+  reference: "関連",
+  same_content: "同一コンテンツ",
+};

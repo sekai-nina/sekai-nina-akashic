@@ -86,6 +86,13 @@ enum AnnotationKind {
   region
 }
 
+enum RelationType {
+  parent_child
+  derived_from
+  reference
+  same_content
+}
+
 model User {
   id           String   @id @default(cuid())
   email        String   @unique
@@ -146,6 +153,8 @@ model Asset {
   annotations     Annotation[]
   collectionItems CollectionItem[]
   testimonials    Testimonial[]
+  relationsAsSource AssetRelation[] @relation("RelationSource")
+  relationsAsTarget AssetRelation[] @relation("RelationTarget")
 
   @@index([sha256])
   @@index([status])
@@ -298,6 +307,22 @@ model AuditLog {
   @@index([actorId])
   @@index([targetType, targetId])
   @@index([createdAt])
+}
+
+model AssetRelation {
+  id           String       @id @default(cuid())
+  sourceId     String
+  source       Asset        @relation("RelationSource", fields: [sourceId], references: [id], onDelete: Cascade)
+  targetId     String
+  target       Asset        @relation("RelationTarget", fields: [targetId], references: [id], onDelete: Cascade)
+  relationType RelationType
+  metadata     Json         @default("{}")
+  sortOrder    Int          @default(0)
+  createdAt    DateTime     @default(now())
+
+  @@unique([sourceId, targetId, relationType])
+  @@index([sourceId, relationType])
+  @@index([targetId, relationType])
 }
 
 enum TestimonialStatus {
