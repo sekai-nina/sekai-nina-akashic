@@ -204,23 +204,32 @@ export default async function SearchPage({
           ) : (
             <div className="bg-white border border-slate-200 rounded-lg divide-y divide-slate-100">
               {results.items.map((item, idx) => (
-                <Link key={`${item.assetId}-${idx}`} href={`/assets/${item.assetId}`}
-                  className="flex items-start gap-3 px-4 py-3 hover:bg-slate-50 transition-colors">
-                  {(item.thumbnailUrl || ((item.assetKind === "image" || item.assetKind === "video") && item.storageUrl)) && (
-                    <img src={item.thumbnailUrl ?? item.storageUrl!} alt="" className="w-14 h-14 object-cover rounded shrink-0 bg-slate-100" />
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-medium text-slate-900">{item.assetTitle}</span>
-                      <KindBadge kind={item.assetKind} />
-                      <span className="text-xs text-slate-400">{MATCH_FIELD_LABELS[item.matchField] ?? item.matchField}</span>
+                <div key={`${item.assetId}-${idx}`} className="flex items-start gap-3 px-4 py-3 hover:bg-slate-50 transition-colors">
+                  <Link href={`/assets/${item.assetId}`} className="flex items-start gap-3 flex-1 min-w-0">
+                    {(item.thumbnailUrl || ((item.assetKind === "image" || item.assetKind === "video") && item.storageUrl)) && (
+                      <img src={item.thumbnailUrl ?? item.storageUrl!} alt="" className="w-14 h-14 object-cover rounded shrink-0 bg-slate-100" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-medium text-slate-900">{item.assetTitle}</span>
+                        <KindBadge kind={item.assetKind} />
+                        <span className="text-xs text-slate-400">{MATCH_FIELD_LABELS[item.matchField] ?? item.matchField}</span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-1 line-clamp-2">
+                        <HighlightedSnippet text={item.snippet} query={q} />
+                      </p>
                     </div>
-                    <p className="text-xs text-slate-500 mt-1 line-clamp-2">
-                      <HighlightedSnippet text={item.snippet} query={q} />
-                    </p>
+                  </Link>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {item.storageUrl && (
+                      <a href={item.storageUrl} target="_blank" rel="noopener noreferrer"
+                        className="text-slate-400 hover:text-blue-500 transition-colors p-1" title="Google Drive で開く">
+                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M7.71 3.5L1.15 15l4.58 7.5h13.54l4.58-7.5L17.29 3.5H7.71zm.58 1h8.42l5.83 10.5h-5.07l-4.5-7.78-4.5 7.78H3.4L8.29 4.5zm3.68 3.72L8.2 15h7.56l-3.79-6.78zM2.27 16h4.86l2.29 3.75H4.56L2.27 16zm12.31 0h4.86l-2.29 3.75h-4.86l2.29-3.75z"/></svg>
+                      </a>
+                    )}
+                    <ScoreBar score={item.score} />
                   </div>
-                  <div className="shrink-0"><ScoreBar score={item.score} /></div>
-                </Link>
+                </div>
               ))}
             </div>
           )}
