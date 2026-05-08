@@ -530,6 +530,33 @@ class AkashicClient:
         return self._request("POST", "/upload/complete", json=complete_body)
 
     # ------------------------------------------------------------------
+    # Thumbnail
+    # ------------------------------------------------------------------
+
+    def upload_thumbnail(
+        self,
+        asset_id: str,
+        image_data: bytes,
+        filename: str = "thumbnail.jpg",
+        mime_type: str = "image/jpeg",
+    ) -> dict[str, Any]:
+        """アセットにサムネイル画像をアップロードする。
+
+        画像は R2 にアップロードされ、thumbnailUrl が更新される。
+
+        Args:
+            asset_id: 対象アセットID
+            image_data: サムネイル画像のバイナリデータ
+            filename: ファイル名
+            mime_type: MIMEタイプ
+        """
+        return self._request(
+            "POST",
+            f"/assets/{asset_id}/thumbnail",
+            files={"file": (filename, image_data, mime_type)},
+        )
+
+    # ------------------------------------------------------------------
     # File URL helper
     # ------------------------------------------------------------------
 

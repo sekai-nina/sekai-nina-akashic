@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { uploadToDrive, isDriveEnabled } from "@/lib/drive";
 import { createAsset, updateAsset, type CreateAssetData } from "@/lib/domain/assets";
 import { logAudit } from "@/lib/domain/audit";
+import { generateAndUploadThumbnails } from "@/lib/thumbnails";
 import { createHash } from "crypto";
 import type { AssetKind, AssetStatus, StorageProvider, SourceType } from "@prisma/client";
 
@@ -155,6 +156,21 @@ export async function POST(request: Request) {
     },
     auth.id
   );
+
+  // Generate R2 thumbnails for images
+  if (kind === "image" && storageKey) {
+    try {
+      const r2Url = await generateAndUploadThumbnails(asset.id, buffer);
+      if (r2Url) {
+        await prisma.asset.update({
+          where: { id: asset.id },
+          data: { thumbnailUrl: r2Url },
+        });
+      }
+    } catch (err) {
+      console.error("R2 thumbnail generation failed:", err);
+    }
+  }
 
   await logAudit({
     actorId: auth.id,
