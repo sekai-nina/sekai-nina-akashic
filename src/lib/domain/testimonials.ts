@@ -17,6 +17,7 @@ interface ExtractOptions {
   entityId: string;
   limit?: number; // max mentions to process per run
   sinceDate?: Date; // only process mentions after this date
+  assetId?: string; // scope to a single asset (avoids full-table scan)
 }
 
 const SYSTEM_PROMPT = `あなたは日向坂46のメンバーのブログから、坂井新奈に関する人柄・性格・特徴の記述を抽出するアシスタントです。
@@ -255,21 +256,76 @@ export async function extractTestimonials(options: ExtractOptions): Promise<{
   extracted: number;
   skipped: number;
 }> {
-  const { entityId, limit = 200, sinceDate } = options;
+  const { entityId, limit = 200, sinceDate, assetId } = options;
 
-  // Get mentions (with date filter at DB level for efficiency)
-  const mentions = await searchMentions(entityId, { since: sinceDate });
-
-  // Filter to blog posts only (sourceType: web, textType: body)
-  // Exclude self-mentions (where the subject entity is the author)
   const entity = await prisma.entity.findUnique({ where: { id: entityId } });
   const entityName = entity?.canonicalName || "";
-  const filtered = mentions.filter((m) => {
-    if (m.assetSourceType !== "web" || m.textType !== "body") return false;
-    // Exclude posts authored by the subject themselves
-    const speaker = parseSpeakerFromLinkedEntities(m.linkedEntities);
-    return speaker !== entityName;
-  });
+
+  let filtered: MentionResult[];
+
+  if (assetId) {
+    // Scoped mode: only check the specific asset's text (no full-table scan)
+    const asset = await prisma.asset.findUnique({
+      where: { id: assetId },
+      include: {
+        texts: { where: { textType: "body" }, take: 1 },
+        entities: { include: { entity: true } },
+        sourceRecords: true,
+      },
+    });
+    if (!asset || !asset.texts[0] || asset.sourceType !== "web") {
+      return { processed: 0, extracted: 0, skipped: 0 };
+    }
+    const text = asset.texts[0];
+    const aliases = (entity?.aliases as string[]) || [];
+    const searchTerms = [entity?.canonicalName, ...aliases].filter(Boolean) as string[];
+    const contentLower = text.content.toLowerCase();
+    const hasMatch = searchTerms.some((term) => contentLower.includes(term.toLowerCase()));
+    if (!hasMatch) {
+      return { processed: 0, extracted: 0, skipped: 0 };
+    }
+    const linkedEntities = asset.entities
+      .map((ae) => `${ae.entity.canonicalName}${ae.roleLabel ? ` (${ae.roleLabel})` : ""}`)
+      .join(", ");
+    const sourceInfo = asset.sourceRecords
+      .map((sr) => `${sr.sourceKind}${sr.url ? `: ${sr.url}` : ""}${sr.publisher ? ` [${sr.publisher}]` : ""}`)
+      .join("; ");
+    const speaker = parseSpeakerFromLinkedEntities(linkedEntities);
+    if (speaker === entityName) {
+      return { processed: 0, extracted: 0, skipped: 0 };
+    }
+    // Build blocks from the text content
+    const blocks = text.content.split(/\n{2,}/).filter((b) => b.trim());
+    const mentions: MentionResult[] = [];
+    for (const block of blocks) {
+      const blockLower = block.toLowerCase();
+      const matched = searchTerms.filter((t) => blockLower.includes(t.toLowerCase()));
+      if (matched.length === 0) continue;
+      mentions.push({
+        assetId: asset.id,
+        assetTitle: asset.title,
+        assetKind: asset.kind,
+        assetSourceType: asset.sourceType,
+        textId: text.id,
+        textType: text.textType,
+        matchedAliases: matched,
+        block: block.trim(),
+        canonicalDate: asset.canonicalDate,
+        createdAt: asset.createdAt,
+        linkedEntities,
+        sourceInfo,
+      });
+    }
+    filtered = mentions;
+  } else {
+    // Full scan mode (for manual/batch extraction)
+    const mentions = await searchMentions(entityId, { since: sinceDate });
+    filtered = mentions.filter((m) => {
+      if (m.assetSourceType !== "web" || m.textType !== "body") return false;
+      const speaker = parseSpeakerFromLinkedEntities(m.linkedEntities);
+      return speaker !== entityName;
+    });
+  }
 
   // Get existing testimonials to avoid reprocessing
   const existingQuotes = await prisma.testimonial.findMany({

@@ -41,13 +41,14 @@ export async function POST(request: Request) {
 
   const asset = await createAsset(body, auth.id);
 
-  // Trigger testimonial extraction in background for web (blog) assets
+  // Trigger testimonial extraction in background for web (blog) assets — scoped to this asset only
   if (body.sourceType === "web" && process.env.OPENAI_API_KEY) {
     after(async () => {
       try {
         await extractTestimonials({
           entityId: NINA_ENTITY_ID,
           limit: 20,
+          assetId: asset.id,
         });
       } catch (err) {
         console.error("[testimonials] background extraction failed:", err);
