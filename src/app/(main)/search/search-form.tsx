@@ -48,7 +48,8 @@ export function SearchForm({
     setSearching(false);
   }, [searchParams]);
 
-  const entityTypes = [...new Set(entities.map((e) => e.type))];
+  const HIDDEN_ENTITY_TYPES = new Set(["source"]);
+  const entityTypes = [...new Set(entities.map((e) => e.type))].filter((t) => !HIDDEN_ENTITY_TYPES.has(t));
   const entitiesByType = Object.fromEntries(
     entityTypes.map((t) => [t, entities.filter((e) => e.type === t)])
   );
