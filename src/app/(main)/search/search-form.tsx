@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
-import { ASSET_KIND_LABELS, ASSET_STATUS_LABELS, TRUST_LEVEL_LABELS, ENTITY_TYPE_LABELS } from "@/lib/utils";
+import { ASSET_KIND_LABELS, ENTITY_TYPE_LABELS } from "@/lib/utils";
 import { EntityFilter } from "./entity-filter";
 
 const NINA_ENTITY_ID = "cmmtp8vrg0004mo381neyztvn";
@@ -44,7 +44,6 @@ export function SearchForm({
   const [ninaOnly, setNinaOnly] = useState(initialEntityIds.includes(NINA_ENTITY_ID));
   const [searching, setSearching] = useState(false);
 
-  // 検索結果が返ってきたら（searchParamsが変化）ローディング解除
   useEffect(() => {
     setSearching(false);
   }, [searchParams]);
@@ -77,35 +76,25 @@ export function SearchForm({
     if (mode !== "all") p.set("mode", mode);
     if (sourceType) p.set("sourceType", sourceType);
 
-    // エンティティID: ninaOnlyトグル + モード別選択 + 詳細フィルタをマージ
     const entityIds = new Set(selectedEntityIds);
     if (ninaOnly) entityIds.add(NINA_ENTITY_ID);
     if (entityIds.size > 0) p.set("entityIds", [...entityIds].join(","));
 
-    // Date filters
     const dateFrom = formData.get("dateFrom") as string;
     const dateTo = formData.get("dateTo") as string;
     if (dateFrom) p.set("dateFrom", dateFrom);
     if (dateTo) p.set("dateTo", dateTo);
 
-    // Advanced filters
     const kind = formData.get("kind") as string;
-    const status = formData.get("status") as string;
-    const trustLevel = formData.get("trustLevel") as string;
-    const target = formData.get("target") as string;
-    const advEntityIds = formData.get("entityIds") as string;
     if (kind) p.set("kind", kind);
-    if (status) p.set("status", status);
-    if (trustLevel) p.set("trustLevel", trustLevel);
-    if (target && target !== "all") p.set("target", target);
-    // 詳細フィルタのエンティティIDをマージ
+
+    const advEntityIds = formData.get("entityIds") as string;
     if (advEntityIds) {
       const existing = p.get("entityIds");
       const merged = new Set([...(existing?.split(",") ?? []), ...advEntityIds.split(",")].filter(Boolean));
       p.set("entityIds", [...merged].join(","));
     }
 
-    // Preserve view
     const view = searchParams.get("view");
     if (view) p.set("view", view);
 
@@ -114,6 +103,7 @@ export function SearchForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-3 mb-4">
+      {/* Search bar */}
       <div className="flex gap-3">
         <input
           type="text"
@@ -205,33 +195,12 @@ export function SearchForm({
         </div>
       )}
 
-      {/* Date sub-filter */}
-      {mode !== "all" && (
-        <div className="flex flex-wrap gap-3 items-end">
-          <div>
-            <label className="block text-xs text-slate-500 mb-1">開始日</label>
-            <input
-              type="date"
-              name="dateFrom"
-              defaultValue={searchParams.get("dateFrom") ?? ""}
-              className="border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-slate-500 mb-1">終了日</label>
-            <input
-              type="date"
-              name="dateTo"
-              defaultValue={searchParams.get("dateTo") ?? ""}
-              className="border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Advanced filters */}
-      {mode === "all" ? (
-        <div className="bg-white border border-slate-200 rounded-lg p-4 space-y-3">
+      {/* Filters */}
+      <details className="bg-white border border-slate-200 rounded-lg">
+        <summary className="px-4 py-2.5 text-sm text-slate-500 cursor-pointer hover:text-slate-700">
+          フィルタ
+        </summary>
+        <div className="px-4 pb-4 pt-1 space-y-3">
           <div className="flex flex-wrap gap-3 items-end">
             <div>
               <label className="block text-xs text-slate-500 mb-1">種別</label>
@@ -246,40 +215,6 @@ export function SearchForm({
                 ))}
               </select>
             </div>
-            <div>
-              <label className="block text-xs text-slate-500 mb-1">ステータス</label>
-              <select
-                name="status"
-                defaultValue={searchParams.get("status") ?? ""}
-                className="border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">すべて</option>
-                {Object.entries(ASSET_STATUS_LABELS).map(([v, l]) => (
-                  <option key={v} value={v}>{l}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs text-slate-500 mb-1">信頼度</label>
-              <select
-                name="trustLevel"
-                defaultValue={searchParams.get("trustLevel") ?? ""}
-                className="border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">すべて</option>
-                {Object.entries(TRUST_LEVEL_LABELS).map(([v, l]) => (
-                  <option key={v} value={v}>{l}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <EntityFilter
-            entityTypes={entityTypes}
-            entitiesByType={entitiesByType}
-            typeLabels={ENTITY_TYPE_LABELS}
-            initialSelected={initialEntityIds}
-          />
-          <div className="flex flex-wrap gap-3 items-end">
             <div>
               <label className="block text-xs text-slate-500 mb-1">開始日</label>
               <input
@@ -299,63 +234,14 @@ export function SearchForm({
               />
             </div>
           </div>
+          <EntityFilter
+            entityTypes={entityTypes}
+            entitiesByType={entitiesByType}
+            typeLabels={ENTITY_TYPE_LABELS}
+            initialSelected={initialEntityIds}
+          />
         </div>
-      ) : (
-        <details className="bg-white border border-slate-200 rounded-lg">
-          <summary className="px-4 py-2.5 text-sm text-slate-500 cursor-pointer hover:text-slate-700">
-            詳細フィルタ
-          </summary>
-          <div className="px-4 pb-4 pt-1 space-y-3">
-            <div className="flex flex-wrap gap-3 items-end">
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">種別</label>
-                <select
-                  name="kind"
-                  defaultValue={searchParams.get("kind") ?? ""}
-                  className="border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">すべて</option>
-                  {Object.entries(ASSET_KIND_LABELS).map(([v, l]) => (
-                    <option key={v} value={v}>{l}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">ステータス</label>
-                <select
-                  name="status"
-                  defaultValue={searchParams.get("status") ?? ""}
-                  className="border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">すべて</option>
-                  {Object.entries(ASSET_STATUS_LABELS).map(([v, l]) => (
-                    <option key={v} value={v}>{l}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">信頼度</label>
-                <select
-                  name="trustLevel"
-                  defaultValue={searchParams.get("trustLevel") ?? ""}
-                  className="border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">すべて</option>
-                  {Object.entries(TRUST_LEVEL_LABELS).map(([v, l]) => (
-                    <option key={v} value={v}>{l}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <EntityFilter
-              entityTypes={entityTypes}
-              entitiesByType={entitiesByType}
-              typeLabels={ENTITY_TYPE_LABELS}
-              initialSelected={initialEntityIds}
-            />
-          </div>
-        </details>
-      )}
+      </details>
     </form>
   );
 }

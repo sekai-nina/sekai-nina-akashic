@@ -4,7 +4,7 @@ import { getCachedEntities } from "@/lib/cache";
 import { ASSET_KIND_LABELS } from "@/lib/utils";
 import { SearchForm } from "./search-form";
 import Link from "next/link";
-import type { AssetKind, AssetStatus, TrustLevel, SourceType } from "@prisma/client";
+import type { AssetKind, SourceType } from "@prisma/client";
 
 type SearchMode = "all" | "text" | "media" | "image" | "live";
 
@@ -37,18 +37,6 @@ function KindBadge({ kind }: { kind: string }) {
     <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700">
       {ASSET_KIND_LABELS[kind] ?? kind}
     </span>
-  );
-}
-
-function ScoreBar({ score }: { score: number }) {
-  const pct = Math.min(100, Math.round(score * 100));
-  return (
-    <div className="flex items-center gap-1.5">
-      <div className="h-1.5 w-16 bg-slate-100 rounded-full overflow-hidden">
-        <div className="h-full bg-blue-400 rounded-full" style={{ width: `${pct}%` }} />
-      </div>
-      <span className="text-xs text-slate-400">{pct}</span>
-    </div>
   );
 }
 
@@ -93,7 +81,6 @@ export default async function SearchPage({
   const allEntities = await getCachedEntities();
   const entities = allEntities.map(({ _count, ...e }) => e);
 
-  // Resolve preset entity IDs
   const presetEntityIds: string[] = [];
   if (preset.entityNames) {
     for (const name of preset.entityNames) {
@@ -107,14 +94,12 @@ export default async function SearchPage({
     : [];
   const effectiveEntityIds = selectedEntityIds.length > 0 ? selectedEntityIds : presetEntityIds;
 
-  const hasFilters = !!(effectiveKind || params.status || params.trustLevel || effectiveSourceType || params.dateFrom || params.dateTo || effectiveEntityIds.length > 0);
+  const hasFilters = !!(effectiveKind || effectiveSourceType || params.dateFrom || params.dateTo || effectiveEntityIds.length > 0);
 
   let results = null;
   if (q.trim() || hasFilters) {
     results = await search({
       q, target: effectiveTarget, kind: effectiveKind,
-      status: params.status as AssetStatus | undefined,
-      trustLevel: params.trustLevel as TrustLevel | undefined,
       sourceType: effectiveSourceType,
       entityIds: effectiveEntityIds.length > 0 ? effectiveEntityIds : undefined,
       dateFrom: params.dateFrom ? new Date(params.dateFrom) : undefined,
@@ -132,12 +117,9 @@ export default async function SearchPage({
     if (merged.mode && merged.mode !== "all") p.set("mode", merged.mode);
     if (merged.view) p.set("view", merged.view);
     if (merged.page && merged.page !== "1") p.set("page", merged.page);
-    // Preserve current filters
     if (merged.sourceType) p.set("sourceType", merged.sourceType);
     if (merged.entityIds) p.set("entityIds", merged.entityIds);
     if (merged.kind) p.set("kind", merged.kind);
-    if (merged.status) p.set("status", merged.status);
-    if (merged.trustLevel) p.set("trustLevel", merged.trustLevel);
     if (merged.dateFrom) p.set("dateFrom", merged.dateFrom);
     if (merged.dateTo) p.set("dateTo", merged.dateTo);
     return `/search?${p.toString()}`;
@@ -227,7 +209,6 @@ export default async function SearchPage({
                         <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M7.71 3.5L1.15 15l4.58 7.5h13.54l4.58-7.5L17.29 3.5H7.71zm.58 1h8.42l5.83 10.5h-5.07l-4.5-7.78-4.5 7.78H3.4L8.29 4.5zm3.68 3.72L8.2 15h7.56l-3.79-6.78zM2.27 16h4.86l2.29 3.75H4.56L2.27 16zm12.31 0h4.86l-2.29 3.75h-4.86l2.29-3.75z"/></svg>
                       </a>
                     )}
-                    <ScoreBar score={item.score} />
                   </div>
                 </div>
               ))}
