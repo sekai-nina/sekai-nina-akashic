@@ -51,17 +51,21 @@ export interface SearchResult {
   perPage: number;
 }
 
-function buildSnippet(text: string, query: string, contextLen = 80): string {
-  const lower = text.toLowerCase();
+function buildSnippet(text: string, query: string): string {
+  const clean = text.replace(/\{\{IMG:[^}]+\}\}/g, "").replace(/[\s\u3000]+/g, " ");
+  const lower = clean.toLowerCase();
   const qLower = query.toLowerCase();
   const idx = lower.indexOf(qLower);
-  if (idx === -1) return text.slice(0, contextLen * 2) + (text.length > contextLen * 2 ? "…" : "");
-  const start = Math.max(0, idx - contextLen);
-  const end = Math.min(text.length, idx + query.length + contextLen);
+  if (idx === -1) return clean.slice(0, 120) + (clean.length > 120 ? "…" : "");
+  // マッチ箇所が必ず先頭寄りに来るようにする（前方コンテキストを短く）
+  const before = 20;
+  const after = 100;
+  const start = Math.max(0, idx - before);
+  const end = Math.min(clean.length, idx + query.length + after);
   let snippet = "";
   if (start > 0) snippet += "…";
-  snippet += text.slice(start, end);
-  if (end < text.length) snippet += "…";
+  snippet += clean.slice(start, end);
+  if (end < clean.length) snippet += "…";
   return snippet;
 }
 
