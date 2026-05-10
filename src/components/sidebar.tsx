@@ -13,7 +13,7 @@ import {
   LogOut,
   Menu,
   X,
-  Home,
+  LayoutDashboard,
   Tag,
   MessageCircle,
   Image,
@@ -26,15 +26,15 @@ interface SidebarProps {
 }
 
 const navItems = [
-  { href: "/", label: "ダッシュボード", icon: Home, exact: true },
-  { href: "/inbox", label: "Inbox", icon: Inbox },
-  { href: "/assets", label: "Assets", icon: Archive },
-  { href: "/gallery", label: "ギャラリー", icon: Image },
-  { href: "/graph", label: "グラフ", icon: Network },
-  { href: "/entities", label: "エンティティ", icon: Tag },
-  { href: "/testimonials", label: "口コミ管理", icon: MessageCircle },
-  { href: "/collections", label: "コレクション", icon: FolderOpen },
   { href: "/search", label: "検索", icon: Search },
+  { href: "/gallery", label: "ギャラリー", icon: Image },
+  { href: "/assets", label: "Assets", icon: Archive },
+  { href: "/inbox", label: "Inbox", icon: Inbox },
+  { href: "/entities", label: "エンティティ", icon: Tag },
+  { href: "/collections", label: "コレクション", icon: FolderOpen },
+  { href: "/testimonials", label: "口コミ管理", icon: MessageCircle },
+  { href: "/graph", label: "グラフ", icon: Network },
+  { href: "/dashboard", label: "ダッシュボード", icon: LayoutDashboard },
 ];
 
 const adminItems = [

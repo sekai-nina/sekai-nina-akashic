@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { ASSET_KIND_LABELS, ENTITY_TYPE_LABELS } from "@/lib/utils";
@@ -18,10 +18,17 @@ const SEARCH_MODES: { key: SearchMode; label: string }[] = [
   { key: "live", label: "ライブ" },
 ];
 
+const MODE_KIND_MAP: Partial<Record<SearchMode, string>> = {
+  text: "text",
+  image: "image",
+};
+
+// テキストモードのサブフィルタ用タグ名
+const TEXT_SUB_TAGS = ["ブログ", "トーク"];
+
 interface SearchFormProps {
   initialMode: SearchMode;
   initialQ: string;
-  initialSourceType?: string;
   initialEntityIds: string[];
   mediaShowEntities: { id: string; canonicalName: string }[];
   entities: { id: string; canonicalName: string; type: string }[];
@@ -30,7 +37,6 @@ interface SearchFormProps {
 export function SearchForm({
   initialMode,
   initialQ,
-  initialSourceType,
   initialEntityIds,
   mediaShowEntities,
   entities,
@@ -39,10 +45,15 @@ export function SearchForm({
   const searchParams = useSearchParams();
 
   const [mode, setMode] = useState<SearchMode>(initialMode);
-  const [sourceType, setSourceType] = useState<string | undefined>(initialSourceType);
-  const [selectedEntityIds, setSelectedEntityIds] = useState<string[]>(initialEntityIds);
+  const [kind, setKind] = useState<string>(
+    searchParams.get("kind") ?? MODE_KIND_MAP[initialMode] ?? ""
+  );
   const [ninaOnly, setNinaOnly] = useState(initialEntityIds.includes(NINA_ENTITY_ID));
   const [searching, setSearching] = useState(false);
+
+  const [filterEntityIds, setFilterEntityIds] = useState<Set<string>>(
+    new Set(initialEntityIds)
+  );
 
   useEffect(() => {
     setSearching(false);
@@ -54,17 +65,62 @@ export function SearchForm({
     entityTypes.map((t) => [t, entities.filter((e) => e.type === t)])
   );
 
-  function handleModeChange(newMode: SearchMode) {
-    setMode(newMode);
-    setSourceType(undefined);
-    setSelectedEntityIds([]);
-  }
+  // テキストモードのサブフィルタ用エンティティ
+  const textSubEntities = TEXT_SUB_TAGS
+    .map((name) => entities.find((e) => e.canonicalName === name && e.type === "tag"))
+    .filter((e): e is NonNullable<typeof e> => e != null);
 
-  function toggleMediaEntity(id: string) {
-    setSelectedEntityIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    );
-  }
+  const handleModeChange = useCallback((newMode: SearchMode) => {
+    setMode(newMode);
+    setKind(MODE_KIND_MAP[newMode] ?? "");
+
+    setFilterEntityIds((prev) => {
+      const next = new Set<string>();
+      if (prev.has(NINA_ENTITY_ID)) next.add(NINA_ENTITY_ID);
+      return next;
+    });
+  }, []);
+
+  const handleNinaToggle = useCallback(() => {
+    setNinaOnly((prev) => {
+      const next = !prev;
+      setFilterEntityIds((ids) => {
+        const updated = new Set(ids);
+        if (next) updated.add(NINA_ENTITY_ID);
+        else updated.delete(NINA_ENTITY_ID);
+        return updated;
+      });
+      return next;
+    });
+  }, []);
+
+  const handleTextSubFilter = useCallback((entityId: string) => {
+    setFilterEntityIds((prev) => {
+      const next = new Set(prev);
+      // 他のテキストサブフィルタを外す（排他選択）
+      for (const e of textSubEntities) {
+        next.delete(e.id);
+      }
+      // 同じものをクリックした場合はトグルオフ（すべて）
+      if (!prev.has(entityId)) {
+        next.add(entityId);
+      }
+      return next;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [textSubEntities.map((e) => e.id).join(",")]);
+
+  const toggleFilterEntity = useCallback((id: string) => {
+    if (id === NINA_ENTITY_ID) {
+      setNinaOnly((prev) => !prev);
+    }
+    setFilterEntityIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -75,32 +131,25 @@ export function SearchForm({
     const q = formData.get("q") as string;
     if (q) p.set("q", q);
     if (mode !== "all") p.set("mode", mode);
-    if (sourceType) p.set("sourceType", sourceType);
+    if (kind) p.set("kind", kind);
 
-    const entityIds = new Set(selectedEntityIds);
-    if (ninaOnly) entityIds.add(NINA_ENTITY_ID);
-    if (entityIds.size > 0) p.set("entityIds", [...entityIds].join(","));
+    if (filterEntityIds.size > 0) {
+      p.set("entityIds", [...filterEntityIds].join(","));
+    }
 
     const dateFrom = formData.get("dateFrom") as string;
     const dateTo = formData.get("dateTo") as string;
     if (dateFrom) p.set("dateFrom", dateFrom);
     if (dateTo) p.set("dateTo", dateTo);
 
-    const kind = formData.get("kind") as string;
-    if (kind) p.set("kind", kind);
-
-    const advEntityIds = formData.get("entityIds") as string;
-    if (advEntityIds) {
-      const existing = p.get("entityIds");
-      const merged = new Set([...(existing?.split(",") ?? []), ...advEntityIds.split(",")].filter(Boolean));
-      p.set("entityIds", [...merged].join(","));
-    }
-
     const view = searchParams.get("view");
     if (view) p.set("view", view);
 
     router.push(`/search?${p.toString()}`, { scroll: false });
   }
+
+  // テキストモードで選択中のサブフィルタ
+  const activeTextSub = textSubEntities.find((e) => filterEntityIds.has(e.id));
 
   return (
     <form onSubmit={handleSubmit} className="space-y-3 mb-4">
@@ -141,7 +190,7 @@ export function SearchForm({
         <span className="text-slate-300 mx-0.5">|</span>
         <button
           type="button"
-          onClick={() => setNinaOnly(!ninaOnly)}
+          onClick={handleNinaToggle}
           className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
             ninaOnly
               ? "bg-purple-600 text-white"
@@ -153,24 +202,37 @@ export function SearchForm({
       </div>
 
       {/* Text mode: blog/talk sub-filter */}
-      {mode === "text" && (
+      {mode === "text" && textSubEntities.length > 0 && (
         <div className="flex gap-1 flex-wrap pl-1">
-          {([
-            { value: undefined as string | undefined, label: "すべて" },
-            { value: "web", label: "ブログ" },
-            { value: "import", label: "トーク" },
-          ]).map((opt) => (
+          <button
+            type="button"
+            onClick={() => {
+              setFilterEntityIds((prev) => {
+                const next = new Set(prev);
+                for (const e of textSubEntities) next.delete(e.id);
+                return next;
+              });
+            }}
+            className={`px-2.5 py-1 rounded-full text-xs transition-colors ${
+              !activeTextSub
+                ? "bg-blue-100 text-blue-700"
+                : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+            }`}
+          >
+            すべて
+          </button>
+          {textSubEntities.map((e) => (
             <button
-              key={opt.label}
+              key={e.id}
               type="button"
-              onClick={() => setSourceType(opt.value)}
+              onClick={() => handleTextSubFilter(e.id)}
               className={`px-2.5 py-1 rounded-full text-xs transition-colors ${
-                sourceType === opt.value
+                filterEntityIds.has(e.id)
                   ? "bg-blue-100 text-blue-700"
                   : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"
               }`}
             >
-              {opt.label}
+              {e.canonicalName}
             </button>
           ))}
         </div>
@@ -183,9 +245,9 @@ export function SearchForm({
             <button
               key={e.id}
               type="button"
-              onClick={() => toggleMediaEntity(e.id)}
+              onClick={() => toggleFilterEntity(e.id)}
               className={`px-2.5 py-1 rounded-full text-xs transition-colors ${
-                selectedEntityIds.includes(e.id)
+                filterEntityIds.has(e.id)
                   ? "bg-blue-100 text-blue-700"
                   : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"
               }`}
@@ -206,8 +268,8 @@ export function SearchForm({
             <div>
               <label className="block text-xs text-slate-500 mb-1">種別</label>
               <select
-                name="kind"
-                defaultValue={searchParams.get("kind") ?? ""}
+                value={kind}
+                onChange={(e) => setKind(e.target.value)}
                 className="border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">すべて</option>
@@ -239,7 +301,8 @@ export function SearchForm({
             entityTypes={entityTypes}
             entitiesByType={entitiesByType}
             typeLabels={ENTITY_TYPE_LABELS}
-            initialSelected={initialEntityIds}
+            selected={filterEntityIds}
+            onToggle={toggleFilterEntity}
           />
         </div>
       </details>

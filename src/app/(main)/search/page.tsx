@@ -4,7 +4,7 @@ import { getCachedEntities } from "@/lib/cache";
 import { ASSET_KIND_LABELS } from "@/lib/utils";
 import { SearchForm } from "./search-form";
 import Link from "next/link";
-import type { AssetKind, SourceType } from "@prisma/client";
+import type { AssetKind } from "@prisma/client";
 
 type SearchMode = "all" | "text" | "media" | "image" | "live";
 
@@ -17,7 +17,6 @@ const MEDIA_SHOW_NAMES = [
 ];
 
 interface ModePreset {
-  sourceType?: SourceType;
   kind?: AssetKind;
   target?: "all" | "assets" | "texts";
   view?: "list" | "gallery";
@@ -75,7 +74,6 @@ export default async function SearchPage({
 
   const effectiveTarget = (params.target as "all" | "assets" | "texts") || preset.target || "all";
   const effectiveKind = (params.kind as AssetKind | undefined) || preset.kind;
-  const effectiveSourceType = (params.sourceType as SourceType | undefined) || preset.sourceType;
   const effectiveView = params.view ? (params.view as "list" | "gallery") : (preset.view ?? "list");
 
   const allEntities = await getCachedEntities();
@@ -94,13 +92,12 @@ export default async function SearchPage({
     : [];
   const effectiveEntityIds = selectedEntityIds.length > 0 ? selectedEntityIds : presetEntityIds;
 
-  const hasFilters = !!(effectiveKind || effectiveSourceType || params.dateFrom || params.dateTo || effectiveEntityIds.length > 0);
+  const hasFilters = !!(effectiveKind || params.dateFrom || params.dateTo || effectiveEntityIds.length > 0);
 
   let results = null;
   if (q.trim() || hasFilters) {
     results = await search({
       q, target: effectiveTarget, kind: effectiveKind,
-      sourceType: effectiveSourceType,
       entityIds: effectiveEntityIds.length > 0 ? effectiveEntityIds : undefined,
       dateFrom: params.dateFrom ? new Date(params.dateFrom) : undefined,
       dateTo: params.dateTo ? new Date(params.dateTo) : undefined,
@@ -117,7 +114,6 @@ export default async function SearchPage({
     if (merged.mode && merged.mode !== "all") p.set("mode", merged.mode);
     if (merged.view) p.set("view", merged.view);
     if (merged.page && merged.page !== "1") p.set("page", merged.page);
-    if (merged.sourceType) p.set("sourceType", merged.sourceType);
     if (merged.entityIds) p.set("entityIds", merged.entityIds);
     if (merged.kind) p.set("kind", merged.kind);
     if (merged.dateFrom) p.set("dateFrom", merged.dateFrom);
@@ -135,7 +131,6 @@ export default async function SearchPage({
         <SearchForm
           initialMode={mode}
           initialQ={q}
-          initialSourceType={params.sourceType}
           initialEntityIds={selectedEntityIds}
           mediaShowEntities={mediaShowEntities}
           entities={entities}
