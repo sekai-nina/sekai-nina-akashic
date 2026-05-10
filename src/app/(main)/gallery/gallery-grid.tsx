@@ -95,12 +95,13 @@ export function GalleryGrid({
   const groups = groupByMonth(items);
 
   function getGalleryImageUrl(item: GalleryItem): string {
-    // Use R2 thumbnail (640px webp) for viewing — fast and sufficient quality
-    if (item.thumbnailUrl) return item.thumbnailUrl;
+    // R2 サムネイルがあればそれを使う
+    if (item.thumbnailUrl?.includes("/thumbnails/")) return item.thumbnailUrl;
+    // Drive 画像はプロキシ経由で表示
     if (item.storageProvider === "gdrive" && item.storageKey) {
       return `/api/drive-image/${item.storageKey}`;
     }
-    return "";
+    return item.thumbnailUrl ?? "";
   }
 
   function getDownloadUrl(item: GalleryItem): string | null {

@@ -31,14 +31,17 @@ export interface SearchResultItem {
   createdAt: Date;
 }
 
-/** Drive の直リンクをプロキシURLに変換する */
+/** R2サムネイルがあればそれを使い、なければDriveプロキシにフォールバック */
 function resolveImageUrl(
   thumbnailUrl: string | null,
   storageProvider: string | null,
   storageKey: string | null,
   kind: string
 ): string | null {
-  if (kind === "image" && storageProvider === "gdrive" && storageKey) {
+  // R2 サムネイルがあればそれを優先
+  if (thumbnailUrl?.includes("/thumbnails/")) return thumbnailUrl;
+  // Drive 画像はプロキシ経由
+  if ((kind === "image" || kind === "video") && storageProvider === "gdrive" && storageKey) {
     return `/api/drive-image/${storageKey}`;
   }
   return thumbnailUrl;
