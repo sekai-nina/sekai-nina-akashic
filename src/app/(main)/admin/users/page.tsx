@@ -14,9 +14,9 @@ const ROLE_LABELS: Record<string, string> = {
 
 const CLEARANCE_LABELS: Record<string, string> = {
   public: "公開",
-  internal: "内部",
-  confidential: "機密",
-  restricted: "制限付き",
+  internal: "一般",
+  confidential: "限定",
+  restricted: "極秘",
 };
 
 const CLEARANCE_COLORS: Record<string, string> = {
@@ -116,10 +116,9 @@ export default async function AdminUsersPage() {
                 name="clearance"
                 className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                <option value="public">公開</option>
-                <option value="internal">内部</option>
-                <option value="confidential">機密</option>
-                <option value="restricted">制限付き</option>
+                <option value="internal">一般</option>
+                <option value="confidential">限定</option>
+                <option value="restricted">極秘</option>
               </select>
             </div>
           </div>
@@ -203,10 +202,9 @@ export default async function AdminUsersPage() {
                           defaultValue={user.clearance}
                           className="w-full border border-slate-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
                         >
-                          <option value="public">公開</option>
-                          <option value="internal">内部</option>
-                          <option value="confidential">機密</option>
-                          <option value="restricted">制限付き</option>
+                          <option value="internal">一般</option>
+                          <option value="confidential">限定</option>
+                          <option value="restricted">極秘</option>
                         </select>
                       </div>
                       <SubmitButton className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700 transition-colors">
