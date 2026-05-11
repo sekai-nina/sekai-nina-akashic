@@ -1,4 +1,5 @@
-import { prisma } from "@/lib/db";
+import { withClearance } from "@/lib/db";
+import { auth } from "@/lib/auth";
 import { ASSET_KIND_LABELS, ASSET_STATUS_LABELS, TRUST_LEVEL_LABELS, formatDate } from "@/lib/utils";
 import Link from "next/link";
 import type { AssetKind, AssetStatus } from "@prisma/client";
@@ -37,24 +38,28 @@ export default async function AssetsPage({
   const page = Math.max(1, parseInt(params.page ?? "1"));
   const statusFilter = params.status as AssetStatus | undefined;
   const kindFilter = params.kind as AssetKind | undefined;
+  const session = await auth();
 
   const where = {
     ...(statusFilter ? { status: statusFilter } : {}),
     ...(kindFilter ? { kind: kindFilter } : {}),
   };
 
-  const [assets, total] = await Promise.all([
-    prisma.asset.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-      skip: (page - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
-      include: {
-        sourceRecords: { take: 1 },
-      },
-    }),
-    prisma.asset.count({ where }),
-  ]);
+  const [assets, total] = await withClearance(session!.user.clearance, async (tx) => {
+    const [a, c] = await Promise.all([
+      tx.asset.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * PAGE_SIZE,
+        take: PAGE_SIZE,
+        include: {
+          sourceRecords: { take: 1 },
+        },
+      }),
+      tx.asset.count({ where }),
+    ]);
+    return [a, c] as const;
+  });
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
 

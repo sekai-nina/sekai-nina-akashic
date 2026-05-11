@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
-import { prisma } from "@/lib/db";
+import { withClearance } from "@/lib/db";
 import { RelationType } from "@prisma/client";
 import {
   createAssetRelation,
@@ -16,7 +16,10 @@ export async function GET(
 
   const { id } = await params;
 
-  const asset = await prisma.asset.findUnique({ where: { id }, select: { id: true } });
+  // RLS handles classification filtering: if asset is not accessible, findUnique returns null
+  const asset = await withClearance(auth.clearance, (tx) =>
+    tx.asset.findUnique({ where: { id }, select: { id: true } })
+  );
   if (!asset) {
     return NextResponse.json({ error: "Asset not found" }, { status: 404 });
   }
@@ -24,7 +27,7 @@ export async function GET(
   const url = new URL(request.url);
   const relationType = url.searchParams.get("relationType") as RelationType | null;
 
-  const relations = await getAssetRelations(id);
+  const relations = await getAssetRelations(id, auth.clearance);
 
   if (relationType) {
     return NextResponse.json({
@@ -71,6 +74,7 @@ export async function POST(
     const relation = await createAssetRelation(
       { sourceId: id, targetId, relationType, metadata, sortOrder },
       auth.id,
+      auth.clearance,
     );
     return NextResponse.json(relation, { status: 201 });
   } catch (e) {

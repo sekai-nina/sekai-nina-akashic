@@ -14,7 +14,7 @@ export async function GET(request: Request) {
   const page = Number(url.searchParams.get("page")) || 1;
   const perPage = Math.min(Number(url.searchParams.get("perPage")) || 50, 200);
 
-  const result = await listTestimonials({ entityId, status, category, page, perPage });
+  const result = await listTestimonials({ entityId, status, category, page, perPage, clearance: auth.clearance });
   return NextResponse.json(result);
 }
 
@@ -37,6 +37,6 @@ export async function PATCH(request: Request) {
     );
   }
 
-  const testimonial = await reviewTestimonial(body.id, body.status);
+  const testimonial = await reviewTestimonial(body.id, body.status, auth.clearance);
   return NextResponse.json(testimonial);
 }

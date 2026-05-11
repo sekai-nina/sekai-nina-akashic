@@ -1,4 +1,5 @@
-import { prisma } from "@/lib/db";
+import { withClearance } from "@/lib/db";
+import { auth } from "@/lib/auth";
 import {
   updateAsset,
   deleteAsset,
@@ -52,19 +53,22 @@ export default async function AssetEditPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const session = await auth();
 
-  const asset = await prisma.asset.findUnique({
-    where: { id },
-    include: {
-      texts: { orderBy: { createdAt: "asc" } },
-      entities: {
-        include: { entity: true },
-        orderBy: { createdAt: "asc" },
+  const asset = await withClearance(session!.user.clearance, (tx) =>
+    tx.asset.findUnique({
+      where: { id },
+      include: {
+        texts: { orderBy: { createdAt: "asc" } },
+        entities: {
+          include: { entity: true },
+          orderBy: { createdAt: "asc" },
+        },
+        sourceRecords: { orderBy: { createdAt: "asc" } },
+        annotations: { orderBy: { createdAt: "asc" } },
       },
-      sourceRecords: { orderBy: { createdAt: "asc" } },
-      annotations: { orderBy: { createdAt: "asc" } },
-    },
-  });
+    })
+  );
   if (!asset) notFound();
 
   const action = updateAsset.bind(null, id);

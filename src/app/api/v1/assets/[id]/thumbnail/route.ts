@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
-import { prisma } from "@/lib/db";
+import { withClearance } from "@/lib/db";
 import { generateAndUploadThumbnails } from "@/lib/thumbnails";
 
 /**
@@ -17,7 +17,10 @@ export async function POST(
   if (auth instanceof NextResponse) return auth;
 
   const { id } = await params;
-  const asset = await prisma.asset.findUnique({ where: { id } });
+  // RLS handles classification filtering: if asset is not accessible, findUnique returns null
+  const asset = await withClearance(auth.clearance, (tx) =>
+    tx.asset.findUnique({ where: { id } })
+  );
   if (!asset) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
@@ -37,10 +40,12 @@ export async function POST(
     );
   }
 
-  await prisma.asset.update({
-    where: { id },
-    data: { thumbnailUrl: r2Url },
-  });
+  await withClearance(auth.clearance, (tx) =>
+    tx.asset.update({
+      where: { id },
+      data: { thumbnailUrl: r2Url },
+    })
+  );
 
   return NextResponse.json({ thumbnailUrl: r2Url });
 }

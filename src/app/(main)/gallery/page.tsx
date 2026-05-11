@@ -1,32 +1,37 @@
-import { prisma } from "@/lib/db";
+import { withClearance } from "@/lib/db";
+import { auth } from "@/lib/auth";
 import { GalleryGrid } from "./gallery-grid";
 
 const PAGE_SIZE = 40;
 const NINA_ENTITY_ID = "cmmtp8vrg0004mo381neyztvn";
 
 export default async function GalleryPage() {
-  const assets = await prisma.asset.findMany({
-    where: {
-      kind: { in: ["image", "video"] },
-      thumbnailUrl: { not: null },
-      entities: { some: { entityId: NINA_ENTITY_ID } },
-    },
-    orderBy: [
-      { canonicalDate: { sort: "desc", nulls: "last" } },
-      { createdAt: "desc" },
-    ],
-    take: PAGE_SIZE + 1,
-    select: {
-      id: true,
-      title: true,
-      kind: true,
-      thumbnailUrl: true,
-      storageKey: true,
-      storageProvider: true,
-      canonicalDate: true,
-      createdAt: true,
-    },
-  });
+  const session = await auth();
+
+  const assets = await withClearance(session!.user.clearance, (tx) =>
+    tx.asset.findMany({
+      where: {
+        kind: { in: ["image", "video"] },
+        thumbnailUrl: { not: null },
+        entities: { some: { entityId: NINA_ENTITY_ID } },
+      },
+      orderBy: [
+        { canonicalDate: { sort: "desc", nulls: "last" } },
+        { createdAt: "desc" },
+      ],
+      take: PAGE_SIZE + 1,
+      select: {
+        id: true,
+        title: true,
+        kind: true,
+        thumbnailUrl: true,
+        storageKey: true,
+        storageProvider: true,
+        canonicalDate: true,
+        createdAt: true,
+      },
+    })
+  );
 
   const hasMore = assets.length > PAGE_SIZE;
   const items = assets.slice(0, PAGE_SIZE).map((a) => ({

@@ -12,6 +12,20 @@ const ROLE_LABELS: Record<string, string> = {
   viewer: "閲覧者",
 };
 
+const CLEARANCE_LABELS: Record<string, string> = {
+  public: "公開",
+  internal: "内部",
+  confidential: "機密",
+  restricted: "制限付き",
+};
+
+const CLEARANCE_COLORS: Record<string, string> = {
+  public: "bg-green-100 text-green-700",
+  internal: "bg-blue-100 text-blue-700",
+  confidential: "bg-orange-100 text-orange-700",
+  restricted: "bg-red-100 text-red-700",
+};
+
 function RoleBadge({ role }: { role: string }) {
   const colors: Record<string, string> = {
     admin: "bg-red-100 text-red-700",
@@ -21,6 +35,14 @@ function RoleBadge({ role }: { role: string }) {
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${colors[role] ?? "bg-slate-100 text-slate-600"}`}>
       {ROLE_LABELS[role] ?? role}
+    </span>
+  );
+}
+
+function ClearanceBadge({ clearance }: { clearance: string }) {
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${CLEARANCE_COLORS[clearance] ?? "bg-slate-100 text-slate-600"}`}>
+      {CLEARANCE_LABELS[clearance] ?? clearance}
     </span>
   );
 }
@@ -88,6 +110,18 @@ export default async function AdminUsersPage() {
                 <option value="admin">管理者</option>
               </select>
             </div>
+            <div>
+              <label className="block text-xs text-slate-500 mb-1">クリアランス</label>
+              <select
+                name="clearance"
+                className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="public">公開</option>
+                <option value="internal">内部</option>
+                <option value="confidential">機密</option>
+                <option value="restricted">制限付き</option>
+              </select>
+            </div>
           </div>
           <SubmitButton className="bg-blue-600 text-white px-4 py-1.5 rounded text-sm font-medium hover:bg-blue-700 transition-colors">
             ユーザーを作成
@@ -107,6 +141,7 @@ export default async function AdminUsersPage() {
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm font-medium text-slate-800">{user.name}</span>
                 <RoleBadge role={user.role} />
+                <ClearanceBadge clearance={user.clearance} />
                 {isSelf && <span className="text-xs text-slate-300">(自分)</span>}
               </div>
               <div className="flex items-center gap-3 text-xs text-slate-500">
@@ -159,6 +194,19 @@ export default async function AdminUsersPage() {
                           <option value="member">メンバー</option>
                           <option value="viewer">閲覧者</option>
                           <option value="admin">管理者</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-0.5">クリアランス</label>
+                        <select
+                          name="clearance"
+                          defaultValue={user.clearance}
+                          className="w-full border border-slate-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        >
+                          <option value="public">公開</option>
+                          <option value="internal">内部</option>
+                          <option value="confidential">機密</option>
+                          <option value="restricted">制限付き</option>
                         </select>
                       </div>
                       <SubmitButton className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700 transition-colors">

@@ -1,5 +1,5 @@
 import { EntityType } from "@prisma/client";
-import { prisma } from "@/lib/db";
+import { prisma, withClearance } from "@/lib/db";
 import { normalizeText } from "@/lib/utils";
 import { logAudit } from "./audit";
 
@@ -38,41 +38,44 @@ export async function searchEntities(query: string, type?: EntityType) {
 export async function listEntities(
   type?: EntityType,
   page: number = 1,
-  perPage: number = 20
+  perPage: number = 20,
+  clearance: string = "public"
 ) {
   const where = type ? { type } : {};
   const skip = (page - 1) * perPage;
 
-  const [items, total] = await prisma.$transaction([
-    prisma.entity.findMany({
+  return withClearance(clearance, async (tx) => {
+    const items = await tx.entity.findMany({
       where,
       skip,
       take: perPage,
       orderBy: { canonicalName: "asc" },
-    }),
-    prisma.entity.count({ where }),
-  ]);
-
-  return { items, total };
+    });
+    const total = await tx.entity.count({ where });
+    return { items, total };
+  });
 }
 
 export async function addEntityToAsset(
   assetId: string,
   entityId: string,
+  clearance: string,
   roleLabel?: string
 ) {
-  const assetEntity = await prisma.assetEntity.upsert({
-    where: {
-      assetId_entityId: { assetId, entityId },
-    },
-    update: {
-      roleLabel: roleLabel ?? null,
-    },
-    create: {
-      assetId,
-      entityId,
-      roleLabel: roleLabel ?? null,
-    },
+  const assetEntity = await withClearance(clearance, async (tx) => {
+    return tx.assetEntity.upsert({
+      where: {
+        assetId_entityId: { assetId, entityId },
+      },
+      update: {
+        roleLabel: roleLabel ?? null,
+      },
+      create: {
+        assetId,
+        entityId,
+        roleLabel: roleLabel ?? null,
+      },
+    });
   });
 
   await logAudit({
@@ -85,10 +88,12 @@ export async function addEntityToAsset(
   return assetEntity;
 }
 
-export async function removeEntityFromAsset(assetId: string, entityId: string) {
-  return prisma.assetEntity.delete({
-    where: {
-      assetId_entityId: { assetId, entityId },
-    },
+export async function removeEntityFromAsset(assetId: string, entityId: string, clearance: string) {
+  return withClearance(clearance, async (tx) => {
+    return tx.assetEntity.delete({
+      where: {
+        assetId_entityId: { assetId, entityId },
+      },
+    });
   });
 }

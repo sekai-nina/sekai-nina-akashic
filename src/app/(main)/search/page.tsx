@@ -1,10 +1,11 @@
 import { Suspense } from "react";
 import { search } from "@/lib/search";
+import { auth } from "@/lib/auth";
 import { getCachedEntities } from "@/lib/cache";
 import { ASSET_KIND_LABELS } from "@/lib/utils";
 import { SearchForm } from "./search-form";
 import Link from "next/link";
-import type { AssetKind } from "@prisma/client";
+import type { AssetKind, ClearanceLevel } from "@prisma/client";
 
 type SearchMode = "all" | "text" | "media" | "image" | "live";
 
@@ -66,6 +67,9 @@ export default async function SearchPage({
 }: {
   searchParams: Promise<{ [key: string]: string | undefined }>;
 }) {
+  const session = await auth();
+  const userClearance = session!.user.clearance as ClearanceLevel;
+
   const params = await searchParams;
   const q = params.q ?? "";
   const mode = (params.mode as SearchMode) || "all";
@@ -102,7 +106,7 @@ export default async function SearchPage({
       dateFrom: params.dateFrom ? new Date(params.dateFrom) : undefined,
       dateTo: params.dateTo ? new Date(params.dateTo) : undefined,
       page, perPage: 20,
-    });
+    }, userClearance);
   }
 
   const mediaShowEntities = entities.filter((e) => MEDIA_SHOW_NAMES.includes(e.canonicalName));

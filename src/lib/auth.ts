@@ -7,6 +7,8 @@ export interface SessionUser {
   email: string;
   name: string;
   role: string;
+  clearance: string;
+  avatarUrl: string | null;
 }
 
 export interface Session {
@@ -39,6 +41,8 @@ export const auth = cache(async (): Promise<Session | null> => {
       email: user.email,
       name: user.name,
       role: user.role,
+      clearance: user.clearance,
+      avatarUrl: user.avatarUrl,
     },
   };
 });

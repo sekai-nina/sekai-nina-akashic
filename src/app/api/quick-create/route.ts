@@ -1,5 +1,5 @@
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import { withClearance } from "@/lib/db";
 import { logAudit } from "@/lib/domain/audit";
 import { invalidateAssets } from "@/lib/cache";
 import { findOrCreateEntity } from "@/lib/domain/entities";
@@ -22,50 +22,54 @@ export async function POST(request: Request) {
   const entitiesRaw = formData.get("entities") as string | null;
   const textsRaw = formData.get("texts") as string | null;
 
-  const asset = await prisma.asset.create({
-    data: {
-      kind,
-      title,
-      status: "inbox",
-      sourceType: "manual",
-      canonicalDate: canonicalDate ? new Date(canonicalDate) : null,
-      createdById: session.user.id,
-      updatedById: session.user.id,
-    },
-  });
-
-  // Add body text if provided
-  if (bodyText?.trim()) {
-    await prisma.assetText.create({
+  const asset = await withClearance(session.user.clearance, async (tx) => {
+    const created = await tx.asset.create({
       data: {
-        assetId: asset.id,
-        textType: "body",
-        content: bodyText.trim(),
-        normalizedContent: normalizeText(bodyText.trim()),
+        kind,
+        title,
+        status: "inbox",
+        sourceType: "manual",
+        canonicalDate: canonicalDate ? new Date(canonicalDate) : null,
         createdById: session.user.id,
+        updatedById: session.user.id,
       },
     });
-  }
 
-  // Add texts from JSON if provided
-  if (textsRaw) {
-    try {
-      const texts = JSON.parse(textsRaw) as Array<{ textType: string; content: string }>;
-      for (const t of texts) {
-        if (t.content?.trim()) {
-          await prisma.assetText.create({
-            data: {
-              assetId: asset.id,
-              textType: t.textType as "body",
-              content: t.content.trim(),
-              normalizedContent: normalizeText(t.content.trim()),
-              createdById: session.user.id,
-            },
-          });
+    // Add body text if provided
+    if (bodyText?.trim()) {
+      await tx.assetText.create({
+        data: {
+          assetId: created.id,
+          textType: "body",
+          content: bodyText.trim(),
+          normalizedContent: normalizeText(bodyText.trim()),
+          createdById: session.user.id,
+        },
+      });
+    }
+
+    // Add texts from JSON if provided
+    if (textsRaw) {
+      try {
+        const texts = JSON.parse(textsRaw) as Array<{ textType: string; content: string }>;
+        for (const t of texts) {
+          if (t.content?.trim()) {
+            await tx.assetText.create({
+              data: {
+                assetId: created.id,
+                textType: t.textType as "body",
+                content: t.content.trim(),
+                normalizedContent: normalizeText(t.content.trim()),
+                createdById: session.user.id,
+              },
+            });
+          }
         }
-      }
-    } catch { /* ignore parse errors */ }
-  }
+      } catch { /* ignore parse errors */ }
+    }
+
+    return created;
+  });
 
   // Link entities/tags
   if (entitiesRaw) {
@@ -73,7 +77,7 @@ export async function POST(request: Request) {
       const entities = JSON.parse(entitiesRaw) as Array<{ type: string; canonicalName: string }>;
       for (const e of entities) {
         const entity = await findOrCreateEntity(e.type as "tag", e.canonicalName);
-        await addEntityToAsset(asset.id, entity.id);
+        await addEntityToAsset(asset.id, entity.id, session.user.clearance);
       }
     } catch { /* ignore parse errors */ }
   }

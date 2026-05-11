@@ -7,6 +7,9 @@ const userSelect = {
   email: true,
   name: true,
   role: true,
+  clearance: true,
+  avatarUrl: true,
+  discordId: true,
   createdAt: true,
   updatedAt: true,
 } as const;

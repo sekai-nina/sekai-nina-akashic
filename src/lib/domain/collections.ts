@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/db";
+import { prisma, withClearance } from "@/lib/db";
 import { logAudit } from "./audit";
 
 export async function createCollection(
@@ -51,52 +51,62 @@ export async function listCollections(ownerId?: string) {
   });
 }
 
-export async function getCollection(id: string) {
-  return prisma.collection.findUnique({
-    where: { id },
-    include: {
-      items: {
-        include: { asset: true },
-        orderBy: { sortOrder: "asc" },
+export async function getCollection(id: string, clearance: string) {
+  return withClearance(clearance, async (tx) => {
+    return tx.collection.findUnique({
+      where: { id },
+      include: {
+        items: {
+          include: { asset: true },
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+        },
       },
-    },
+    });
   });
 }
 
 export async function addToCollection(
   collectionId: string,
   assetId: string,
+  clearance: string,
   note?: string
 ) {
-  return prisma.collectionItem.upsert({
-    where: {
-      collectionId_assetId: { collectionId, assetId },
-    },
-    update: {
-      ...(note !== undefined ? { note } : {}),
-    },
-    create: {
-      collectionId,
-      assetId,
-      note: note ?? "",
-    },
+  return withClearance(clearance, async (tx) => {
+    return tx.collectionItem.upsert({
+      where: {
+        collectionId_assetId: { collectionId, assetId },
+      },
+      update: {
+        ...(note !== undefined ? { note } : {}),
+      },
+      create: {
+        collectionId,
+        assetId,
+        note: note ?? "",
+      },
+    });
   });
 }
 
-export async function removeFromCollection(collectionId: string, assetId: string) {
-  return prisma.collectionItem.delete({
-    where: {
-      collectionId_assetId: { collectionId, assetId },
-    },
+export async function removeFromCollection(collectionId: string, assetId: string, clearance: string) {
+  return withClearance(clearance, async (tx) => {
+    return tx.collectionItem.delete({
+      where: {
+        collectionId_assetId: { collectionId, assetId },
+      },
+    });
   });
 }
 
 export async function updateCollectionItem(
   id: string,
-  data: { note?: string; sortOrder?: number }
+  data: { note?: string; sortOrder?: number },
+  clearance: string
 ) {
-  return prisma.collectionItem.update({
-    where: { id },
-    data,
+  return withClearance(clearance, async (tx) => {
+    return tx.collectionItem.update({
+      where: { id },
+      data,
+    });
   });
 }

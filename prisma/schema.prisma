@@ -93,22 +93,34 @@ enum RelationType {
   same_content
 }
 
+enum ClearanceLevel {
+  public
+  internal
+  confidential
+  restricted
+}
+
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
+  id           String         @id @default(cuid())
+  email        String         @unique
   name         String
   passwordHash String
-  role         Role     @default(member)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  role         Role           @default(member)
+  clearance    ClearanceLevel @default(internal)
+  avatarUrl    String?
+  discordId    String?        @unique
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
 
-  createdAssets  Asset[]      @relation("AssetCreatedBy")
-  updatedAssets  Asset[]      @relation("AssetUpdatedBy")
-  assetTexts     AssetText[]  @relation("AssetTextCreatedBy")
-  annotations    Annotation[] @relation("AnnotationCreatedBy")
-  collections    Collection[]
-  auditLogs      AuditLog[]
-  apiKeys        ApiKey[]
+  createdAssets      Asset[]      @relation("AssetCreatedBy")
+  updatedAssets      Asset[]      @relation("AssetUpdatedBy")
+  assetTexts         AssetText[]  @relation("AssetTextCreatedBy")
+  annotations        Annotation[] @relation("AnnotationCreatedBy")
+  collections        Collection[]
+  auditLogs          AuditLog[]
+  apiKeys            ApiKey[]
+  invitation         Invitation?
+  createdInvitations Invitation[] @relation("InvitationCreatedBy")
 }
 
 model Asset {
@@ -129,6 +141,7 @@ model Asset {
   storageUrl       String?
   thumbnailUrl     String?
   messageBodyPreview String?
+  classification     ClearanceLevel @default(internal)
 
   // Discord metadata
   discordGuildId    String?
@@ -163,6 +176,7 @@ model Asset {
   @@index([trustLevel])
   @@index([canonicalDate])
   @@index([createdAt])
+  @@index([classification])
 }
 
 model AssetText {
@@ -323,6 +337,24 @@ model AssetRelation {
   @@unique([sourceId, targetId, relationType])
   @@index([sourceId, relationType])
   @@index([targetId, relationType])
+}
+
+model Invitation {
+  id          String         @id @default(cuid())
+  token       String         @unique @default(cuid())
+  email       String?
+  role        Role           @default(member)
+  clearance   ClearanceLevel @default(internal)
+  expiresAt   DateTime
+  usedAt      DateTime?
+  usedById    String?        @unique
+  usedBy      User?          @relation(fields: [usedById], references: [id])
+  createdById String
+  createdBy   User           @relation("InvitationCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime       @default(now())
+
+  @@index([token])
+  @@index([createdById])
 }
 
 enum TestimonialStatus {

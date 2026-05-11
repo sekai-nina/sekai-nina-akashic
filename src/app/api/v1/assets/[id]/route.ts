@@ -11,12 +11,18 @@ export async function GET(
   if (auth instanceof NextResponse) return auth;
 
   const { id } = await params;
-  const asset = await getAsset(id);
-  if (!asset) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  try {
+    const asset = await getAsset(id, auth.clearance);
+    if (!asset) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    return NextResponse.json(asset);
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("Access denied")) {
+      return NextResponse.json({ error: err.message }, { status: 403 });
+    }
+    throw err;
   }
-
-  return NextResponse.json(asset);
 }
 
 export async function PATCH(
@@ -27,13 +33,31 @@ export async function PATCH(
   if (auth instanceof NextResponse) return auth;
 
   const { id } = await params;
-  const existing = await getAsset(id);
-  if (!existing) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  try {
+    const existing = await getAsset(id, auth.clearance);
+    if (!existing) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("Access denied")) {
+      return NextResponse.json({ error: err.message }, { status: 403 });
+    }
+    throw err;
   }
 
   const body = await request.json() as UpdateAssetData;
-  const asset = await updateAsset(id, body, auth.id);
+
+  // Prevent classification escalation above user's clearance
+  if (body.classification) {
+    const { assertClearance } = await import("@/lib/classification");
+    try {
+      assertClearance(auth.clearance, body.classification);
+    } catch {
+      return NextResponse.json({ error: "Cannot set classification above your clearance level" }, { status: 403 });
+    }
+  }
+
+  const asset = await updateAsset(id, body, auth.id, auth.clearance);
   return NextResponse.json(asset);
 }
 
@@ -45,11 +69,18 @@ export async function DELETE(
   if (auth instanceof NextResponse) return auth;
 
   const { id } = await params;
-  const existing = await getAsset(id);
-  if (!existing) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  try {
+    const existing = await getAsset(id, auth.clearance);
+    if (!existing) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("Access denied")) {
+      return NextResponse.json({ error: err.message }, { status: 403 });
+    }
+    throw err;
   }
 
-  await deleteAsset(id, auth.id);
+  await deleteAsset(id, auth.id, auth.clearance);
   return NextResponse.json({ deleted: true });
 }

@@ -1,5 +1,5 @@
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import { withClearance } from "@/lib/db";
 import { NextResponse } from "next/server";
 
 const PAGE_SIZE = 40;
@@ -23,25 +23,27 @@ export async function GET(request: Request) {
     where.entities = { some: { entityId } };
   }
 
-  const assets = await prisma.asset.findMany({
-    where,
-    orderBy: [
-      { canonicalDate: { sort: "desc", nulls: "last" } },
-      { createdAt: "desc" },
-    ],
-    take: PAGE_SIZE + 1,
-    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-    select: {
-      id: true,
-      title: true,
-      kind: true,
-      thumbnailUrl: true,
-      storageKey: true,
-      storageProvider: true,
-      canonicalDate: true,
-      createdAt: true,
-    },
-  });
+  const assets = await withClearance(session.user.clearance, (tx) =>
+    tx.asset.findMany({
+      where,
+      orderBy: [
+        { canonicalDate: { sort: "desc", nulls: "last" } },
+        { createdAt: "desc" },
+      ],
+      take: PAGE_SIZE + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      select: {
+        id: true,
+        title: true,
+        kind: true,
+        thumbnailUrl: true,
+        storageKey: true,
+        storageProvider: true,
+        canonicalDate: true,
+        createdAt: true,
+      },
+    })
+  );
 
   const hasMore = assets.length > PAGE_SIZE;
   const items = assets.slice(0, PAGE_SIZE);

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
-import { prisma } from "@/lib/db";
+import { prismaInternal } from "@/lib/db";
 import { extractTestimonials } from "@/lib/domain/testimonials";
 
 export async function POST(request: Request) {
@@ -18,13 +18,13 @@ export async function POST(request: Request) {
   }
 
   // Verify entity exists
-  const entity = await prisma.entity.findUnique({ where: { id: entityId } });
+  const entity = await prismaInternal.entity.findUnique({ where: { id: entityId } });
   if (!entity) {
     return NextResponse.json({ error: "Entity not found" }, { status: 404 });
   }
 
   // Auto-detect sinceDate: use the sourceDate of the most recently processed testimonial
-  const latestTestimonial = await prisma.testimonial.findFirst({
+  const latestTestimonial = await prismaInternal.testimonial.findFirst({
     where: { entityId },
     orderBy: { sourceDate: "desc" },
     select: { sourceDate: true },

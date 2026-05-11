@@ -7,9 +7,12 @@ import {
   getCachedKindCountsRecent,
   getCachedNinaStatsRecent,
 } from "@/lib/cache";
+import { auth } from "@/lib/auth";
 import { ASSET_KIND_LABELS, ASSET_STATUS_LABELS, formatDate } from "@/lib/utils";
+import { ClearanceLevel } from "@prisma/client";
 import Link from "next/link";
 import { Inbox, Plus } from "lucide-react";
+import { redirect } from "next/navigation";
 
 function Delta({ value }: { value: number }) {
   if (value <= 0) return null;
@@ -19,14 +22,18 @@ function Delta({ value }: { value: number }) {
 }
 
 export default async function DashboardPage() {
+  const session = await auth();
+  if (!session?.user) redirect("/login");
+  const clearance = session.user.clearance as ClearanceLevel;
+
   const [stats, kindCounts, statusCounts, recentAssets, inboxCount, kindCountsRecent, ninaRecent] =
     await Promise.all([
       getCachedDashboardStats(),
-      getCachedKindCounts(),
-      getCachedStatusCounts(),
-      getCachedRecentAssets(),
-      getCachedInboxCount(),
-      getCachedKindCountsRecent(),
+      getCachedKindCounts(clearance),
+      getCachedStatusCounts(clearance),
+      getCachedRecentAssets(clearance),
+      getCachedInboxCount(clearance),
+      getCachedKindCountsRecent(clearance),
       getCachedNinaStatsRecent(),
     ]);
 
@@ -115,7 +122,7 @@ export default async function DashboardPage() {
               {(["inbox", "triaging", "organized", "archived"] as const).map(
                 (status) => {
                   const raw = statusCounts.find((s) => s.status === status)?._count;
-                  const count = typeof raw === 'number' ? raw : ((raw as Record<string, number>)?._all ?? 0);
+                  const count = typeof raw === 'number' ? raw : ((raw as unknown as Record<string, number>)?._all ?? 0);
                   return (
                     <Link
                       key={status}

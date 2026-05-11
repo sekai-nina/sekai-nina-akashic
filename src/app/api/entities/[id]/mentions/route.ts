@@ -20,7 +20,7 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const mentions = await searchMentions(id, { excludeLinked });
+  const mentions = await searchMentions(id, { excludeLinked, clearance: session.user?.clearance });
 
   // Build CSV
   const header = "アセットタイトル,種別,ソースタイプ,テキストタイプ,マッチしたエイリアス,紐づきエンティティ,ソース情報,ブロック,日付";

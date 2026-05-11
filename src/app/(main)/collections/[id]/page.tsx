@@ -1,9 +1,11 @@
-import { prisma } from "@/lib/db";
+import { auth } from "@/lib/auth";
+import { getCollection } from "@/lib/domain/collections";
 import { removeFromCollection, deleteCollection, updateCollectionItem } from "@/lib/actions";
 import { ASSET_KIND_LABELS, formatDate } from "@/lib/utils";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { SubmitButton } from "@/components/submit-button";
+import type { ClearanceLevel } from "@prisma/client";
 
 function KindBadge({ kind }: { kind: string }) {
   return (
@@ -26,18 +28,10 @@ export default async function CollectionDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const session = await auth();
+  const userClearance = session!.user.clearance as ClearanceLevel;
 
-  const collection = await prisma.collection.findUnique({
-    where: { id },
-    include: {
-      items: {
-        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-        include: {
-          asset: true,
-        },
-      },
-    },
-  });
+  const collection = await getCollection(id, userClearance);
 
   if (!collection) notFound();
 

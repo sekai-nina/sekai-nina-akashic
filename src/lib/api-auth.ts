@@ -8,6 +8,7 @@ export interface ApiKeyUser {
   email: string;
   name: string;
   role: string;
+  clearance: string;
   apiKeyId: string;
   permissions: string[];
 }
@@ -50,6 +51,7 @@ export async function authenticateApiKey(
     email: apiKey.user.email,
     name: apiKey.user.name,
     role: apiKey.user.role,
+    clearance: apiKey.user.clearance,
     apiKeyId: apiKey.id,
     permissions: apiKey.permissions as string[],
   };

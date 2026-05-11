@@ -1,4 +1,5 @@
-import { prisma } from "@/lib/db";
+import { withClearance } from "@/lib/db";
+import { auth } from "@/lib/auth";
 import { QuickUploadForm } from "@/components/quick-upload-form";
 import { InboxList } from "./inbox-list";
 import Link from "next/link";
@@ -12,19 +13,25 @@ export default async function InboxPage({
 }) {
   const params = await searchParams;
   const page = Math.max(1, parseInt(params.page ?? "1"));
+  const session = await auth();
 
-  const [assets, total] = await Promise.all([
-    prisma.asset.findMany({
-      where: { status: "inbox" },
-      orderBy: { createdAt: "desc" },
-      skip: (page - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
-      include: {
-        sourceRecords: { take: 1 },
-      },
-    }),
-    prisma.asset.count({ where: { status: "inbox" } }),
-  ]);
+  const where = { status: "inbox" as const };
+
+  const [assets, total] = await withClearance(session!.user.clearance, async (tx) => {
+    const [a, c] = await Promise.all([
+      tx.asset.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * PAGE_SIZE,
+        take: PAGE_SIZE,
+        include: {
+          sourceRecords: { take: 1 },
+        },
+      }),
+      tx.asset.count({ where }),
+    ]);
+    return [a, c] as const;
+  });
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
 

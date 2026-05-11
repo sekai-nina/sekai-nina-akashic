@@ -1,4 +1,5 @@
-import { prisma } from "@/lib/db";
+import { withClearance } from "@/lib/db";
+import { auth } from "@/lib/auth";
 import { getCachedEntityById } from "@/lib/cache";
 import { addEntityAlias, removeEntityAlias } from "@/lib/actions";
 import { searchMentions } from "@/lib/domain/mentions";
@@ -9,6 +10,7 @@ import { ArrowLeft } from "lucide-react";
 import { SubmitButton } from "@/components/submit-button";
 import { LoadingLink } from "@/components/loading-link";
 import { CsvDownloadButton } from "./csv-download-button";
+import type { ClearanceLevel } from "@prisma/client";
 
 const TEXT_TYPE_LABELS: Record<string, string> = {
   title: "タイトル",
@@ -40,6 +42,8 @@ export default async function EntityDetailPage({
   const { showMentions, excludeLinked } = await searchParams;
   // Default to excluding linked assets (opt-out with excludeLinked=0)
   const isExcludeLinked = excludeLinked !== "0";
+  const session = await auth();
+  const userClearance = session!.user.clearance as ClearanceLevel;
 
   const entity = await getCachedEntityById(id);
 
@@ -47,20 +51,22 @@ export default async function EntityDetailPage({
 
   const aliases = (entity.aliases as string[]) || [];
 
-  // Load linked assets
-  const linkedAssets = await prisma.assetEntity.findMany({
-    where: { entityId: id },
-    include: {
-      asset: {
-        select: { id: true, title: true, kind: true, canonicalDate: true, createdAt: true },
+  // Load linked assets (filtered by RLS)
+  const linkedAssets = await withClearance(session!.user.clearance, (tx) =>
+    tx.assetEntity.findMany({
+      where: { entityId: id },
+      include: {
+        asset: {
+          select: { id: true, title: true, kind: true, canonicalDate: true, createdAt: true },
+        },
       },
-    },
-    orderBy: { createdAt: "desc" },
-    take: 20,
-  });
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    })
+  );
 
-  // Search mentions if requested
-  const mentions = showMentions === "1" ? await searchMentions(id, { excludeLinked: isExcludeLinked }) : null;
+  // Search mentions if requested (with classification filtering)
+  const mentions = showMentions === "1" ? await searchMentions(id, { excludeLinked: isExcludeLinked, clearance: userClearance }) : null;
 
   const addAliasAction = addEntityAlias.bind(null, id);
   const color = typeColors[entity.type] ?? "bg-slate-100 text-slate-700";

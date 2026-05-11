@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
-import { prisma } from "@/lib/db";
+import { prismaInternal, withClearance } from "@/lib/db";
 import { uploadToDrive, isDriveEnabled } from "@/lib/drive";
 import { createAsset, updateAsset, type CreateAssetData } from "@/lib/domain/assets";
 import { logAudit } from "@/lib/domain/audit";
@@ -76,8 +76,16 @@ export async function POST(request: Request) {
   }
 
   // 重複チェック — メタデータがあれば既存アセットに付与する
-  const existing = await prisma.asset.findFirst({ where: { sha256 } });
+  const existing = await prismaInternal.asset.findFirst({ where: { sha256 } });
   if (existing) {
+    // Clearance check on existing asset
+    const { assertClearance } = await import("@/lib/classification");
+    try {
+      assertClearance(auth.clearance, existing.classification);
+    } catch {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const hasMetadata =
       statusStr || sourceTypeStr || canonicalDateStr || entities || sourceRecords || texts;
     if (hasMetadata) {
@@ -90,7 +98,8 @@ export async function POST(request: Request) {
           entities,
           sourceRecords: sourceRecords as CreateAssetData["sourceRecords"],
         },
-        auth.id
+        auth.id,
+        auth.clearance
       );
     }
     return NextResponse.json({
@@ -134,9 +143,13 @@ export async function POST(request: Request) {
     thumbnailUrl = storageUrl;
   }
 
+  const classificationStr = formData.get("classification") as string;
+  const classification = (classificationStr as "public" | "internal" | "confidential" | "restricted") || auth.clearance as "public" | "internal" | "confidential" | "restricted";
+
   const asset = await createAsset(
     {
       kind,
+      classification,
       title: title || file.name,
       description: "",
       status: statusStr || "inbox",
@@ -154,7 +167,8 @@ export async function POST(request: Request) {
       sourceRecords: sourceRecords as CreateAssetData["sourceRecords"],
       texts: texts as CreateAssetData["texts"],
     },
-    auth.id
+    auth.id,
+    auth.clearance
   );
 
   // Generate R2 thumbnails for images
@@ -162,10 +176,12 @@ export async function POST(request: Request) {
     try {
       const r2Url = await generateAndUploadThumbnails(asset.id, buffer);
       if (r2Url) {
-        await prisma.asset.update({
-          where: { id: asset.id },
-          data: { thumbnailUrl: r2Url },
-        });
+        await withClearance(auth.clearance, (tx) =>
+          tx.asset.update({
+            where: { id: asset.id },
+            data: { thumbnailUrl: r2Url },
+          })
+        );
       }
     } catch (err) {
       console.error("R2 thumbnail generation failed:", err);

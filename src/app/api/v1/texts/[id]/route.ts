@@ -21,7 +21,7 @@ export async function PATCH(
   }
 
   try {
-    const text = await updateText(id, content);
+    const text = await updateText(id, content, auth.clearance);
     return NextResponse.json(text);
   } catch {
     return NextResponse.json(

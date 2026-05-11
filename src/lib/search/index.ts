@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/db";
+import { withClearance } from "@/lib/db";
 import { normalizeText } from "@/lib/utils";
 import { Prisma, AssetKind, AssetStatus, TrustLevel, SourceType } from "@prisma/client";
 
@@ -72,7 +72,7 @@ function buildSnippet(text: string, query: string): string {
   return snippet;
 }
 
-export async function search(query: SearchQuery): Promise<SearchResult> {
+export async function search(query: SearchQuery, clearance: string): Promise<SearchResult> {
   const { q, target = "all", page = 1, perPage = 20 } = query;
   const offset = (page - 1) * perPage;
   const hasKeyword = q.trim().length > 0;
@@ -80,11 +80,9 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
   const likePattern = hasKeyword ? `%${q}%` : "";
   const normalizedLikePattern = hasKeyword ? `%${normalizedQ}%` : "";
 
-  const results: SearchResultItem[] = [];
-
   const assetWhereConditions: Prisma.Sql[] = [];
 
-  // Base filters
+  // Base filters (no classificationFilterSql needed — RLS handles it)
   if (query.kind) assetWhereConditions.push(Prisma.sql`a."kind" = ${query.kind}::"AssetKind"`);
   if (query.status) assetWhereConditions.push(Prisma.sql`a."status" = ${query.status}::"AssetStatus"`);
   if (query.trustLevel) assetWhereConditions.push(Prisma.sql`a."trustLevel" = ${query.trustLevel}::"TrustLevel"`);
@@ -117,174 +115,178 @@ export async function search(query: SearchQuery): Promise<SearchResult> {
     return { items: [], total: 0, page, perPage };
   }
 
-  // Search assets directly
-  if (target === "all" || target === "assets") {
-    const keywordCondition = hasKeyword
-      ? Prisma.sql`(
-          a."title" ILIKE ${likePattern}
-          OR a."description" ILIKE ${likePattern}
-          OR a."messageBodyPreview" ILIKE ${likePattern}
-        )`
-      : Prisma.sql`TRUE`;
+  return withClearance(clearance, async (tx) => {
+    const results: SearchResultItem[] = [];
 
-    const assetResults = await prisma.$queryRaw<Array<{
-      id: string;
-      title: string;
-      description: string;
-      kind: AssetKind;
-      status: AssetStatus;
-      thumbnailUrl: string | null;
-      storageUrl: string | null;
-      storageProvider: string | null;
-      storageKey: string | null;
-      messageBodyPreview: string | null;
-      createdAt: Date;
-    }>>`
-      SELECT
-        a."id", a."title", a."description", a."kind", a."status",
-        a."thumbnailUrl", a."storageUrl", a."storageProvider", a."storageKey",
-        a."messageBodyPreview", a."createdAt"
-      FROM "Asset" a
-      WHERE ${keywordCondition}
-      ${baseFilter}
-      ${entityFilter}
-      ORDER BY a."createdAt" DESC
-      LIMIT ${perPage} OFFSET ${offset}
-    `;
+    // Search assets directly
+    if (target === "all" || target === "assets") {
+      const keywordCondition = hasKeyword
+        ? Prisma.sql`(
+            a."title" ILIKE ${likePattern}
+            OR a."description" ILIKE ${likePattern}
+            OR a."messageBodyPreview" ILIKE ${likePattern}
+          )`
+        : Prisma.sql`TRUE`;
 
-    for (const row of assetResults) {
-      const qLower = hasKeyword ? q.toLowerCase() : "";
-      const titleMatch = hasKeyword && row.title.toLowerCase().includes(qLower);
-      const descMatch = hasKeyword && row.description.toLowerCase().includes(qLower);
-      const previewMatch = hasKeyword && (row.messageBodyPreview || "").toLowerCase().includes(qLower);
-      const matchField = titleMatch ? "title" : descMatch ? "description" : previewMatch ? "messageBodyPreview" : "title";
-      const matchText = titleMatch ? row.title : descMatch ? row.description : previewMatch ? (row.messageBodyPreview || "") : row.title;
-      results.push({
-        type: "asset",
-        assetId: row.id,
-        assetTitle: row.title || "(無題)",
-        assetKind: row.kind,
-        assetStatus: row.status,
-        thumbnailUrl: resolveImageUrl(row.thumbnailUrl, row.storageProvider, row.storageKey, row.kind),
-        storageUrl: row.storageUrl,
-        snippet: hasKeyword ? buildSnippet(matchText, q) : row.title,
-        matchField,
-        score: titleMatch ? 3 : descMatch ? 2 : previewMatch ? 1 : 0,
-        createdAt: row.createdAt,
-      });
-    }
-  }
+      const assetResults = await tx.$queryRaw<Array<{
+        id: string;
+        title: string;
+        description: string;
+        kind: AssetKind;
+        status: AssetStatus;
+        thumbnailUrl: string | null;
+        storageUrl: string | null;
+        storageProvider: string | null;
+        storageKey: string | null;
+        messageBodyPreview: string | null;
+        createdAt: Date;
+      }>>`
+        SELECT
+          a."id", a."title", a."description", a."kind", a."status",
+          a."thumbnailUrl", a."storageUrl", a."storageProvider", a."storageKey",
+          a."messageBodyPreview", a."createdAt"
+        FROM "Asset" a
+        WHERE ${keywordCondition}
+        ${baseFilter}
+        ${entityFilter}
+        ORDER BY a."createdAt" DESC
+        LIMIT ${perPage} OFFSET ${offset}
+      `;
 
-  // Search AssetTexts (only when keyword is provided)
-  if (hasKeyword && (target === "all" || target === "texts")) {
-    const textResults = await prisma.$queryRaw<Array<{
-      id: string;
-      assetId: string;
-      textType: string;
-      content: string;
-      asset_title: string;
-      asset_kind: AssetKind;
-      asset_status: AssetStatus;
-      asset_thumbnailUrl: string | null;
-      asset_storageUrl: string | null;
-      asset_storageProvider: string | null;
-      asset_storageKey: string | null;
-      asset_createdAt: Date;
-    }>>`
-      SELECT
-        t."id", t."assetId", t."textType", t."content",
-        a."title" as asset_title, a."kind" as asset_kind, a."status" as asset_status,
-        a."thumbnailUrl" as "asset_thumbnailUrl", a."storageUrl" as "asset_storageUrl",
-        a."storageProvider" as "asset_storageProvider", a."storageKey" as "asset_storageKey",
-        a."createdAt" as "asset_createdAt"
-      FROM "AssetText" t
-      JOIN "Asset" a ON a."id" = t."assetId"
-      WHERE (
-        t."content" ILIKE ${likePattern}
-        OR t."normalizedContent" ILIKE ${normalizedLikePattern}
-      )
-      ${baseFilter}
-      ${entityFilter}
-      ORDER BY a."createdAt" DESC
-      LIMIT ${perPage} OFFSET ${offset}
-    `;
-
-    for (const row of textResults) {
-      results.push({
-        type: "text",
-        assetId: row.assetId,
-        assetTitle: row.asset_title || "(無題)",
-        assetKind: row.asset_kind,
-        assetStatus: row.asset_status,
-        thumbnailUrl: resolveImageUrl(row.asset_thumbnailUrl, row.asset_storageProvider, row.asset_storageKey, row.asset_kind),
-        storageUrl: row.asset_storageUrl,
-        snippet: buildSnippet(row.content, q),
-        matchField: row.textType,
-        score: 1,
-        createdAt: row.asset_createdAt,
-      });
-    }
-  }
-
-  // Search Entity matches → return linked assets (only when keyword is provided)
-  if (hasKeyword && (target === "all" || target === "assets")) {
-    const entityAssets = await prisma.$queryRaw<Array<{
-      assetId: string;
-      asset_title: string;
-      asset_kind: AssetKind;
-      asset_status: AssetStatus;
-      asset_thumbnailUrl: string | null;
-      asset_storageUrl: string | null;
-      asset_storageProvider: string | null;
-      asset_storageKey: string | null;
-      asset_createdAt: Date;
-      entity_name: string;
-    }>>`
-      SELECT DISTINCT ON (ae."assetId")
-        ae."assetId",
-        a."title" as asset_title, a."kind" as asset_kind, a."status" as asset_status,
-        a."thumbnailUrl" as "asset_thumbnailUrl", a."storageUrl" as "asset_storageUrl",
-        a."storageProvider" as "asset_storageProvider", a."storageKey" as "asset_storageKey",
-        a."createdAt" as "asset_createdAt",
-        e."canonicalName" as entity_name
-      FROM "Entity" e
-      JOIN "AssetEntity" ae ON ae."entityId" = e."id"
-      JOIN "Asset" a ON a."id" = ae."assetId"
-      WHERE (
-        e."canonicalName" ILIKE ${likePattern}
-        OR e."normalizedName" ILIKE ${normalizedLikePattern}
-      )
-      ${baseFilter}
-      ORDER BY ae."assetId", a."createdAt" DESC
-      LIMIT ${perPage}
-    `;
-
-    for (const row of entityAssets) {
-      if (!results.some(r => r.assetId === row.assetId)) {
+      for (const row of assetResults) {
+        const qLower = hasKeyword ? q.toLowerCase() : "";
+        const titleMatch = hasKeyword && row.title.toLowerCase().includes(qLower);
+        const descMatch = hasKeyword && row.description.toLowerCase().includes(qLower);
+        const previewMatch = hasKeyword && (row.messageBodyPreview || "").toLowerCase().includes(qLower);
+        const matchField = titleMatch ? "title" : descMatch ? "description" : previewMatch ? "messageBodyPreview" : "title";
+        const matchText = titleMatch ? row.title : descMatch ? row.description : previewMatch ? (row.messageBodyPreview || "") : row.title;
         results.push({
           type: "asset",
+          assetId: row.id,
+          assetTitle: row.title || "(無題)",
+          assetKind: row.kind,
+          assetStatus: row.status,
+          thumbnailUrl: resolveImageUrl(row.thumbnailUrl, row.storageProvider, row.storageKey, row.kind),
+          storageUrl: row.storageUrl,
+          snippet: hasKeyword ? buildSnippet(matchText, q) : row.title,
+          matchField,
+          score: titleMatch ? 3 : descMatch ? 2 : previewMatch ? 1 : 0,
+          createdAt: row.createdAt,
+        });
+      }
+    }
+
+    // Search AssetTexts (only when keyword is provided)
+    if (hasKeyword && (target === "all" || target === "texts")) {
+      const textResults = await tx.$queryRaw<Array<{
+        id: string;
+        assetId: string;
+        textType: string;
+        content: string;
+        asset_title: string;
+        asset_kind: AssetKind;
+        asset_status: AssetStatus;
+        asset_thumbnailUrl: string | null;
+        asset_storageUrl: string | null;
+        asset_storageProvider: string | null;
+        asset_storageKey: string | null;
+        asset_createdAt: Date;
+      }>>`
+        SELECT
+          t."id", t."assetId", t."textType", t."content",
+          a."title" as asset_title, a."kind" as asset_kind, a."status" as asset_status,
+          a."thumbnailUrl" as "asset_thumbnailUrl", a."storageUrl" as "asset_storageUrl",
+          a."storageProvider" as "asset_storageProvider", a."storageKey" as "asset_storageKey",
+          a."createdAt" as "asset_createdAt"
+        FROM "AssetText" t
+        JOIN "Asset" a ON a."id" = t."assetId"
+        WHERE (
+          t."content" ILIKE ${likePattern}
+          OR t."normalizedContent" ILIKE ${normalizedLikePattern}
+        )
+        ${baseFilter}
+        ${entityFilter}
+        ORDER BY a."createdAt" DESC
+        LIMIT ${perPage} OFFSET ${offset}
+      `;
+
+      for (const row of textResults) {
+        results.push({
+          type: "text",
           assetId: row.assetId,
           assetTitle: row.asset_title || "(無題)",
           assetKind: row.asset_kind,
           assetStatus: row.asset_status,
           thumbnailUrl: resolveImageUrl(row.asset_thumbnailUrl, row.asset_storageProvider, row.asset_storageKey, row.asset_kind),
           storageUrl: row.asset_storageUrl,
-          snippet: `タグ/人物: ${row.entity_name}`,
-          matchField: "entity",
-          score: 2,
+          snippet: buildSnippet(row.content, q),
+          matchField: row.textType,
+          score: 1,
           createdAt: row.asset_createdAt,
         });
       }
     }
-  }
 
-  // Sort by score descending, then by date
-  results.sort((a, b) => b.score - a.score || b.createdAt.getTime() - a.createdAt.getTime());
+    // Search Entity matches → return linked assets (only when keyword is provided)
+    if (hasKeyword && (target === "all" || target === "assets")) {
+      const entityAssets = await tx.$queryRaw<Array<{
+        assetId: string;
+        asset_title: string;
+        asset_kind: AssetKind;
+        asset_status: AssetStatus;
+        asset_thumbnailUrl: string | null;
+        asset_storageUrl: string | null;
+        asset_storageProvider: string | null;
+        asset_storageKey: string | null;
+        asset_createdAt: Date;
+        entity_name: string;
+      }>>`
+        SELECT DISTINCT ON (ae."assetId")
+          ae."assetId",
+          a."title" as asset_title, a."kind" as asset_kind, a."status" as asset_status,
+          a."thumbnailUrl" as "asset_thumbnailUrl", a."storageUrl" as "asset_storageUrl",
+          a."storageProvider" as "asset_storageProvider", a."storageKey" as "asset_storageKey",
+          a."createdAt" as "asset_createdAt",
+          e."canonicalName" as entity_name
+        FROM "Entity" e
+        JOIN "AssetEntity" ae ON ae."entityId" = e."id"
+        JOIN "Asset" a ON a."id" = ae."assetId"
+        WHERE (
+          e."canonicalName" ILIKE ${likePattern}
+          OR e."normalizedName" ILIKE ${normalizedLikePattern}
+        )
+        ${baseFilter}
+        ORDER BY ae."assetId", a."createdAt" DESC
+        LIMIT ${perPage}
+      `;
 
-  return {
-    items: results.slice(0, perPage),
-    total: results.length,
-    page,
-    perPage,
-  };
+      for (const row of entityAssets) {
+        if (!results.some(r => r.assetId === row.assetId)) {
+          results.push({
+            type: "asset",
+            assetId: row.assetId,
+            assetTitle: row.asset_title || "(無題)",
+            assetKind: row.asset_kind,
+            assetStatus: row.asset_status,
+            thumbnailUrl: resolveImageUrl(row.asset_thumbnailUrl, row.asset_storageProvider, row.asset_storageKey, row.asset_kind),
+            storageUrl: row.asset_storageUrl,
+            snippet: `タグ/人物: ${row.entity_name}`,
+            matchField: "entity",
+            score: 2,
+            createdAt: row.asset_createdAt,
+          });
+        }
+      }
+    }
+
+    // Sort by score descending, then by date
+    results.sort((a, b) => b.score - a.score || b.createdAt.getTime() - a.createdAt.getTime());
+
+    return {
+      items: results.slice(0, perPage),
+      total: results.length,
+      page,
+      perPage,
+    };
+  });
 }

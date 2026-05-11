@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/db";
+import { withClearance } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import {
   addEntityToAsset,
@@ -16,6 +16,7 @@ import {
   formatDate,
 } from "@/lib/utils";
 import { getAssetRelations, getAssetGraph } from "@/lib/domain/relations";
+import type { ClearanceLevel } from "@prisma/client";
 import { SubmitButton } from "@/components/submit-button";
 import { BackButton } from "@/components/back-button";
 import { StatusWorkflow } from "./status-workflow";
@@ -94,37 +95,45 @@ export default async function AssetDetailPage({
 }) {
   const { id } = await params;
   const session = await auth();
+  const userClearance = session!.user.clearance as ClearanceLevel;
 
-  const [asset, collections, relations, graph] = await Promise.all([
-    prisma.asset.findUnique({
-      where: { id },
-      include: {
-        texts: { orderBy: { createdAt: "asc" } },
-        entities: {
-          include: { entity: true },
-          orderBy: { createdAt: "asc" },
-        },
-        sourceRecords: { orderBy: { createdAt: "asc" } },
-      },
-    }),
-    session?.user
-      ? prisma.collection.findMany({
-          where: { ownerId: session.user.id },
+  const [assetData, relations, graph] = await Promise.all([
+    withClearance(userClearance, async (tx) => {
+      const [a, cols] = await Promise.all([
+        tx.asset.findUnique({
+          where: { id },
+          include: {
+            texts: { orderBy: { createdAt: "asc" } },
+            entities: {
+              include: { entity: true },
+              orderBy: { createdAt: "asc" },
+            },
+            sourceRecords: { orderBy: { createdAt: "asc" } },
+          },
+        }),
+        tx.collection.findMany({
+          where: { ownerId: session!.user.id },
           orderBy: { name: "asc" },
-        })
-      : Promise.resolve([]),
-    getAssetRelations(id),
-    getAssetGraph(id, 1),
+        }),
+      ]);
+      return { asset: a, collections: cols };
+    }),
+    getAssetRelations(id, userClearance),
+    getAssetGraph(id, 1, userClearance),
   ]);
+
+  const { asset, collections } = assetData;
 
   if (!asset) notFound();
 
   let duplicates: { id: string; title: string }[] = [];
   if (asset.sha256) {
-    duplicates = await prisma.asset.findMany({
-      where: { sha256: asset.sha256, id: { not: id } },
-      select: { id: true, title: true },
-    });
+    duplicates = await withClearance(userClearance, (tx) =>
+      tx.asset.findMany({
+        where: { sha256: asset.sha256, id: { not: id } },
+        select: { id: true, title: true },
+      })
+    );
   }
 
   const isImage = asset.kind === "image";
@@ -148,10 +157,12 @@ export default async function AssetDetailPage({
   }
   const embeddedImages: Record<string, { thumbnailUrl: string | null; title: string }> = {};
   if (embeddedImageIds.size > 0) {
-    const imageAssets = await prisma.asset.findMany({
-      where: { id: { in: [...embeddedImageIds] } },
-      select: { id: true, thumbnailUrl: true, title: true },
-    });
+    const imageAssets = await withClearance(userClearance, (tx) =>
+      tx.asset.findMany({
+        where: { id: { in: [...embeddedImageIds] } },
+        select: { id: true, thumbnailUrl: true, title: true },
+      })
+    );
     for (const img of imageAssets) {
       embeddedImages[img.id] = { thumbnailUrl: img.thumbnailUrl, title: img.title };
     }

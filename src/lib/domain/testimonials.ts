@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/db";
+import { prismaInternal, withClearance } from "@/lib/db";
 import { TestimonialCategory, TestimonialStatus } from "@prisma/client";
 import { searchMentions, MentionResult } from "./mentions";
 
@@ -186,7 +186,7 @@ async function buildWindowedContexts(
     const first = assetMentions[0];
 
     // Fetch the full text to split into blocks ourselves
-    const assetText = await prisma.assetText.findUnique({
+    const assetText = await prismaInternal.assetText.findUnique({
       where: { id: first.textId },
       select: { content: true },
     });
@@ -258,14 +258,14 @@ export async function extractTestimonials(options: ExtractOptions): Promise<{
 }> {
   const { entityId, limit = 200, sinceDate, assetId } = options;
 
-  const entity = await prisma.entity.findUnique({ where: { id: entityId } });
+  const entity = await prismaInternal.entity.findUnique({ where: { id: entityId } });
   const entityName = entity?.canonicalName || "";
 
   let filtered: MentionResult[];
 
   if (assetId) {
     // Scoped mode: only check the specific asset's text (no full-table scan)
-    const asset = await prisma.asset.findUnique({
+    const asset = await prismaInternal.asset.findUnique({
       where: { id: assetId },
       include: {
         texts: { where: { textType: "body" }, take: 1 },
@@ -328,7 +328,7 @@ export async function extractTestimonials(options: ExtractOptions): Promise<{
   }
 
   // Get existing testimonials to avoid reprocessing
-  const existingQuotes = await prisma.testimonial.findMany({
+  const existingQuotes = await prismaInternal.testimonial.findMany({
     where: { entityId },
     select: { assetId: true, quote: true },
   });
@@ -390,7 +390,7 @@ export async function extractTestimonials(options: ExtractOptions): Promise<{
       }
 
       try {
-        await prisma.testimonial.create({
+        await prismaInternal.testimonial.create({
           data: {
             assetId: window.assetId,
             entityId,
@@ -429,26 +429,29 @@ export async function listTestimonials(options: {
   category?: TestimonialCategory;
   page?: number;
   perPage?: number;
+  clearance: string;
 }) {
-  const { entityId, status, category, page = 1, perPage = 50 } = options;
+  const { entityId, status, category, page = 1, perPage = 50, clearance } = options;
 
-  const where = {
-    ...(entityId && { entityId }),
-    ...(status && { status }),
-    ...(category && { category }),
-  };
+  return withClearance(clearance, async (tx) => {
+    const where = {
+      ...(entityId && { entityId }),
+      ...(status && { status }),
+      ...(category && { category }),
+    };
 
-  const [items, total] = await Promise.all([
-    prisma.testimonial.findMany({
-      where,
-      orderBy: [{ confidence: "desc" }, { sourceDate: "desc" }],
-      skip: (page - 1) * perPage,
-      take: perPage,
-    }),
-    prisma.testimonial.count({ where }),
-  ]);
+    const [items, total] = await Promise.all([
+      tx.testimonial.findMany({
+        where,
+        orderBy: [{ confidence: "desc" }, { sourceDate: "desc" }],
+        skip: (page - 1) * perPage,
+        take: perPage,
+      }),
+      tx.testimonial.count({ where }),
+    ]);
 
-  return { items, total, page, perPage };
+    return { items, total, page, perPage };
+  });
 }
 
 /**
@@ -456,10 +459,13 @@ export async function listTestimonials(options: {
  */
 export async function reviewTestimonial(
   id: string,
-  status: "approved" | "rejected"
+  status: "approved" | "rejected",
+  clearance: string
 ) {
-  return prisma.testimonial.update({
-    where: { id },
-    data: { status, reviewedAt: new Date() },
+  return withClearance(clearance, async (tx) => {
+    return tx.testimonial.update({
+      where: { id },
+      data: { status, reviewedAt: new Date() },
+    });
   });
 }

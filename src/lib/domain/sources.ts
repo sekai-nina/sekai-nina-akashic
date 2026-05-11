@@ -1,5 +1,5 @@
 import { SourceKind } from "@prisma/client";
-import { prisma } from "@/lib/db";
+import { withClearance } from "@/lib/db";
 
 export interface CreateSourceData {
   sourceKind: SourceKind;
@@ -19,36 +19,42 @@ export interface UpdateSourceData {
   metadata?: Record<string, unknown>;
 }
 
-export async function addSource(assetId: string, data: CreateSourceData) {
-  return prisma.sourceRecord.create({
-    data: {
-      assetId,
-      sourceKind: data.sourceKind,
-      title: data.title ?? "",
-      url: data.url ?? null,
-      publisher: data.publisher ?? null,
-      publishedAt: data.publishedAt ?? null,
-      metadata: (data.metadata ?? {}) as object,
-    },
+export async function addSource(assetId: string, data: CreateSourceData, clearance: string) {
+  return withClearance(clearance, async (tx) => {
+    return tx.sourceRecord.create({
+      data: {
+        assetId,
+        sourceKind: data.sourceKind,
+        title: data.title ?? "",
+        url: data.url ?? null,
+        publisher: data.publisher ?? null,
+        publishedAt: data.publishedAt ?? null,
+        metadata: (data.metadata ?? {}) as object,
+      },
+    });
   });
 }
 
-export async function updateSource(id: string, data: UpdateSourceData) {
-  return prisma.sourceRecord.update({
-    where: { id },
-    data: {
-      ...(data.sourceKind !== undefined ? { sourceKind: data.sourceKind } : {}),
-      ...(data.title !== undefined ? { title: data.title } : {}),
-      ...(data.url !== undefined ? { url: data.url } : {}),
-      ...(data.publisher !== undefined ? { publisher: data.publisher } : {}),
-      ...(data.publishedAt !== undefined ? { publishedAt: data.publishedAt } : {}),
-      ...(data.metadata !== undefined ? { metadata: data.metadata as object } : {}),
-    },
+export async function updateSource(id: string, data: UpdateSourceData, clearance: string) {
+  return withClearance(clearance, async (tx) => {
+    return tx.sourceRecord.update({
+      where: { id },
+      data: {
+        ...(data.sourceKind !== undefined ? { sourceKind: data.sourceKind } : {}),
+        ...(data.title !== undefined ? { title: data.title } : {}),
+        ...(data.url !== undefined ? { url: data.url } : {}),
+        ...(data.publisher !== undefined ? { publisher: data.publisher } : {}),
+        ...(data.publishedAt !== undefined ? { publishedAt: data.publishedAt } : {}),
+        ...(data.metadata !== undefined ? { metadata: data.metadata as object } : {}),
+      },
+    });
   });
 }
 
-export async function deleteSource(id: string) {
-  return prisma.sourceRecord.delete({
-    where: { id },
+export async function deleteSource(id: string, clearance: string) {
+  return withClearance(clearance, async (tx) => {
+    return tx.sourceRecord.delete({
+      where: { id },
+    });
   });
 }

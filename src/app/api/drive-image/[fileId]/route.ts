@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth";
 import { google } from "googleapis";
 import { NextResponse } from "next/server";
+import { withClearance } from "@/lib/db";
 
 function getAuth() {
   const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -42,6 +43,17 @@ export async function GET(
 
   if (!fileId || fileId.includes("..")) {
     return NextResponse.json({ error: "Invalid fileId" }, { status: 400 });
+  }
+
+  // Check classification via RLS: if asset is not accessible, findFirst returns null
+  const asset = await withClearance(session.user.clearance, (tx) =>
+    tx.asset.findFirst({
+      where: { storageKey: fileId },
+      select: { id: true },
+    })
+  );
+  if (!asset) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const driveAuth = getAuth();

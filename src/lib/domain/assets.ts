@@ -7,14 +7,17 @@ import {
   TextType,
   EntityType,
   SourceKind,
+  ClearanceLevel,
 } from "@prisma/client";
-import { prisma } from "@/lib/db";
+import { prismaInternal, withClearance } from "@/lib/db";
 import { normalizeText } from "@/lib/utils";
 import { logAudit } from "./audit";
-import { backupTextToDrive, backupAssetToDrive } from "@/lib/drive";
+import { backupAssetToDrive } from "@/lib/drive";
+import { assertClearance } from "@/lib/classification";
 
 export interface CreateAssetData {
   kind: AssetKind;
+  classification: ClearanceLevel;
   title?: string;
   description?: string;
   status?: AssetStatus;
@@ -58,6 +61,7 @@ export interface CreateAssetData {
 
 export interface UpdateAssetData {
   kind?: AssetKind;
+  classification?: ClearanceLevel;
   title?: string;
   description?: string;
   status?: AssetStatus;
@@ -105,10 +109,13 @@ export interface ListAssetsFilters {
   include?: string[];
 }
 
-export async function createAsset(data: CreateAssetData, userId?: string | null) {
+export async function createAsset(data: CreateAssetData, userId: string | null, clearance: string) {
   const { texts, entities, sourceRecords, ...assetFields } = data;
 
-  const asset = await prisma.$transaction(async (tx) => {
+  // Check user can set this classification level
+  assertClearance(clearance, data.classification);
+
+  const asset = await withClearance(clearance, async (tx) => {
     const created = await tx.asset.create({
       data: {
         ...assetFields,
@@ -176,11 +183,17 @@ export async function createAsset(data: CreateAssetData, userId?: string | null)
 export async function updateAsset(
   id: string,
   data: UpdateAssetData,
-  userId?: string | null
+  userId: string | null,
+  clearance: string
 ) {
   const { entities, sourceRecords, ...assetFields } = data;
 
-  const asset = await prisma.$transaction(async (tx) => {
+  // If changing classification, check user can set the new level
+  if (data.classification) {
+    assertClearance(clearance, data.classification);
+  }
+
+  const asset = await withClearance(clearance, async (tx) => {
     // トップレベルフィールドの更新
     const updated = await tx.asset.update({
       where: { id },
@@ -255,58 +268,63 @@ export async function updateAsset(
   return asset;
 }
 
-export async function getAsset(id: string) {
-  return prisma.asset.findUnique({
-    where: { id },
-    include: {
-      texts: true,
-      entities: { include: { entity: true } },
-      sourceRecords: true,
-      annotations: true,
-      collectionItems: true,
-    },
+export async function getAsset(id: string, clearance: string) {
+  return withClearance(clearance, async (tx) => {
+    return tx.asset.findUnique({
+      where: { id },
+      include: {
+        texts: true,
+        entities: { include: { entity: true } },
+        sourceRecords: true,
+        annotations: true,
+        collectionItems: true,
+      },
+    });
   });
 }
 
-export async function listAssets(filters: ListAssetsFilters = {}) {
+export async function listAssets(filters: ListAssetsFilters = {}, clearance: string) {
   const { status, kind, trustLevel, sourceType, updatedSince, page = 1, perPage = 20, include } = filters;
 
-  const where = {
-    ...(status ? { status } : {}),
-    ...(kind ? { kind } : {}),
-    ...(trustLevel ? { trustLevel } : {}),
-    ...(sourceType ? { sourceType } : {}),
-    ...(updatedSince ? { updatedAt: { gte: updatedSince } } : {}),
-  };
+  return withClearance(clearance, async (tx) => {
+    const where = {
+      ...(status ? { status } : {}),
+      ...(kind ? { kind } : {}),
+      ...(trustLevel ? { trustLevel } : {}),
+      ...(sourceType ? { sourceType } : {}),
+      ...(updatedSince ? { updatedAt: { gte: updatedSince } } : {}),
+    };
 
-  const skip = (page - 1) * perPage;
+    const skip = (page - 1) * perPage;
 
-  const includeRelations = include?.length
-    ? {
-        ...(include.includes("sourceRecords") ? { sourceRecords: true } : {}),
-        ...(include.includes("texts") ? { texts: true } : {}),
-        ...(include.includes("entities") ? { entities: { include: { entity: true } } } : {}),
-      }
-    : undefined;
+    const includeRelations = include?.length
+      ? {
+          ...(include.includes("sourceRecords") ? { sourceRecords: true } : {}),
+          ...(include.includes("texts") ? { texts: true } : {}),
+          ...(include.includes("entities") ? { entities: { include: { entity: true } } } : {}),
+        }
+      : undefined;
 
-  const [items, total] = await prisma.$transaction([
-    prisma.asset.findMany({
+    const items = await tx.asset.findMany({
       where,
       skip,
       take: perPage,
       orderBy: { createdAt: "desc" },
       ...(includeRelations ? { include: includeRelations } : {}),
-    }),
-    prisma.asset.count({ where }),
-  ]);
+    });
+    const total = await tx.asset.count({ where });
 
-  return { items, total };
+    return { items, total };
+  });
 }
 
-export async function deleteAsset(id: string, userId?: string | null) {
-  const asset = await prisma.asset.findUnique({ where: { id } });
-  if (!asset) throw new Error("Asset not found");
-  await prisma.asset.delete({ where: { id } });
+export async function deleteAsset(id: string, userId: string | null, clearance: string) {
+  const asset = await withClearance(clearance, async (tx) => {
+    const found = await tx.asset.findUnique({ where: { id } });
+    if (!found) throw new Error("Asset not found");
+    await tx.asset.delete({ where: { id } });
+    return found;
+  });
   await logAudit({
     actorId: userId,
     action: "asset.delete",
@@ -317,7 +335,7 @@ export async function deleteAsset(id: string, userId?: string | null) {
 }
 
 export async function checkDuplicateHash(sha256: string) {
-  return prisma.asset.findMany({
+  return prismaInternal.asset.findMany({
     where: { sha256 },
   });
 }

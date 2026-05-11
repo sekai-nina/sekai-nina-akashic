@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
-import { prisma } from "@/lib/db";
+import { withClearance } from "@/lib/db";
 import { getAssetGraph } from "@/lib/domain/relations";
 
 export async function GET(request: Request) {
@@ -18,11 +18,14 @@ export async function GET(request: Request) {
     );
   }
 
-  const asset = await prisma.asset.findUnique({ where: { id: assetId }, select: { id: true } });
+  // RLS handles classification filtering: if asset is not accessible, findUnique returns null
+  const asset = await withClearance(auth.clearance, (tx) =>
+    tx.asset.findUnique({ where: { id: assetId }, select: { id: true } })
+  );
   if (!asset) {
     return NextResponse.json({ error: "Asset not found" }, { status: 404 });
   }
 
-  const graph = await getAssetGraph(assetId, depth);
+  const graph = await getAssetGraph(assetId, depth, auth.clearance);
   return NextResponse.json(graph);
 }

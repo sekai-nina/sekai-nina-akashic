@@ -25,7 +25,7 @@ export async function GET(request: Request) {
     include: includeParam ? includeParam.split(",") : undefined,
   };
 
-  const result = await listAssets(filters);
+  const result = await listAssets(filters, auth.clearance);
   return NextResponse.json(result);
 }
 
@@ -39,7 +39,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "kind is required" }, { status: 400 });
   }
 
-  const asset = await createAsset(body, auth.id);
+  // Ensure the created asset's classification doesn't exceed the user's clearance
+  if (body.classification) {
+    const { assertClearance } = await import("@/lib/classification");
+    try {
+      assertClearance(auth.clearance, body.classification);
+    } catch {
+      return NextResponse.json(
+        { error: "Cannot create asset with classification above your clearance" },
+        { status: 403 },
+      );
+    }
+  }
+
+  const asset = await createAsset(body, auth.id, auth.clearance);
 
   // Trigger testimonial extraction in background for web (blog) assets — scoped to this asset only
   if (body.sourceType === "web" && process.env.OPENAI_API_KEY) {

@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/db";
+import { prismaInternal as prisma } from "@/lib/db";
 
 export interface DashboardStats {
   blog: {

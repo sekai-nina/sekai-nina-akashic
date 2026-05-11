@@ -27,6 +27,6 @@ export async function GET(request: Request) {
     perPage: Math.min(Number(url.searchParams.get("perPage")) || 20, 100),
   };
 
-  const result = await search(query);
+  const result = await search(query, auth.clearance);
   return NextResponse.json(result);
 }

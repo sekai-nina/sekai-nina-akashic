@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
-import { prisma } from "@/lib/db";
+import { prismaInternal } from "@/lib/db";
 import { createResumableUploadSession, isDriveEnabled } from "@/lib/drive";
 import { updateAsset, type CreateAssetData } from "@/lib/domain/assets";
 
@@ -31,7 +31,7 @@ export async function POST(request: Request) {
 
   // sha256 が渡された場合は重複チェック
   if (sha256) {
-    const existing = await prisma.asset.findFirst({ where: { sha256 } });
+    const existing = await prismaInternal.asset.findFirst({ where: { sha256 } });
     if (existing) {
       // メタデータがあれば既存アセットに付与（既存の /upload と同じ動作）
       if (metadata) {
@@ -54,7 +54,8 @@ export async function POST(request: Request) {
             entities: metadata.entities,
             sourceRecords: sourceRecords as CreateAssetData["sourceRecords"],
           } as Parameters<typeof updateAsset>[1],
-          auth.id
+          auth.id,
+          auth.clearance
         );
       }
       return NextResponse.json({

@@ -10,6 +10,7 @@ import {
   Archive,
   FolderOpen,
   Users,
+  UserPlus,
   LogOut,
   Menu,
   X,
@@ -22,7 +23,7 @@ import {
 import { QuickCreateModal } from "@/components/quick-create-modal";
 
 interface SidebarProps {
-  user: { name: string; role: string };
+  user: { name: string; role: string; avatarUrl?: string | null };
 }
 
 const navItems = [
@@ -39,6 +40,7 @@ const navItems = [
 
 const adminItems = [
   { href: "/admin/users", label: "ユーザー管理", icon: Users },
+  { href: "/admin/invitations", label: "招待管理", icon: UserPlus },
 ];
 
 export function Sidebar({ user }: SidebarProps) {
@@ -145,7 +147,12 @@ export function Sidebar({ user }: SidebarProps) {
           )}
         </nav>
         <div className="border-t border-slate-200 px-4 py-3">
-          <p className="text-xs font-medium">{user.name}</p>
+          <div className="flex items-center gap-2">
+            {user.avatarUrl ? (
+              <img src={user.avatarUrl} alt="" className="w-6 h-6 rounded-full" />
+            ) : null}
+            <p className="text-xs font-medium">{user.name}</p>
+          </div>
           <button
             onClick={handleSignOut}
             className="mt-1 flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700"

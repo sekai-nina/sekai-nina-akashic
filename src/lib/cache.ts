@@ -1,6 +1,7 @@
 import { unstable_cache, revalidateTag } from "next/cache";
-import { prisma } from "@/lib/db";
+import { prisma, prismaInternal, withClearance } from "@/lib/db";
 import { getDashboardStats } from "@/lib/domain/stats";
+import { ClearanceLevel } from "@prisma/client";
 
 // ========== Cache Tags ==========
 export const CACHE_TAGS = {
@@ -31,43 +32,56 @@ export const getCachedDashboardStats = unstable_cache(
   { tags: [CACHE_TAGS.stats], revalidate: 60 }
 );
 
-export const getCachedKindCounts = unstable_cache(
-  () =>
-    prisma.asset.groupBy({
-      by: ["kind"],
-      _count: true,
-      orderBy: { _count: { kind: "desc" } },
-    }),
-  ["kind-counts"],
-  { tags: [CACHE_TAGS.assets], revalidate: 60 }
-);
+export const getCachedKindCounts = (clearance: ClearanceLevel) =>
+  unstable_cache(
+    () =>
+      withClearance(clearance, (tx) =>
+        tx.asset.groupBy({
+          by: ["kind"],
+          _count: true,
+          orderBy: { _count: { kind: "desc" } },
+        })
+      ),
+    [`kind-counts-${clearance}`],
+    { tags: [CACHE_TAGS.assets], revalidate: 60 }
+  )();
 
-export const getCachedStatusCounts = unstable_cache(
-  () =>
-    prisma.asset.groupBy({
-      by: ["status"],
-      _count: true,
-    }),
-  ["status-counts"],
-  { tags: [CACHE_TAGS.assets], revalidate: 60 }
-);
+export const getCachedStatusCounts = (clearance: ClearanceLevel) =>
+  unstable_cache(
+    () =>
+      withClearance(clearance, (tx) =>
+        tx.asset.groupBy({
+          by: ["status"],
+          _count: true,
+        })
+      ),
+    [`status-counts-${clearance}`],
+    { tags: [CACHE_TAGS.assets], revalidate: 60 }
+  )();
 
-export const getCachedRecentAssets = unstable_cache(
-  () =>
-    prisma.asset.findMany({
-      orderBy: { createdAt: "desc" },
-      take: 8,
-      include: { sourceRecords: { take: 1 } },
-    }),
-  ["recent-assets"],
-  { tags: [CACHE_TAGS.assets], revalidate: 30 }
-);
+export const getCachedRecentAssets = (clearance: ClearanceLevel) =>
+  unstable_cache(
+    () =>
+      withClearance(clearance, (tx) =>
+        tx.asset.findMany({
+          orderBy: { createdAt: "desc" },
+          take: 8,
+          include: { sourceRecords: { take: 1 } },
+        })
+      ),
+    [`recent-assets-${clearance}`],
+    { tags: [CACHE_TAGS.assets], revalidate: 30 }
+  )();
 
-export const getCachedInboxCount = unstable_cache(
-  () => prisma.asset.count({ where: { status: "inbox" } }),
-  ["inbox-count"],
-  { tags: [CACHE_TAGS.assets], revalidate: 30 }
-);
+export const getCachedInboxCount = (clearance: ClearanceLevel) =>
+  unstable_cache(
+    () =>
+      withClearance(clearance, (tx) =>
+        tx.asset.count({ where: { status: "inbox" } })
+      ),
+    [`inbox-count-${clearance}`],
+    { tags: [CACHE_TAGS.assets], revalidate: 30 }
+  )();
 
 export const getCachedEntities = unstable_cache(
   () =>
@@ -91,31 +105,34 @@ export const getCachedEntityById = unstable_cache(
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
-export const getCachedKindCountsRecent = unstable_cache(
-  () => {
-    const since = new Date(Date.now() - SEVEN_DAYS_MS);
-    return prisma.asset.groupBy({
-      by: ["kind"],
-      where: { createdAt: { gte: since } },
-      _count: true,
-    });
-  },
-  ["kind-counts-recent"],
-  { tags: [CACHE_TAGS.assets], revalidate: 60 }
-);
+export const getCachedKindCountsRecent = (clearance: ClearanceLevel) =>
+  unstable_cache(
+    () => {
+      const since = new Date(Date.now() - SEVEN_DAYS_MS);
+      return withClearance(clearance, (tx) =>
+        tx.asset.groupBy({
+          by: ["kind"],
+          where: { createdAt: { gte: since } },
+          _count: true,
+        })
+      );
+    },
+    [`kind-counts-recent-${clearance}`],
+    { tags: [CACHE_TAGS.assets], revalidate: 60 }
+  )();
 
 export const getCachedNinaStatsRecent = unstable_cache(
   async () => {
     const since = new Date(Date.now() - SEVEN_DAYS_MS);
     const ninaEntityId = "cmmtp8vrg0004mo381neyztvn";
     const [blogPosts, talkMessages, media, lives] = await Promise.all([
-      prisma.asset.count({
+      prismaInternal.asset.count({
         where: { sourceType: "web", kind: "text", createdAt: { gte: since }, entities: { some: { entityId: ninaEntityId } } },
       }),
-      prisma.asset.count({
+      prismaInternal.asset.count({
         where: { sourceType: "import", kind: "text", createdAt: { gte: since } },
       }),
-      prisma.assetEntity.count({
+      prismaInternal.assetEntity.count({
         where: {
           createdAt: { gte: since },
           entity: { type: "tag", canonicalName: { in: ["日向坂で会いましょう", "日向坂になりましょう", "日向坂ちゃんねる", "日向坂46公式チャンネル", "雑誌"] } },
@@ -134,8 +151,12 @@ export const getCachedNinaStatsRecent = unstable_cache(
   { tags: [CACHE_TAGS.stats], revalidate: 60 }
 );
 
-export const getCachedAssetCount = unstable_cache(
-  (where: Record<string, unknown>) => prisma.asset.count({ where }),
-  ["asset-count"],
-  { tags: [CACHE_TAGS.assets], revalidate: 30 }
-);
+export const getCachedAssetCount = (clearance: ClearanceLevel) =>
+  unstable_cache(
+    (where: Record<string, unknown>) =>
+      withClearance(clearance, (tx) =>
+        tx.asset.count({ where })
+      ),
+    [`asset-count-${clearance}`],
+    { tags: [CACHE_TAGS.assets], revalidate: 30 }
+  );
