@@ -10,8 +10,10 @@ const nextConfig: NextConfig = {
   },
   experimental: {
     staleTimes: {
-      dynamic: 30, // 動的ページのクライアントキャッシュを30秒保持
+      dynamic: 300, // 動的ページのクライアントキャッシュを5分保持
+      static: 600,
     },
+    optimizePackageImports: ["lucide-react", "recharts", "leaflet", "react-leaflet"],
   },
 };
 

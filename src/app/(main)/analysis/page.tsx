@@ -1,6 +1,6 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { getCachedEntities } from "@/lib/cache";
+import { getCachedEntityList } from "@/lib/cache";
 import { AnalysisClient } from "./analysis-client";
 
 export default async function AnalysisPage({
@@ -13,7 +13,7 @@ export default async function AnalysisPage({
 
   const params = await searchParams;
 
-  const allEntities = await getCachedEntities();
+  const allEntities = await getCachedEntityList();
   const entities = allEntities.map((e) => ({
     id: e.id,
     type: e.type,

@@ -99,6 +99,17 @@ export const getCachedEntities = unstable_cache(
   { tags: [CACHE_TAGS.entities], revalidate: 60 }
 );
 
+/** Lightweight entity list (no _count) for search/filter forms */
+export const getCachedEntityList = unstable_cache(
+  () =>
+    prisma.entity.findMany({
+      select: { id: true, type: true, canonicalName: true, normalizedName: true },
+      orderBy: [{ type: "asc" }, { canonicalName: "asc" }],
+    }),
+  ["entities-list-light"],
+  { tags: [CACHE_TAGS.entities], revalidate: 300 }
+);
+
 export const getCachedEntityById = unstable_cache(
   (id: string) =>
     prisma.entity.findUnique({
