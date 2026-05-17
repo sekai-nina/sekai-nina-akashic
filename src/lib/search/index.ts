@@ -63,7 +63,7 @@ export interface SearchResult {
  * Nearby occurrences are merged into a single snippet.
  */
 function buildSnippets(text: string, query: string, contextLen = 80): { snippets: string[]; matchCount: number } {
-  const terms = query.split("|").map((t) => t.trim()).filter(Boolean);
+  const terms = query.split("/").map((t) => t.trim()).filter(Boolean);
   if (terms.length === 0) return { snippets: [text.slice(0, contextLen * 2) + (text.length > contextLen * 2 ? "…" : "")], matchCount: 0 };
 
   const lower = text.toLowerCase();
@@ -148,7 +148,7 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
 
   // Support OR search with | separator
   const terms = hasKeyword
-    ? q.split("|").map((t) => t.trim()).filter(Boolean)
+    ? q.split("/").map((t) => t.trim()).filter(Boolean)
     : [];
   const normalizedTerms = terms.map((t) => normalizeText(t));
   const likePatterns = terms.map((t) => `%${t}%`);

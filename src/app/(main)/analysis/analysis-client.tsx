@@ -280,10 +280,10 @@ export function AnalysisClient({
   function handleWordChartClick(state: any) {
     const bucket = state?.activeLabel as string | undefined;
     if (!bucket) return;
-    // Pass all variants joined by | for OR search
+    // Pass all variants joined by / for OR search
     const groups = parseWordGroups(wordInput);
     const allVariants = groups.flatMap((g) => g.variants);
-    navigateToSearch(bucket, allVariants.join("|"));
+    navigateToSearch(bucket, allVariants.join("/"));
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
