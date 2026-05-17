@@ -1,12 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-// Routes that don't need MFA check
 const MFA_EXEMPT_PREFIXES = ["/login", "/invite/", "/mfa/", "/api/auth/"];
-
-function isMfaExempt(pathname: string): boolean {
-  return MFA_EXEMPT_PREFIXES.some((p) => pathname.startsWith(p));
-}
 
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
@@ -32,24 +27,24 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // Refresh session if expired
-  const { data: { user } } = await supabase.auth.getUser();
+  // getSession() decodes the JWT locally — no network round-trip.
+  // Expired tokens are refreshed via the setAll cookie callback above.
+  const { data: { session } } = await supabase.auth.getSession();
 
-  // MFA enforcement: skip for exempt routes and API key routes
   const pathname = request.nextUrl.pathname;
-  if (user && !isMfaExempt(pathname) && !pathname.startsWith("/api/v1/")) {
-    const { data: aalData } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  const isMfaExempt = MFA_EXEMPT_PREFIXES.some((p) => pathname.startsWith(p));
 
-    if (aalData) {
-      const { currentLevel, nextLevel } = aalData;
-      // If MFA is enrolled (nextLevel is aal2) but session is only aal1, redirect to verify
-      if (nextLevel === "aal2" && currentLevel === "aal1") {
-        return NextResponse.redirect(new URL("/mfa/verify", request.url));
-      }
-      // If no MFA enrolled at all, redirect to setup
-      if (nextLevel === "aal1" && currentLevel === "aal1") {
-        return NextResponse.redirect(new URL("/mfa/setup", request.url));
-      }
+  // MFA enforcement using session claims (no additional API call)
+  if (session?.user && !isMfaExempt && !pathname.startsWith("/api/v1/")) {
+    const factors = session.user.factors;
+    const hasMfaEnrolled = factors && factors.length > 0;
+    const hasVerifiedFactor = factors?.some((f) => f.status === "verified");
+
+    if (hasMfaEnrolled && !hasVerifiedFactor) {
+      return NextResponse.redirect(new URL("/mfa/verify", request.url));
+    }
+    if (!hasMfaEnrolled) {
+      return NextResponse.redirect(new URL("/mfa/setup", request.url));
     }
   }
 

@@ -97,44 +97,61 @@ export default async function AssetDetailPage({
   const session = await auth();
   const userClearance = session!.user.clearance as ClearanceLevel;
 
-  const [assetData, relations, graph] = await Promise.all([
-    withClearance(userClearance, async (tx) => {
-      const [a, cols] = await Promise.all([
-        tx.asset.findUnique({
-          where: { id },
-          include: {
-            texts: { orderBy: { createdAt: "asc" } },
-            entities: {
-              include: { entity: true },
-              orderBy: { createdAt: "asc" },
-            },
-            sourceRecords: { orderBy: { createdAt: "asc" } },
+  // Single withClearance call for all read queries (avoids repeated transaction overhead)
+  const pageData = await withClearance(userClearance, async (tx) => {
+    const [a, cols, relationsData, graphData] = await Promise.all([
+      tx.asset.findUnique({
+        where: { id },
+        include: {
+          texts: { orderBy: { createdAt: "asc" } },
+          entities: {
+            include: { entity: true },
+            orderBy: { createdAt: "asc" },
           },
-        }),
-        tx.collection.findMany({
-          where: { ownerId: session!.user.id },
-          orderBy: { name: "asc" },
-        }),
-      ]);
-      return { asset: a, collections: cols };
-    }),
-    getAssetRelations(id, userClearance),
-    getAssetGraph(id, 1, userClearance),
-  ]);
+          sourceRecords: { orderBy: { createdAt: "asc" } },
+        },
+      }),
+      tx.collection.findMany({
+        where: { ownerId: session!.user.id },
+        orderBy: { name: "asc" },
+      }),
+      getAssetRelations(id, tx),
+      getAssetGraph(id, 1, tx),
+    ]);
 
-  const { asset, collections } = assetData;
+    if (!a) return null;
 
-  if (!asset) notFound();
+    // Duplicates and embedded images in the same transaction
+    const duplicatesPromise = a.sha256
+      ? tx.asset.findMany({
+          where: { sha256: a.sha256, id: { not: id } },
+          select: { id: true, title: true },
+        })
+      : Promise.resolve([]);
 
-  let duplicates: { id: string; title: string }[] = [];
-  if (asset.sha256) {
-    duplicates = await withClearance(userClearance, (tx) =>
-      tx.asset.findMany({
-        where: { sha256: asset.sha256, id: { not: id } },
-        select: { id: true, title: true },
-      })
-    );
-  }
+    const imgPlaceholderRegex = /\{\{IMG:([a-zA-Z0-9_-]+)\}\}/g;
+    const embeddedImageIds = new Set<string>();
+    for (const text of a.texts) {
+      for (const match of text.content.matchAll(imgPlaceholderRegex)) {
+        if (!/^\d+$/.test(match[1])) {
+          embeddedImageIds.add(match[1]);
+        }
+      }
+    }
+    const embeddedImagesPromise = embeddedImageIds.size > 0
+      ? tx.asset.findMany({
+          where: { id: { in: [...embeddedImageIds] } },
+          select: { id: true, thumbnailUrl: true, title: true },
+        })
+      : Promise.resolve([]);
+
+    const [dupes, embImgs] = await Promise.all([duplicatesPromise, embeddedImagesPromise]);
+
+    return { asset: a, collections: cols, relations: relationsData, graph: graphData, duplicates: dupes, embeddedImageAssets: embImgs };
+  });
+
+  if (!pageData) notFound();
+  const { asset, collections, relations, graph, duplicates, embeddedImageAssets } = pageData;
 
   const isImage = asset.kind === "image";
   let previewUrl = asset.thumbnailUrl;
@@ -146,26 +163,9 @@ export default async function AssetDetailPage({
     }
   }
 
-  const imgPlaceholderRegex = /\{\{IMG:([a-zA-Z0-9_-]+)\}\}/g;
-  const embeddedImageIds = new Set<string>();
-  for (const text of asset.texts) {
-    for (const match of text.content.matchAll(imgPlaceholderRegex)) {
-      if (!/^\d+$/.test(match[1])) {
-        embeddedImageIds.add(match[1]);
-      }
-    }
-  }
   const embeddedImages: Record<string, { thumbnailUrl: string | null; title: string }> = {};
-  if (embeddedImageIds.size > 0) {
-    const imageAssets = await withClearance(userClearance, (tx) =>
-      tx.asset.findMany({
-        where: { id: { in: [...embeddedImageIds] } },
-        select: { id: true, thumbnailUrl: true, title: true },
-      })
-    );
-    for (const img of imageAssets) {
-      embeddedImages[img.id] = { thumbnailUrl: img.thumbnailUrl, title: img.title };
-    }
+  for (const img of embeddedImageAssets) {
+    embeddedImages[img.id] = { thumbnailUrl: img.thumbnailUrl, title: img.title };
   }
 
   const totalRelations = relations.asSource.length + relations.asTarget.length;

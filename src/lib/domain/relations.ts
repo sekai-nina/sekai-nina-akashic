@@ -1,5 +1,5 @@
 import { RelationType } from "@prisma/client";
-import { withClearance } from "@/lib/db";
+import { withClearance, type TransactionClient } from "@/lib/db";
 import { logAudit } from "./audit";
 
 const ASSET_SUMMARY_SELECT = {
@@ -101,23 +101,30 @@ export async function deleteAssetRelation(
   return relation;
 }
 
-export async function getAssetRelations(assetId: string, clearance: string) {
-  return withClearance(clearance, async (tx) => {
-    const [asSource, asTarget] = await Promise.all([
-      tx.assetRelation.findMany({
-        where: { sourceId: assetId },
-        include: { target: { select: ASSET_SUMMARY_SELECT } },
-        orderBy: [{ relationType: "asc" }, { sortOrder: "asc" }],
-      }),
-      tx.assetRelation.findMany({
-        where: { targetId: assetId },
-        include: { source: { select: ASSET_SUMMARY_SELECT } },
-        orderBy: [{ relationType: "asc" }, { sortOrder: "asc" }],
-      }),
-    ]);
+export async function getAssetRelations(assetId: string, clearance: string): Promise<{ asSource: Awaited<ReturnType<typeof _getAssetRelationsInner>>["asSource"]; asTarget: Awaited<ReturnType<typeof _getAssetRelationsInner>>["asTarget"] }>;
+export async function getAssetRelations(assetId: string, tx: TransactionClient): Promise<{ asSource: Awaited<ReturnType<typeof _getAssetRelationsInner>>["asSource"]; asTarget: Awaited<ReturnType<typeof _getAssetRelationsInner>>["asTarget"] }>;
+export async function getAssetRelations(assetId: string, clearanceOrTx: string | TransactionClient) {
+  if (typeof clearanceOrTx === "string") {
+    return withClearance(clearanceOrTx, (tx) => _getAssetRelationsInner(assetId, tx));
+  }
+  return _getAssetRelationsInner(assetId, clearanceOrTx);
+}
 
-    return { asSource, asTarget };
-  });
+async function _getAssetRelationsInner(assetId: string, tx: TransactionClient) {
+  const [asSource, asTarget] = await Promise.all([
+    tx.assetRelation.findMany({
+      where: { sourceId: assetId },
+      include: { target: { select: ASSET_SUMMARY_SELECT } },
+      orderBy: [{ relationType: "asc" }, { sortOrder: "asc" }],
+    }),
+    tx.assetRelation.findMany({
+      where: { targetId: assetId },
+      include: { source: { select: ASSET_SUMMARY_SELECT } },
+      orderBy: [{ relationType: "asc" }, { sortOrder: "asc" }],
+    }),
+  ]);
+
+  return { asSource, asTarget };
 }
 
 export interface GraphNode {
@@ -135,81 +142,91 @@ export interface GraphEdge {
   relationType: string;
 }
 
+export async function getAssetGraph(startId: string, depth: number, clearance: string): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }>;
+export async function getAssetGraph(startId: string, depth: number, tx: TransactionClient): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }>;
 export async function getAssetGraph(
   startId: string,
   depth = 2,
-  clearance: string,
+  clearanceOrTx: string | TransactionClient,
 ): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> {
-  return withClearance(clearance, async (tx) => {
-    const visited = new Set<string>();
-    const nodes: GraphNode[] = [];
-    const edges: GraphEdge[] = [];
-    const seenEdges = new Set<string>();
-    let frontier = [startId];
+  if (typeof clearanceOrTx === "string") {
+    return withClearance(clearanceOrTx, (tx) => _getAssetGraphInner(startId, depth, tx));
+  }
+  return _getAssetGraphInner(startId, depth, clearanceOrTx);
+}
 
-    for (let d = 0; d <= depth && frontier.length > 0; d++) {
-      const newFrontier: string[] = [];
+async function _getAssetGraphInner(
+  startId: string,
+  depth: number,
+  tx: TransactionClient,
+): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> {
+  const visited = new Set<string>();
+  const nodes: GraphNode[] = [];
+  const edges: GraphEdge[] = [];
+  const seenEdges = new Set<string>();
+  let frontier = [startId];
 
-      const assets = await tx.asset.findMany({
-        where: { id: { in: frontier } },
-        select: ASSET_SUMMARY_SELECT,
-      });
+  for (let d = 0; d <= depth && frontier.length > 0; d++) {
+    const newFrontier: string[] = [];
 
-      for (const a of assets) {
-        if (!visited.has(a.id)) {
-          visited.add(a.id);
-          nodes.push({
-            id: a.id,
-            title: a.title,
-            kind: a.kind,
-            thumbnailUrl: a.thumbnailUrl,
-            status: a.status,
-          });
-        }
+    const assets = await tx.asset.findMany({
+      where: { id: { in: frontier } },
+      select: ASSET_SUMMARY_SELECT,
+    });
+
+    for (const a of assets) {
+      if (!visited.has(a.id)) {
+        visited.add(a.id);
+        nodes.push({
+          id: a.id,
+          title: a.title,
+          kind: a.kind,
+          thumbnailUrl: a.thumbnailUrl,
+          status: a.status,
+        });
       }
-
-      if (d === depth) break;
-
-      const frontierSet = new Set(frontier);
-
-      const [outgoing, incoming] = await Promise.all([
-        tx.assetRelation.findMany({
-          where: { sourceId: { in: frontier } },
-        }),
-        tx.assetRelation.findMany({
-          where: { targetId: { in: frontier } },
-        }),
-      ]);
-
-      for (const rel of [...outgoing, ...incoming]) {
-        const edgeKey = `${rel.sourceId}-${rel.targetId}-${rel.relationType}`;
-        if (!seenEdges.has(edgeKey)) {
-          seenEdges.add(edgeKey);
-          edges.push({
-            id: edgeKey,
-            source: rel.sourceId,
-            target: rel.targetId,
-            relationType: rel.relationType,
-          });
-        }
-
-        const neighbor = frontierSet.has(rel.sourceId)
-          ? rel.targetId
-          : rel.sourceId;
-        if (!visited.has(neighbor)) {
-          newFrontier.push(neighbor);
-        }
-      }
-
-      frontier = [...new Set(newFrontier)];
     }
 
-    // Filter edges to only include those where both endpoints are visible
-    const visibleIds = new Set(nodes.map((n) => n.id));
-    const filteredEdges = edges.filter(
-      (e) => visibleIds.has(e.source) && visibleIds.has(e.target)
-    );
+    if (d === depth) break;
 
-    return { nodes, edges: filteredEdges };
-  });
+    const frontierSet = new Set(frontier);
+
+    const [outgoing, incoming] = await Promise.all([
+      tx.assetRelation.findMany({
+        where: { sourceId: { in: frontier } },
+      }),
+      tx.assetRelation.findMany({
+        where: { targetId: { in: frontier } },
+      }),
+    ]);
+
+    for (const rel of [...outgoing, ...incoming]) {
+      const edgeKey = `${rel.sourceId}-${rel.targetId}-${rel.relationType}`;
+      if (!seenEdges.has(edgeKey)) {
+        seenEdges.add(edgeKey);
+        edges.push({
+          id: edgeKey,
+          source: rel.sourceId,
+          target: rel.targetId,
+          relationType: rel.relationType,
+        });
+      }
+
+      const neighbor = frontierSet.has(rel.sourceId)
+        ? rel.targetId
+        : rel.sourceId;
+      if (!visited.has(neighbor)) {
+        newFrontier.push(neighbor);
+      }
+    }
+
+    frontier = [...new Set(newFrontier)];
+  }
+
+  const visibleIds = new Set(nodes.map((n) => n.id));
+  const filteredEdges = edges.filter(
+    (e) => visibleIds.has(e.source) && visibleIds.has(e.target)
+  );
+
+  return { nodes, edges: filteredEdges };
 }

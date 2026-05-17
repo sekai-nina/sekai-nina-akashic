@@ -31,128 +31,122 @@ export interface DashboardStats {
   };
 }
 
-// 坂井新奈のperson entity ID
 const NINA_ENTITY_ID = "cmmtp8vrg0004mo381neyztvn";
 
-// 坂井新奈に紐づくアセットのフィルタ条件
-const ninaFilter = {
-  entities: { some: { entityId: NINA_ENTITY_ID } },
-};
+interface CountsRow {
+  blog_posts: bigint;
+  blog_images: bigint;
+  talk_messages: bigint;
+  talk_images: bigint;
+  talk_videos: bigint;
+  talk_audios: bigint;
+  total_assets: bigint;
+  discovery: bigint;
+  hinaai: bigint;
+  hinanari: bigint;
+  hinach: bigint;
+  official: bigint;
+  magazine: bigint;
+  live: bigint;
+}
+
+interface CharsRow {
+  blog_chars: bigint;
+  talk_chars: bigint;
+  live_songs: bigint;
+  live_center: bigint;
+}
 
 export async function getDashboardStats(): Promise<DashboardStats> {
-  // エンティティ名でアセット数をカウントするヘルパー
-  const countByTag = (name: string) =>
-    prisma.assetEntity.count({
-      where: { entity: { type: "tag", normalizedName: name } },
-    });
-
-  const [
-    blogPostCount,
-    blogImageCount,
-    talkMessageCount,
-    talkImageCount,
-    talkVideoCount,
-    talkAudioCount,
-    totalAssetCount,
-    blogCharsResult,
-    talkCharsResult,
-    discoveryCount,
-    hinaaiCount,
-    hinanariCount,
-    hinachCount,
-    officialCount,
-    magazineCount,
-    liveCount,
-    liveSongsResult,
-    liveCenterResult,
-  ] = await Promise.all([
-    prisma.asset.count({ where: { sourceType: "web", kind: "text", ...ninaFilter } }),
-    prisma.asset.count({ where: { sourceType: "web", kind: "image", ...ninaFilter } }),
-    prisma.asset.count({ where: { sourceType: "import", kind: "text" } }),
-    prisma.asset.count({ where: { sourceType: "import", kind: "image" } }),
-    prisma.asset.count({ where: { sourceType: "import", kind: "video" } }),
-    prisma.asset.count({ where: { sourceType: "import", kind: "audio" } }),
-    prisma.asset.count(),
-    // 坂井新奈のブログ文字数合計
-    prisma.$queryRaw<[{ total: bigint }]>`
-      SELECT COALESCE(SUM(LENGTH(t.content)), 0) AS total
-      FROM "AssetText" t
-      JOIN "Asset" a ON a.id = t."assetId"
-      JOIN "AssetEntity" ae ON ae."assetId" = a.id
-      WHERE a."sourceType" = 'web'
-        AND a.kind = 'text'
-        AND t."textType" IN ('body', 'message_body')
-        AND ae."entityId" = ${NINA_ENTITY_ID}
+  // Two consolidated queries instead of 18 individual ones
+  const [countsResult, charsResult] = await Promise.all([
+    prisma.$queryRaw<[CountsRow]>`
+      SELECT
+        (SELECT COUNT(*) FROM "Asset" a
+          JOIN "AssetEntity" ae ON ae."assetId" = a.id
+          WHERE a."sourceType" = 'web' AND a.kind = 'text' AND ae."entityId" = ${NINA_ENTITY_ID}
+        ) AS blog_posts,
+        (SELECT COUNT(*) FROM "Asset" a
+          JOIN "AssetEntity" ae ON ae."assetId" = a.id
+          WHERE a."sourceType" = 'web' AND a.kind = 'image' AND ae."entityId" = ${NINA_ENTITY_ID}
+        ) AS blog_images,
+        (SELECT COUNT(*) FROM "Asset" WHERE "sourceType" = 'import' AND kind = 'text') AS talk_messages,
+        (SELECT COUNT(*) FROM "Asset" WHERE "sourceType" = 'import' AND kind = 'image') AS talk_images,
+        (SELECT COUNT(*) FROM "Asset" WHERE "sourceType" = 'import' AND kind = 'video') AS talk_videos,
+        (SELECT COUNT(*) FROM "Asset" WHERE "sourceType" = 'import' AND kind = 'audio') AS talk_audios,
+        (SELECT COUNT(*) FROM "Asset") AS total_assets,
+        (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '今日の発見') AS discovery,
+        (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '日向坂で会いましょう') AS hinaai,
+        (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '日向坂になりましょう') AS hinanari,
+        (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '日向坂ちゃんねる') AS hinach,
+        (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '日向坂46公式チャンネル') AS official,
+        (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '雑誌') AS magazine,
+        (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."canonicalName" = 'ライブ') AS live
     `,
-    // トーク文字数合計（トークは坂井新奈のみ）
-    prisma.$queryRaw<[{ total: bigint }]>`
-      SELECT COALESCE(SUM(LENGTH(t.content)), 0) AS total
-      FROM "AssetText" t
-      JOIN "Asset" a ON a.id = t."assetId"
-      WHERE a."sourceType" = 'import'
-        AND a.kind = 'text'
-        AND t."textType" IN ('body', 'message_body')
-    `,
-    // 「今日の発見」タグがついたアセット数
-    countByTag("今日の発見"),
-    // メディア出演カウント
-    countByTag("日向坂で会いましょう"),
-    countByTag("日向坂になりましょう"),
-    countByTag("日向坂ちゃんねる"),
-    countByTag("日向坂46公式チャンネル"),
-    countByTag("雑誌"),
-    // ライブ: 参加数、披露曲数（セミコロン区切りのbodyテキストから集計）、センター曲数（noteテキストから集計）
-    countByTag("ライブ"),
-    prisma.$queryRaw<[{ total: bigint }]>`
-      SELECT COALESCE(SUM(
-        array_length(string_to_array(t.content, ';'), 1)
-      ), 0) AS total
-      FROM "AssetText" t
-      JOIN "AssetEntity" ae ON ae."assetId" = t."assetId"
-      JOIN "Entity" e ON e.id = ae."entityId"
-      WHERE e."canonicalName" = 'ライブ' AND e.type = 'tag'
-        AND t."textType" = 'body' AND t.content != ''
-    `,
-    prisma.$queryRaw<[{ total: bigint }]>`
-      SELECT COALESCE(SUM(
-        array_length(string_to_array(t.content, ';'), 1)
-      ), 0) AS total
-      FROM "AssetText" t
-      JOIN "AssetEntity" ae ON ae."assetId" = t."assetId"
-      JOIN "Entity" e ON e.id = ae."entityId"
-      WHERE e."canonicalName" = 'ライブ' AND e.type = 'tag'
-        AND t."textType" = 'note' AND t.content != ''
+    prisma.$queryRaw<[CharsRow]>`
+      SELECT
+        (SELECT COALESCE(SUM(LENGTH(t.content)), 0)
+          FROM "AssetText" t
+          JOIN "Asset" a ON a.id = t."assetId"
+          JOIN "AssetEntity" ae ON ae."assetId" = a.id
+          WHERE a."sourceType" = 'web' AND a.kind = 'text'
+            AND t."textType" IN ('body', 'message_body')
+            AND ae."entityId" = ${NINA_ENTITY_ID}
+        ) AS blog_chars,
+        (SELECT COALESCE(SUM(LENGTH(t.content)), 0)
+          FROM "AssetText" t
+          JOIN "Asset" a ON a.id = t."assetId"
+          WHERE a."sourceType" = 'import' AND a.kind = 'text'
+            AND t."textType" IN ('body', 'message_body')
+        ) AS talk_chars,
+        (SELECT COALESCE(SUM(array_length(string_to_array(t.content, ';'), 1)), 0)
+          FROM "AssetText" t
+          JOIN "AssetEntity" ae ON ae."assetId" = t."assetId"
+          JOIN "Entity" e ON e.id = ae."entityId"
+          WHERE e."canonicalName" = 'ライブ' AND e.type = 'tag'
+            AND t."textType" = 'body' AND t.content != ''
+        ) AS live_songs,
+        (SELECT COALESCE(SUM(array_length(string_to_array(t.content, ';'), 1)), 0)
+          FROM "AssetText" t
+          JOIN "AssetEntity" ae ON ae."assetId" = t."assetId"
+          JOIN "Entity" e ON e.id = ae."entityId"
+          WHERE e."canonicalName" = 'ライブ' AND e.type = 'tag'
+            AND t."textType" = 'note' AND t.content != ''
+        ) AS live_center
     `,
   ]);
 
+  const counts = countsResult[0];
+  const chars = charsResult[0];
+
   return {
     blog: {
-      postCount: blogPostCount,
-      imageCount: blogImageCount,
-      totalChars: Number(blogCharsResult[0].total),
-      discoveryCount,
+      postCount: Number(counts.blog_posts),
+      imageCount: Number(counts.blog_images),
+      totalChars: Number(chars.blog_chars),
+      discoveryCount: Number(counts.discovery),
     },
     talk: {
-      messageCount: talkMessageCount,
-      imageCount: talkImageCount,
-      videoCount: talkVideoCount,
-      audioCount: talkAudioCount,
-      totalChars: Number(talkCharsResult[0].total),
+      messageCount: Number(counts.talk_messages),
+      imageCount: Number(counts.talk_images),
+      videoCount: Number(counts.talk_videos),
+      audioCount: Number(counts.talk_audios),
+      totalChars: Number(chars.talk_chars),
     },
     media: {
-      hinaai: hinaaiCount,
-      hinanari: hinanariCount,
-      hinach: hinachCount,
-      official: officialCount,
-      magazine: magazineCount,
+      hinaai: Number(counts.hinaai),
+      hinanari: Number(counts.hinanari),
+      hinach: Number(counts.hinach),
+      official: Number(counts.official),
+      magazine: Number(counts.magazine),
     },
     live: {
-      count: liveCount,
-      totalSongs: Number(liveSongsResult[0].total),
-      centerSongs: Number(liveCenterResult[0].total),
+      count: Number(counts.live),
+      totalSongs: Number(chars.live_songs),
+      centerSongs: Number(chars.live_center),
     },
     total: {
-      assetCount: totalAssetCount,
+      assetCount: Number(counts.total_assets),
     },
   };
 }
