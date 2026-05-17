@@ -6,7 +6,7 @@ import { normalizeText } from "@/lib/utils";
 import { logAudit } from "@/lib/domain/audit";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
-import { invalidateAssets, invalidateEntities, invalidateCollections } from "@/lib/cache";
+import { invalidateAssets, invalidateEntities, invalidateCollections, invalidatePlaces } from "@/lib/cache";
 import { redirect, RedirectType } from "next/navigation";
 import type { AssetKind, AssetStatus, TrustLevel, SourceType, StorageProvider, EntityType, TextType, SourceKind, AnnotationKind, RelationType, ClearanceLevel } from "@prisma/client";
 import { createInvitation, deleteInvitation as deleteInvitationDomain } from "@/lib/domain/invitations";
@@ -639,4 +639,62 @@ export async function deleteInvitationAction(id: string) {
   await requireRole(["admin"]);
   await deleteInvitationDomain(id);
   revalidatePath("/admin/invitations");
+}
+
+// ========== Places ==========
+
+export async function createPlaceAction(formData: FormData) {
+  const user = await requireRole(["admin", "member"]);
+
+  const { createPlace } = await import("@/lib/domain/places");
+  const place = await createPlace(
+    {
+      canonicalName: (formData.get("name") as string) || "",
+      latitude: parseFloat(formData.get("latitude") as string),
+      longitude: parseFloat(formData.get("longitude") as string),
+      googleMapsUrl: (formData.get("googleMapsUrl") as string) || undefined,
+      address: (formData.get("address") as string) || undefined,
+      description: (formData.get("description") as string) || undefined,
+      classification: (formData.get("classification") as ClearanceLevel) || undefined,
+    },
+    user.clearance
+  );
+
+  invalidatePlaces();
+  revalidatePath("/places");
+  redirect(`/places/${place.id}`);
+}
+
+export async function updatePlaceAction(id: string, formData: FormData) {
+  const user = await requireRole(["admin", "member"]);
+
+  const { updatePlace } = await import("@/lib/domain/places");
+  await updatePlace(
+    id,
+    {
+      canonicalName: (formData.get("name") as string) || undefined,
+      latitude: formData.get("latitude") ? parseFloat(formData.get("latitude") as string) : undefined,
+      longitude: formData.get("longitude") ? parseFloat(formData.get("longitude") as string) : undefined,
+      googleMapsUrl: formData.has("googleMapsUrl") ? (formData.get("googleMapsUrl") as string) || undefined : undefined,
+      address: formData.has("address") ? (formData.get("address") as string) || undefined : undefined,
+      description: formData.has("description") ? (formData.get("description") as string) || undefined : undefined,
+      classification: (formData.get("classification") as ClearanceLevel) || undefined,
+    },
+    user.clearance
+  );
+
+  invalidatePlaces();
+  revalidatePath("/places");
+  revalidatePath(`/places/${id}`);
+}
+
+export async function deletePlaceAction(id: string) {
+  const user = await requireRole(["admin", "member"]);
+
+  const { deletePlace } = await import("@/lib/domain/places");
+  await deletePlace(id, user.clearance);
+
+  invalidatePlaces();
+  revalidatePath("/places");
+  redirect("/places");
 }

@@ -20,6 +20,7 @@ import {
   Image,
   Network,
   BarChart3,
+  MapPin,
 } from "lucide-react";
 import { QuickCreateModal } from "@/components/quick-create-modal";
 
@@ -33,6 +34,7 @@ const navItems = [
   { href: "/assets", label: "Assets", icon: Archive },
   { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/entities", label: "エンティティ", icon: Tag },
+  { href: "/places", label: "聖地マップ", icon: MapPin },
   { href: "/collections", label: "コレクション", icon: FolderOpen },
   { href: "/testimonials", label: "口コミ管理", icon: MessageCircle },
   { href: "/graph", label: "グラフ", icon: Network },

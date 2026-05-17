@@ -209,6 +209,7 @@ model Entity {
 
   assets       AssetEntity[]
   testimonials Testimonial[]
+  place        Place?
 
   @@unique([type, canonicalName])
 }
@@ -395,4 +396,20 @@ model Testimonial {
   @@index([entityId, status])
   @@index([category])
   @@index([status])
+}
+
+model Place {
+  id             String         @id @default(cuid())
+  entityId       String         @unique
+  entity         Entity         @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  latitude       Float
+  longitude      Float
+  googleMapsUrl  String?
+  address        String?
+  classification ClearanceLevel @default(internal)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([latitude, longitude])
+  @@index([classification])
 }

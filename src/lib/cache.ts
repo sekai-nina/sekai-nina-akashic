@@ -9,6 +9,7 @@ export const CACHE_TAGS = {
   entities: "entities",
   collections: "collections",
   stats: "stats",
+  places: "places",
 } as const;
 
 export function invalidateAssets() {
@@ -17,6 +18,11 @@ export function invalidateAssets() {
 }
 
 export function invalidateEntities() {
+  revalidateTag(CACHE_TAGS.entities, "max");
+}
+
+export function invalidatePlaces() {
+  revalidateTag(CACHE_TAGS.places, "max");
   revalidateTag(CACHE_TAGS.entities, "max");
 }
 
@@ -160,3 +166,24 @@ export const getCachedAssetCount = (clearance: ClearanceLevel) =>
     [`asset-count-${clearance}`],
     { tags: [CACHE_TAGS.assets], revalidate: 30 }
   );
+
+export const getCachedPlaces = (clearance: ClearanceLevel) => {
+  const clearanceOrder: ClearanceLevel[] = ["public", "internal", "confidential", "restricted"];
+  const maxLevel = clearanceOrder.indexOf(clearance);
+  const allowedLevels = clearanceOrder.slice(0, maxLevel + 1);
+
+  return unstable_cache(
+    () =>
+      prisma.place.findMany({
+        where: { classification: { in: allowedLevels.length > 0 ? allowedLevels : ["public"] } },
+        include: {
+          entity: {
+            include: { _count: { select: { assets: true } } },
+          },
+        },
+        orderBy: { entity: { canonicalName: "asc" } },
+      }),
+    [`places-list-${clearance}`],
+    { tags: [CACHE_TAGS.places], revalidate: 60 }
+  )();
+};
