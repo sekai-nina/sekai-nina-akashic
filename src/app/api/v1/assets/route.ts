@@ -34,6 +34,9 @@ export async function POST(request: Request) {
   if (auth instanceof NextResponse) return auth;
 
   const body = await request.json() as CreateAssetData;
+  if (!body.classification) {
+    body.classification = "internal";
+  }
 
   if (!body.kind) {
     return NextResponse.json({ error: "kind is required" }, { status: 400 });
