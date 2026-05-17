@@ -47,6 +47,18 @@ function ClearanceBadge({ clearance }: { clearance: string }) {
   );
 }
 
+function UserAvatar({ name, avatarUrl }: { name: string; avatarUrl: string | null }) {
+  if (avatarUrl) {
+    return <img src={avatarUrl} alt="" className="w-10 h-10 rounded-full shrink-0" />;
+  }
+  const initial = name.trim().charAt(0).toUpperCase() || "?";
+  return (
+    <div className="w-10 h-10 rounded-full shrink-0 bg-slate-200 text-slate-600 flex items-center justify-center text-sm font-medium">
+      {initial}
+    </div>
+  );
+}
+
 export default async function AdminUsersPage() {
   const session = await auth();
   if (!session?.user || session.user.role !== "admin") {
@@ -136,7 +148,9 @@ export default async function AdminUsersPage() {
           const isSelf = user.id === session.user.id;
 
           return (
-            <div key={user.id} className="px-4 py-3 space-y-2">
+            <div key={user.id} className="px-4 py-3 flex gap-3">
+              <UserAvatar name={user.name} avatarUrl={user.avatarUrl} />
+              <div className="flex-1 min-w-0 space-y-2">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm font-medium text-slate-800">{user.name}</span>
                 <RoleBadge role={user.role} />
@@ -184,6 +198,16 @@ export default async function AdminUsersPage() {
                         />
                       </div>
                       <div>
+                        <label className="block text-xs text-slate-500 mb-0.5">アイコン URL（任意）</label>
+                        <input
+                          type="url"
+                          name="avatarUrl"
+                          defaultValue={user.avatarUrl ?? ""}
+                          placeholder="https://example.com/avatar.png"
+                          className="w-full border border-slate-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      </div>
+                      <div>
                         <label className="block text-xs text-slate-500 mb-0.5">ロール</label>
                         <select
                           name="role"
@@ -221,6 +245,7 @@ export default async function AdminUsersPage() {
                     </SubmitButton>
                   </form>
                 )}
+              </div>
               </div>
             </div>
           );

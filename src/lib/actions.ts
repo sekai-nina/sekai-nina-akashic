@@ -506,6 +506,8 @@ export async function updateUser(id: string, formData: FormData) {
   }
 
   const clearance = (formData.get("clearance") as ClearanceLevel) || undefined;
+  const avatarUrlRaw = (formData.get("avatarUrl") as string | null)?.trim() ?? "";
+  const avatarUrl = avatarUrlRaw === "" ? null : avatarUrlRaw;
 
   await prisma.user.update({
     where: { id },
@@ -513,6 +515,7 @@ export async function updateUser(id: string, formData: FormData) {
       email: newEmail,
       name,
       role: role as "admin" | "member" | "viewer",
+      avatarUrl,
       ...(clearance ? { clearance } : {}),
     },
   });
