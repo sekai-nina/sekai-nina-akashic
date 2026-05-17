@@ -194,8 +194,11 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
     return { items: [], total: 0, page, perPage };
   }
 
-  // Run search queries in parallel (each gets its own DB connection from pool)
-  const searchAssets = (target === "all" || target === "assets")
+  // Run search queries in parallel (each gets its own DB connection from pool).
+  // When there's no keyword, run searchAssets regardless of target — there's
+  // nothing to match inside text content or entity names, so we fall back to
+  // listing assets filtered by kind/date/entity.
+  const searchAssets = (target === "all" || target === "assets" || !hasKeyword)
     ? withClearance(clearance, async (tx) => {
         const keywordCondition = hasKeyword
           ? Prisma.sql`(${Prisma.join(
@@ -228,7 +231,7 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
           WHERE ${keywordCondition}
           ${baseFilter}
           ${entityFilter}
-          ORDER BY a."createdAt" DESC
+          ORDER BY COALESCE(a."canonicalDate", a."createdAt") DESC
           LIMIT ${perPage} OFFSET ${offset}
         `;
       })
@@ -407,8 +410,13 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
     }
   }
 
-  // Sort by score descending, then by date
-  results.sort((a, b) => b.score - a.score || b.createdAt.getTime() - a.createdAt.getTime());
+  // Sort by score descending, then by canonical/created date
+  results.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    const aDate = (a.canonicalDate ?? a.createdAt).getTime();
+    const bDate = (b.canonicalDate ?? b.createdAt).getTime();
+    return bDate - aDate;
+  });
 
   const sliced = results.slice(0, perPage);
 
