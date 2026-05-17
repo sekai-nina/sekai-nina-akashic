@@ -88,5 +88,5 @@ export function LeafletMap({
     }
   }, [markers, center, onMarkerClick]);
 
-  return <div ref={containerRef} className={className} />;
+  return <div ref={containerRef} className={`${className} isolate`} />;
 }
