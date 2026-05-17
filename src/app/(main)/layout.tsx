@@ -18,7 +18,9 @@ export default async function MainLayout({
         <NavigationProgress />
       </Suspense>
       <Sidebar user={session.user} />
-      <main className="flex-1 overflow-auto p-4 pt-14 pb-24 md:p-6 md:pt-6 md:pb-6">{children}</main>
+      <main className="flex-1 overflow-auto mt-12 md:mt-0">
+        <div className="px-4 pt-2 pb-24 md:px-6 md:pt-6 md:pb-6">{children}</div>
+      </main>
     </div>
   );
 }
