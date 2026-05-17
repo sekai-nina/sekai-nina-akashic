@@ -19,6 +19,7 @@ import {
   MessageCircle,
   Image,
   Network,
+  BarChart3,
 } from "lucide-react";
 import { QuickCreateModal } from "@/components/quick-create-modal";
 
@@ -35,6 +36,7 @@ const navItems = [
   { href: "/collections", label: "コレクション", icon: FolderOpen },
   { href: "/testimonials", label: "口コミ管理", icon: MessageCircle },
   { href: "/graph", label: "グラフ", icon: Network },
+  { href: "/analysis", label: "テキスト分析", icon: BarChart3 },
   { href: "/dashboard", label: "ダッシュボード", icon: LayoutDashboard },
 ];
 

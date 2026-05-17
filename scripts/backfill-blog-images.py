@@ -55,7 +55,7 @@ def main() -> None:
         print("Error: AKASHIC_API_KEY is required")
         sys.exit(1)
 
-    akashic = AkashicClient(AKASHIC_BASE_URL, AKASHIC_API_KEY, timeout=60)
+    akashic = AkashicClient(AKASHIC_BASE_URL, AKASHIC_API_KEY, timeout=300)
     blog_client = BlogClient(delay=1.0)
 
     # Fetch all text assets with blog source records
@@ -127,8 +127,8 @@ def main() -> None:
                     continue
 
             processed += 1
-            title = asset.get("title", "")
-            print(f"\n[{processed}] post_id={post_id} title={title[:40]}")
+            old_title = asset.get("title", "")
+            print(f"\n[{processed}] post_id={post_id} title={old_title[:40]}")
 
             # Re-fetch blog to get image positions
             try:
@@ -143,7 +143,17 @@ def main() -> None:
                 errors += 1
                 continue
 
+            # Update asset title to new format: (author)ブログ「(title)」
+            new_title = f"{post.author}ブログ「{post.title}」" if post.author and post.title else old_title
+
             if not post.image_urls:
+                # Even without images, update title if needed
+                if new_title != old_title and not args.dry_run:
+                    try:
+                        akashic.update_asset(asset_id, title=new_title)
+                        print(f"  Updated title: {new_title[:50]}")
+                    except Exception as e:
+                        print(f"  Title update error: {e}")
                 print(f"  No images in blog post")
                 skipped += 1
                 continue
@@ -186,7 +196,7 @@ def main() -> None:
                 if img_index is None:
                     continue
 
-                image_title = f"{title} ({i + 1}/{total_imgs})" if total_imgs > 1 else title
+                image_title = f"{new_title} ({i + 1}/{total_imgs})" if total_imgs > 1 else new_title
                 print(f"  Uploading image {i + 1}/{total_imgs}: {img.filename}")
 
                 if args.dry_run:
@@ -236,6 +246,9 @@ def main() -> None:
                         f"/texts/{body_text_id}",
                         json={"content": new_content},
                     )
+                    if new_title != old_title:
+                        akashic.update_asset(asset_id, title=new_title)
+                        print(f"  Updated title: {new_title[:50]}")
                     updated += 1
                 except Exception as e:
                     print(f"  Update error: {e}")
