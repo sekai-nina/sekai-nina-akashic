@@ -33,9 +33,11 @@ export default async function AdminInvitationsPage() {
   }
 
   const invitations = await listInvitations();
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
-    : "http://localhost:3000";
+  const baseUrl =
+    process.env.NEXT_PUBLIC_APP_URL ??
+    (process.env.NODE_ENV === "production"
+      ? "https://akashic.sekai-nina.com"
+      : "http://localhost:3000");
 
   return (
     <div className="max-w-4xl mx-auto">
