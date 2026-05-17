@@ -78,8 +78,9 @@ export async function GET(request: Request) {
     return NextResponse.redirect(`${origin}/login?error=email_mismatch`);
   }
 
-  // Atomically consume invitation first (race-condition safe)
-  const consumed = await consumeInvitation(inviteToken, "pending");
+  // Atomically consume invitation first (race-condition safe).
+  // usedById is set after the user is created below.
+  const consumed = await consumeInvitation(inviteToken);
   if (!consumed) {
     await supabase.auth.signOut();
     return NextResponse.redirect(`${origin}/login?error=invalid_invite`);

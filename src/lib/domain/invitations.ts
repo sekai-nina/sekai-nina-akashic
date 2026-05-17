@@ -60,11 +60,15 @@ export async function getInvitationByToken(token: string) {
 /**
  * Atomically consume an invitation. Returns the updated invitation,
  * or null if it was already consumed or expired (race condition safe).
+ *
+ * Pass `userId` for the email/password flow where the user already exists.
+ * Omit it for OAuth flows that must claim the invitation before creating
+ * the user (set `usedById` in a follow-up update once the user is created).
  */
-export async function consumeInvitation(token: string, userId: string) {
+export async function consumeInvitation(token: string, userId?: string) {
   const result = await prisma.invitation.updateMany({
     where: { token, usedAt: null, expiresAt: { gte: new Date() } },
-    data: { usedAt: new Date(), usedById: userId },
+    data: userId ? { usedAt: new Date(), usedById: userId } : { usedAt: new Date() },
   });
   if (result.count === 0) return null;
   return prisma.invitation.findUnique({ where: { token } });
