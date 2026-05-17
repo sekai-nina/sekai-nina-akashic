@@ -57,6 +57,28 @@ export function Sidebar({ user }: SidebarProps) {
     setOpen(false);
   }, [pathname]);
 
+  // 主要ページを背景でプリフェッチ — クリック時に即座に表示できるようにする
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    // requestIdleCallback で他の処理を邪魔しないようにする
+    const cb = () => {
+      for (const item of navItems) {
+        if (item.href !== pathname) router.prefetch(item.href);
+      }
+      if (user.role === "admin") {
+        for (const item of adminItems) {
+          if (item.href !== pathname) router.prefetch(item.href);
+        }
+      }
+    };
+    if ("requestIdleCallback" in window) {
+      const id = (window as Window & typeof globalThis).requestIdleCallback(cb, { timeout: 2000 });
+      return () => (window as Window & typeof globalThis).cancelIdleCallback(id);
+    }
+    const timer = setTimeout(cb, 500);
+    return () => clearTimeout(timer);
+  }, [pathname, router, user.role]);
+
   async function handleSignOut() {
     const supabase = createClient();
     await supabase.auth.signOut();
@@ -116,6 +138,8 @@ export function Sidebar({ user }: SidebarProps) {
               <Link
                 key={item.href}
                 href={item.href}
+                prefetch
+                onMouseEnter={() => router.prefetch(item.href)}
                 className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm ${
                   active
                     ? "bg-slate-100 font-medium text-slate-900"
@@ -136,6 +160,8 @@ export function Sidebar({ user }: SidebarProps) {
                   <Link
                     key={item.href}
                     href={item.href}
+                    prefetch
+                    onMouseEnter={() => router.prefetch(item.href)}
                     className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm ${
                       active
                         ? "bg-slate-100 font-medium text-slate-900"
