@@ -98,7 +98,6 @@ export function Sidebar({ user }: SidebarProps) {
         </button>
         <img src="/icon-96.jpg" alt="" className="w-6 h-6 rounded-md" />
         <span className="text-sm font-bold tracking-tight">Akashic</span>
-        <QuickCreateModal />
       </header>
 
       {/* オーバーレイ */}
@@ -125,8 +124,8 @@ export function Sidebar({ user }: SidebarProps) {
             <p className="text-xs text-slate-500 leading-tight">Sekai Nina</p>
           </div>
         </div>
-        {/* New asset */}
-        <div className="px-3 py-2 border-b border-slate-200">
+        {/* New asset (desktop only — mobile uses floating FAB) */}
+        <div className="hidden md:block px-3 py-2 border-b border-slate-200">
           <QuickCreateModal />
         </div>
         <nav className="flex-1 space-y-1 px-2 py-3">

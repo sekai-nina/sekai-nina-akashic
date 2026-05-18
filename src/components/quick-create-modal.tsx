@@ -12,7 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-export function QuickCreateModal() {
+export function QuickCreateModal({ variant = "desktop" }: { variant?: "desktop" | "fab" }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState("image");
@@ -145,24 +145,25 @@ export function QuickCreateModal() {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      {/* Desktop sidebar button */}
-      <button
-        type="button"
-        onClick={handleOpen}
-        className="hidden md:flex items-center justify-center gap-1.5 w-full bg-blue-600 text-white rounded-md py-1.5 text-sm font-medium hover:bg-blue-700 transition-colors"
-      >
-        <Plus size={14} />
-        新規登録
-      </button>
-
-      {/* Mobile header button */}
-      <button
-        type="button"
-        onClick={handleOpen}
-        className="md:hidden ml-auto p-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-      >
-        <Plus size={16} />
-      </button>
+      {variant === "desktop" ? (
+        <button
+          type="button"
+          onClick={handleOpen}
+          className="flex items-center justify-center gap-1.5 w-full bg-blue-600 text-white rounded-md py-1.5 text-sm font-medium hover:bg-blue-700 transition-colors"
+        >
+          <Plus size={14} />
+          新規登録
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={handleOpen}
+          aria-label="新規登録"
+          className="md:hidden fixed right-4 bottom-[max(1rem,env(safe-area-inset-bottom))] z-30 w-14 h-14 rounded-full bg-blue-600 text-white shadow-lg shadow-blue-600/30 hover:bg-blue-700 active:bg-blue-800 transition-colors flex items-center justify-center"
+        >
+          <Plus size={24} />
+        </button>
+      )}
 
       <DialogContent className="max-h-[90vh] overflow-y-auto">
         <DialogHeader>

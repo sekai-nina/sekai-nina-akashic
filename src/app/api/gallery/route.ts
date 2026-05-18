@@ -12,15 +12,27 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const cursor = url.searchParams.get("cursor");
-  const entityId = url.searchParams.get("entityId");
+  const entityIdsParam =
+    url.searchParams.get("entityIds") ?? url.searchParams.get("entityId");
+  const entityIds = entityIdsParam
+    ? entityIdsParam.split(",").filter(Boolean)
+    : [];
+  const kindParam = url.searchParams.get("kind");
 
   const where: Record<string, unknown> = {
-    kind: { in: ["image", "video"] },
     thumbnailUrl: { not: null },
   };
 
-  if (entityId) {
-    where.entities = { some: { entityId } };
+  if (kindParam === "image" || kindParam === "video") {
+    where.kind = kindParam;
+  } else {
+    where.kind = { in: ["image", "video"] };
+  }
+
+  if (entityIds.length > 0) {
+    where.AND = entityIds.map((id) => ({
+      entities: { some: { entityId: id } },
+    }));
   }
 
   const assets = await withClearance(session.user.clearance, (tx) =>
