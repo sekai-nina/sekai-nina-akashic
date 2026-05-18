@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { Sidebar } from "@/components/sidebar";
 import { NavigationProgress } from "@/components/navigation-progress";
+import { QuickCreateModal } from "@/components/quick-create-modal";
 
 export default async function MainLayout({
   children,
@@ -21,6 +22,7 @@ export default async function MainLayout({
       <main className="flex-1 overflow-auto mt-12 md:mt-0">
         <div className="px-4 pt-2 pb-24 md:px-6 md:pt-6 md:pb-6">{children}</div>
       </main>
+      <QuickCreateModal variant="fab" />
     </div>
   );
 }
