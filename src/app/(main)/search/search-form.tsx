@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Loader2 } from "lucide-react";
+import { Loader2, RotateCcw } from "lucide-react";
 import { ASSET_KIND_LABELS, ENTITY_TYPE_LABELS } from "@/lib/utils";
 import { EntityFilter } from "./entity-filter";
 import { AuthorFilter } from "./author-filter";
@@ -60,10 +60,51 @@ export function SearchForm({
   const [filterAuthorIds, setFilterAuthorIds] = useState<Set<string>>(
     new Set(initialAuthorIds)
   );
+  const qInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setSearching(false);
   }, [searchParams]);
+
+  // Persist the current search URL so navigating away and back restores filters.
+  const STORAGE_KEY = "search-last-query";
+  const hydratedRef = useRef(false);
+
+  useEffect(() => {
+    if (hydratedRef.current) return;
+    hydratedRef.current = true;
+    // Hydrate only when the user lands on /search with no params at all.
+    if (searchParams.toString().length > 0) return;
+    if (typeof window === "undefined") return;
+    const saved = window.localStorage.getItem(STORAGE_KEY);
+    if (saved && saved.startsWith("?")) {
+      router.replace(`/search${saved}`, { scroll: false });
+    }
+    // We deliberately ignore router/searchParams updates after the first mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Save the latest URL whenever the params change (so submissions are remembered).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const qs = searchParams.toString();
+    if (qs.length > 0) {
+      window.localStorage.setItem(STORAGE_KEY, `?${qs}`);
+    }
+  }, [searchParams]);
+
+  const handleReset = useCallback(() => {
+    setMode("all");
+    setKind("");
+    setNinaOnly(false);
+    setFilterEntityIds(new Set());
+    setFilterAuthorIds(new Set());
+    if (qInputRef.current) qInputRef.current.value = "";
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(STORAGE_KEY);
+    }
+    router.push("/search", { scroll: false });
+  }, [router]);
 
   const HIDDEN_ENTITY_TYPES = new Set(["source"]);
   const entityTypes = [...new Set(entities.map((e) => e.type))].filter((t) => !HIDDEN_ENTITY_TYPES.has(t));
@@ -175,6 +216,7 @@ export function SearchForm({
       {/* Search bar */}
       <div className="flex gap-3">
         <input
+          ref={qInputRef}
           type="text"
           name="q"
           defaultValue={initialQ}
@@ -217,6 +259,15 @@ export function SearchForm({
           }`}
         >
           坂井新奈
+        </button>
+        <button
+          type="button"
+          onClick={handleReset}
+          title="検索条件をリセット"
+          className="ml-auto inline-flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+        >
+          <RotateCcw size={12} />
+          リセット
         </button>
       </div>
 
