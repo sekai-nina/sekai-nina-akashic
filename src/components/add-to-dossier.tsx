@@ -2,7 +2,7 @@
 
 import { useState, useTransition, useRef, useEffect } from "react";
 import { Plus, Check, Loader2, FolderSearch } from "lucide-react";
-import { addAssetToDossierAction, createDossierAction } from "@/app/(main)/dossiers/actions";
+import { addAssetToDossierAction, createDossierWithAssetAction } from "@/app/(main)/dossiers/actions";
 
 interface EditableDossier {
   id: string;
@@ -82,12 +82,20 @@ export function AddToDossier({
   function createAndAdd() {
     if (!newTitle.trim()) return;
     startTransition(async () => {
-      const fd = new FormData();
-      fd.set("title", newTitle.trim());
-      // createDossierAction redirects after create; we can't chain after that.
-      // Instead use a non-redirecting flow: call the domain action directly
-      // is not possible from a client. So we redirect to the new dossier.
-      await createDossierAction(fd);
+      const result = await createDossierWithAssetAction(newTitle.trim(), assetId, {
+        caption: defaultCaption,
+        excerpt: excerpt?.text,
+        excerptType: excerpt?.textType as never,
+        excerptStart: excerpt?.textStart,
+        excerptEnd: excerpt?.textEnd,
+      });
+      setAddedIds((prev) => new Set(prev).add(result.dossierId));
+      setNewTitle("");
+      setCreating(false);
+      if (onAdded) {
+        onAdded(result.dossierId, result.title);
+        setOpen(false);
+      }
     });
   }
 
@@ -129,7 +137,7 @@ export function AddToDossier({
     <div ref={popoverRef} className="relative inline-block">
       {trigger}
       {open && (
-        <div className="absolute right-0 mt-1 z-50 w-64 bg-white border border-slate-200 rounded-lg shadow-lg p-2">
+        <div className="absolute right-0 mt-1 z-50 w-64 bg-white text-slate-700 border border-slate-200 rounded-lg shadow-lg p-2">
           {!creating ? (
             <>
               <input
@@ -189,7 +197,7 @@ export function AddToDossier({
                 className="w-full text-xs border border-slate-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               />
               <p className="text-[10px] text-slate-400">
-                作成後、ドシエページに移動します。作成のみ行い、このアセットは別途追加してください。
+                作成と同時に、このアセットを新しいドシエに追加します。
               </p>
               <div className="flex justify-end gap-2">
                 <button
@@ -203,9 +211,10 @@ export function AddToDossier({
                   type="button"
                   onClick={createAndAdd}
                   disabled={!newTitle.trim() || isPending}
-                  className="bg-indigo-600 text-white px-2 py-1 rounded text-xs font-medium hover:bg-indigo-700 disabled:opacity-50"
+                  className="bg-indigo-600 text-white px-2 py-1 rounded text-xs font-medium hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center gap-1"
                 >
-                  作成
+                  {isPending && <Loader2 className="h-3 w-3 animate-spin" />}
+                  作成して追加
                 </button>
               </div>
             </div>

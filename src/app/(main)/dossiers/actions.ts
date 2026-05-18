@@ -91,6 +91,31 @@ export async function addAssetToDossierAction(
   revalidatePath(`/dossiers/${dossierId}`);
 }
 
+/**
+ * Create a new dossier and immediately add the given asset to it.
+ * Returns the new dossier id so the caller can navigate or surface a link.
+ */
+export async function createDossierWithAssetAction(
+  title: string,
+  assetId: string,
+  options?: { caption?: string; excerpt?: string; excerptType?: TextType; excerptStart?: number; excerptEnd?: number }
+): Promise<{ dossierId: string; title: string }> {
+  const user = await requireUser();
+  const dossier = await createDossierDomain(user, { title });
+  await addAssetItemDomain(user, dossier.id, {
+    assetId,
+    caption: options?.caption,
+    excerpt: options?.excerpt,
+    excerptType: options?.excerptType,
+    excerptStart: options?.excerptStart,
+    excerptEnd: options?.excerptEnd,
+  });
+  invalidateDossiers();
+  revalidatePath("/dossiers");
+  revalidatePath(`/dossiers/${dossier.id}`);
+  return { dossierId: dossier.id, title: dossier.title };
+}
+
 export async function addExternalLinkAction(dossierId: string, formData: FormData) {
   const user = await requireUser();
   await addExternalLinkItemDomain(user, dossierId, {
