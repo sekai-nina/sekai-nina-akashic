@@ -44,14 +44,31 @@ function KindBadge({ kind }: { kind: string }) {
   );
 }
 
+function stripPlaceholders(text: string): string {
+  return text.replace(/\{\{IMG:[a-zA-Z0-9_-]+\}\}/g, "").replace(/[ \t]{2,}/g, " ");
+}
+
 function HighlightedSnippet({ text, query }: { text: string; query: string }) {
-  if (!query.trim()) return <>{text}</>;
-  // Support OR terms separated by |
-  const terms = query.split("|").map((t) => t.trim()).filter(Boolean);
+  const cleaned = stripPlaceholders(text);
+  if (!query.trim()) return <>{cleaned}</>;
+  // Backend splits the query on "/" — keep these in sync.
+  const terms = query.split("/").map((t) => t.trim()).filter(Boolean);
+  if (terms.length === 0) return <>{cleaned}</>;
   const pattern = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
   const regex = new RegExp(`(${pattern})`, "gi");
-  const parts = text.split(regex);
-  return <>{parts.map((part, i) => regex.test(part) ? <mark key={i} className="bg-yellow-200 text-yellow-900 rounded-sm px-0.5">{part}</mark> : <span key={i}>{part}</span>)}</>;
+  const parts = cleaned.split(regex);
+  const termsLower = new Set(terms.map((t) => t.toLowerCase()));
+  return (
+    <>
+      {parts.map((part, i) =>
+        termsLower.has(part.toLowerCase()) ? (
+          <mark key={i} className="bg-yellow-200 text-yellow-900 rounded-sm px-0.5">{part}</mark>
+        ) : (
+          <span key={i}>{part}</span>
+        )
+      )}
+    </>
+  );
 }
 
 const MATCH_FIELD_LABELS: Record<string, string> = {
