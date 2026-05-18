@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Loader2, X, ChevronLeft, ChevronRight, Download } from "lucide-react";
 import Link from "next/link";
+import { AddToDossier } from "@/components/add-to-dossier";
 
 interface GalleryItem {
   id: string;
@@ -30,14 +31,18 @@ function groupByMonth(items: GalleryItem[]): Map<string, GalleryItem[]> {
   return groups;
 }
 
+interface EditableDossier { id: string; title: string }
+
 export function GalleryGrid({
   initialItems,
   initialCursor,
   entityId,
+  editableDossiers = [],
 }: {
   initialItems: GalleryItem[];
   initialCursor: string | null;
   entityId?: string;
+  editableDossiers?: EditableDossier[];
 }) {
   const [items, setItems] = useState(initialItems);
   const [cursor, setCursor] = useState(initialCursor);
@@ -226,6 +231,14 @@ export function GalleryGrid({
               >
                 詳細を見る →
               </Link>
+              {editableDossiers.length > 0 && (
+                <AddToDossier
+                  assetId={items[lightbox].id}
+                  dossiers={editableDossiers}
+                  defaultCaption={items[lightbox].title}
+                  size="md"
+                />
+              )}
             </div>
           </div>
         </div>

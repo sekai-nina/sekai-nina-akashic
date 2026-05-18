@@ -83,7 +83,7 @@ export async function backupAssetToDrive(assetId: string): Promise<void> {
       entities: { include: { entity: true } },
       sourceRecords: true,
       annotations: true,
-      collectionItems: true,
+      dossierItems: true,
     },
   });
   if (!asset) return;

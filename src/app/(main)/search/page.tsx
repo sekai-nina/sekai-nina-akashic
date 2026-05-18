@@ -2,10 +2,14 @@ import { Suspense } from "react";
 import { search } from "@/lib/search";
 import { auth } from "@/lib/auth";
 import { getCachedEntityList } from "@/lib/cache";
+import { listEditableDossiers } from "@/lib/domain/dossiers";
+import { AddToDossier } from "@/components/add-to-dossier";
 import { ASSET_KIND_LABELS, formatDate } from "@/lib/utils";
 import { SearchForm } from "./search-form";
 import Link from "next/link";
 import type { AssetKind, ClearanceLevel } from "@prisma/client";
+
+interface EditableDossier { id: string; title: string }
 
 type SearchMode = "all" | "text" | "media" | "image" | "live";
 
@@ -85,9 +89,11 @@ function SearchResultsSkeleton() {
 async function SearchResults({
   params,
   clearance,
+  editableDossiers,
 }: {
   params: { [key: string]: string | undefined };
   clearance: ClearanceLevel;
+  editableDossiers: EditableDossier[];
 }) {
   const q = params.q ?? "";
   const mode = (params.mode as SearchMode) || "all";
@@ -112,7 +118,11 @@ async function SearchResults({
     : [];
   const effectiveEntityIds = selectedEntityIds.length > 0 ? selectedEntityIds : presetEntityIds;
 
-  const hasFilters = !!(effectiveKind || params.dateFrom || params.dateTo || effectiveEntityIds.length > 0);
+  const selectedAuthorIds: string[] = params.authorIds
+    ? params.authorIds.split(",").filter(Boolean)
+    : [];
+
+  const hasFilters = !!(effectiveKind || params.dateFrom || params.dateTo || effectiveEntityIds.length > 0 || selectedAuthorIds.length > 0);
 
   if (!q.trim() && !hasFilters) {
     return (
@@ -125,6 +135,7 @@ async function SearchResults({
   const results = await search({
     q, target: effectiveTarget, kind: effectiveKind,
     entityIds: effectiveEntityIds.length > 0 ? effectiveEntityIds : undefined,
+    authorIds: selectedAuthorIds.length > 0 ? selectedAuthorIds : undefined,
     dateFrom: params.dateFrom ? new Date(params.dateFrom) : undefined,
     dateTo: params.dateTo ? new Date(params.dateTo) : undefined,
     page, perPage: 20,
@@ -138,6 +149,7 @@ async function SearchResults({
     if (merged.view) p.set("view", merged.view);
     if (merged.page && merged.page !== "1") p.set("page", merged.page);
     if (merged.entityIds) p.set("entityIds", merged.entityIds);
+    if (merged.authorIds) p.set("authorIds", merged.authorIds);
     if (merged.kind) p.set("kind", merged.kind);
     if (merged.dateFrom) p.set("dateFrom", merged.dateFrom);
     if (merged.dateTo) p.set("dateTo", merged.dateTo);
@@ -173,22 +185,33 @@ async function SearchResults({
       ) : effectiveView === "gallery" ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
           {results.items.map((item, idx) => (
-            <Link key={`${item.assetId}-${idx}`} href={`/assets/${item.assetId}`}
-              className="bg-white border border-slate-200 rounded-lg overflow-hidden hover:border-blue-400 transition-colors">
-              {item.thumbnailUrl ? (
-                <img src={item.thumbnailUrl} alt={item.assetTitle} className="w-full h-32 object-cover" />
-              ) : (item.assetKind === "image" || item.assetKind === "video") && item.storageUrl ? (
-                <img src={item.storageUrl} alt={item.assetTitle} className="w-full h-32 object-cover" />
-              ) : (
-                <div className="w-full h-32 bg-slate-100 flex items-center justify-center text-slate-400 text-xs">
-                  {ASSET_KIND_LABELS[item.assetKind] ?? item.assetKind}
+            <div key={`${item.assetId}-${idx}`} className="relative group">
+              <Link href={`/assets/${item.assetId}`}
+                className="block bg-white border border-slate-200 rounded-lg overflow-hidden hover:border-blue-400 transition-colors">
+                {item.thumbnailUrl ? (
+                  <img src={item.thumbnailUrl} alt={item.assetTitle} className="w-full h-32 object-cover" />
+                ) : (item.assetKind === "image" || item.assetKind === "video") && item.storageUrl ? (
+                  <img src={item.storageUrl} alt={item.assetTitle} className="w-full h-32 object-cover" />
+                ) : (
+                  <div className="w-full h-32 bg-slate-100 flex items-center justify-center text-slate-400 text-xs">
+                    {ASSET_KIND_LABELS[item.assetKind] ?? item.assetKind}
+                  </div>
+                )}
+                <div className="p-2">
+                  <p className="text-xs font-medium text-slate-800 line-clamp-2">{item.assetTitle}</p>
+                  <div className="mt-1"><KindBadge kind={item.assetKind} /></div>
+                </div>
+              </Link>
+              {editableDossiers.length > 0 && (
+                <div className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                  <AddToDossier
+                    assetId={item.assetId}
+                    dossiers={editableDossiers}
+                    defaultCaption={item.assetTitle}
+                  />
                 </div>
               )}
-              <div className="p-2">
-                <p className="text-xs font-medium text-slate-800 line-clamp-2">{item.assetTitle}</p>
-                <div className="mt-1"><KindBadge kind={item.assetKind} /></div>
-              </div>
-            </Link>
+            </div>
           ))}
         </div>
       ) : (
@@ -233,6 +256,13 @@ async function SearchResults({
                     <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M7.71 3.5L1.15 15l4.58 7.5h13.54l4.58-7.5L17.29 3.5H7.71zm.58 1h8.42l5.83 10.5h-5.07l-4.5-7.78-4.5 7.78H3.4L8.29 4.5zm3.68 3.72L8.2 15h7.56l-3.79-6.78zM2.27 16h4.86l2.29 3.75H4.56L2.27 16zm12.31 0h4.86l-2.29 3.75h-4.86l2.29-3.75z"/></svg>
                   </a>
                 )}
+                {editableDossiers.length > 0 && (
+                  <AddToDossier
+                    assetId={item.assetId}
+                    dossiers={editableDossiers}
+                    defaultCaption={item.assetTitle}
+                  />
+                )}
               </div>
             </div>
           ))}
@@ -268,6 +298,7 @@ export default async function SearchPage({
     getCachedEntityList(),
   ]);
   const userClearance = session!.user.clearance as ClearanceLevel;
+  const editableDossiers = (await listEditableDossiers(session!.user)).map((d) => ({ id: d.id, title: d.title }));
 
   const params = await searchParams;
   const q = params.q ?? "";
@@ -277,10 +308,13 @@ export default async function SearchPage({
   const selectedEntityIds: string[] = params.entityIds
     ? params.entityIds.split(",").filter(Boolean)
     : [];
+  const selectedAuthorIds: string[] = params.authorIds
+    ? params.authorIds.split(",").filter(Boolean)
+    : [];
 
   const mediaShowEntities = entities.filter((e) => MEDIA_SHOW_NAMES.includes(e.canonicalName));
 
-  const hasQuery = !!(q.trim() || params.kind || preset.kind || params.dateFrom || params.dateTo || selectedEntityIds.length > 0 || preset.entityNames);
+  const hasQuery = !!(q.trim() || params.kind || preset.kind || params.dateFrom || params.dateTo || selectedEntityIds.length > 0 || selectedAuthorIds.length > 0 || preset.entityNames);
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -293,6 +327,7 @@ export default async function SearchPage({
           initialMode={mode}
           initialQ={q}
           initialEntityIds={selectedEntityIds}
+          initialAuthorIds={selectedAuthorIds}
           mediaShowEntities={mediaShowEntities}
           entities={entities}
         />
@@ -300,7 +335,7 @@ export default async function SearchPage({
 
       {hasQuery ? (
         <Suspense fallback={<SearchResultsSkeleton />}>
-          <SearchResults params={params} clearance={userClearance} />
+          <SearchResults params={params} clearance={userClearance} editableDossiers={editableDossiers} />
         </Suspense>
       ) : (
         <div className="text-center py-16 text-slate-400">

@@ -178,34 +178,34 @@ async function main() {
     },
   });
 
-  // Sample collection
-  await prisma.collection.upsert({
-    where: { id: "seed-collection-1" },
+  // Sample dossier (特定支援)
+  await prisma.dossier.upsert({
+    where: { id: "seed-dossier-1" },
     update: {},
     create: {
-      id: "seed-collection-1",
-      name: "調査用まとめ",
-      description: "調査に使う資料をまとめたコレクション",
+      id: "seed-dossier-1",
+      title: "調査用まとめ",
+      summary: "調査に使う資料をまとめたドシエ",
       ownerId: admin.id,
     },
   });
 
-  await prisma.collectionItem.upsert({
-    where: { collectionId_assetId: { collectionId: "seed-collection-1", assetId: asset1.id } },
+  await prisma.dossierItem.upsert({
+    where: { dossierId_assetId: { dossierId: "seed-dossier-1", assetId: asset1.id } },
     update: {},
     create: {
-      collectionId: "seed-collection-1",
+      dossierId: "seed-dossier-1",
       assetId: asset1.id,
       note: "メインの参考資料",
       sortOrder: 0,
     },
   });
 
-  await prisma.collectionItem.upsert({
-    where: { collectionId_assetId: { collectionId: "seed-collection-1", assetId: asset2.id } },
+  await prisma.dossierItem.upsert({
+    where: { dossierId_assetId: { dossierId: "seed-dossier-1", assetId: asset2.id } },
     update: {},
     create: {
-      collectionId: "seed-collection-1",
+      dossierId: "seed-dossier-1",
       assetId: asset2.id,
       note: "",
       sortOrder: 1,

@@ -1,5 +1,6 @@
 import { withClearance } from "@/lib/db";
 import { auth } from "@/lib/auth";
+import { listEditableDossiers } from "@/lib/domain/dossiers";
 import { GalleryGrid } from "./gallery-grid";
 
 const PAGE_SIZE = 40;
@@ -41,12 +42,22 @@ export default async function GalleryPage() {
   }));
   const nextCursor = hasMore ? items[items.length - 1].id : null;
 
+  const editableDossiers = (await listEditableDossiers(session!.user)).map((d) => ({
+    id: d.id,
+    title: d.title,
+  }));
+
   return (
     <div className="max-w-6xl mx-auto">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-900">ギャラリー</h1>
       </div>
-      <GalleryGrid initialItems={items} initialCursor={nextCursor} entityId={NINA_ENTITY_ID} />
+      <GalleryGrid
+        initialItems={items}
+        initialCursor={nextCursor}
+        entityId={NINA_ENTITY_ID}
+        editableDossiers={editableDossiers}
+      />
     </div>
   );
 }

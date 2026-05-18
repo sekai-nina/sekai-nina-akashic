@@ -100,6 +100,22 @@ enum ClearanceLevel {
   restricted
 }
 
+enum DossierAccessMode {
+  private
+  clearance
+}
+
+enum DossierItemKind {
+  asset_ref
+  external_link
+  external_image
+}
+
+enum PlaceStatus {
+  confirmed
+  candidate
+}
+
 model User {
   id           String         @id @default(cuid())
   email        String         @unique
@@ -116,7 +132,7 @@ model User {
   updatedAssets      Asset[]      @relation("AssetUpdatedBy")
   assetTexts         AssetText[]  @relation("AssetTextCreatedBy")
   annotations        Annotation[] @relation("AnnotationCreatedBy")
-  collections        Collection[]
+  dossiers           Dossier[]
   auditLogs          AuditLog[]
   apiKeys            ApiKey[]
   invitation         Invitation?
@@ -164,7 +180,7 @@ model Asset {
   entities        AssetEntity[]
   sourceRecords   SourceRecord[]
   annotations     Annotation[]
-  collectionItems CollectionItem[]
+  dossierItems    DossierItem[]
   testimonials    Testimonial[]
   relationsAsSource AssetRelation[] @relation("RelationSource")
   relationsAsTarget AssetRelation[] @relation("RelationTarget")
@@ -265,33 +281,84 @@ model Annotation {
   @@index([assetId])
 }
 
-model Collection {
-  id          String @id @default(cuid())
-  ownerId     String
-  owner       User   @relation(fields: [ownerId], references: [id])
-  name        String
-  description String @default("")
+model Dossier {
+  id              String                  @id @default(cuid())
+  ownerId         String
+  owner           User                    @relation(fields: [ownerId], references: [id])
+  title           String
+  summary         String                  @default("")
+  classification  ClearanceLevel          @default(internal)
+  viewMode        DossierAccessMode       @default(private)
+  editMode        DossierAccessMode       @default(private)
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
 
-  items CollectionItem[]
+  items           DossierItem[]
+  placeCandidates DossierPlaceCandidate[]
 
   @@index([ownerId])
+  @@index([classification])
+  @@index([updatedAt])
 }
 
-model CollectionItem {
-  id           String @id @default(cuid())
-  collectionId String
-  collection   Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
-  assetId      String
-  asset        Asset      @relation(fields: [assetId], references: [id], onDelete: Cascade)
-  note         String     @default("")
-  sortOrder    Int        @default(0)
-  createdAt    DateTime   @default(now())
+model DossierItem {
+  id                    String          @id @default(cuid())
+  dossierId             String
+  dossier               Dossier         @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  kind                  DossierItemKind @default(asset_ref)
 
-  @@unique([collectionId, assetId])
-  @@index([collectionId])
+  // kind=asset_ref
+  assetId               String?
+  asset                 Asset?          @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  // kind=external_link
+  externalUrl           String?
+
+  // kind=external_image (stored in R2)
+  externalImageKey      String?
+  externalImageThumbKey String?
+
+  // Common metadata
+  caption               String          @default("")
+  note                  String          @default("")
+
+  // Excerpt (range selection from AssetText)
+  excerpt               String          @default("")
+  excerptType           TextType?
+  excerptStart          Int?
+  excerptEnd            Int?
+
+  sortOrder             Int             @default(0)
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  @@unique([dossierId, assetId], map: "dossier_item_dossier_asset_unique")
+  @@index([dossierId])
+  @@index([assetId])
+}
+
+model DossierPlaceCandidate {
+  id            String   @id @default(cuid())
+  dossierId     String
+  dossier       Dossier  @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  placeId       String?
+  place         Place?   @relation(fields: [placeId], references: [id], onDelete: SetNull)
+
+  // Inline fallback fields when placeId is null
+  name          String   @default("")
+  latitude      Float?
+  longitude     Float?
+  address       String?
+  googleMapsUrl String?
+  note          String   @default("")
+  confidence    Int      @default(0)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([dossierId])
+  @@index([placeId])
 }
 
 model ApiKey {
@@ -407,9 +474,13 @@ model Place {
   googleMapsUrl  String?
   address        String?
   classification ClearanceLevel @default(internal)
+  status         PlaceStatus    @default(confirmed)
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
+  dossierCandidates DossierPlaceCandidate[]
+
   @@index([latitude, longitude])
   @@index([classification])
+  @@index([status])
 }

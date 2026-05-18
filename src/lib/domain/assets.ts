@@ -158,7 +158,7 @@ export async function createAsset(data: CreateAssetData, userId: string | null, 
         entities: { include: { entity: true } },
         sourceRecords: true,
         annotations: true,
-        collectionItems: true,
+        dossierItems: true,
       },
     });
     return created;
@@ -243,7 +243,7 @@ export async function updateAsset(
         entities: { include: { entity: true } },
         sourceRecords: true,
         annotations: true,
-        collectionItems: true,
+        dossierItems: true,
       },
     });
   });
@@ -277,7 +277,7 @@ export async function getAsset(id: string, clearance: string) {
         entities: { include: { entity: true } },
         sourceRecords: true,
         annotations: true,
-        collectionItems: true,
+        dossierItems: true,
       },
     });
   });

@@ -11,6 +11,8 @@ export interface SearchQuery {
   sourceType?: SourceType;
   entityId?: string;
   entityIds?: string[];
+  /** Match assets where any of these entities is linked with roleLabel='author' (OR semantics). */
+  authorIds?: string[];
   dateFrom?: Date;
   dateTo?: Date;
   page?: number;
@@ -188,8 +190,19 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
       )}`
     : Prisma.empty;
 
+  // Author filter: any of the given entities linked with roleLabel='author' (OR within group)
+  const authorIds = query.authorIds ?? [];
+  const authorFilter = authorIds.length > 0
+    ? Prisma.sql`AND EXISTS (
+        SELECT 1 FROM "AssetEntity" ae
+        WHERE ae."assetId" = a."id"
+        AND ae."roleLabel" = 'author'
+        AND ae."entityId" IN (${Prisma.join(authorIds)})
+      )`
+    : Prisma.empty;
+
   // キーワードなし＋フィルタもなし → 空結果
-  const hasFilters = assetWhereConditions.length > 0 || allEntityIds.length > 0;
+  const hasFilters = assetWhereConditions.length > 0 || allEntityIds.length > 0 || authorIds.length > 0;
   if (!hasKeyword && !hasFilters) {
     return { items: [], total: 0, page, perPage };
   }
@@ -231,6 +244,7 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
           WHERE ${keywordCondition}
           ${baseFilter}
           ${entityFilter}
+          ${authorFilter}
           ORDER BY COALESCE(a."canonicalDate", a."createdAt") DESC
           LIMIT ${perPage} OFFSET ${offset}
         `;
@@ -288,6 +302,7 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
             )})
           ${baseFilter}
           ${entityFilter}
+          ${authorFilter}
           ORDER BY t."assetId" DESC
           LIMIT ${perPage} OFFSET ${offset}
         `
@@ -327,6 +342,7 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
               " OR "
             )})
           ${baseFilter}
+          ${authorFilter}
           ORDER BY ae."assetId", a."createdAt" DESC
           LIMIT ${perPage}
         `

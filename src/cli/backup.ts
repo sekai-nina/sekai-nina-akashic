@@ -6,7 +6,7 @@
  *     akashic-backup/
  *       <assetId>.json    ← アセットごとのフルデータ
  *       _entities.json    ← 全エンティティ
- *       _collections.json ← 全コレクション
+ *       _dossiers.json    ← 全ドシエ (特定支援)
  *       _users.json       ← 全ユーザー（パスワードハッシュ含む）
  *
  * Usage:
@@ -47,7 +47,7 @@ async function main() {
       entities: { include: { entity: true } },
       sourceRecords: true,
       annotations: true,
-      collectionItems: true,
+      dossierItems: true,
     },
     orderBy: { createdAt: "asc" },
   });
@@ -94,18 +94,18 @@ async function main() {
   );
   console.log(`Backed up ${entities.length} entities`);
 
-  // --- コレクションのバックアップ ---
-  const collections = await prisma.collection.findMany({
-    include: { items: true },
+  // --- ドシエのバックアップ ---
+  const dossiers = await prisma.dossier.findMany({
+    include: { items: true, placeCandidates: true },
     orderBy: { createdAt: "asc" },
   });
   await uploadToFolder(
     backupFolderId,
-    Buffer.from(JSON.stringify(collections, null, 2), "utf-8"),
-    "_collections.json",
+    Buffer.from(JSON.stringify(dossiers, null, 2), "utf-8"),
+    "_dossiers.json",
     "application/json"
   );
-  console.log(`Backed up ${collections.length} collections`);
+  console.log(`Backed up ${dossiers.length} dossiers`);
 
   // --- ユーザーのバックアップ ---
   const users = await prisma.user.findMany({ orderBy: { createdAt: "asc" } });

@@ -1,10 +1,11 @@
-import { withClearance } from "@/lib/db";
+import { withClearance, withSession } from "@/lib/db";
 import { auth } from "@/lib/auth";
+import { listEditableDossiers } from "@/lib/domain/dossiers";
+import { AddToDossier } from "@/components/add-to-dossier";
 import {
   addEntityToAsset,
   addAssetText,
   addSourceRecord,
-  addToCollection,
   addAssetRelation,
 } from "@/lib/actions";
 import {
@@ -23,15 +24,10 @@ import { StatusWorkflow } from "./status-workflow";
 import { CopySourceRef } from "./copy-source-ref";
 import { ParentAssets, ChildAssets } from "./related-assets";
 import { SubGraph } from "./sub-graph";
+import { TextsSection } from "./texts-section";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-
-async function addToCollectionAction(assetId: string, formData: FormData) {
-  "use server";
-  const collectionId = formData.get("collectionId") as string;
-  if (collectionId) await addToCollection(collectionId, assetId);
-}
 
 function RichTextContent({
   content,
@@ -99,7 +95,7 @@ export default async function AssetDetailPage({
 
   // Single withClearance call for all read queries (avoids repeated transaction overhead)
   const pageData = await withClearance(userClearance, async (tx) => {
-    const [a, cols, relationsData, graphData] = await Promise.all([
+    const [a, relationsData, graphData] = await Promise.all([
       tx.asset.findUnique({
         where: { id },
         include: {
@@ -110,10 +106,6 @@ export default async function AssetDetailPage({
           },
           sourceRecords: { orderBy: { createdAt: "asc" } },
         },
-      }),
-      tx.collection.findMany({
-        where: { ownerId: session!.user.id },
-        orderBy: { name: "asc" },
       }),
       getAssetRelations(id, tx),
       getAssetGraph(id, 1, tx),
@@ -147,11 +139,62 @@ export default async function AssetDetailPage({
 
     const [dupes, embImgs] = await Promise.all([duplicatesPromise, embeddedImagesPromise]);
 
-    return { asset: a, collections: cols, relations: relationsData, graph: graphData, duplicates: dupes, embeddedImageAssets: embImgs };
+    // Prev/next navigation among the same person's blog/talk entries
+    let prevAsset: { id: string; title: string; canonicalDate: Date | null } | null = null;
+    let nextAsset: { id: string; title: string; canonicalDate: Date | null } | null = null;
+    const isBlogOrTalk =
+      a.kind === "text" && (a.sourceType === "web" || a.sourceType === "import");
+    const personEntityId = isBlogOrTalk
+      ? a.entities.find((ae) => ae.entity.type === "person")?.entityId
+      : undefined;
+    if (personEntityId && a.canonicalDate) {
+      const navSelect = { id: true, title: true, canonicalDate: true } as const;
+      const baseWhere = {
+        kind: a.kind,
+        sourceType: a.sourceType,
+        entities: { some: { entityId: personEntityId } },
+        id: { not: a.id },
+        canonicalDate: { not: null },
+      } as const;
+      [prevAsset, nextAsset] = await Promise.all([
+        tx.asset.findFirst({
+          where: { ...baseWhere, canonicalDate: { lt: a.canonicalDate } },
+          orderBy: { canonicalDate: "desc" },
+          select: navSelect,
+        }),
+        tx.asset.findFirst({
+          where: { ...baseWhere, canonicalDate: { gt: a.canonicalDate } },
+          orderBy: { canonicalDate: "asc" },
+          select: navSelect,
+        }),
+      ]);
+    }
+
+    return {
+      asset: a,
+      relations: relationsData,
+      graph: graphData,
+      duplicates: dupes,
+      embeddedImageAssets: embImgs,
+      prevAsset,
+      nextAsset,
+    };
   });
 
   if (!pageData) notFound();
-  const { asset, collections, relations, graph, duplicates, embeddedImageAssets } = pageData;
+  const { asset, relations, graph, duplicates, embeddedImageAssets, prevAsset, nextAsset } = pageData;
+
+  // Editable dossiers + which of them already contain this asset
+  const editableDossiers = await listEditableDossiers(session!.user);
+  const dossiersContainingAsset = editableDossiers.length
+    ? await withSession(session!.user, (tx) =>
+        tx.dossierItem.findMany({
+          where: { assetId: id, dossierId: { in: editableDossiers.map((d) => d.id) } },
+          select: { dossierId: true },
+        })
+      )
+    : [];
+  const dossierIdsContaining = dossiersContainingAsset.map((r) => r.dossierId);
 
   const isImage = asset.kind === "image";
   let previewUrl = asset.thumbnailUrl;
@@ -172,11 +215,48 @@ export default async function AssetDetailPage({
 
   return (
     <div className="max-w-6xl mx-auto">
+      {(prevAsset || nextAsset) && (
+        <nav className="mb-3 flex items-stretch gap-2 text-xs">
+          {prevAsset ? (
+            <Link
+              href={`/assets/${prevAsset.id}`}
+              className="flex-1 min-w-0 flex items-center gap-2 bg-white border border-slate-200 hover:border-indigo-300 rounded-lg px-3 py-2 transition-colors"
+            >
+              <span className="text-slate-400 shrink-0">←</span>
+              <div className="min-w-0">
+                <div className="text-[10px] text-slate-400">
+                  前: {prevAsset.canonicalDate ? formatDate(prevAsset.canonicalDate) : ""}
+                </div>
+                <div className="truncate text-slate-700">{prevAsset.title || "(無題)"}</div>
+              </div>
+            </Link>
+          ) : (
+            <div className="flex-1" />
+          )}
+          {nextAsset ? (
+            <Link
+              href={`/assets/${nextAsset.id}`}
+              className="flex-1 min-w-0 flex items-center gap-2 bg-white border border-slate-200 hover:border-indigo-300 rounded-lg px-3 py-2 text-right transition-colors"
+            >
+              <div className="min-w-0 ml-auto">
+                <div className="text-[10px] text-slate-400">
+                  次: {nextAsset.canonicalDate ? formatDate(nextAsset.canonicalDate) : ""}
+                </div>
+                <div className="truncate text-slate-700">{nextAsset.title || "(無題)"}</div>
+              </div>
+              <span className="text-slate-400 shrink-0">→</span>
+            </Link>
+          ) : (
+            <div className="flex-1" />
+          )}
+        </nav>
+      )}
+
       {/* ===== Header (full width) ===== */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div className="min-w-0">
           <div className="mb-2"><BackButton /></div>
-          <h1 className="text-2xl font-bold text-slate-900">{asset.title || "(無題)"}</h1>
+          <h1 className="text-2xl font-bold text-slate-900 break-words">{asset.title || "(無題)"}</h1>
           <div className="flex items-center gap-2 mt-2 flex-wrap">
             <span className="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700">
               {ASSET_KIND_LABELS[asset.kind] ?? asset.kind}
@@ -195,7 +275,14 @@ export default async function AssetDetailPage({
             )}
           </div>
         </div>
-        <div className="flex gap-2 shrink-0">
+        <div className="flex flex-wrap gap-2 items-center sm:shrink-0 sm:flex-nowrap">
+          <AddToDossier
+            assetId={asset.id}
+            dossiers={editableDossiers}
+            defaultCaption={asset.title || ""}
+            alreadyAdded={dossierIdsContaining}
+            variant="button"
+          />
           <CopySourceRef
             assetId={asset.id}
             title={asset.title || "(無題)"}
@@ -252,37 +339,33 @@ export default async function AssetDetailPage({
 
           {/* Texts */}
           {asset.texts.length > 0 && (
-            <div className="bg-white border border-slate-200 rounded-lg p-5">
-              <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">テキスト</h2>
-              <ul className="space-y-3 mb-4">
-                {asset.texts.map((text) => (
-                  <li key={text.id} className="border border-slate-100 rounded-lg p-3">
-                    <div className="mb-1.5">
-                      <span className="text-xs font-medium bg-teal-100 text-teal-700 px-2 py-0.5 rounded">
-                        {TEXT_TYPE_LABELS[text.textType] ?? text.textType}
-                      </span>
+            <>
+              <TextsSection
+                assetId={asset.id}
+                assetTitle={asset.title || "(無題)"}
+                texts={asset.texts.map((t) => ({ id: t.id, textType: t.textType, content: t.content }))}
+                embeddedImages={embeddedImages}
+                editableDossiers={editableDossiers}
+              />
+              <div className="bg-white border border-slate-200 rounded-lg p-5 mt-4">
+                <details className="border border-slate-200 rounded p-3">
+                  <summary className="text-sm text-slate-600 cursor-pointer hover:text-slate-800">テキストを追加</summary>
+                  <form action={addAssetText.bind(null, id)} className="mt-3 space-y-3">
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">テキストタイプ</label>
+                      <select name="textType" className="border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        {Object.entries(TEXT_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                      </select>
                     </div>
-                    <RichTextContent content={text.content} embeddedImages={embeddedImages} />
-                  </li>
-                ))}
-              </ul>
-              <details className="border border-slate-200 rounded p-3">
-                <summary className="text-sm text-slate-600 cursor-pointer hover:text-slate-800">テキストを追加</summary>
-                <form action={addAssetText.bind(null, id)} className="mt-3 space-y-3">
-                  <div>
-                    <label className="block text-xs text-slate-500 mb-1">テキストタイプ</label>
-                    <select name="textType" className="border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                      {Object.entries(TEXT_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs text-slate-500 mb-1">内容 <span className="text-red-500">*</span></label>
-                    <textarea name="content" rows={4} required className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                  <SubmitButton className="bg-teal-600 text-white px-3 py-1 rounded text-sm hover:bg-teal-700 transition-colors">追加</SubmitButton>
-                </form>
-              </details>
-            </div>
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">内容 <span className="text-red-500">*</span></label>
+                      <textarea name="content" rows={4} required className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                    <SubmitButton className="bg-teal-600 text-white px-3 py-1 rounded text-sm hover:bg-teal-700 transition-colors">追加</SubmitButton>
+                  </form>
+                </details>
+              </div>
+            </>
           )}
 
           {/* Relations + Graph */}
@@ -541,18 +624,6 @@ export default async function AssetDetailPage({
             </details>
           </div>
 
-          {/* Add to collection */}
-          {collections.length > 0 && (
-            <div className="bg-white border border-slate-200 rounded-lg p-4">
-              <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">コレクション</h2>
-              <form action={addToCollectionAction.bind(null, id)} className="flex gap-2">
-                <select name="collectionId" className="flex-1 min-w-0 border border-slate-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  {collections.map((col) => <option key={col.id} value={col.id}>{col.name}</option>)}
-                </select>
-                <SubmitButton className="bg-slate-700 text-white px-2.5 py-1.5 rounded text-xs hover:bg-slate-800 transition-colors">追加</SubmitButton>
-              </form>
-            </div>
-          )}
         </div>
       </div>
     </div>

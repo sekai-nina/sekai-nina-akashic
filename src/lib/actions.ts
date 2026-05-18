@@ -6,7 +6,7 @@ import { normalizeText } from "@/lib/utils";
 import { logAudit } from "@/lib/domain/audit";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
-import { invalidateAssets, invalidateEntities, invalidateCollections, invalidatePlaces } from "@/lib/cache";
+import { invalidateAssets, invalidateEntities, invalidatePlaces } from "@/lib/cache";
 import { redirect, RedirectType } from "next/navigation";
 import type { AssetKind, AssetStatus, TrustLevel, SourceType, StorageProvider, EntityType, TextType, SourceKind, AnnotationKind, RelationType, ClearanceLevel } from "@prisma/client";
 import { createInvitation, deleteInvitation as deleteInvitationDomain } from "@/lib/domain/invitations";
@@ -390,64 +390,6 @@ export async function deleteAnnotation(id: string) {
     backupAssetToDrive(ann.assetId).catch(() => {});
     revalidatePath(`/assets/${ann.assetId}`);
   }
-}
-
-// ========== Collections ==========
-
-export async function createCollection(formData: FormData) {
-  const user = await requireRole(["admin", "member"]);
-  const collection = await prisma.collection.create({
-    data: {
-      name: (formData.get("name") as string) || "",
-      description: (formData.get("description") as string) || "",
-      ownerId: user.id,
-    },
-  });
-  await logAudit({ actorId: user.id, action: "collection.create", targetType: "Collection", targetId: collection.id });
-  invalidateCollections();
-  revalidatePath("/collections");
-  redirect(`/collections/${collection.id}`);
-}
-
-export async function addToCollection(collectionId: string, assetId: string) {
-  const user = await requireRole(["admin", "member"]);
-  await withClearance(user.clearance, (tx) =>
-    tx.collectionItem.upsert({
-      where: { collectionId_assetId: { collectionId, assetId } },
-      create: { collectionId, assetId },
-      update: {},
-    })
-  );
-  revalidatePath(`/collections/${collectionId}`);
-}
-
-export async function removeFromCollection(collectionId: string, assetId: string) {
-  const user = await requireRole(["admin", "member"]);
-  await withClearance(user.clearance, (tx) =>
-    tx.collectionItem.deleteMany({ where: { collectionId, assetId } })
-  );
-  revalidatePath(`/collections/${collectionId}`);
-}
-
-export async function updateCollectionItem(id: string, formData: FormData) {
-  const user = await requireRole(["admin", "member"]);
-  await withClearance(user.clearance, (tx) =>
-    tx.collectionItem.update({
-      where: { id },
-      data: {
-        note: (formData.get("note") as string) || "",
-        sortOrder: formData.get("sortOrder") ? parseInt(formData.get("sortOrder") as string) : undefined,
-      },
-    })
-  );
-}
-
-export async function deleteCollection(id: string) {
-  await requireRole(["admin", "member"]);
-  await prisma.collection.delete({ where: { id } });
-  invalidateCollections();
-  revalidatePath("/collections");
-  redirect("/collections");
 }
 
 // ========== Users (admin) ==========

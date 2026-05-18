@@ -214,44 +214,69 @@ async function main() {
     console.log(`  [${assetRestored + assetSkipped}/${assetFiles.length}] ${data.title || assetId}`);
   }
 
-  // --- 4. コレクションの復元 ---
-  const collectionsFileId = fileMap.get("_collections.json");
-  if (collectionsFileId) {
-    const collections = await downloadJson<Array<Record<string, unknown>>>(collectionsFileId);
+  // --- 4. ドシエ (特定支援) の復元 ---
+  const dossiersFileId = fileMap.get("_dossiers.json");
+  if (dossiersFileId) {
+    const dossiers = await downloadJson<Array<Record<string, unknown>>>(dossiersFileId);
     let restored = 0;
-    for (const col of collections) {
-      const exists = await prisma.collection.findUnique({ where: { id: col.id as string } });
+    for (const d of dossiers) {
+      const exists = await prisma.dossier.findUnique({ where: { id: d.id as string } });
       if (exists) continue;
-      const items = (col.items as Array<Record<string, unknown>>) || [];
-      await prisma.collection.create({
+      const items = (d.items as Array<Record<string, unknown>>) || [];
+      const placeCandidates = (d.placeCandidates as Array<Record<string, unknown>>) || [];
+      await prisma.dossier.create({
         data: {
-          id: col.id as string,
-          ownerId: col.ownerId as string,
-          name: col.name as string,
-          description: (col.description as string) || "",
-          createdAt: new Date(col.createdAt as string),
-          updatedAt: new Date(col.updatedAt as string),
+          id: d.id as string,
+          ownerId: d.ownerId as string,
+          title: d.title as string,
+          summary: (d.summary as string) || "",
+          classification: (d.classification as "public" | "internal" | "confidential" | "restricted") ?? "internal",
+          viewMode: (d.viewMode as "private" | "clearance") ?? "private",
+          editMode: (d.editMode as "private" | "clearance") ?? "private",
+          createdAt: new Date(d.createdAt as string),
+          updatedAt: new Date(d.updatedAt as string),
           items: {
-            create: items
-              .filter((item) => {
-                // アセットが復元済みか確認は省略（存在しなければPrismaがエラー）
-                return item.assetId;
-              })
-              .map((item) => ({
-                id: item.id as string,
-                assetId: item.assetId as string,
-                note: (item.note as string) || "",
-                sortOrder: (item.sortOrder as number) || 0,
-                createdAt: new Date(item.createdAt as string),
-              })),
+            create: items.map((item) => ({
+              id: item.id as string,
+              kind: (item.kind as "asset_ref" | "external_link" | "external_image") ?? "asset_ref",
+              assetId: (item.assetId as string) || null,
+              externalUrl: (item.externalUrl as string) || null,
+              externalImageKey: (item.externalImageKey as string) || null,
+              externalImageThumbKey: (item.externalImageThumbKey as string) || null,
+              caption: (item.caption as string) || "",
+              note: (item.note as string) || "",
+              excerpt: (item.excerpt as string) || "",
+              excerptType: (item.excerptType as never) || null,
+              excerptStart: (item.excerptStart as number) ?? null,
+              excerptEnd: (item.excerptEnd as number) ?? null,
+              sortOrder: (item.sortOrder as number) || 0,
+              createdAt: new Date(item.createdAt as string),
+              updatedAt: new Date((item.updatedAt as string) ?? (item.createdAt as string)),
+            })),
+          },
+          placeCandidates: {
+            create: placeCandidates.map((pc) => ({
+              id: pc.id as string,
+              placeId: (pc.placeId as string) || null,
+              name: (pc.name as string) || "",
+              latitude: (pc.latitude as number) ?? null,
+              longitude: (pc.longitude as number) ?? null,
+              address: (pc.address as string) || null,
+              googleMapsUrl: (pc.googleMapsUrl as string) || null,
+              note: (pc.note as string) || "",
+              confidence: (pc.confidence as number) ?? 0,
+              sortOrder: (pc.sortOrder as number) ?? 0,
+              createdAt: new Date(pc.createdAt as string),
+              updatedAt: new Date((pc.updatedAt as string) ?? (pc.createdAt as string)),
+            })),
           },
         },
       }).catch((err) => {
-        console.error(`  Collection restore failed: ${col.name}`, err.message);
+        console.error(`  Dossier restore failed: ${d.title}`, err.message);
       });
       restored++;
     }
-    console.log(`Collections: ${restored} restored, ${collections.length - restored} skipped`);
+    console.log(`Dossiers: ${restored} restored, ${dossiers.length - restored} skipped`);
   }
 
   console.log(`\nDone: ${assetRestored} assets restored, ${assetSkipped} skipped.`);

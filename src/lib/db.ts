@@ -46,5 +46,22 @@ export async function withClearance<T>(
   });
 }
 
+/**
+ * Like withClearance, but also exposes the acting user's id via the
+ * `app.user_id` PostgreSQL session variable. Required for tables whose
+ * RLS policies need owner-based rules in addition to clearance — currently
+ * Dossier, DossierItem, DossierPlaceCandidate.
+ */
+export async function withSession<T>(
+  user: { id: string; clearance: string },
+  fn: (tx: TransactionClient) => Promise<T>
+): Promise<T> {
+  return basePrisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT set_config('app.user_id', ${user.id}, true)`;
+    await tx.$executeRaw`SELECT set_config('app.clearance', ${user.clearance}, true)`;
+    return fn(tx);
+  });
+}
+
 export const prisma = basePrisma;
 export { internalPrisma as prismaInternal };

@@ -7,7 +7,7 @@ import { ClearanceLevel } from "@prisma/client";
 export const CACHE_TAGS = {
   assets: "assets",
   entities: "entities",
-  collections: "collections",
+  dossiers: "dossiers",
   stats: "stats",
   places: "places",
 } as const;
@@ -26,8 +26,8 @@ export function invalidatePlaces() {
   revalidateTag(CACHE_TAGS.entities, "max");
 }
 
-export function invalidateCollections() {
-  revalidateTag(CACHE_TAGS.collections, "max");
+export function invalidateDossiers() {
+  revalidateTag(CACHE_TAGS.dossiers, "max");
 }
 
 // ========== Cached Queries ==========
@@ -186,7 +186,10 @@ export const getCachedPlaces = (clearance: ClearanceLevel) => {
   return unstable_cache(
     () =>
       prisma.place.findMany({
-        where: { classification: { in: allowedLevels.length > 0 ? allowedLevels : ["public"] } },
+        where: {
+          status: "confirmed",
+          classification: { in: allowedLevels.length > 0 ? allowedLevels : ["public"] },
+        },
         include: {
           entity: {
             include: { _count: { select: { assets: true } } },

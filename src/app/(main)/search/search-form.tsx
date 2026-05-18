@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { ASSET_KIND_LABELS, ENTITY_TYPE_LABELS } from "@/lib/utils";
 import { EntityFilter } from "./entity-filter";
+import { AuthorFilter } from "./author-filter";
 
 const NINA_ENTITY_ID = "cmmtp8vrg0004mo381neyztvn";
 
@@ -30,6 +31,7 @@ interface SearchFormProps {
   initialMode: SearchMode;
   initialQ: string;
   initialEntityIds: string[];
+  initialAuthorIds: string[];
   mediaShowEntities: { id: string; canonicalName: string }[];
   entities: { id: string; canonicalName: string; type: string }[];
 }
@@ -38,6 +40,7 @@ export function SearchForm({
   initialMode,
   initialQ,
   initialEntityIds,
+  initialAuthorIds,
   mediaShowEntities,
   entities,
 }: SearchFormProps) {
@@ -53,6 +56,9 @@ export function SearchForm({
 
   const [filterEntityIds, setFilterEntityIds] = useState<Set<string>>(
     new Set(initialEntityIds)
+  );
+  const [filterAuthorIds, setFilterAuthorIds] = useState<Set<string>>(
+    new Set(initialAuthorIds)
   );
 
   useEffect(() => {
@@ -79,6 +85,7 @@ export function SearchForm({
       if (prev.has(NINA_ENTITY_ID)) next.add(NINA_ENTITY_ID);
       return next;
     });
+    setFilterAuthorIds(new Set());
   }, []);
 
   const handleNinaToggle = useCallback(() => {
@@ -110,6 +117,15 @@ export function SearchForm({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [textSubEntities.map((e) => e.id).join(",")]);
 
+  const toggleFilterAuthor = useCallback((id: string) => {
+    setFilterAuthorIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
   const toggleFilterEntity = useCallback((id: string) => {
     if (id === NINA_ENTITY_ID) {
       setNinaOnly((prev) => !prev);
@@ -135,6 +151,9 @@ export function SearchForm({
 
     if (filterEntityIds.size > 0) {
       p.set("entityIds", [...filterEntityIds].join(","));
+    }
+    if (filterAuthorIds.size > 0) {
+      p.set("authorIds", [...filterAuthorIds].join(","));
     }
 
     const dateFrom = formData.get("dateFrom") as string;
@@ -297,6 +316,11 @@ export function SearchForm({
               />
             </div>
           </div>
+          <AuthorFilter
+            persons={entities.filter((e) => e.type === "person")}
+            selected={filterAuthorIds}
+            onToggle={toggleFilterAuthor}
+          />
           <EntityFilter
             entityTypes={entityTypes}
             entitiesByType={entitiesByType}
