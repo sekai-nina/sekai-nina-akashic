@@ -51,7 +51,7 @@ export function SearchForm({
   const [kind, setKind] = useState<string>(
     searchParams.get("kind") ?? MODE_KIND_MAP[initialMode] ?? ""
   );
-  const [ninaOnly, setNinaOnly] = useState(initialEntityIds.includes(NINA_ENTITY_ID));
+  const [ninaOnly, setNinaOnly] = useState(initialAuthorIds.includes(NINA_ENTITY_ID));
   const [searching, setSearching] = useState(false);
 
   const [filterEntityIds, setFilterEntityIds] = useState<Set<string>>(
@@ -121,18 +121,18 @@ export function SearchForm({
     setMode(newMode);
     setKind(MODE_KIND_MAP[newMode] ?? "");
 
-    setFilterEntityIds((prev) => {
+    setFilterEntityIds(new Set());
+    setFilterAuthorIds((prev) => {
       const next = new Set<string>();
       if (prev.has(NINA_ENTITY_ID)) next.add(NINA_ENTITY_ID);
       return next;
     });
-    setFilterAuthorIds(new Set());
   }, []);
 
   const handleNinaToggle = useCallback(() => {
     setNinaOnly((prev) => {
       const next = !prev;
-      setFilterEntityIds((ids) => {
+      setFilterAuthorIds((ids) => {
         const updated = new Set(ids);
         if (next) updated.add(NINA_ENTITY_ID);
         else updated.delete(NINA_ENTITY_ID);
@@ -159,6 +159,9 @@ export function SearchForm({
   }, [textSubEntities.map((e) => e.id).join(",")]);
 
   const toggleFilterAuthor = useCallback((id: string) => {
+    if (id === NINA_ENTITY_ID) {
+      setNinaOnly((prev) => !prev);
+    }
     setFilterAuthorIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -168,9 +171,6 @@ export function SearchForm({
   }, []);
 
   const toggleFilterEntity = useCallback((id: string) => {
-    if (id === NINA_ENTITY_ID) {
-      setNinaOnly((prev) => !prev);
-    }
     setFilterEntityIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
