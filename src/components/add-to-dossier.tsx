@@ -44,6 +44,7 @@ export function AddToDossier({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set(alreadyAdded));
+  const [pendingId, setPendingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [isPending, startTransition] = useTransition();
@@ -63,18 +64,23 @@ export function AddToDossier({
   function addToExisting(dossierId: string) {
     if (addedIds.has(dossierId)) return;
     const target = dossiers.find((d) => d.id === dossierId);
+    setPendingId(dossierId);
     startTransition(async () => {
-      await addAssetToDossierAction(dossierId, assetId, {
-        caption: defaultCaption,
-        excerpt: excerpt?.text,
-        excerptType: excerpt?.textType as never,
-        excerptStart: excerpt?.textStart,
-        excerptEnd: excerpt?.textEnd,
-      });
-      setAddedIds((prev) => new Set(prev).add(dossierId));
-      if (onAdded) {
-        onAdded(dossierId, target?.title || "(無題)");
-        setOpen(false);
+      try {
+        await addAssetToDossierAction(dossierId, assetId, {
+          caption: defaultCaption,
+          excerpt: excerpt?.text,
+          excerptType: excerpt?.textType as never,
+          excerptStart: excerpt?.textStart,
+          excerptEnd: excerpt?.textEnd,
+        });
+        setAddedIds((prev) => new Set(prev).add(dossierId));
+        if (onAdded) {
+          onAdded(dossierId, target?.title || "(無題)");
+          setOpen(false);
+        }
+      } finally {
+        setPendingId(null);
       }
     });
   }
@@ -168,7 +174,7 @@ export function AddToDossier({
                         <span className="truncate">{d.title || "(無題)"}</span>
                         {added ? (
                           <Check className="h-3 w-3 text-emerald-500 shrink-0" />
-                        ) : isPending ? (
+                        ) : pendingId === d.id ? (
                           <Loader2 className="h-3 w-3 animate-spin shrink-0" />
                         ) : null}
                       </button>
