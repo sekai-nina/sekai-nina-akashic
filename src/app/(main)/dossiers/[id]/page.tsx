@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { getDossier } from "@/lib/domain/dossiers";
 import { canEditDossier, canManageDossier } from "@/lib/auth/dossier-permissions";
 import { formatDate } from "@/lib/utils";
+import { getR2PublicUrl } from "@/lib/r2";
 import { exportDossierToYaml } from "@/lib/yaml/dossier-export";
 import { DossierItemRow } from "./item-row";
 import { DossierHeader } from "./dossier-header";
@@ -77,7 +78,19 @@ export default async function DossierDetailPage({ params }: DossierDetailProps) 
               <li key={item.id}>
                 <DossierItemRow
                   dossierId={dossier.id}
-                  item={item}
+                  item={
+                    item.kind === "external_image"
+                      ? {
+                          ...item,
+                          externalImageUrl: item.externalImageKey
+                            ? getR2PublicUrl(item.externalImageKey)
+                            : null,
+                          externalImageThumbnailUrl: item.externalImageThumbKey
+                            ? getR2PublicUrl(item.externalImageThumbKey)
+                            : null,
+                        }
+                      : item
+                  }
                   editable={editable}
                   isFirst={idx === 0}
                   isLast={idx === dossier.items.length - 1}

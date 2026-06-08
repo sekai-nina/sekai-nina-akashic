@@ -81,6 +81,7 @@ export async function getDossier(user: ActingUser, id: string) {
                 thumbnailUrl: true,
                 storageProvider: true,
                 storageUrl: true,
+                storageKey: true,
                 classification: true,
               },
             },

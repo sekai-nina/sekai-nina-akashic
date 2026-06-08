@@ -6,6 +6,7 @@ import {
   ArrowUp,
   ArrowDown,
   ExternalLink,
+  HardDrive,
   Image as ImageIcon,
   FileText,
   Video,
@@ -30,6 +31,8 @@ type Item = {
   externalUrl: string | null;
   externalImageKey: string | null;
   externalImageThumbKey: string | null;
+  externalImageUrl?: string | null;
+  externalImageThumbnailUrl?: string | null;
   sortOrder: number;
   asset:
     | {
@@ -40,6 +43,7 @@ type Item = {
         thumbnailUrl: string | null;
         storageProvider: string;
         storageUrl: string | null;
+        storageKey: string | null;
       }
     | null;
 };
@@ -54,11 +58,11 @@ interface ItemRowProps {
   indexInList: number;
 }
 
-const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL ?? "";
-
-function externalImageSrc(key: string | null): string | null {
-  if (!key || !R2_PUBLIC_URL) return null;
-  return `${R2_PUBLIC_URL.replace(/\/$/, "")}/${key}`;
+function driveUrl(asset: NonNullable<Item["asset"]>): string | null {
+  if (asset.storageProvider !== "gdrive") return null;
+  if (asset.storageUrl) return asset.storageUrl;
+  if (asset.storageKey) return `https://drive.google.com/file/d/${asset.storageKey}/view`;
+  return null;
 }
 
 export function DossierItemRow({ dossierId, item, editable, isFirst, isLast, orderedIds, indexInList }: ItemRowProps) {
@@ -146,18 +150,30 @@ export function DossierItemRow({ dossierId, item, editable, isFirst, isLast, ord
 
         {/* Source link */}
         {item.asset ? (
-          <Link
-            href={`/assets/${item.asset.id}`}
-            className="inline-flex items-center gap-1 text-[11px] text-indigo-600 hover:underline"
-          >
-            <KindIcon kind={item.asset.kind} />
-            ソース: {item.asset.title || item.asset.id}
-            {item.asset.canonicalDate && (
-              <span className="text-slate-400">
-                · {typeof item.asset.canonicalDate === "string" ? item.asset.canonicalDate.slice(0, 10) : item.asset.canonicalDate.toISOString().slice(0, 10)}
-              </span>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <Link
+              href={`/assets/${item.asset.id}`}
+              className="inline-flex items-center gap-1 text-[11px] text-indigo-600 hover:underline"
+            >
+              <KindIcon kind={item.asset.kind} />
+              ソース: {item.asset.title || item.asset.id}
+              {item.asset.canonicalDate && (
+                <span className="text-slate-400">
+                  · {typeof item.asset.canonicalDate === "string" ? item.asset.canonicalDate.slice(0, 10) : item.asset.canonicalDate.toISOString().slice(0, 10)}
+                </span>
+              )}
+            </Link>
+            {driveUrl(item.asset) && (
+              <a
+                href={driveUrl(item.asset)!}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-[11px] text-emerald-600 hover:underline"
+              >
+                <HardDrive className="h-3 w-3" /> Drive で開く
+              </a>
             )}
-          </Link>
+          </div>
         ) : item.externalUrl ? (
           <a
             href={item.externalUrl}
@@ -220,12 +236,24 @@ function KindIcon({ kind }: { kind: string }) {
 
 function ItemPreview({ item }: { item: Item }) {
   if (item.kind === "external_image") {
-    const src = externalImageSrc(item.externalImageThumbKey ?? item.externalImageKey);
-    return src ? (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img src={src} alt={item.caption} className="w-full h-24 sm:h-32 object-cover rounded bg-slate-100" />
-    ) : (
-      <PlaceholderBlock label="外部画像" />
+    const fullSrc = item.externalImageUrl ?? null;
+    const thumbSrc = item.externalImageThumbnailUrl ?? fullSrc;
+    if (!thumbSrc) return <PlaceholderBlock label="外部画像" />;
+    return (
+      <a
+        href={fullSrc ?? thumbSrc}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="block group"
+        title="画像を開く"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={thumbSrc}
+          alt={item.caption}
+          className="w-full h-24 sm:h-32 object-cover rounded bg-slate-100 group-hover:opacity-90 transition-opacity"
+        />
+      </a>
     );
   }
   if (item.kind === "external_link") {
