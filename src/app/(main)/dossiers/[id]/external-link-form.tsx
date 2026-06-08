@@ -11,8 +11,13 @@ export function ExternalLinkForm({ dossierId }: { dossierId: string }) {
   const [note, setNote] = useState("");
   const [isPending, startTransition] = useTransition();
 
+  const urlCount = url
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean).length;
+
   function submit() {
-    if (!url) return;
+    if (urlCount === 0) return;
     const fd = new FormData();
     fd.set("url", url);
     fd.set("caption", caption);
@@ -51,12 +56,16 @@ export function ExternalLinkForm({ dossierId }: { dossierId: string }) {
         </button>
       </div>
       <div className="space-y-2">
-        <input
+        <textarea
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          placeholder="https://..."
+          placeholder={"https://...\n複数のリンクは改行で区切って貼り付け"}
+          rows={4}
           className="w-full border border-slate-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
         />
+        {urlCount > 1 && (
+          <p className="text-[10px] text-slate-400">{urlCount} 件のリンクを1アイテムにまとめます</p>
+        )}
         <input
           value={caption}
           onChange={(e) => setCaption(e.target.value)}
@@ -74,10 +83,10 @@ export function ExternalLinkForm({ dossierId }: { dossierId: string }) {
           <button
             type="button"
             onClick={submit}
-            disabled={!url || isPending}
+            disabled={urlCount === 0 || isPending}
             className="bg-indigo-600 text-white px-3 py-1 rounded text-xs font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors"
           >
-            追加
+            {urlCount > 1 ? `${urlCount} 件を追加` : "追加"}
           </button>
         </div>
       </div>

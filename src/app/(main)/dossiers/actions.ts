@@ -118,8 +118,20 @@ export async function createDossierWithAssetAction(
 
 export async function addExternalLinkAction(dossierId: string, formData: FormData) {
   const user = await requireUser();
+  // One item can hold multiple links — accept a newline-separated list,
+  // trim/dedupe, and store them joined by "\n".
+  const raw = (formData.get("url") as string) || "";
+  const urls = Array.from(
+    new Set(
+      raw
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+    )
+  );
+  if (urls.length === 0) return;
   await addExternalLinkItemDomain(user, dossierId, {
-    url: (formData.get("url") as string) || "",
+    url: urls.join("\n"),
     caption: (formData.get("caption") as string) || "",
     note: (formData.get("note") as string) || "",
   });

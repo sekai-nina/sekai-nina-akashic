@@ -12,6 +12,8 @@ import {
   Video,
   Quote,
   Trash2,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import {
   updateItemAction,
@@ -56,6 +58,55 @@ interface ItemRowProps {
   isLast: boolean;
   orderedIds: string[];
   indexInList: number;
+}
+
+function parseLinks(value: string | null): string[] {
+  if (!value) return [];
+  return value
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+const LINK_COLLAPSE_THRESHOLD = 3;
+
+function LinkList({ urls }: { urls: string[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const collapsible = urls.length > LINK_COLLAPSE_THRESHOLD;
+  const visible = collapsible && !expanded ? urls.slice(0, LINK_COLLAPSE_THRESHOLD) : urls;
+
+  return (
+    <div className="space-y-1">
+      {visible.map((url, i) => (
+        <a
+          key={i}
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-1 text-[11px] text-indigo-600 hover:underline break-all"
+        >
+          <ExternalLink className="h-3 w-3 shrink-0" /> {url}
+        </a>
+      ))}
+      {collapsible && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-600"
+        >
+          {expanded ? (
+            <>
+              <ChevronUp className="h-3 w-3" /> 折りたたむ
+            </>
+          ) : (
+            <>
+              <ChevronDown className="h-3 w-3" /> 他 {urls.length - LINK_COLLAPSE_THRESHOLD} 件を表示
+            </>
+          )}
+        </button>
+      )}
+    </div>
+  );
 }
 
 function driveUrl(asset: NonNullable<Item["asset"]>): string | null {
@@ -175,14 +226,7 @@ export function DossierItemRow({ dossierId, item, editable, isFirst, isLast, ord
             )}
           </div>
         ) : item.externalUrl ? (
-          <a
-            href={item.externalUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-[11px] text-indigo-600 hover:underline break-all"
-          >
-            <ExternalLink className="h-3 w-3" /> {item.externalUrl}
-          </a>
+          <LinkList urls={parseLinks(item.externalUrl)} />
         ) : null}
 
         {/* Excerpt (for text-bearing assets) */}
@@ -257,7 +301,13 @@ function ItemPreview({ item }: { item: Item }) {
     );
   }
   if (item.kind === "external_link") {
-    return <PlaceholderBlock label="外部リンク" icon={<ExternalLink className="h-5 w-5" />} />;
+    const n = parseLinks(item.externalUrl).length;
+    return (
+      <PlaceholderBlock
+        label={n > 1 ? `外部リンク ${n}` : "外部リンク"}
+        icon={<ExternalLink className="h-5 w-5" />}
+      />
+    );
   }
   // asset_ref
   if (!item.asset) return <PlaceholderBlock label="アセット未参照" />;

@@ -81,8 +81,20 @@ export function exportDossierToYaml(dossier: DossierForExport): string {
       }
     } else if (item.kind === "external_link") {
       // sekai-nina-site doesn't have a canonical schema for external links yet —
-      // emit a commented-out entry so the editor can decide later.
-      lines.push(`  # external_link: ${item.externalUrl ?? ""}`);
+      // emit a commented-out entry so the editor can decide later. One item may
+      // hold several links (newline-separated) — comment each on its own line so
+      // the YAML stays valid.
+      const urls = (item.externalUrl ?? "")
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (urls.length === 0) {
+        lines.push(`  # external_link:`);
+      } else {
+        for (const url of urls) {
+          lines.push(`  # external_link: ${url}`);
+        }
+      }
       if (item.caption) lines.push(`  #   label: ${quote(item.caption)}`);
     } else if (item.kind === "external_image") {
       lines.push(`  # external_image: ${item.externalImageKey ?? ""}`);

@@ -53,6 +53,10 @@ export async function GET(
         excerptEnd: item.excerptEnd,
         sortOrder: item.sortOrder,
         externalUrl: item.externalUrl,
+        externalUrls: (item.externalUrl ?? "")
+          .split(/\r?\n/)
+          .map((s) => s.trim())
+          .filter(Boolean),
         externalImageUrl: r2Url(item.externalImageKey),
         externalImageThumbnailUrl: r2Url(item.externalImageThumbKey),
         asset: asset
