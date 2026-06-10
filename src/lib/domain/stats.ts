@@ -70,10 +70,22 @@ export async function getDashboardStats(): Promise<DashboardStats> {
           JOIN "AssetEntity" ae ON ae."assetId" = a.id
           WHERE a."sourceType" = 'web' AND a.kind = 'image' AND ae."entityId" = ${NINA_ENTITY_ID}
         ) AS blog_images,
-        (SELECT COUNT(*) FROM "Asset" WHERE "sourceType" = 'import' AND kind = 'text') AS talk_messages,
-        (SELECT COUNT(*) FROM "Asset" WHERE "sourceType" = 'import' AND kind = 'image') AS talk_images,
-        (SELECT COUNT(*) FROM "Asset" WHERE "sourceType" = 'import' AND kind = 'video') AS talk_videos,
-        (SELECT COUNT(*) FROM "Asset" WHERE "sourceType" = 'import' AND kind = 'audio') AS talk_audios,
+        (SELECT COUNT(*) FROM "Asset" a
+          JOIN "AssetEntity" ae ON ae."assetId" = a.id
+          WHERE a."sourceType" = 'import' AND a.kind = 'text' AND ae."entityId" = ${NINA_ENTITY_ID}
+        ) AS talk_messages,
+        (SELECT COUNT(*) FROM "Asset" a
+          JOIN "AssetEntity" ae ON ae."assetId" = a.id
+          WHERE a."sourceType" = 'import' AND a.kind = 'image' AND ae."entityId" = ${NINA_ENTITY_ID}
+        ) AS talk_images,
+        (SELECT COUNT(*) FROM "Asset" a
+          JOIN "AssetEntity" ae ON ae."assetId" = a.id
+          WHERE a."sourceType" = 'import' AND a.kind = 'video' AND ae."entityId" = ${NINA_ENTITY_ID}
+        ) AS talk_videos,
+        (SELECT COUNT(*) FROM "Asset" a
+          JOIN "AssetEntity" ae ON ae."assetId" = a.id
+          WHERE a."sourceType" = 'import' AND a.kind = 'audio' AND ae."entityId" = ${NINA_ENTITY_ID}
+        ) AS talk_audios,
         (SELECT COUNT(*) FROM "Asset") AS total_assets,
         (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '今日の発見') AS discovery,
         (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '日向坂で会いましょう') AS hinaai,
@@ -96,8 +108,10 @@ export async function getDashboardStats(): Promise<DashboardStats> {
         (SELECT COALESCE(SUM(LENGTH(t.content)), 0)
           FROM "AssetText" t
           JOIN "Asset" a ON a.id = t."assetId"
+          JOIN "AssetEntity" ae ON ae."assetId" = a.id
           WHERE a."sourceType" = 'import' AND a.kind = 'text'
             AND t."textType" IN ('body', 'message_body')
+            AND ae."entityId" = ${NINA_ENTITY_ID}
         ) AS talk_chars,
         (SELECT COALESCE(SUM(array_length(string_to_array(t.content, ';'), 1)), 0)
           FROM "AssetText" t
