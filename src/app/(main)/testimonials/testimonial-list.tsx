@@ -23,6 +23,21 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 const CATEGORIES = Object.keys(CATEGORY_LABELS);
 
+/**
+ * Append a Text Fragment (#:~:text=) so supporting browsers (Chrome/Edge/
+ * Firefox) auto-scroll to and highlight the quote on the original blog page.
+ * Safari ignores the fragment and simply opens the page at the top.
+ * Long quotes use the `start,end` range form for a more reliable match.
+ */
+function blogHrefWithScroll(url: string, quote: string): string {
+  const q = quote.trim();
+  if (!q) return url;
+  const enc = (s: string) =>
+    encodeURIComponent(s).replace(/[-~]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase());
+  const frag = q.length <= 40 ? enc(q) : `${enc(q.slice(0, 16))},${enc(q.slice(-16))}`;
+  return `${url}#:~:text=${frag}`;
+}
+
 type OptimisticAction =
   | { type: "status"; id: string; status: string }
   | { type: "category"; id: string; category: string };
@@ -104,7 +119,7 @@ export function TestimonialList({ items }: { items: Testimonial[] }) {
                 </span>
                 {t.sourceUrl && (
                   <a
-                    href={t.sourceUrl}
+                    href={blogHrefWithScroll(t.sourceUrl, t.quote)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-xs text-blue-500 hover:underline ml-auto"
