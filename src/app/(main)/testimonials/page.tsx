@@ -1,4 +1,7 @@
-import { prisma } from "@/lib/db";
+import { notFound } from "next/navigation";
+import type { TestimonialStatus } from "@prisma/client";
+import { auth } from "@/lib/auth";
+import { listTestimonials } from "@/lib/domain/testimonials";
 import { TestimonialList } from "./testimonial-list";
 import Link from "next/link";
 
@@ -9,21 +12,21 @@ export default async function TestimonialsPage({
 }: {
   searchParams: Promise<{ page?: string; status?: string }>;
 }) {
+  const session = await auth();
+  if (!session?.user) notFound();
+
   const params = await searchParams;
   const page = Math.max(1, parseInt(params.page ?? "1"));
   const statusFilter = params.status || "pending";
 
-  const where = statusFilter === "all" ? {} : { status: statusFilter as "pending" | "approved" | "rejected" };
-
-  const [testimonials, total] = await Promise.all([
-    prisma.testimonial.findMany({
-      where,
-      orderBy: [{ confidence: "desc" }, { sourceDate: "desc" }],
-      skip: (page - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
-    }),
-    prisma.testimonial.count({ where }),
-  ]);
+  // Protected table — must read through RLS clearance, otherwise the query
+  // fails closed and returns 0 rows.
+  const { items: testimonials, total } = await listTestimonials({
+    status: statusFilter === "all" ? undefined : (statusFilter as TestimonialStatus),
+    page,
+    perPage: PAGE_SIZE,
+    clearance: session.user.clearance,
+  });
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
