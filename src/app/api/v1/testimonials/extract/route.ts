@@ -38,7 +38,7 @@ export async function POST(request: Request) {
 
   const limit = Number(url.searchParams.get("limit")) || 200;
 
-  const result = await extractTestimonials({ entityId, limit, sinceDate });
+  const result = await extractTestimonials({ entityId, limit, sinceDate, clearance: auth.clearance });
 
   return NextResponse.json({
     success: true,

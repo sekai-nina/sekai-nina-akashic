@@ -18,32 +18,38 @@ interface ExtractOptions {
   limit?: number; // max mentions to process per run
   sinceDate?: Date; // only process mentions after this date
   assetId?: string; // scope to a single asset (avoids full-table scan)
+  clearance?: string; // RLS clearance for the full-scan mention search (default "public")
 }
 
-const SYSTEM_PROMPT = `あなたは日向坂46のメンバーのブログから、坂井新奈に関する人柄・性格・特徴の記述を抽出するアシスタントです。
+const SYSTEM_PROMPT = `あなたは日向坂46のメンバーのブログから、坂井新奈に関する「口コミ」になりうる記述を抽出するアシスタントです。
+ここでの口コミとは、本人以外の人物が語った、坂井新奈の人柄・性格・パフォーマンス、および関係性・愛されエピソード（他メンバーから慕われている/可愛がられている様子や、仲の良さが具体的に伝わる描写）を指します。
 
 各テキストブロックについて、以下を判断してください:
-1. そのブロックが坂井新奈の人柄・性格・特徴・スキルについて語っているか
-2. 単なる名前の列挙、活動報告、予定告知だけの場合は is_personality: false
+1. そのブロックが坂井新奈について、上記の口コミになりうる内容を含むか（含むなら is_personality: true）
+2. 単なる名前の列挙・活動報告・予定告知だけ、または「坂井」「新奈」「にいな」「にいたん」等が固有名詞として彼女を指していない偶然の文字列一致（例:「ここにいたんだよ」「渦中にいながら」「絶対にいないと思う」）の場合は is_personality: false
 
 **抽出対象の例:**
-- 性格の描写（優しい、面白い、しっかり者など）
-- ダンス・パフォーマンスの特徴
-- 癖や特徴的な行動
-- 外見・雰囲気の描写
-- 好み・嗜好
-- スキル・特技
+- 性格・人柄の描写（優しい、面白い、しっかり者など）
+- ダンス・パフォーマンスの特徴、スキル・特技
+- 癖や特徴的な行動、外見・雰囲気、好み・嗜好
+- 関係性・愛されエピソード（例:「にぃなにめろめろ」「わんちゃんみたいに接している」「ずっと追いかけている」「皆にぃたんを守って」「全部付き合ってくれる」など、他メンバーからの好意や慕われ方が具体的に伝わるもの）
 
 **除外するもの:**
-- 「坂井新奈ちゃんです！」のような単なる紹介
-- メンバーリスト内の名前
-- 「明日はにぃたんのブログです」のような事務連絡
-- 活動の事実だけ（「一緒に行った」だけで性格に触れていない）
+- 「坂井新奈ちゃんです！」のような単なる紹介や、本人による自己紹介
+- メンバーリスト・収録曲・セットリスト内の名前の列挙
+- 「明日はにぃたんのブログです」のような事務連絡・配信/イベント告知
+- 固有名詞ではない偶然の文字列一致（彼女を指していないもの）
+- 単なる事実の羅列で、人柄も関係性のニュアンスも読み取れないもの（例:「一緒に行った」だけ）
+
+**category の使い分け:**
+- personality: 性格・人柄・外見・好み・癖
+- performance: ダンス・歌・パフォーマンス・スキル
+- relationship: 他メンバーとの仲の良さ・慕われ方・愛されエピソード
 
 重要:
 - 入力の各ブロック [N] に対して、必ず1つの結果をindex=Nとして返してください。スキップしないでください。
 - quoteは原文からそのまま抜き出してください。複数箇所を「...」で繋いだり要約したりしないでください。
-- 1つのブロックから複数の性格描写が読み取れる場合でも、最も印象的な1つだけをquoteとして選んでください。`;
+- 1つのブロックから複数読み取れる場合でも、最も口コミとして印象的な1つだけをquoteとして選んでください。`;
 
 const RESPONSE_SCHEMA = {
   name: "testimonial_extraction",
@@ -58,8 +64,8 @@ const RESPONSE_SCHEMA = {
           properties: {
             index: { type: "number", description: "入力ブロックの [N] の番号" },
             is_personality: { type: "boolean" },
-            quote: { type: "string", description: "性格に触れている部分のみ抜粋。100文字以内" },
-            trait: { type: "string", description: "キーワード。例: 優しい, しなやかなダンス" },
+            quote: { type: "string", description: "口コミに該当する部分のみ原文から抜粋。100文字以内" },
+            trait: { type: "string", description: "キーワード。例: 優しい, しなやかなダンス, 先輩・同期に可愛がられる" },
             category: { type: "string", enum: ["personality", "performance", "relationship"] },
             confidence: { type: "number", description: "0-1" },
           },
@@ -256,7 +262,7 @@ export async function extractTestimonials(options: ExtractOptions): Promise<{
   extracted: number;
   skipped: number;
 }> {
-  const { entityId, limit = 200, sinceDate, assetId } = options;
+  const { entityId, limit = 200, sinceDate, assetId, clearance } = options;
 
   const entity = await prismaInternal.entity.findUnique({ where: { id: entityId } });
   const entityName = entity?.canonicalName || "";
@@ -318,8 +324,13 @@ export async function extractTestimonials(options: ExtractOptions): Promise<{
     }
     filtered = mentions;
   } else {
-    // Full scan mode (for manual/batch extraction)
-    const mentions = await searchMentions(entityId, { since: sinceDate });
+    // Full scan mode (for manual/batch extraction). Pass the caller's clearance
+    // so RLS lets the mention search see internal/restricted assets — without it
+    // searchMentions defaults to "public" and misses all classified content.
+    const mentions = await searchMentions(entityId, {
+      since: sinceDate,
+      clearance: clearance ?? "public",
+    });
     filtered = mentions.filter((m) => {
       if (m.assetSourceType !== "web" || m.textType !== "body") return false;
       const speaker = parseSpeakerFromLinkedEntities(m.linkedEntities);
