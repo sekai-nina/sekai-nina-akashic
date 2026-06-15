@@ -3,20 +3,11 @@ import sharp from "sharp";
 import { auth } from "@/lib/auth";
 import { withSession } from "@/lib/db";
 import { uploadToR2, isR2Configured } from "@/lib/r2";
-import { generateThumbnails } from "@/lib/thumbnails";
 import { canEditDossier } from "@/lib/auth/dossier-permissions";
 import { invalidateDossiers } from "@/lib/cache";
 import { logAudit } from "@/lib/domain/audit";
 
 const MAX_BYTES = 20 * 1024 * 1024; // 20 MB
-
-function extensionFor(mimeType: string): string {
-  if (mimeType === "image/png") return "png";
-  if (mimeType === "image/webp") return "webp";
-  if (mimeType === "image/gif") return "gif";
-  if (mimeType === "image/heic") return "heic";
-  return "jpg";
-}
 
 export async function POST(
   request: Request,
@@ -65,9 +56,15 @@ export async function POST(
   const arrayBuffer = await file.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
 
-  // Normalize EXIF rotation so the stored original matches what we display
-  const normalized = await sharp(buffer).rotate().toBuffer();
-  const ext = extensionFor(file.type);
+  // Normalize EXIF rotation, then re-encode to a lightweight 640px WebP.
+  // We intentionally do NOT keep the full-resolution original — this single
+  // image doubles as both the list thumbnail and the click-through view,
+  // matching the blog/talk thumbnail pipeline (640px WebP, quality 80).
+  const image = await sharp(buffer)
+    .rotate()
+    .resize(640, null, { withoutEnlargement: true })
+    .webp({ quality: 80 })
+    .toBuffer();
 
   // Create the row first so we have a stable id, then upload R2 objects to a
   // key prefixed by it. If R2 fails we delete the row to keep things clean.
@@ -88,22 +85,17 @@ export async function POST(
     });
   });
 
-  const originalKey = `dossiers/${dossierId}/${item.id}/original.${ext}`;
-  const thumbKey = `dossiers/${dossierId}/${item.id}/thumb.webp`;
+  const imageKey = `dossiers/${dossierId}/${item.id}/image.webp`;
 
   try {
-    const { gallery } = await generateThumbnails(normalized);
-    await Promise.all([
-      uploadToR2(originalKey, normalized, file.type || "image/jpeg"),
-      uploadToR2(thumbKey, gallery, "image/webp"),
-    ]);
+    await uploadToR2(imageKey, image, "image/webp");
 
     await withSession(session.user, (tx) =>
       tx.dossierItem.update({
         where: { id: item.id },
         data: {
-          externalImageKey: originalKey,
-          externalImageThumbKey: thumbKey,
+          externalImageKey: imageKey,
+          externalImageThumbKey: imageKey,
         },
       })
     );
@@ -128,7 +120,7 @@ export async function POST(
 
   return NextResponse.json({
     id: item.id,
-    externalImageKey: originalKey,
-    externalImageThumbKey: thumbKey,
+    externalImageKey: imageKey,
+    externalImageThumbKey: imageKey,
   });
 }

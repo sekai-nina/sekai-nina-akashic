@@ -19,7 +19,8 @@
     "cli:backup": "tsx src/cli/backup.ts",
     "cli:restore": "tsx src/cli/restore.ts",
     "cli:thumbnails": "tsx src/cli/generate-thumbnails.ts",
-    "cli:backfill-relations": "tsx src/cli/backfill-relations.ts"
+    "cli:backfill-relations": "tsx src/cli/backfill-relations.ts",
+    "cli:lighten-dossier-images": "tsx src/cli/lighten-dossier-images.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
