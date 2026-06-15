@@ -20,7 +20,8 @@
     "cli:restore": "tsx src/cli/restore.ts",
     "cli:thumbnails": "tsx src/cli/generate-thumbnails.ts",
     "cli:backfill-relations": "tsx src/cli/backfill-relations.ts",
-    "cli:lighten-dossier-images": "tsx src/cli/lighten-dossier-images.ts"
+    "cli:lighten-dossier-images": "tsx src/cli/lighten-dossier-images.ts",
+    "cli:import-curepo": "tsx src/cli/import-curepo.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

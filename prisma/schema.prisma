@@ -484,3 +484,75 @@ model Place {
   @@index([classification])
   @@index([status])
 }
+
+// ============================================================
+// レポ収集 (curepo 由来) — Twitter ミーグリレポ収集・選別
+// ============================================================
+
+enum RepoTweetStatus {
+  undecided
+  keep
+  reject
+}
+
+model RepoCollection {
+  id              String         @id @default(cuid())
+  name            String
+  groups          Json           // [{ tags: string[], op: "and" | "or" }]
+  groupOp         String         @default("or")
+  query           String         // 構築済み X API クエリ（日付は別送信）
+  startDate       String? // JST "YYYY-MM-DD"（TZ事故回避のため文字列保持）
+  endDate         String?
+  excludeRetweets Boolean        @default(true)
+  langJa          Boolean        @default(true)
+  extra           String         @default("")
+  classification  ClearanceLevel @default(internal)
+  sourceLegacyId  Int?           @unique // 移行の冪等化（curepo の整数 id）
+  lastFetchedAt   DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  tweets RepoTweet[]
+
+  @@index([classification])
+}
+
+model RepoTweet {
+  id             String          @id @default(cuid())
+  collectionId   String
+  collection     RepoCollection  @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  tweetId        String
+  authorUsername String          @default("")
+  authorName     String          @default("")
+  text           String          @default("")
+  tweetedAt      DateTime?
+  likeCount      Int             @default(0)
+  retweetCount   Int             @default(0)
+  replyCount     Int             @default(0)
+  quoteCount     Int             @default(0)
+  url            String
+  status         RepoTweetStatus @default(undecided)
+  note           String          @default("")
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  media RepoTweetMedia[]
+
+  @@unique([collectionId, tweetId])
+  @@index([collectionId, status])
+}
+
+model RepoTweetMedia {
+  id        String    @id @default(cuid())
+  tweetId   String
+  tweet     RepoTweet @relation(fields: [tweetId], references: [id], onDelete: Cascade)
+  mediaKey  String
+  type      String    @default("photo") // photo | video | animated_gif
+  remoteUrl String? // 元 Twitter 画像URL（参照/再取得用）
+  imageKey  String? // R2 key（640px WebP）
+  width     Int?
+  height    Int?
+  altText   String    @default("")
+
+  @@unique([tweetId, mediaKey])
+}
