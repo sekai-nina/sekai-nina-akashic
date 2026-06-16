@@ -57,39 +57,45 @@ export function CollectionList({ items }: { items: CollectionItem[] }) {
       {items.map((c) => (
         <div
           key={c.id}
-          className={`flex items-center gap-3 p-3 bg-white border border-slate-200 rounded-lg hover:border-slate-300 ${
+          className={`p-3 bg-white border border-slate-200 rounded-lg hover:border-slate-300 ${
             busyId === c.id ? "opacity-50" : ""
           }`}
         >
-          <Link href={`/repo/${c.id}`} className="flex-1 min-w-0">
-            <div className="font-medium text-slate-900 truncate">{c.name}</div>
-            <div className="text-xs text-slate-400 truncate">
-              {c.query} ｜ {c.startDate || "?"} 〜 {c.endDate || "?"}
+          <div className="flex items-start gap-2">
+            <Link href={`/repo/${c.id}`} className="flex-1 min-w-0">
+              <div className="font-medium text-slate-900 truncate">{c.name}</div>
+              <div className="text-xs text-slate-400 truncate">
+                {c.query} ｜ {c.startDate || "?"} 〜 {c.endDate || "?"}
+              </div>
+            </Link>
+            <div className="flex gap-1 shrink-0">
+              <button
+                onClick={() => handleRename(c)}
+                disabled={isPending}
+                className="text-xs px-2 py-1 rounded text-slate-500 hover:bg-slate-100"
+              >
+                名前変更
+              </button>
+              <button
+                onClick={() => handleDelete(c)}
+                disabled={isPending}
+                className="text-xs px-2 py-1 rounded text-red-600 hover:bg-red-50"
+              >
+                削除
+              </button>
             </div>
-          </Link>
-          <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 shrink-0">
-            計 {c.total}
-          </span>
-          <span className="text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700 shrink-0">
-            採用 {c.keep}
-          </span>
-          <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-700 shrink-0">
-            却下 {c.reject}
-          </span>
-          <button
-            onClick={() => handleRename(c)}
-            disabled={isPending}
-            className="text-xs px-2 py-1 rounded text-slate-500 hover:bg-slate-100 shrink-0"
-          >
-            名前変更
-          </button>
-          <button
-            onClick={() => handleDelete(c)}
-            disabled={isPending}
-            className="text-xs px-2 py-1 rounded text-red-600 hover:bg-red-50 shrink-0"
-          >
-            削除
-          </button>
+          </div>
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+              計 {c.total}
+            </span>
+            <span className="text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700">
+              採用 {c.keep}
+            </span>
+            <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-700">
+              却下 {c.reject}
+            </span>
+          </div>
         </div>
       ))}
     </div>

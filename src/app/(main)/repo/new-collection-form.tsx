@@ -125,28 +125,30 @@ export function NewCollectionForm() {
       </label>
       <div className="space-y-2">
         {groups.map((g, i) => (
-          <div key={i} className="flex gap-2 items-center">
+          <div key={i} className="flex flex-col sm:flex-row gap-2 sm:items-center">
             <input
               className={inputCls + " flex-1"}
               value={g.tags}
               onChange={(e) => updateGroup(i, { tags: e.target.value })}
               placeholder="例: 坂井新奈 ひなたみ"
             />
-            <select
-              className={inputCls + " w-40 shrink-0"}
-              value={g.op}
-              onChange={(e) => updateGroup(i, { op: e.target.value as "and" | "or" })}
-            >
-              <option value="and">グループ内 AND</option>
-              <option value="or">グループ内 OR</option>
-            </select>
-            <button
-              type="button"
-              onClick={() => removeGroup(i)}
-              className="px-3 py-2 text-xs text-red-600 border border-red-200 rounded-md hover:bg-red-50 shrink-0"
-            >
-              ×
-            </button>
+            <div className="flex gap-2">
+              <select
+                className={inputCls + " flex-1 sm:w-40"}
+                value={g.op}
+                onChange={(e) => updateGroup(i, { op: e.target.value as "and" | "or" })}
+              >
+                <option value="and">グループ内 AND</option>
+                <option value="or">グループ内 OR</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => removeGroup(i)}
+                className="px-3 py-2 text-xs text-red-600 border border-red-200 rounded-md hover:bg-red-50 shrink-0"
+              >
+                ×
+              </button>
+            </div>
           </div>
         ))}
       </div>
@@ -158,8 +160,8 @@ export function NewCollectionForm() {
         ＋ 条件グループを追加
       </button>
 
-      <div className="flex gap-3 mt-3 flex-wrap">
-        <div className="flex-1 min-w-[140px]">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
+        <div>
           <label className={labelCls}>グループ間の結合</label>
           <select
             className={inputCls}
@@ -170,7 +172,7 @@ export function NewCollectionForm() {
             <option value="and">AND（すべてのグループに一致）</option>
           </select>
         </div>
-        <div className="flex-1 min-w-[140px]">
+        <div>
           <label className={labelCls}>開始日（JST）</label>
           <input
             type="date"
@@ -179,7 +181,7 @@ export function NewCollectionForm() {
             onChange={(e) => setStartDate(e.target.value)}
           />
         </div>
-        <div className="flex-1 min-w-[140px]">
+        <div>
           <label className={labelCls}>終了日（JST）</label>
           <input
             type="date"
