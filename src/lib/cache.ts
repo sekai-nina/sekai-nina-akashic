@@ -185,18 +185,20 @@ export const getCachedPlaces = (clearance: ClearanceLevel) => {
 
   return unstable_cache(
     () =>
-      prisma.place.findMany({
-        where: {
-          status: "confirmed",
-          classification: { in: allowedLevels.length > 0 ? allowedLevels : ["public"] },
-        },
-        include: {
-          entity: {
-            include: { _count: { select: { assets: true } } },
+      withClearance(clearance, (tx) =>
+        tx.place.findMany({
+          where: {
+            status: "confirmed",
+            classification: { in: allowedLevels.length > 0 ? allowedLevels : ["public"] },
           },
-        },
-        orderBy: { entity: { canonicalName: "asc" } },
-      }),
+          include: {
+            entity: {
+              include: { _count: { select: { assets: true } } },
+            },
+          },
+          orderBy: { entity: { canonicalName: "asc" } },
+        })
+      ),
     [`places-list-${clearance}`],
     { tags: [CACHE_TAGS.places], revalidate: 60 }
   )();

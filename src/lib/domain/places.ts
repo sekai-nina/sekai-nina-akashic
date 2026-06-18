@@ -1,5 +1,5 @@
 import { ClearanceLevel } from "@prisma/client";
-import { prisma, withClearance } from "@/lib/db";
+import { withClearance } from "@/lib/db";
 import { normalizeText } from "@/lib/utils";
 import { logAudit } from "./audit";
 
@@ -29,7 +29,7 @@ export type PlaceWithEntity = Awaited<ReturnType<typeof getPlaceById>> & {};
 export async function createPlace(data: CreatePlaceData, clearance: string) {
   const normalizedName = normalizeText(data.canonicalName);
 
-  const place = await prisma.$transaction(async (tx) => {
+  const place = await withClearance(clearance, async (tx) => {
     const entity = await tx.entity.upsert({
       where: {
         type_canonicalName: { type: "place", canonicalName: data.canonicalName },
@@ -75,7 +75,7 @@ export async function createPlace(data: CreatePlaceData, clearance: string) {
 }
 
 export async function updatePlace(id: string, data: UpdatePlaceData, clearance: string) {
-  const place = await prisma.$transaction(async (tx) => {
+  const place = await withClearance(clearance, async (tx) => {
     const existing = await tx.place.findUnique({
       where: { id },
       include: { entity: true },
@@ -125,14 +125,17 @@ export async function updatePlace(id: string, data: UpdatePlaceData, clearance: 
 }
 
 export async function deletePlace(id: string, clearance: string) {
-  const place = await prisma.place.findUnique({
-    where: { id },
-    include: { entity: true },
-  });
-  if (!place) throw new Error("Place not found");
+  const place = await withClearance(clearance, async (tx) => {
+    const found = await tx.place.findUnique({
+      where: { id },
+      include: { entity: true },
+    });
+    if (!found) throw new Error("Place not found");
 
-  // Deleting the entity cascades to the place
-  await prisma.entity.delete({ where: { id: place.entityId } });
+    // Deleting the entity cascades to the place
+    await tx.entity.delete({ where: { id: found.entityId } });
+    return found;
+  });
 
   await logAudit({
     action: "place.delete",
@@ -147,17 +150,19 @@ export async function listPlaces(clearance: string) {
   const maxLevel = clearanceOrder.indexOf(clearance as ClearanceLevel);
   const allowedLevels = clearanceOrder.slice(0, maxLevel + 1);
 
-  return prisma.place.findMany({
-    where: {
-      classification: { in: allowedLevels.length > 0 ? allowedLevels : ["public"] },
-    },
-    include: {
-      entity: {
-        include: { _count: { select: { assets: true } } },
+  return withClearance(clearance, (tx) =>
+    tx.place.findMany({
+      where: {
+        classification: { in: allowedLevels.length > 0 ? allowedLevels : ["public"] },
       },
-    },
-    orderBy: { entity: { canonicalName: "asc" } },
-  });
+      include: {
+        entity: {
+          include: { _count: { select: { assets: true } } },
+        },
+      },
+      orderBy: { entity: { canonicalName: "asc" } },
+    })
+  );
 }
 
 export async function getPlaceById(id: string, clearance: string) {
@@ -165,17 +170,19 @@ export async function getPlaceById(id: string, clearance: string) {
   const maxLevel = clearanceOrder.indexOf(clearance as ClearanceLevel);
   const allowedLevels = clearanceOrder.slice(0, maxLevel + 1);
 
-  return prisma.place.findFirst({
-    where: {
-      id,
-      classification: { in: allowedLevels.length > 0 ? allowedLevels : ["public"] },
-    },
-    include: {
-      entity: {
-        include: { _count: { select: { assets: true } } },
+  return withClearance(clearance, (tx) =>
+    tx.place.findFirst({
+      where: {
+        id,
+        classification: { in: allowedLevels.length > 0 ? allowedLevels : ["public"] },
       },
-    },
-  });
+      include: {
+        entity: {
+          include: { _count: { select: { assets: true } } },
+        },
+      },
+    })
+  );
 }
 
 export async function getPlaceByEntityId(entityId: string, clearance: string) {
@@ -183,15 +190,17 @@ export async function getPlaceByEntityId(entityId: string, clearance: string) {
   const maxLevel = clearanceOrder.indexOf(clearance as ClearanceLevel);
   const allowedLevels = clearanceOrder.slice(0, maxLevel + 1);
 
-  return prisma.place.findFirst({
-    where: {
-      entityId,
-      classification: { in: allowedLevels.length > 0 ? allowedLevels : ["public"] },
-    },
-    include: {
-      entity: {
-        include: { _count: { select: { assets: true } } },
+  return withClearance(clearance, (tx) =>
+    tx.place.findFirst({
+      where: {
+        entityId,
+        classification: { in: allowedLevels.length > 0 ? allowedLevels : ["public"] },
       },
-    },
-  });
+      include: {
+        entity: {
+          include: { _count: { select: { assets: true } } },
+        },
+      },
+    })
+  );
 }
