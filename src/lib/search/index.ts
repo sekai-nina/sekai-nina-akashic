@@ -30,6 +30,9 @@ export interface SearchResultItem {
   snippets: string[];
   matchCount: number;
   matchField: string;
+  /** Short preview of the asset body (e.g. トーク message), shown when the
+   *  match itself isn't inside the body. Null when redundant. */
+  bodyPreview: string | null;
   score: number;
   createdAt: Date;
   canonicalDate: Date | null;
@@ -141,6 +144,34 @@ async function getEntityNames(
     map.set(row.assetId, names);
   }
   return { persons, tags };
+}
+
+/**
+ * Fetch a short body preview (message_body / body text) for a list of assets.
+ * Used to surface トーク本文 etc. in results that matched by title/entity/date
+ * rather than inside the body itself. Prefers message_body over body.
+ */
+async function getBodyPreviews(
+  assetIds: string[],
+  tx: Parameters<Parameters<typeof withClearance>[1]>[0],
+  maxLen = 240
+): Promise<Map<string, string>> {
+  if (assetIds.length === 0) return new Map();
+  const rows = await tx.$queryRaw<Array<{ assetId: string; content: string }>>`
+    SELECT DISTINCT ON (t."assetId") t."assetId", t."content"
+    FROM "AssetText" t
+    WHERE t."assetId"::text = ANY(${assetIds})
+      AND t."textType" IN ('message_body', 'body')
+    ORDER BY t."assetId",
+      CASE t."textType" WHEN 'message_body' THEN 0 WHEN 'body' THEN 1 ELSE 2 END
+  `;
+  const map = new Map<string, string>();
+  for (const row of rows) {
+    const cleaned = row.content.replace(/\{\{IMG:[a-zA-Z0-9_-]+\}\}/g, "").trim();
+    if (!cleaned) continue;
+    map.set(row.assetId, cleaned.length > maxLen ? cleaned.slice(0, maxLen) + "…" : cleaned);
+  }
+  return map;
 }
 
 export async function search(query: SearchQuery, clearance: string): Promise<SearchResult> {
@@ -375,6 +406,8 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
       storageUrl: row.storageUrl,
       ...(hasKeyword ? buildSnippets(matchText, q) : { snippets: [row.title], matchCount: 0 }),
       matchField,
+      // Filled in below by a batched AssetText lookup (トーク本文など).
+      bodyPreview: null,
       score: titleMatch ? 3 : descMatch ? 2 : previewMatch ? 1 : 0,
       createdAt: row.createdAt,
       canonicalDate: row.canonicalDate,
@@ -395,6 +428,7 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
       storageUrl: row.asset_storageUrl,
       ...buildSnippets(row.content, q),
       matchField: row.textType,
+      bodyPreview: null,
       score: 1,
       createdAt: row.asset_createdAt,
       canonicalDate: row.asset_canonicalDate,
@@ -417,6 +451,7 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
         snippets: [`タグ/人物: ${row.entity_name}`],
         matchCount: 1,
         matchField: "entity",
+        bodyPreview: null,
         score: 2,
         createdAt: row.asset_createdAt,
         canonicalDate: row.asset_canonicalDate,
@@ -436,12 +471,24 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
 
   const sliced = results.slice(0, perPage);
 
-  // Batch fetch person and tag names
+  // Batch fetch person/tag names, plus a body preview for results whose match
+  // did NOT come from the body (title/entity/date). Text matches already show a
+  // body-derived snippet, so they don't need a separate preview.
   const assetIds = [...new Set(sliced.map((r) => r.assetId))];
-  const { persons, tags } = await withClearance(clearance, (tx) => getEntityNames(assetIds, tx));
+  const bodyNeededIds = [...new Set(sliced.filter((r) => r.type !== "text").map((r) => r.assetId))];
+  const [{ persons, tags }, bodyPreviews] = await withClearance(clearance, async (tx) => {
+    const [names, bodies] = await Promise.all([
+      getEntityNames(assetIds, tx),
+      getBodyPreviews(bodyNeededIds, tx),
+    ]);
+    return [names, bodies] as const;
+  });
   for (const item of sliced) {
     item.personNames = persons.get(item.assetId) ?? [];
     item.tagNames = tags.get(item.assetId) ?? [];
+    if (item.type !== "text") {
+      item.bodyPreview = bodyPreviews.get(item.assetId) ?? null;
+    }
   }
 
   return {

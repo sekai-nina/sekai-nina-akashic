@@ -254,6 +254,11 @@ async function SearchResults({
                         <HighlightedSnippet text={snip} query={q} />
                       </p>
                     ))}
+                    {item.bodyPreview && (
+                      <p className="text-xs text-slate-500 line-clamp-3 whitespace-pre-wrap">
+                        <HighlightedSnippet text={item.bodyPreview} query={q} />
+                      </p>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 mt-1 text-xs text-slate-400 flex-wrap">
                     {item.canonicalDate && <span>{formatDate(item.canonicalDate)}</span>}
