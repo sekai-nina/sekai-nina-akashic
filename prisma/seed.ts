@@ -191,9 +191,10 @@ async function main() {
   });
 
   await prisma.dossierItem.upsert({
-    where: { dossierId_assetId: { dossierId: "seed-dossier-1", assetId: asset1.id } },
+    where: { id: "seed-dossier-1-item-1" },
     update: {},
     create: {
+      id: "seed-dossier-1-item-1",
       dossierId: "seed-dossier-1",
       assetId: asset1.id,
       note: "メインの参考資料",
@@ -202,9 +203,10 @@ async function main() {
   });
 
   await prisma.dossierItem.upsert({
-    where: { dossierId_assetId: { dossierId: "seed-dossier-1", assetId: asset2.id } },
+    where: { id: "seed-dossier-1-item-2" },
     update: {},
     create: {
+      id: "seed-dossier-1-item-2",
       dossierId: "seed-dossier-1",
       assetId: asset2.id,
       note: "",

@@ -285,13 +285,32 @@ export interface AddAssetItemInput {
 export async function addAssetItem(user: ActingUser, dossierId: string, input: AddAssetItemInput) {
   await requireEditAccess(user, dossierId);
 
+  // An excerpt (range selection) always creates a NEW item so a single asset
+  // can contribute multiple quotes to the same dossier. A plain asset reference
+  // (no excerpt) stays idempotent: reuse the existing excerpt-less reference for
+  // this asset if one is already present.
+  const hasExcerpt = !!input.excerpt && input.excerpt.trim() !== "";
+
   const item = await withSession(user, async (tx) => {
+    if (!hasExcerpt) {
+      const existing = await tx.dossierItem.findFirst({
+        where: { dossierId, assetId: input.assetId, excerpt: "" },
+        orderBy: { createdAt: "asc" },
+      });
+      if (existing) {
+        return tx.dossierItem.update({
+          where: { id: existing.id },
+          data: {
+            ...(input.caption !== undefined ? { caption: input.caption } : {}),
+            ...(input.note !== undefined ? { note: input.note } : {}),
+          },
+        });
+      }
+    }
+
     const sortOrder = await nextSortOrder(tx, dossierId);
-    return tx.dossierItem.upsert({
-      where: {
-        dossierId_assetId: { dossierId, assetId: input.assetId },
-      },
-      create: {
+    return tx.dossierItem.create({
+      data: {
         dossierId,
         kind: "asset_ref",
         assetId: input.assetId,
@@ -302,14 +321,6 @@ export async function addAssetItem(user: ActingUser, dossierId: string, input: A
         excerptStart: input.excerptStart ?? null,
         excerptEnd: input.excerptEnd ?? null,
         sortOrder,
-      },
-      update: {
-        ...(input.caption !== undefined ? { caption: input.caption } : {}),
-        ...(input.note !== undefined ? { note: input.note } : {}),
-        ...(input.excerpt !== undefined ? { excerpt: input.excerpt } : {}),
-        ...(input.excerptType !== undefined ? { excerptType: input.excerptType } : {}),
-        ...(input.excerptStart !== undefined ? { excerptStart: input.excerptStart } : {}),
-        ...(input.excerptEnd !== undefined ? { excerptEnd: input.excerptEnd } : {}),
       },
     });
   });

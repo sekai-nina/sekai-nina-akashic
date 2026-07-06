@@ -333,7 +333,8 @@ model DossierItem {
   createdAt             DateTime        @default(now())
   updatedAt             DateTime        @updatedAt
 
-  @@unique([dossierId, assetId], map: "dossier_item_dossier_asset_unique")
+  // NOTE: intentionally no @@unique([dossierId, assetId]) — a single asset can
+  // be added to a dossier multiple times, once per excerpt (range selection).
   @@index([dossierId])
   @@index([assetId])
 }
