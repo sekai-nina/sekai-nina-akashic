@@ -9,10 +9,11 @@ export async function POST(request: Request) {
   if (auth instanceof NextResponse) return auth;
 
   const body = await request.json();
-  const { filename, mimeType, sha256, metadata } = body as {
+  const { filename, mimeType, sha256, metadata, driveFolderId } = body as {
     filename: string;
     mimeType: string;
     sha256?: string;
+    driveFolderId?: string;
     metadata?: {
       status?: string;
       sourceType?: string;
@@ -77,7 +78,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const uploadUrl = await createResumableUploadSession(filename, mimeType);
+    const uploadUrl = await createResumableUploadSession(filename, mimeType, driveFolderId);
     if (!uploadUrl) {
       return NextResponse.json(
         { error: "Failed to create upload session" },

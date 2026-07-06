@@ -240,10 +240,12 @@ export async function uploadToFolder(
  */
 export async function createResumableUploadSession(
   filename: string,
-  mimeType: string
+  mimeType: string,
+  folderIdOverride?: string
 ): Promise<string | null> {
   const auth = getAuth();
-  const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
+  // 番組ごとに保存先フォルダを分けたい場合は folderIdOverride を渡す（省略時は既定フォルダ）
+  const folderId = folderIdOverride || process.env.GOOGLE_DRIVE_FOLDER_ID;
   if (!auth || !folderId) return null;
 
   // アクセストークンを取得
