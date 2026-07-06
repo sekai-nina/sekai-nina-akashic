@@ -16,6 +16,7 @@ export interface DashboardStats {
   };
   media: {
     hinaai: number;
+    madamada: number;
     hinanari: number;
     hinach: number;
     official: number;
@@ -43,6 +44,7 @@ interface CountsRow {
   total_assets: bigint;
   discovery: bigint;
   hinaai: bigint;
+  madamada: bigint;
   hinanari: bigint;
   hinach: bigint;
   official: bigint;
@@ -89,6 +91,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
         (SELECT COUNT(*) FROM "Asset") AS total_assets,
         (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '今日の発見') AS discovery,
         (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '日向坂で会いましょう') AS hinaai,
+        (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = 'まだまだ!日向坂で会いましょう') AS madamada,
         (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '日向坂になりましょう') AS hinanari,
         (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '日向坂ちゃんねる') AS hinach,
         (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '日向坂46公式チャンネル') AS official,
@@ -149,6 +152,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     },
     media: {
       hinaai: Number(counts.hinaai),
+      madamada: Number(counts.madamada),
       hinanari: Number(counts.hinanari),
       hinach: Number(counts.hinach),
       official: Number(counts.official),
