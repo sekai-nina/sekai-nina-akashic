@@ -32,7 +32,6 @@ export async function PUT(request: Request) {
         lensKey: body.lensKey,
         dataSourceKey: body.dataSourceKey,
         status: body.status as CoverageStatus | undefined,
-        collectedUntil: body.collectedUntil,
         note: body.note,
         classification: body.classification as ClearanceLevel | undefined,
       },

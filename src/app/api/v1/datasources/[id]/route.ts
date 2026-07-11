@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
 import { updateDataSource } from "@/lib/domain/coverage";
-import type { ClearanceLevel, DataSourceKind } from "@prisma/client";
+import type { ClearanceLevel, DataSourceKind, ItemRule } from "@prisma/client";
 
 export async function PATCH(
   request: Request,
@@ -24,6 +24,9 @@ export async function PATCH(
         active: body.active,
         public: body.public,
         classification: body.classification as ClearanceLevel | undefined,
+        itemRule: body.itemRule as ItemRule | undefined,
+        publisherPattern: body.publisherPattern,
+        titlePattern: body.titlePattern,
       },
       auth.clearance,
       auth.id
