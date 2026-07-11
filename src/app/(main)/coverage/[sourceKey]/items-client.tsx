@@ -469,7 +469,8 @@ export function ItemListClient({
               const excerpts = item.excerpts ?? [];
               const images = item.imageAssets ?? [];
               const extraImages = (item.imageAssetCount ?? images.length) - images.length;
-              const titleHref = item.repAsset ? `/assets/${item.repAsset.id}` : null;
+              // ?hl=nina: アセットページで坂井新奈への言及箇所をハイライト表示する
+              const titleHref = item.repAsset ? `/assets/${item.repAsset.id}?hl=nina` : null;
               const titleText = item.itemTitle || item.itemKey;
               return (
                 <li key={item.itemKey} className={done ? "opacity-60 bg-slate-50/60" : ""}>
@@ -576,7 +577,7 @@ export function ItemListClient({
                           ))}
                           {item.repAsset?.kind === "text" && (
                             <Link
-                              href={`/assets/${item.repAsset.id}`}
+                              href={`/assets/${item.repAsset.id}?hl=nina`}
                               className="inline-flex items-center gap-0.5 text-[10px] text-slate-400 hover:text-slate-700"
                               title="テキストアセットを開く"
                             >
@@ -824,7 +825,7 @@ export function ItemListClient({
               {lightbox.index + 1} / {lightbox.images.length}
             </p>
             <Link
-              href={`/assets/${lightbox.images[lightbox.index].id}`}
+              href={`/assets/${lightbox.images[lightbox.index].id}?hl=nina`}
               onClick={(e) => e.stopPropagation()}
               className="inline-flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white text-sm font-medium rounded-full px-4 py-2 mt-3 transition-colors"
             >

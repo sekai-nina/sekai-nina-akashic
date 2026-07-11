@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Quote, Check, ExternalLink } from "lucide-react";
 import { AddToDossier } from "@/components/add-to-dossier";
@@ -38,6 +38,8 @@ interface TextsSectionProps {
   texts: AssetText[];
   embeddedImages: Record<string, EmbeddedImage>;
   editableDossiers: EditableDossier[];
+  /** 言及ハイライト語彙（?hl=nina 時のみ非空。長い語が先＝交替の優先順） */
+  highlightTerms?: string[];
 }
 
 type Selection = {
@@ -52,6 +54,7 @@ export function TextsSection({
   texts,
   embeddedImages,
   editableDossiers,
+  highlightTerms = [],
 }: TextsSectionProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [activeSelection, setActiveSelection] = useState<Selection>(null);
@@ -140,7 +143,11 @@ export function TextsSection({
                   {TEXT_TYPE_LABELS[text.textType] ?? text.textType}
                 </span>
               </div>
-              <RichTextContent content={text.content} embeddedImages={embeddedImages} />
+              <RichTextContent
+                content={text.content}
+                embeddedImages={embeddedImages}
+                highlightTerms={highlightTerms}
+              />
             </li>
           ))}
         </ul>
@@ -164,12 +171,43 @@ function nearestPanel(node: Node): HTMLLIElement | null {
   return el ? (el.closest("li[data-text-id]") as HTMLLIElement | null) : null;
 }
 
+function regexEscape(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * テキストを一致語で分割し、一致箇所を <mark data-hl="nina"> に置き換えた React ノード列を返す。
+ * dangerouslySetInnerHTML を使わない（XSS 安全）。capture group 付き split のため
+ * 奇数インデックスが一致セグメント。terms は長い語が先（「坂井新奈」>「坂井」）。
+ */
+function highlightNodes(text: string, terms: string[], keyBase: string): ReactNode {
+  if (terms.length === 0 || !text) return text;
+  const re = new RegExp(`(${terms.map(regexEscape).join("|")})`, "gi");
+  const segs = text.split(re);
+  if (segs.length === 1) return text;
+  return segs.map((seg, i) =>
+    i % 2 === 1 ? (
+      <mark
+        key={`${keyBase}-${i}`}
+        data-hl="nina"
+        className="bg-amber-200 text-slate-900 rounded px-0.5"
+      >
+        {seg}
+      </mark>
+    ) : (
+      seg
+    )
+  );
+}
+
 function RichTextContent({
   content,
   embeddedImages,
+  highlightTerms = [],
 }: {
   content: string;
   embeddedImages: Record<string, EmbeddedImage>;
+  highlightTerms?: string[];
 }) {
   const parts = content.split(/(\{\{IMG:[a-zA-Z0-9_-]+\}\})/);
   return (
@@ -194,7 +232,7 @@ function RichTextContent({
           }
           return null;
         }
-        return <span key={i}>{part}</span>;
+        return <span key={i}>{highlightNodes(part, highlightTerms, `hl-${i}`)}</span>;
       })}
     </div>
   );

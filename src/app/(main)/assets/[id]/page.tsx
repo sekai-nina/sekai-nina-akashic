@@ -17,13 +17,14 @@ import {
   formatDate,
 } from "@/lib/utils";
 import { getAssetRelations, getAssetGraph } from "@/lib/domain/relations";
-import { findItemsForAsset } from "@/lib/domain/coverage-items";
+import { findItemsForAsset, getNinaTerms } from "@/lib/domain/coverage-items";
 import { listLenses } from "@/lib/domain/coverage";
 import type { ClearanceLevel } from "@prisma/client";
 import { SubmitButton } from "@/components/submit-button";
 import { BackButton } from "@/components/back-button";
 import { StatusWorkflow } from "./status-workflow";
 import { AssetCoveragePanel } from "./coverage-panel";
+import { NinaHighlightBanner } from "./nina-highlight-banner";
 import { CopySourceRef } from "./copy-source-ref";
 import { ParentAssets, ChildAssets } from "./related-assets";
 import { SubGraph } from "./sub-graph";
@@ -87,12 +88,27 @@ const SOURCE_KIND_LABELS: Record<string, string> = {
 };
 
 
+/** 一致箇所数（表示用 N）。ハイライト描画と同じ語彙・大文字小文字無視で数える。 */
+function countTermMatches(contents: string[], terms: string[]): number {
+  if (terms.length === 0) return 0;
+  const escaped = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const re = new RegExp(escaped.join("|"), "gi");
+  let n = 0;
+  for (const c of contents) n += c.match(re)?.length ?? 0;
+  return n;
+}
+
 export default async function AssetDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ hl?: string }>;
 }) {
   const { id } = await params;
+  const sp = await searchParams;
+  // 言及ハイライト（カバレッジのアイテム一覧からの遷移で ?hl=nina が付く）
+  const hlNina = sp.hl === "nina";
   const session = await auth();
   const userClearance = session!.user.clearance as ClearanceLevel;
 
@@ -188,11 +204,19 @@ export default async function AssetDetailPage({
   const { asset, relations, graph, duplicates, embeddedImageAssets, prevAsset, nextAsset } = pageData;
 
   // カバレッジパネル（v2.4）: このアセットが属するカバレッジアイテムの逆引き＋アクティブ観点
+  // ハイライト語彙（?hl=nina 時のみ）も並列で取得
   const canEditCoverage = ["admin", "member"].includes(session!.user.role);
-  const [coverageItems, activeLenses] = await Promise.all([
+  const [coverageItems, activeLenses, ninaTerms] = await Promise.all([
     findItemsForAsset(id, userClearance),
     listLenses(userClearance, false), // active のみ
+    hlNina ? getNinaTerms(userClearance) : Promise.resolve([] as string[]),
   ]);
+  const highlightCount = hlNina
+    ? countTermMatches(
+        asset.texts.map((t) => t.content),
+        ninaTerms
+      )
+    : 0;
 
   // Editable dossiers + which of them already contain this asset
   const editableDossiers = await listEditableDossiers(session!.user);
@@ -307,6 +331,9 @@ export default async function AssetDetailPage({
         </div>
       </div>
 
+      {/* 言及ハイライトバナー（?hl=nina）: 件数表示＋最初の <mark> へスクロール */}
+      {hlNina && <NinaHighlightBanner count={highlightCount} />}
+
       {/* Duplicate warning */}
       {duplicates.length > 0 && (
         <div className="mt-4 bg-yellow-50 border border-yellow-300 rounded-lg p-3 text-sm text-yellow-800">
@@ -356,6 +383,7 @@ export default async function AssetDetailPage({
                 texts={asset.texts.map((t) => ({ id: t.id, textType: t.textType, content: t.content }))}
                 embeddedImages={embeddedImages}
                 editableDossiers={editableDossiers}
+                highlightTerms={hlNina ? ninaTerms : []}
               />
               <div className="bg-white border border-slate-200 rounded-lg p-5 mt-4">
                 <details className="border border-slate-200 rounded p-3">

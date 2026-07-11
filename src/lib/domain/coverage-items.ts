@@ -104,6 +104,17 @@ async function getNinaEntity(tx: TransactionClient): Promise<NinaEntity | null> 
   return { id: e.id, terms };
 }
 
+/**
+ * 坂井新奈の一致語彙（canonicalName + aliases）を返す（アセットページの言及ハイライト用）。
+ * 長い語を先に並べる（正規表現の交替で「坂井新奈」が「坂井」「新奈」より優先されるように）。
+ */
+export async function getNinaTerms(clearance: string): Promise<string[]> {
+  return withClearance(clearance, async (tx) => {
+    const entity = await getNinaEntity(tx);
+    return (entity?.terms ?? []).slice().sort((a, b) => b.length - a.length);
+  });
+}
+
 // ============================================================
 // ソース全体の言及ありキー集合（url 系のみ・数分キャッシュ）
 // ============================================================
