@@ -63,23 +63,25 @@ const DATA_SOURCES: DataSourceSeed[] = [
     itemRule: "talk_date",
     publisherPattern: "Talk (Sony Music)%",
   },
-  // 日向坂で会いましょう: 番号のみ表記(#362等)と【配信】表記の2形式
+  // 日向坂で会いましょう: 番号のみ表記(#362等)と【配信】表記の2形式。
+  // 番号のみは末尾%なしの完全長マッチ（#4__% だとひななり「#4 企画名」を誤って拾う）。
+  // 実DB検証(2026-07-12): Lemino 109 URL が hinaai 57 + ninarimashou 52 に重複0・取りこぼし0で分割。
   {
     key: "hinaai",
     name: "日向坂で会いましょう",
     kind: "tv",
     itemRule: "source_url",
     publisherPattern: "Lemino%",
-    titlePattern: "【%配信】#%|%日向坂で会いましょう%|#3__%|#4__%",
+    titlePattern: "【%配信】#%|%日向坂で会いましょう%|#3__|#4__|#3__\n|#4__\n",
   },
-  // 日向坂になりましょう: 「#N 企画名」形式（#0〜26）
+  // 日向坂になりましょう: 「#N 企画名」形式（#0〜26）と「日向坂になりましょう【…】#N」形式
   {
     key: "ninarimashou",
     name: "日向坂になりましょう",
     kind: "tv",
     itemRule: "source_url",
     publisherPattern: "Lemino%",
-    titlePattern: "#_ %|#__ %",
+    titlePattern: "#_ %|#__ %|%日向坂になりましょう%",
   },
   {
     key: "hinachan",

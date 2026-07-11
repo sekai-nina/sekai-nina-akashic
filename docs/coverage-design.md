@@ -58,8 +58,12 @@ v1 は「セルに手動の日付カーソル（collectedUntil）を持つ」設
 |---|---|---|---|---|
 | blog | blog_url | `日向坂46公式ブログ%` | — | 13,908件 |
 | talk | talk_date | `Talk (Sony Music)%` | — | 26,866件 |
-| hinaai | source_url | `Lemino%` | `【%配信】#%\|%日向坂で会いましょう%\|#3__%\|#4__%` | 番号のみ表記(#362等)と【配信】表記の2形式 |
-| ninarimashou | source_url | `Lemino%` | `#_ %\|#__ %` | ひななりは「#N 企画名」形式（#0〜26）。ひなあい側は番号のみ/【配信】なので前方「#N␣」に一致しない |
+| hinaai | source_url | `Lemino%` | `【%配信】#%\|%日向坂で会いましょう%\|#3__\|#4__\|#3__⏎\|#4__⏎` | 番号のみ表記(#362等)は**末尾%なしの完全長マッチ**（`#4__%` だとひななり「#4 企画名」を誤マッチ）。⏎=改行付き行対応 |
+| ninarimashou | source_url | `Lemino%` | `#_ %\|#__ %\|%日向坂になりましょう%` | 「#N 企画名」形式と「日向坂になりましょう【…】#N」形式 |
+
+実DB検証（2026-07-12）: 上記パターンで Lemino 109 URL → hinaai 57 + ninarimashou 52（**重複0・取りこぼし0**）、
+YouTube 28 URL → hinachan 20 + official_ch 8（未振り分け0）、magazine 8。
+将来ひななりが #300 を超える頃に `#3__` が衝突しうるが、遠い将来であり設定タブで調整可能。
 | hinachan | source_url | `YouTube%` | `日向坂ちゃんねる%` | 全タイトルがこの前方一致 |
 | official_ch | source_url | `YouTube%` | `日向坂46公式チャンネル%` | 同上 |
 | magazine | source_url | `EX大衆%\|BRODY%\|週刊少年チャンピオン%\|グラビアチャンピオン%\|Ray%\|BUBKA%\|B.L.T.%` | — | 誌名=publisher。新誌が来たら設定タブで追記 |
