@@ -133,6 +133,13 @@ enum CoverageStatus {
   not_applicable
 }
 
+enum ItemRule {
+  blog_url
+  talk_date
+  source_url
+  manual
+}
+
 model User {
   id           String         @id @default(cuid())
   email        String         @unique
@@ -584,34 +591,40 @@ model RepoTweetMedia {
 // ============================================================
 
 model Lens {
-  id             String         @id @default(cuid())
-  key            String         @unique // 機械名: live, meetgreet, food, possessions, ...
+  id             String          @id @default(cuid())
+  key            String          @unique // 機械名: live, meetgreet, food, possessions, ...
   name           String // 表示名: ライブ, ミーグリ, 食べたもの, ...
   description    String // 観点の詳細説明（何を拾うか・拾わないか）
-  sortOrder      Int            @default(0)
-  active         Boolean        @default(true)
-  public         Boolean        @default(true) // 公開サイトの鮮度表示に出すか
-  classification ClearanceLevel @default(internal)
+  sortOrder      Int             @default(0)
+  active         Boolean         @default(true)
+  public         Boolean         @default(true) // 公開サイトの鮮度表示に出すか
+  classification ClearanceLevel  @default(internal)
   coverages      Coverage[]
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  itemChecks     LensItemCheck[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 
   @@index([classification])
 }
 
 model DataSource {
-  id             String         @id @default(cuid())
-  key            String         @unique // blog, talk, hinaai, hinachan, ...
-  name           String
-  kind           DataSourceKind
-  description    String?
-  sortOrder      Int            @default(0)
-  active         Boolean        @default(true)
-  public         Boolean        @default(true)
-  classification ClearanceLevel @default(internal)
-  coverages      Coverage[]
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  id               String          @id @default(cuid())
+  key              String          @unique // blog, talk, hinaai, hinachan, ...
+  name             String
+  kind             DataSourceKind
+  description      String?
+  sortOrder        Int             @default(0)
+  active           Boolean         @default(true)
+  public           Boolean         @default(true)
+  classification   ClearanceLevel  @default(internal)
+  // v2: アイテム導出規則。itemRule に応じて SourceRecord/Asset からアイテムを導出する。
+  itemRule         ItemRule        @default(manual)
+  publisherPattern String? // SourceRecord.publisher への SQL LIKE（null=不問）
+  titlePattern     String? // SourceRecord.title への SQL LIKE（null=不問。番組回の切り分け用）
+  coverages        Coverage[]
+  itemChecks       LensItemCheck[]
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
 
   @@index([classification])
 }
@@ -623,7 +636,6 @@ model Coverage {
   dataSourceId   String
   dataSource     DataSource     @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
   status         CoverageStatus @default(tracked)
-  collectedUntil DateTime? // 日付として扱う（YYYY-MM-DD）。not_applicable なら null
   note           String? // 内部メモ（公開しない）
   classification ClearanceLevel @default(internal)
   updatedById    String?
@@ -632,5 +644,26 @@ model Coverage {
 
   @@unique([lensId, dataSourceId])
   @@index([dataSourceId])
+  @@index([classification])
+}
+
+// v2: アイテム単位チェックの本体。「このアイテム(itemKey)をこの観点(Lens)で見た」の記録。
+// アイテムは DataSource.itemRule で SourceRecord/Asset から導出する（テーブル実体化しない）。
+model LensItemCheck {
+  id             String         @id @default(cuid())
+  lensId         String
+  lens           Lens           @relation(fields: [lensId], references: [id], onDelete: Cascade)
+  dataSourceId   String
+  dataSource     DataSource     @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+  itemKey        String // url または "YYYY-MM-DD"
+  itemDate       DateTime? // 導出時点のスナップショット（表示・連続日付導出用）
+  itemTitle      String? // 表示用スナップショット
+  note           String?
+  classification ClearanceLevel @default(internal)
+  checkedById    String?
+  checkedAt      DateTime       @default(now())
+
+  @@unique([lensId, dataSourceId, itemKey])
+  @@index([dataSourceId, itemDate])
   @@index([classification])
 }
