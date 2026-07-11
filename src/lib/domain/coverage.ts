@@ -35,9 +35,14 @@ export function parseDateOnly(s: string | null | undefined): Date | null {
   return d;
 }
 
-/** 今日 (UTC) を Date(UTC 00:00) で返す。 */
+/** 今日 (JST) を Date(UTC 00:00) で返す。
+ * このプロダクトの日付ドメインは日本時間（ブログ日付・運用者とも JST）。
+ * UTC 基準だと JST 0〜9時の「今日まで反映」が前日を記録してしまう。
+ * 格納規約は従来どおり「YYYY-MM-DD の UTC 00:00」で不変。 */
 export function todayDateOnly(): Date {
-  return new Date(new Date().toISOString().slice(0, 10) + "T00:00:00.000Z");
+  // en-CA ロケールは YYYY-MM-DD 形式を返す
+  const jst = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(new Date());
+  return new Date(jst + "T00:00:00.000Z");
 }
 
 // ============================================================
