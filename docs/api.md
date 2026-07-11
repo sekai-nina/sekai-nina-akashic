@@ -42,7 +42,7 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 | POST | `/assets` | write | アセット作成 |
 | GET | `/assets/:id` | read | アセット詳細 |
 | PATCH | `/assets/:id` | write | アセット更新 |
-| GET | `/assets/:id/thumbnail` | **なし** | サムネイルへ 302 リダイレクト（`<img>` 埋め込み用。id=cuid が実質の鍵） |
+| GET | `/assets/:id/thumbnail` | セッション or read | サムネイルへ 302 リダイレクト（`<img>` 埋め込み用。同一オリジンの `<img>` はセッション cookie で通る。clearance の RLS 適用） |
 | GET | `/assets/search` | read | 全文検索 |
 | GET | `/entities` | read | エンティティ一覧・検索 |
 | POST | `/entities` | write | エンティティ作成 |
