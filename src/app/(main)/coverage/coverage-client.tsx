@@ -741,19 +741,25 @@ function DataSourceRow({ ds, canEdit }: { ds: DataSource; canEdit: boolean }) {
             </option>
           ))}
         </select>
-        <label className={labelCls}>publisherPattern（SourceRecord.publisher への SQL LIKE・空=不問）</label>
+        <label className={labelCls}>
+          publisherPattern（SourceRecord.publisher への SQL LIKE・空=不問・
+          <code>|</code> で複数パターン（OR））
+        </label>
         <input
           className={inputCls}
           value={publisherPattern}
           onChange={(e) => setPublisherPattern(e.target.value)}
-          placeholder="例: 日向坂46公式ブログ"
+          placeholder="例: 日向坂46公式ブログ%（複数は EX大衆%|BRODY% のように | 区切り）"
         />
-        <label className={labelCls}>titlePattern（SourceRecord.title への SQL LIKE・空=不問）</label>
+        <label className={labelCls}>
+          titlePattern（SourceRecord.title への SQL LIKE・空=不問・
+          <code>|</code> で複数パターン（OR））
+        </label>
         <input
           className={inputCls}
           value={titlePattern}
           onChange={(e) => setTitlePattern(e.target.value)}
-          placeholder="例: %日向坂で会いましょう%"
+          placeholder="例: 日向坂ちゃんねる%（複数は #_ %|#__ % のように | 区切り）"
         />
         <div className="flex gap-4 mt-2">
           <label className="flex items-center gap-1.5 text-sm text-slate-700">

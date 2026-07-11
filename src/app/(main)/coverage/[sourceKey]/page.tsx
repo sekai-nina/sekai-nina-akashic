@@ -13,7 +13,7 @@ export default async function ItemListPage({
   searchParams,
 }: {
   params: Promise<{ sourceKey: string }>;
-  searchParams: Promise<{ lens?: string; order?: string; page?: string }>;
+  searchParams: Promise<{ lens?: string; order?: string; page?: string; mentions?: string }>;
 }) {
   const session = await auth();
   if (!session?.user) notFound();
@@ -37,6 +37,17 @@ export default async function ItemListPage({
       ? sp.lens
       : (lenses[0]?.key ?? null);
 
+  // 言及フィルタ: url 系のみ有効。ブログは既定 ON（母集団の大半が無関係なため）。
+  // ページ URL では mentions=1（言及ありのみ）/ mentions=0（全件表示）の2状態のみ使う。
+  const mentionApplicable =
+    source.itemRule === "blog_url" || source.itemRule === "source_url";
+  let mentions: boolean | undefined;
+  if (mentionApplicable) {
+    if (sp.mentions === "1") mentions = true;
+    else if (sp.mentions === "0") mentions = undefined;
+    else mentions = source.key === "blog" ? true : undefined; // 既定
+  }
+
   // 観点別進捗（このソースのセルから）
   const lensProgress: Record<
     string,
@@ -52,7 +63,12 @@ export default async function ItemListPage({
   }
 
   // アイテム行（lens 未指定 = 全観点の checkedLensKeys 付き。行展開に必要）
-  const items = await listItems(sourceKey, { order, page, pageSize }, clearance);
+  // 言及フィルタは母集団を絞るためサーバー側で適用（total/ページングに反映）。
+  const items = await listItems(
+    sourceKey,
+    { order, page, pageSize, mentions },
+    { id: session.user.id, clearance }
+  );
 
   return (
     <div className="max-w-full">
@@ -63,6 +79,7 @@ export default async function ItemListPage({
           itemRule: source.itemRule,
           totalItems: source.totalItems,
           public: source.public,
+          mentionApplicable,
         }}
         lenses={lenses.map((l) => ({ key: l.key, name: l.name }))}
         lensProgress={lensProgress}
@@ -72,6 +89,7 @@ export default async function ItemListPage({
         page={items.page}
         pageSize={items.pageSize}
         total={items.total}
+        mentionOn={mentions === true}
         canEdit={canEdit}
       />
     </div>

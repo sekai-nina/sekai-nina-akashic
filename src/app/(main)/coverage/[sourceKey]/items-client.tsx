@@ -13,6 +13,7 @@ interface SourceMeta {
   itemRule: ItemRule;
   totalItems: number;
   public: boolean;
+  mentionApplicable: boolean;
 }
 
 interface LensMeta {
@@ -21,12 +22,6 @@ interface LensMeta {
 }
 
 type Progress = { checked: number; total: number; continuousUntil: string | null };
-
-/** "YYYY-MM-DD" -> "M/D" */
-function shortDate(dateStr: string): string {
-  const [, m, d] = dateStr.split("-");
-  return `${Number(m)}/${Number(d)}`;
-}
 
 export function ItemListClient({
   source,
@@ -38,6 +33,7 @@ export function ItemListClient({
   page,
   pageSize,
   total,
+  mentionOn,
   canEdit,
 }: {
   source: SourceMeta;
@@ -49,6 +45,7 @@ export function ItemListClient({
   page: number;
   pageSize: number;
   total: number;
+  mentionOn: boolean;
   canEdit: boolean;
 }) {
   const router = useRouter();
@@ -67,11 +64,20 @@ export function ItemListClient({
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const sel = selectedLensKey;
   const selProgress = sel ? progress[sel] : undefined;
+  const isTalk = source.itemRule === "talk_date";
 
-  function nav(next: { lens?: string; order?: "asc" | "desc"; page?: number }) {
+  function nav(next: {
+    lens?: string;
+    order?: "asc" | "desc";
+    page?: number;
+    mentions?: boolean;
+  }) {
     const p = new URLSearchParams();
     p.set("lens", next.lens ?? sel ?? "");
     p.set("order", next.order ?? order);
+    // 言及フィルタは URL パラメータ（母集団を絞るためサーバー側で適用）
+    const nextMentions = next.mentions ?? mentionOn;
+    if (source.mentionApplicable) p.set("mentions", nextMentions ? "1" : "0");
     if (next.page && next.page > 1) p.set("page", String(next.page));
     router.push(`/coverage/${source.key}?${p.toString()}`);
   }
@@ -117,17 +123,17 @@ export function ItemListClient({
     }
   }
 
-  async function bulk(item: ItemDTO, scope: "one" | "all") {
+  /** scope: この観点 / 全観点。onlyMentionless: 言及なしのみを対象に一括✓ */
+  async function bulk(item: ItemDTO, scope: "one" | "all", onlyMentionless = false) {
     if (!canEdit || !item.itemDate) return;
     const lensKeys = scope === "one" ? (sel ? [sel] : []) : lenses.map((l) => l.key);
     if (lensKeys.length === 0) return;
     const label =
-      scope === "one"
-        ? `「${lenses.find((l) => l.key === sel)?.name ?? sel}」`
-        : "全観点";
+      scope === "one" ? `「${lenses.find((l) => l.key === sel)?.name ?? sel}」` : "全観点";
+    const kind = onlyMentionless ? "言及なしの全アイテム" : "全アイテム";
     if (
       !confirm(
-        `${item.itemDate} 以前の全アイテム（${source.name}）を ${label} でチェック済みにします。よろしいですか？`
+        `${item.itemDate} 以前の${kind}（${source.name}）を ${label} でチェック済みにします。よろしいですか？`
       )
     )
       return;
@@ -136,11 +142,14 @@ export function ItemListClient({
       dataSourceKey: source.key,
       lensKeys,
       untilDate: item.itemDate,
+      onlyMentionless,
     });
     if (!res.ok) {
       setMsg(`エラー: ${res.error}`);
     } else {
-      setMsg(`${label}: ${res.result.created} 件をチェック済みにしました`);
+      setMsg(
+        `${label}${onlyMentionless ? "・言及なし" : ""}: ${res.result.created} 件をチェック済みにしました`
+      );
       startTransition(() => router.refresh());
     }
   }
@@ -213,6 +222,16 @@ export function ItemListClient({
                 )}
               </span>
             )}
+            {source.mentionApplicable && (
+              <label className="flex items-center gap-1.5 text-slate-600 text-xs">
+                <input
+                  type="checkbox"
+                  checked={mentionOn}
+                  onChange={(e) => nav({ mentions: e.target.checked, page: 1 })}
+                />
+                坂井新奈に言及あり
+              </label>
+            )}
             <button
               onClick={() => nav({ order: order === "asc" ? "desc" : "asc", page: 1 })}
               className="px-2 py-1 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-100 text-xs"
@@ -236,41 +255,97 @@ export function ItemListClient({
             {visibleItems.map((item) => {
               const checkedSel = sel ? isChecked(item, sel) : false;
               const isOpen = expanded.has(item.itemKey);
+              const dossiers = item.dossiers ?? [];
+              const assets = item.assets ?? [];
+              const excerpts = item.excerpts ?? [];
+              const extraAssets = (item.assetCount ?? assets.length) - assets.length;
               return (
-                <li
-                  key={item.itemKey}
-                  className={!checkedSel && sel ? "bg-amber-50/40" : ""}
-                >
-                  <div className="flex items-center gap-2 px-3 py-2">
+                <li key={item.itemKey} className={!checkedSel && sel ? "bg-amber-50/40" : ""}>
+                  <div className="flex items-start gap-2 px-3 py-2">
                     {sel && (
                       <input
                         type="checkbox"
                         checked={checkedSel}
                         disabled={!canEdit}
                         onChange={(e) => toggle(item, sel, e.target.checked)}
-                        className="shrink-0"
+                        className="shrink-0 mt-1"
                         title={`${sel} でチェック`}
                       />
                     )}
-                    <div className="w-16 shrink-0 text-xs text-slate-500 tabular-nums">
+                    <div className="w-16 shrink-0 text-xs text-slate-500 tabular-nums mt-0.5">
                       {item.itemDate ?? "―"}
                     </div>
                     <div className="min-w-0 flex-1">
-                      {item.isUrl ? (
-                        <a
-                          href={item.itemKey}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-sm text-slate-800 hover:text-slate-950 hover:underline truncate block"
-                        >
-                          {item.itemTitle || item.itemKey}
-                        </a>
-                      ) : (
-                        <span className="text-sm text-slate-800 truncate block">
-                          {item.itemTitle || item.itemKey}
-                        </span>
+                      <div className="flex items-center gap-1.5">
+                        {item.isUrl ? (
+                          <a
+                            href={item.itemKey}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-sm text-slate-800 hover:text-slate-950 hover:underline truncate"
+                          >
+                            {item.itemTitle || item.itemKey}
+                          </a>
+                        ) : (
+                          <span className="text-sm text-slate-800 truncate">
+                            {item.itemTitle || item.itemKey}
+                          </span>
+                        )}
+                        {source.mentionApplicable && item.mentions && (
+                          <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700 font-medium">
+                            言及
+                          </span>
+                        )}
+                      </div>
+
+                      {/* 抜粋スニペット（url=一致箇所ハイライト / talk=先頭プレビュー） */}
+                      {excerpts.length > 0 && (
+                        <div className="mt-1 space-y-0.5">
+                          {excerpts.map((ex, i) => (
+                            <p
+                              key={i}
+                              className="text-[11px] leading-snug text-slate-500 [&_mark]:bg-amber-200 [&_mark]:text-slate-900 [&_mark]:rounded [&_mark]:px-0.5"
+                              dangerouslySetInnerHTML={{ __html: ex }}
+                            />
+                          ))}
+                        </div>
+                      )}
+
+                      {/* ドシエバッジ・アセット導線 */}
+                      {(dossiers.length > 0 || assets.length > 0) && (
+                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                          {dossiers.map((d) => (
+                            <Link
+                              key={d.id}
+                              href={`/dossiers/${d.id}`}
+                              className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100 truncate max-w-[16rem]"
+                              title={`ドシエ: ${d.title}`}
+                            >
+                              📋 {d.title}
+                            </Link>
+                          ))}
+                          {assets.length > 0 && (
+                            <span className="text-[10px] text-slate-400">
+                              アセット:
+                              {assets.map((a) => (
+                                <Link
+                                  key={a.id}
+                                  href={`/assets/${a.id}`}
+                                  className="ml-1 text-slate-500 hover:text-slate-800 hover:underline"
+                                  title={a.kind}
+                                >
+                                  {a.kind}
+                                </Link>
+                              ))}
+                              {extraAssets > 0 && (
+                                <span className="ml-1 text-slate-400">+{extraAssets}</span>
+                              )}
+                            </span>
+                          )}
+                        </div>
                       )}
                     </div>
+
                     <button
                       onClick={() =>
                         setExpanded((prev) => {
@@ -280,7 +355,7 @@ export function ItemListClient({
                           return next;
                         })
                       }
-                      className="shrink-0 text-xs text-slate-400 hover:text-slate-700 px-1"
+                      className="shrink-0 text-xs text-slate-400 hover:text-slate-700 px-1 mt-0.5"
                       title="全観点を展開"
                     >
                       {isOpen ? "▾" : "▸"}
@@ -321,6 +396,23 @@ export function ItemListClient({
                           >
                             ここまで全部✓（全観点）
                           </button>
+                          {source.mentionApplicable && (
+                            <>
+                              <button
+                                onClick={() => bulk(item, "one", true)}
+                                disabled={!sel}
+                                className="text-xs px-2 py-1 rounded-md border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+                              >
+                                言及なしをここまで✓（この観点）
+                              </button>
+                              <button
+                                onClick={() => bulk(item, "all", true)}
+                                className="text-xs px-2 py-1 rounded-md border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                              >
+                                言及なしをここまで✓（全観点）
+                              </button>
+                            </>
+                          )}
                         </div>
                       )}
                     </div>
