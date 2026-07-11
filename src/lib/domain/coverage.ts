@@ -301,19 +301,25 @@ async function deriveItems(
 
   let rows: DerivedItem[];
 
+  // 日付バケットは JST 基準。canonicalDate/publishedAt は「UTC 実時刻の naive timestamp」で
+  // 保存されているため、素の ::date（=UTC日付）だと JST 0〜9時のデータが前日に落ちる
+  // （実測: トーク26,794件中1,515件≒5.7%がずれる）。AT TIME ZONE で JST の壁時計に直してから date 化する。
   if (ds.itemRule === "talk_date") {
     const conds: Prisma.Sql[] = [Prisma.sql`a."canonicalDate" IS NOT NULL`];
     if (ds.publisherPattern) conds.push(Prisma.sql`sr.publisher LIKE ${ds.publisherPattern}`);
     if (ds.titlePattern) conds.push(Prisma.sql`sr.title LIKE ${ds.titlePattern}`);
-    if (onlyKeys) conds.push(Prisma.sql`(a."canonicalDate"::date)::text = ANY(${onlyKeys})`);
+    if (onlyKeys)
+      conds.push(
+        Prisma.sql`(((a."canonicalDate" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Tokyo')::date)::text = ANY(${onlyKeys})`
+      );
     rows = await tx.$queryRaw<DerivedItem[]>`
-      SELECT (a."canonicalDate"::date)::text AS "itemKey",
-             a."canonicalDate"::date         AS "itemDate",
-             NULL::text                      AS "itemTitle"
+      SELECT (((a."canonicalDate" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Tokyo')::date)::text AS "itemKey",
+             ((a."canonicalDate" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Tokyo')::date         AS "itemDate",
+             NULL::text                                                                       AS "itemTitle"
       FROM "Asset" a
       JOIN "SourceRecord" sr ON sr."assetId" = a.id
       WHERE ${Prisma.join(conds, " AND ")}
-      GROUP BY a."canonicalDate"::date
+      GROUP BY ((a."canonicalDate" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Tokyo')::date
     `;
     for (const r of rows) r.itemTitle = `トーク ${r.itemKey}`;
   } else {
@@ -324,7 +330,7 @@ async function deriveItems(
     if (onlyKeys) conds.push(Prisma.sql`sr.url = ANY(${onlyKeys})`);
     rows = await tx.$queryRaw<DerivedItem[]>`
       SELECT sr.url                                                  AS "itemKey",
-             MIN(COALESCE(a."canonicalDate", sr."publishedAt"))::date AS "itemDate",
+             ((MIN(COALESCE(a."canonicalDate", sr."publishedAt")) AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Tokyo')::date AS "itemDate",
              MAX(NULLIF(sr.title, ''))                               AS "itemTitle"
       FROM "SourceRecord" sr
       JOIN "Asset" a ON a.id = sr."assetId"
