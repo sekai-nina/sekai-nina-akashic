@@ -30,6 +30,17 @@ export type TransactionClient = Parameters<
 >[0];
 
 /**
+ * Interactive transaction options. Prisma の既定タイムアウトは 5000ms で、
+ * ローカル→Supabase のレイテンシ込みの重い集約（例: ブログ導出 13.9k SourceRecord）で
+ * P2028 (Transaction already closed) になるため、既定を 15s に引き上げる。
+ */
+export interface TxOptions {
+  timeout?: number; // ms
+}
+
+const DEFAULT_TX_TIMEOUT_MS = 15_000;
+
+/**
  * Execute a function within a transaction with RLS clearance set.
  * All queries through `tx` will be filtered by the user's clearance level.
  *
@@ -38,12 +49,16 @@ export type TransactionClient = Parameters<
  */
 export async function withClearance<T>(
   clearance: string,
-  fn: (tx: TransactionClient) => Promise<T>
+  fn: (tx: TransactionClient) => Promise<T>,
+  opts?: TxOptions
 ): Promise<T> {
-  return basePrisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT set_config('app.clearance', ${clearance}, true)`;
-    return fn(tx);
-  });
+  return basePrisma.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.clearance', ${clearance}, true)`;
+      return fn(tx);
+    },
+    { timeout: opts?.timeout ?? DEFAULT_TX_TIMEOUT_MS }
+  );
 }
 
 /**
@@ -54,13 +69,17 @@ export async function withClearance<T>(
  */
 export async function withSession<T>(
   user: { id: string; clearance: string },
-  fn: (tx: TransactionClient) => Promise<T>
+  fn: (tx: TransactionClient) => Promise<T>,
+  opts?: TxOptions
 ): Promise<T> {
-  return basePrisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT set_config('app.user_id', ${user.id}, true)`;
-    await tx.$executeRaw`SELECT set_config('app.clearance', ${user.clearance}, true)`;
-    return fn(tx);
-  });
+  return basePrisma.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.user_id', ${user.id}, true)`;
+      await tx.$executeRaw`SELECT set_config('app.clearance', ${user.clearance}, true)`;
+      return fn(tx);
+    },
+    { timeout: opts?.timeout ?? DEFAULT_TX_TIMEOUT_MS }
+  );
 }
 
 export const prisma = basePrisma;

@@ -14,6 +14,7 @@
  */
 
 import { ClearanceLevel, CoverageStatus, DataSourceKind, ItemRule, Prisma } from "@prisma/client";
+import { unstable_cache } from "next/cache";
 import { withClearance, type TransactionClient } from "@/lib/db";
 import { logAudit } from "./audit";
 import { getSourceMentionKeys } from "./coverage-items";
@@ -393,6 +394,61 @@ export function itemRuleIsUrl(rule: ItemRule): boolean {
   return rule === "blog_url" || rule === "source_url";
 }
 
+// ============================================================
+// 導出キャッシュ (getDerivedItems)
+// ============================================================
+
+/** unstable_cache は JSON シリアライズするため Date を文字列で保持する内部形。 */
+interface SerializedDerivedItem {
+  itemKey: string;
+  itemDate: string | null; // YYYY-MM-DD
+  itemTitle: string | null;
+}
+
+/** 自前の小さい withClearance tx で1ソース分だけ導出する（大きい tx に相乗りしない）。 */
+async function computeDerivedItemsSerialized(
+  sourceKey: string,
+  clearance: string
+): Promise<SerializedDerivedItem[]> {
+  return withClearance(clearance, async (tx) => {
+    const ds = await tx.dataSource.findUnique({ where: { key: sourceKey } });
+    if (!ds) return [];
+    const items = await deriveItems(tx, ds);
+    return items.map((i) => ({
+      itemKey: i.itemKey,
+      itemDate: toDateOnlyString(i.itemDate),
+      itemTitle: i.itemTitle,
+    }));
+  });
+}
+
+/**
+ * ソースの導出アイテムをキャッシュ付きで返す（v2.2 P2028 対策）。
+ *
+ * ブログ導出（13.9k SourceRecord の集約）はローカル→Supabase のレイテンシ込みで
+ * Prisma interactive tx の既定 5s を超えうるため、導出は**キャッシュ付きの独立した
+ * 小さいトランザクション**で実行し、buildMatrix / listItems の tx には相乗りさせない。
+ * チェック操作でアイテム集合は変わらないので invalidate は TTL（90秒）任せで十分。
+ * key は source×clearance（RLS の見え方が clearance で変わるため）。
+ */
+export async function getDerivedItems(
+  sourceKey: string,
+  clearance: string
+): Promise<DerivedItem[]> {
+  const cached = unstable_cache(
+    () => computeDerivedItemsSerialized(sourceKey, clearance),
+    ["coverage-derived-items", sourceKey, clearance],
+    { revalidate: 90, tags: ["coverage-derived-items"] }
+  );
+  const rows = await cached();
+  // キャッシュ経由は JSON 化されるので Date に復元する
+  return rows.map((r) => ({
+    itemKey: r.itemKey,
+    itemDate: parseDateOnly(r.itemDate),
+    itemTitle: r.itemTitle,
+  }));
+}
+
 /**
  * 「この日まで全部見た」と言える導出日付。
  * itemDate 昇順で見て、最古の未チェックの直前のアイテムの日付。
@@ -473,43 +529,57 @@ interface BuiltMatrix {
  * lens / dataSource / 導出アイテム / チェックを N+1 無しで集めてセル導出値を組む。
  * 導出は「ソース別に1回」（≤ ソース数）、チェックは「全体1回」の集約。
  * セル単位のクエリは発行しない（設計書 §4）。
+ *
+ * P2028 対策: 以前は全ソースの導出を1つの withClearance tx 内で直列実行しており、
+ * ブログ導出だけで interactive tx の既定 5s を超えることがあった。現在は
+ * 「メタ＋チェック集計」だけを小さい tx で取り、導出はソースごとに
+ * getDerivedItems（キャッシュ付き独立トランザクション）を並列で呼ぶ。
  */
 async function buildMatrix(
-  tx: TransactionClient,
+  clearance: string,
   options: { publicOnly?: boolean } = {}
 ): Promise<BuiltMatrix> {
   const { publicOnly = false } = options;
 
-  const [lenses, dataSources, coverages] = await Promise.all([
-    tx.lens.findMany({
-      where: publicOnly ? { public: true, active: true } : {},
-      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-    }),
-    tx.dataSource.findMany({
-      where: publicOnly ? { public: true, active: true } : {},
-      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-    }),
-    tx.coverage.findMany({
-      include: { lens: { select: { key: true } }, dataSource: { select: { key: true } } },
-    }),
-  ]);
+  // 1) メタ＋チェック集計（速いクエリのみの小さい tx）
+  const { lenses, dataSources, coverages, checks } = await withClearance(
+    clearance,
+    async (tx) => {
+      const [lenses, dataSources, coverages] = await Promise.all([
+        tx.lens.findMany({
+          where: publicOnly ? { public: true, active: true } : {},
+          orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+        }),
+        tx.dataSource.findMany({
+          where: publicOnly ? { public: true, active: true } : {},
+          orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+        }),
+        tx.coverage.findMany({
+          include: { lens: { select: { key: true } }, dataSource: { select: { key: true } } },
+        }),
+      ]);
 
-  // ソース別にアイテム導出（≤ ソース数のクエリ。manual は即空）
+      // チェックは全体1回。(lensId:dataSourceId) 別に itemKey 集合＋最終チェック時刻を集約。
+      const lensIds = lenses.map((l) => l.id);
+      const dsIds = dataSources.map((d) => d.id);
+      const checks =
+        lensIds.length && dsIds.length
+          ? await tx.lensItemCheck.findMany({
+              where: { lensId: { in: lensIds }, dataSourceId: { in: dsIds } },
+              select: { lensId: true, dataSourceId: true, itemKey: true, checkedAt: true },
+            })
+          : [];
+
+      return { lenses, dataSources, coverages, checks };
+    }
+  );
+
+  // 2) ソース別にアイテム導出（各ソース = キャッシュ付き独立 tx。並列）
+  const derivedLists = await Promise.all(
+    dataSources.map((ds) => getDerivedItems(ds.key, clearance))
+  );
   const derivedBySource = new Map<string, DerivedItem[]>();
-  for (const ds of dataSources) {
-    derivedBySource.set(ds.id, await deriveItems(tx, ds));
-  }
-
-  // チェックは全体1回。(lensId:dataSourceId) 別に itemKey 集合＋最終チェック時刻を集約。
-  const lensIds = lenses.map((l) => l.id);
-  const dsIds = dataSources.map((d) => d.id);
-  const checks =
-    lensIds.length && dsIds.length
-      ? await tx.lensItemCheck.findMany({
-          where: { lensId: { in: lensIds }, dataSourceId: { in: dsIds } },
-          select: { lensId: true, dataSourceId: true, itemKey: true, checkedAt: true },
-        })
-      : [];
+  dataSources.forEach((ds, i) => derivedBySource.set(ds.id, derivedLists[i]));
 
   const checkMap = new Map<string, { keys: Set<string>; last: Date | null }>();
   for (const c of checks) {
@@ -564,40 +634,38 @@ export async function getMatrix(
   clearance: string,
   options: { publicOnly?: boolean } = {}
 ): Promise<CoverageMatrixDTO> {
-  return withClearance(clearance, async (tx) => {
-    const built = await buildMatrix(tx, options);
-    const totalBySource = new Map<string, number>();
-    for (const [dsId, items] of built.derivedBySource) totalBySource.set(dsId, items.length);
+  const built = await buildMatrix(clearance, options);
+  const totalBySource = new Map<string, number>();
+  for (const [dsId, items] of built.derivedBySource) totalBySource.set(dsId, items.length);
 
-    return {
-      lenses: built.lenses.map((l) => ({
-        id: l.id,
-        key: l.key,
-        name: l.name,
-        description: l.description,
-        sortOrder: l.sortOrder,
-        active: l.active,
-        public: l.public,
-        classification: l.classification,
-      })),
-      dataSources: built.dataSources.map((d) => ({
-        id: d.id,
-        key: d.key,
-        name: d.name,
-        kind: d.kind,
-        description: d.description,
-        sortOrder: d.sortOrder,
-        active: d.active,
-        public: d.public,
-        classification: d.classification,
-        itemRule: d.itemRule,
-        publisherPattern: d.publisherPattern,
-        titlePattern: d.titlePattern,
-        totalItems: totalBySource.get(d.id) ?? 0,
-      })),
-      cells: built.cells,
-    };
-  });
+  return {
+    lenses: built.lenses.map((l) => ({
+      id: l.id,
+      key: l.key,
+      name: l.name,
+      description: l.description,
+      sortOrder: l.sortOrder,
+      active: l.active,
+      public: l.public,
+      classification: l.classification,
+    })),
+    dataSources: built.dataSources.map((d) => ({
+      id: d.id,
+      key: d.key,
+      name: d.name,
+      kind: d.kind,
+      description: d.description,
+      sortOrder: d.sortOrder,
+      active: d.active,
+      public: d.public,
+      classification: d.classification,
+      itemRule: d.itemRule,
+      publisherPattern: d.publisherPattern,
+      titlePattern: d.titlePattern,
+      totalItems: totalBySource.get(d.id) ?? 0,
+    })),
+    cells: built.cells,
+  };
 }
 
 // ============================================================
@@ -915,68 +983,66 @@ export interface CoverageSummaryDTO {
  * - 対象ソースが1つも無い Lens は含めない
  */
 export async function getSummary(clearance: string): Promise<CoverageSummaryDTO> {
-  return withClearance(clearance, async (tx) => {
-    const built = await buildMatrix(tx, { publicOnly: true });
+  const built = await buildMatrix(clearance, { publicOnly: true });
 
-    const dsById = new Map(built.dataSources.map((d) => [d.id, d]));
-    const cellsByLens = new Map<string, CoverageCellDTO[]>();
-    for (const cell of built.cells) {
-      const arr = cellsByLens.get(cell.lensId) ?? [];
-      arr.push(cell);
-      cellsByLens.set(cell.lensId, arr);
-    }
+  const dsById = new Map(built.dataSources.map((d) => [d.id, d]));
+  const cellsByLens = new Map<string, CoverageCellDTO[]>();
+  for (const cell of built.cells) {
+    const arr = cellsByLens.get(cell.lensId) ?? [];
+    arr.push(cell);
+    cellsByLens.set(cell.lensId, arr);
+  }
 
-    const resultLenses = built.lenses
-      .map((l) => {
-        const cells = (cellsByLens.get(l.id) ?? []).filter(
-          (c) => c.status !== "not_applicable" && c.totalItems > 0
-        );
-        if (cells.length === 0) return null;
+  const resultLenses = built.lenses
+    .map((l) => {
+      const cells = (cellsByLens.get(l.id) ?? []).filter(
+        (c) => c.status !== "not_applicable" && c.totalItems > 0
+      );
+      if (cells.length === 0) return null;
 
-        const sources = cells
-          .map((c) => {
-            const ds = dsById.get(c.dataSourceId)!;
-            return {
-              key: c.dataSourceKey,
-              name: ds.name,
-              sortOrder: ds.sortOrder,
-              continuousUntil: c.continuousUntil,
-              checked: c.checkedItems,
-              total: c.totalItems,
-            };
-          })
-          .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+      const sources = cells
+        .map((c) => {
+          const ds = dsById.get(c.dataSourceId)!;
+          return {
+            key: c.dataSourceKey,
+            name: ds.name,
+            sortOrder: ds.sortOrder,
+            continuousUntil: c.continuousUntil,
+            checked: c.checkedItems,
+            total: c.totalItems,
+          };
+        })
+        .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
 
-        // 最も遅れているソース: null があれば null、無ければ最小の日付
-        let minContinuousUntil: string | null = sources[0].continuousUntil;
-        for (const s of sources) {
-          if (s.continuousUntil === null) {
-            minContinuousUntil = null;
-            break;
-          }
-          if (minContinuousUntil !== null && s.continuousUntil < minContinuousUntil) {
-            minContinuousUntil = s.continuousUntil;
-          }
+      // 最も遅れているソース: null があれば null、無ければ最小の日付
+      let minContinuousUntil: string | null = sources[0].continuousUntil;
+      for (const s of sources) {
+        if (s.continuousUntil === null) {
+          minContinuousUntil = null;
+          break;
         }
+        if (minContinuousUntil !== null && s.continuousUntil < minContinuousUntil) {
+          minContinuousUntil = s.continuousUntil;
+        }
+      }
 
-        return {
-          key: l.key,
-          name: l.name,
-          sources: sources.map((s) => ({
-            key: s.key,
-            name: s.name,
-            continuousUntil: s.continuousUntil,
-            checked: s.checked,
-            total: s.total,
-          })),
-          minContinuousUntil,
-        };
-      })
-      .filter((x): x is NonNullable<typeof x> => x !== null);
+      return {
+        key: l.key,
+        name: l.name,
+        sources: sources.map((s) => ({
+          key: s.key,
+          name: s.name,
+          continuousUntil: s.continuousUntil,
+          checked: s.checked,
+          total: s.total,
+        })),
+        minContinuousUntil,
+      };
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null);
 
-    return {
-      generatedAt: new Date().toISOString(),
-      lenses: resultLenses,
-    };
-  });
+  return {
+    generatedAt: new Date().toISOString(),
+    lenses: resultLenses,
+  };
 }

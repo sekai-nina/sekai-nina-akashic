@@ -22,7 +22,7 @@ import { ItemRule, Prisma } from "@prisma/client";
 import { unstable_cache } from "next/cache";
 import { withClearance, withSession, type TransactionClient } from "@/lib/db";
 import {
-  deriveItems,
+  getDerivedItems,
   itemRuleIsUrl,
   sourcePatternConds,
   toDateOnlyString,
@@ -102,7 +102,11 @@ async function getNinaEntity(tx: TransactionClient): Promise<NinaEntity | null> 
 // ============================================================
 
 async function computeSourceMentionKeys(clearance: string, sourceKey: string): Promise<string[]> {
-  return withClearance(clearance, async (tx) => {
+  // AssetText 全体への ILIKE スキャン（一致語 16 種 OR）はソースが大きいと重いので
+  // 独立 tx ＋ 30s タイムアウト（db.ts 既定 15s のさらに上）で流す。結果はキャッシュされる。
+  return withClearance(
+    clearance,
+    async (tx) => {
     const ds = await tx.dataSource.findUnique({ where: { key: sourceKey } });
     if (!ds || !itemRuleIsUrl(ds.itemRule)) return [];
     const entity = await getNinaEntity(tx);
@@ -137,7 +141,9 @@ async function computeSourceMentionKeys(clearance: string, sourceKey: string): P
     for (const r of aRows) set.add(r.itemKey);
     for (const r of bRows) set.add(r.itemKey);
     return Array.from(set);
-  });
+    },
+    { timeout: 30_000 }
+  );
 }
 
 /**
@@ -374,7 +380,10 @@ async function enrichPageItems(
  * ソースのアイテム一覧を返す（トリアージ・エンリッチ込み）。
  * lensKey 指定時は当該観点の checked フラグと checked フィルタ、省略時は全観点の
  * checkedLensKeys を各アイテムに付ける（アイテム起点ビュー）。昇順が既定。
- * ドシエの owner ベース RLS のため withSession（app.user_id 付き）で実行する。
+ *
+ * P2028 対策: 導出（重い集約）は getDerivedItems（キャッシュ付き独立 tx）から取り、
+ * withSession の tx 内では「チェック取得＋ページ分のエンリッチ」だけを行う。
+ * withSession（app.user_id 付き）なのはドシエの owner ベース RLS のため。
  */
 export async function listItems(
   sourceKey: string,
@@ -385,8 +394,12 @@ export async function listItems(
   const page = Math.max(1, opts.page ?? 1);
   const pageSize = Math.min(500, Math.max(1, opts.pageSize ?? 100));
 
-  // ソース全体の言及ありキー（url 系のみ非空・数分キャッシュ）。母集団フィルタと行バッジで共有。
-  const mentionSet = new Set(await getSourceMentionKeys(sourceKey, actor.clearance));
+  // ソース全体の言及ありキー（url 系のみ非空）と導出アイテム。どちらもキャッシュ付き独立 tx。
+  const [mentionKeyArr, derived] = await Promise.all([
+    getSourceMentionKeys(sourceKey, actor.clearance),
+    getDerivedItems(sourceKey, actor.clearance),
+  ]);
+  const mentionSet = new Set(mentionKeyArr);
 
   return withSession(actor, async (tx) => {
     const ds = await tx.dataSource.findUnique({ where: { key: sourceKey } });
@@ -398,8 +411,6 @@ export async function listItems(
 
     const mentionOf = (key: string): boolean | undefined =>
       mentionApplicable ? mentionSet.has(key) : isTalk ? true : undefined;
-
-    const derived = await deriveItems(tx, ds);
 
     // 言及フィルタ（母集団を絞る。url 系のみ）
     let filtered: DerivedItem[] = derived;
