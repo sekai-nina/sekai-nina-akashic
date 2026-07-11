@@ -46,6 +46,15 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 | GET | `/entities` | read | エンティティ一覧・検索 |
 | POST | `/entities` | write | エンティティ作成 |
 | POST | `/upload` | write | ファイルアップロード |
+| GET | `/lenses` | read | 観点一覧 |
+| POST | `/lenses` | write | 観点作成 |
+| PATCH | `/lenses/:id` | write | 観点更新 |
+| GET | `/datasources` | read | データソース一覧 |
+| POST | `/datasources` | write | データソース作成 |
+| PATCH | `/datasources/:id` | write | データソース更新 |
+| GET | `/coverage` | read | カバレッジ・マトリクス |
+| PUT | `/coverage` | write | セル upsert |
+| GET | `/coverage/summary` | read | 公開サイト用の要約 |
 
 ---
 
@@ -431,6 +440,97 @@ curl -X POST http://localhost:3000/api/v1/upload \
 ```
 GET /assets/:id → response.thumbnailUrl または response.storageUrl を取得
 GET <そのパス> → 画像バイナリ
+```
+
+---
+
+## 収集カバレッジ (Coverage)
+
+観点 (Lens) × データソース (DataSource) ごとに「何日の分まで反映したか」(`collectedUntil`) を記録する。カーソルは日付1点 (`YYYY-MM-DD`) のみ。詳細は `docs/coverage-design.md` を参照。
+
+Lens / DataSource / Coverage の3テーブルはいずれも `classification` を持ち RLS が有効（他テーブルと同じ clearance ベース）。`public` は「公開サイトの鮮度表示に出すか」を表す別の関心事。
+
+### GET /lenses
+
+観点の一覧（`sortOrder` 昇順）。`active=false` も含む。
+
+```json
+[
+  {
+    "id": "cl...", "key": "food", "name": "食べたもの",
+    "description": "食べた・飲んだものの記録",
+    "sortOrder": 50, "active": true, "public": true,
+    "classification": "internal",
+    "createdAt": "...", "updatedAt": "..."
+  }
+]
+```
+
+### POST /lenses
+
+**ボディ:** `key`（必須・作成後変更不可・`^[a-z][a-z0-9_]*$`）, `name`（必須）, `description`, `sortOrder`, `public`, `classification`。
+
+### PATCH /lenses/:id
+
+`name` / `description` / `sortOrder` / `active` / `public` / `classification` を更新。`key` は変更不可（無視）。DELETE は無く、`active=false` で無効化する。
+
+### GET /datasources
+
+データソース一覧。フィールドは Lens に加えて `kind`（`blog` `talk` `tv` `youtube` `sns` `radio` `magazine` `live_event` `other`）。
+
+### POST /datasources
+
+**ボディ:** `key`（必須・不変）, `name`（必須）, `kind`（必須）, `description`, `sortOrder`, `public`, `classification`。
+
+### PATCH /datasources/:id
+
+`name` / `kind` / `description` / `sortOrder` / `active` / `public` / `classification` を更新。`key` は不変。
+
+### GET /coverage
+
+マトリクス全体（`lenses` / `dataSources` / `cells`）を返す。`?public=1` を付けると public かつ active な行・列のみに絞り、各セルの `note`（内部メモ）を除去する。
+
+```json
+{
+  "lenses": [ { "id": "...", "key": "food", "name": "食べたもの", "sortOrder": 50, "active": true, "public": true, "classification": "internal" } ],
+  "dataSources": [ { "id": "...", "key": "blog", "name": "公式ブログ", "kind": "blog", "sortOrder": 10, "active": true, "public": true, "classification": "internal" } ],
+  "cells": [
+    {
+      "id": "...", "lensId": "...", "dataSourceId": "...",
+      "lensKey": "food", "dataSourceKey": "blog",
+      "status": "tracked", "collectedUntil": "2026-06-25",
+      "note": "...", "updatedById": "...", "updatedAt": "..."
+    }
+  ]
+}
+```
+
+セルの状態: `tracked`（`collectedUntil` まで収集済み） / `not_applicable`（対象外・`collectedUntil` は常に null）。マトリクスに現れないセル（行なし）は「未着手」を表す。
+
+### PUT /coverage
+
+セルを upsert する（`lensKey` + `dataSourceKey` で特定）。
+
+**ボディ:** `lensKey`（必須）, `dataSourceKey`（必須）, `status`（`tracked` / `not_applicable`, 既定 `tracked`）, `collectedUntil`（`YYYY-MM-DD`）, `note`, `classification`。`status=not_applicable` のとき `collectedUntil` は強制的に null になる。監査は AuditLog `coverage.update` に記録。
+
+### GET /coverage/summary
+
+公開サイト用の要約（`note` なし）。public かつ active な Lens × DataSource の tracked セルのみ。`minCollectedUntil` はその観点で最も遅れているソースの日付。`not_applicable` と未着手は含めない。
+
+```json
+{
+  "generatedAt": "2026-07-12T...",
+  "lenses": [
+    {
+      "key": "food", "name": "食べたもの",
+      "sources": [
+        {"key": "blog", "name": "公式ブログ", "collectedUntil": "2026-06-25"},
+        {"key": "talk", "name": "トーク", "collectedUntil": "2026-05-30"}
+      ],
+      "minCollectedUntil": "2026-05-30"
+    }
+  ]
+}
 ```
 
 ---
