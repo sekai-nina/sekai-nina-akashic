@@ -980,7 +980,7 @@ export interface SetItemChecksResult {
 
 /**
  * 1アイテムを複数観点へ一括でチェック/解除する（v2.3 消化モードの
- * 「残りの観点は該当なし」と Undo トーストの実体。冪等）。
+ * 「残りの観点も確認済みにする」と Undo トーストの実体。冪等）。
  * checked=true: 導出スナップショットを1回取り、createMany skipDuplicates。
  * checked=false: 対象観点分を deleteMany（Undo 用）。
  */

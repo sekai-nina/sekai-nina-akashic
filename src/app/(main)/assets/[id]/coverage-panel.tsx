@@ -20,7 +20,7 @@ interface LensMeta {
 /**
  * アセットページ内の観点チェックパネル（v2.4）。
  * このアセットが属するカバレッジアイテム（ブログ記事 / トーク日 / 番組回）に対して、
- * 全アクティブ観点のチップと「残りの観点は該当なし」をその場で操作できる。
+ * 全アクティブ観点のチップと「残りの観点も確認済みにする」をその場で操作できる。
  * チェックは**アイテム単位**（このアセット単体ではなく記事/日の全体に付く）。
  * viewer は読み取り専用（チップ表示のみ）。
  */
@@ -167,7 +167,7 @@ export function AssetCoveragePanel({
                     className="text-[11px] px-2 py-0.5 rounded-full border border-slate-300 bg-slate-100 text-slate-600 hover:bg-slate-200 ml-1"
                     title="未チェックの観点をすべて✓"
                   >
-                    残りの観点は該当なし
+                    残りの観点も確認済みにする
                   </button>
                 )}
                 {complete && (

@@ -224,7 +224,7 @@ export function ItemListClient({
     }
   }
 
-  /** 消化モード:「残りの観点は該当なし」= 未チェック観点を一括✓して行を完了 */
+  /** 消化モード:「残りの観点も確認済みにする」= 未チェック観点を一括✓して行を完了 */
   async function checkRemaining(item: ItemDTO) {
     if (!canEdit) return;
     const set = new Set(checkedKeys(item));
@@ -614,7 +614,7 @@ export function ItemListClient({
                         </div>
                       )}
 
-                      {/* 消化モード: 全観点チップ常時表示＋「残りの観点は該当なし」 */}
+                      {/* 消化モード: 全観点チップ常時表示＋「残りの観点も確認済みにする」 */}
                       {mode === "digest" && (
                         <div className="mt-2 flex flex-wrap items-center gap-1">
                           {lenses.map((l) => {
@@ -644,7 +644,7 @@ export function ItemListClient({
                               className="text-[11px] px-2 py-0.5 rounded-full border border-slate-300 bg-slate-100 text-slate-600 hover:bg-slate-200 ml-1"
                               title="未チェックの観点をすべて✓して行を完了"
                             >
-                              残りの観点は該当なし
+                              残りの観点も確認済みにする
                             </button>
                           )}
                         </div>
