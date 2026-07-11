@@ -42,6 +42,7 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 | POST | `/assets` | write | アセット作成 |
 | GET | `/assets/:id` | read | アセット詳細 |
 | PATCH | `/assets/:id` | write | アセット更新 |
+| GET | `/assets/:id/thumbnail` | **なし** | サムネイルへ 302 リダイレクト（`<img>` 埋め込み用。id=cuid が実質の鍵） |
 | GET | `/assets/search` | read | 全文検索 |
 | GET | `/entities` | read | エンティティ一覧・検索 |
 | POST | `/entities` | write | エンティティ作成 |
@@ -528,7 +529,9 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 - `mentions`（boolean）— 坂井新奈への言及。判定 = (a) 所属アセットに坂井新奈への `AssetEntity` リンク **または** (b) 所属アセットの `AssetText` 本文が canonicalName/aliases に一致。talk は全件本人=`true`。言及集合はソース全体で導出し数分キャッシュする。
 - `excerpts`（string[]）— url 系は一致箇所の前後スニペット（最大3件・一致語を `<mark>` で囲む HTML 安全文字列）。talk は本文先頭プレビュー（最大2件・`messageBodyPreview`）。
 - `dossiers`（`{id,title}[]`）— アイテム所属アセットを含むドシエ（重複除去・`/dossiers/[id]` 導線用）。
-- `assets`（`{id,kind}[]`）＋ `assetCount`（number）— アイテム所属アセット（先頭数件＋総数・`/assets/[id]` 導線用）。
+- `repAsset`（`{id,kind} | null`）— 代表アセット（text 優先・日付順先頭）。タイトルの `/assets/[id]` リンク先（v2.3）。
+- `imageAssets`（`{id}[]`）＋ `imageAssetCount`（number）— サムネイル有りの画像アセット（先頭8件＋画像総数）。`GET /assets/[id]/thumbnail`（認証不要・302 リダイレクト）でサムネイルストリップを組む（v2.3）。
+- `assetCount`（number）— 所属アセット総数。
 
 「アイテム所属アセット」= url 系は同一 `SourceRecord.url` のアセット群、talk はその JST 日のトークアセット群。`source.mentionApplicable` は言及フィルタが有効か（url 系のみ `true`）。
 
@@ -542,7 +545,8 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
       "checkedLensKeys": ["food"], "mentions": true,
       "excerpts": ["…今日は<mark>にぃな</mark>とごはん…"],
       "dossiers": [{ "id": "...", "title": "2020-09-19 おでかけ" }],
-      "assets": [{ "id": "...", "kind": "text" }], "assetCount": 1
+      "repAsset": { "id": "...", "kind": "text" },
+      "imageAssets": [{ "id": "..." }], "imageAssetCount": 3, "assetCount": 4
     }
   ]
 }
@@ -556,7 +560,7 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 
 ### POST /coverage/checks/bulk
 
-範囲一括チェック。**ボディ:** `dataSourceKey`, `lensKeys[]`, `untilDate`（`YYYY-MM-DD`）, `onlyMentionless?`（boolean・既定 false）, `classification?`。`itemDate <= untilDate` の全導出アイテムを対象 lens すべてに `createMany skipDuplicates`。`onlyMentionless=true` のときはさらに**坂井新奈への言及がないアイテムだけ**に絞る（「言及なしをここまで一括✓」= 退屈な9割を一掃する省力化。言及集合はソース全体で導出・数分キャッシュ。url 系のみ有効・talk は全件本人）。返り値 `{ created, targetItems, lensKeys }`。監査は AuditLog `coverage.bulk_check`。
+範囲一括チェック。**ボディ:** `dataSourceKey`, `lensKeys[]`, `untilDate?`（`YYYY-MM-DD`・省略時は**全期間**〈v2.3「言及なしを全部✓」等のワンショット用〉）, `onlyMentionless?`（boolean・既定 false）, `classification?`。`itemDate <= untilDate` の全導出アイテムを対象 lens すべてに `createMany skipDuplicates`。`onlyMentionless=true` のときはさらに**坂井新奈への言及がないアイテムだけ**に絞る（「言及なしをここまで一括✓」= 退屈な9割を一掃する省力化。言及集合はソース全体で導出・数分キャッシュ。url 系のみ有効・talk は全件本人）。返り値 `{ created, targetItems, lensKeys }`。監査は AuditLog `coverage.bulk_check`。
 
 ### GET /coverage/summary
 

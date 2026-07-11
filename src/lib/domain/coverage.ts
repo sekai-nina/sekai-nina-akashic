@@ -868,20 +868,21 @@ export async function toggleCheck(
 export interface BulkCheckInput {
   dataSourceKey: string;
   lensKeys: string[];
-  untilDate: string; // YYYY-MM-DD（この日以前の導出アイテムを対象）
+  untilDate?: string | null; // YYYY-MM-DD（この日以前の導出アイテムを対象）。省略=全期間（v2.3）
   onlyMentionless?: boolean; // true: 坂井新奈への言及なしのアイテムだけを対象にする
   classification?: ClearanceLevel;
 }
 
 export interface BulkCheckResult {
   created: number; // 実際に作成された LensItemCheck 行数（既存はスキップ）
-  targetItems: number; // untilDate 以前（onlyMentionless 時は言及なしに限定）の導出アイテム数
+  targetItems: number; // 対象導出アイテム数（untilDate/onlyMentionless 適用後）
   lensKeys: string[];
 }
 
 /**
  * 範囲一括チェック。untilDate 以前（itemDate <= untilDate）の全導出アイテムを、
  * 対象 lens すべてに createMany skipDuplicates でチェック済みにする。
+ * untilDate 省略時は**全期間**（「言及なしを全部✓」のワンショット用・v2.3）。
  * onlyMentionless=true のときは、さらに坂井新奈への言及がないアイテムだけに絞る
  * （「言及なしをここまで一括✓」= 退屈な9割を一掃する省力化）。言及集合はソース全体で
  * 導出する（getSourceMentionKeys・数分キャッシュ）。url 系ソースのみ有効（talk は全件本人）。
@@ -891,8 +892,7 @@ export async function bulkCheck(
   clearance: string,
   actorId?: string | null
 ): Promise<BulkCheckResult> {
-  const until = parseDateOnly(input.untilDate);
-  if (!until) throw new Error("untilDate is required (YYYY-MM-DD)");
+  const until = parseDateOnly(input.untilDate ?? null); // null = 全期間
   if (!input.lensKeys || input.lensKeys.length === 0) {
     throw new Error("lensKeys is required");
   }
@@ -911,7 +911,7 @@ export async function bulkCheck(
     }
 
     const derived = await deriveItems(tx, ds);
-    let targets = derived.filter((d) => d.itemDate && d.itemDate <= until);
+    let targets = until ? derived.filter((d) => d.itemDate && d.itemDate <= until) : derived;
     if (mentionKeys) targets = targets.filter((d) => !mentionKeys.has(d.itemKey));
 
     let created = 0;
@@ -943,7 +943,7 @@ export async function bulkCheck(
     metadata: {
       dataSourceKey: input.dataSourceKey,
       lensKeys: input.lensKeys,
-      untilDate: input.untilDate,
+      untilDate: input.untilDate ?? null, // null = 全期間
       onlyMentionless: input.onlyMentionless ?? false,
       created: result.created,
       targetItems: result.targetItems,
@@ -951,6 +951,100 @@ export async function bulkCheck(
   });
 
   return { created: result.created, targetItems: result.targetItems, lensKeys: input.lensKeys };
+}
+
+// ============================================================
+// アイテム単位の複数観点チェック (setItemChecks) — v2.3
+// ============================================================
+
+export interface SetItemChecksInput {
+  dataSourceKey: string;
+  itemKey: string;
+  lensKeys: string[]; // 対象観点（複数）
+  checked: boolean;
+  classification?: ClearanceLevel;
+}
+
+export interface SetItemChecksResult {
+  checked: boolean;
+  itemKey: string;
+  lensKeys: string[];
+  affected: number; // 作成/削除された LensItemCheck 行数
+}
+
+/**
+ * 1アイテムを複数観点へ一括でチェック/解除する（v2.3 消化モードの
+ * 「残りの観点は該当なし」と Undo トーストの実体。冪等）。
+ * checked=true: 導出スナップショットを1回取り、createMany skipDuplicates。
+ * checked=false: 対象観点分を deleteMany（Undo 用）。
+ */
+export async function setItemChecks(
+  input: SetItemChecksInput,
+  clearance: string,
+  actorId?: string | null
+): Promise<SetItemChecksResult> {
+  if (!input.lensKeys || input.lensKeys.length === 0) {
+    throw new Error("lensKeys is required");
+  }
+
+  const result = await withClearance(clearance, async (tx) => {
+    const ds = await tx.dataSource.findUnique({ where: { key: input.dataSourceKey } });
+    if (!ds) throw new Error(`DataSource not found: ${input.dataSourceKey}`);
+    const lenses = await tx.lens.findMany({ where: { key: { in: input.lensKeys } } });
+    if (lenses.length !== new Set(input.lensKeys).size) {
+      throw new Error("Unknown lensKey in lensKeys");
+    }
+
+    if (input.checked) {
+      const [item] = await deriveItems(tx, ds, { onlyKeys: [input.itemKey] });
+      if (!item) {
+        throw new Error(`Item not found in source ${input.dataSourceKey}: ${input.itemKey}`);
+      }
+      const res = await tx.lensItemCheck.createMany({
+        data: lenses.map((lens) => ({
+          lensId: lens.id,
+          dataSourceId: ds.id,
+          itemKey: input.itemKey,
+          itemDate: item.itemDate,
+          itemTitle: item.itemTitle,
+          classification: input.classification ?? "internal",
+          checkedById: actorId ?? null,
+        })),
+        skipDuplicates: true,
+      });
+      return { affected: res.count };
+    } else {
+      const res = await tx.lensItemCheck.deleteMany({
+        where: {
+          dataSourceId: ds.id,
+          itemKey: input.itemKey,
+          lensId: { in: lenses.map((l) => l.id) },
+        },
+      });
+      return { affected: res.count };
+    }
+  });
+
+  await logAudit({
+    actorId,
+    action: "coverage.check_multi",
+    targetType: "DataSource",
+    targetId: input.dataSourceKey,
+    metadata: {
+      dataSourceKey: input.dataSourceKey,
+      itemKey: input.itemKey,
+      lensKeys: input.lensKeys,
+      checked: input.checked,
+      affected: result.affected,
+    },
+  });
+
+  return {
+    checked: input.checked,
+    itemKey: input.itemKey,
+    lensKeys: input.lensKeys,
+    affected: result.affected,
+  };
 }
 
 // ============================================================

@@ -11,6 +11,7 @@ import {
   upsertCell,
   toggleCheck,
   bulkCheck,
+  setItemChecks,
   type CreateLensInput,
   type UpdateLensInput,
   type CreateDataSourceInput,
@@ -70,12 +71,30 @@ export async function toggleCheckAction(input: {
 export async function bulkCheckAction(input: {
   dataSourceKey: string;
   lensKeys: string[];
-  untilDate: string;
+  untilDate?: string; // 省略 = 全期間（v2.3「言及なしを全部✓」）
   onlyMentionless?: boolean;
 }) {
   const user = await requireEditor();
   try {
     const result = await bulkCheck(input, user.clearance, user.id);
+    revalidatePath(`/coverage/${input.dataSourceKey}`);
+    revalidatePath("/coverage");
+    return { ok: true as const, result };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+/** 1アイテム×複数観点の一括チェック/解除（v2.3 消化モードの「残りは該当なし」と Undo の実体）。 */
+export async function setItemChecksAction(input: {
+  dataSourceKey: string;
+  itemKey: string;
+  lensKeys: string[];
+  checked: boolean;
+}) {
+  const user = await requireEditor();
+  try {
+    const result = await setItemChecks(input, user.clearance, user.id);
     revalidatePath(`/coverage/${input.dataSourceKey}`);
     revalidatePath("/coverage");
     return { ok: true as const, result };

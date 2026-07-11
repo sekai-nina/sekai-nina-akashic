@@ -6,16 +6,17 @@ import type { ClearanceLevel } from "@prisma/client";
 /**
  * POST /coverage/checks/bulk
  * 範囲一括チェック。itemDate <= untilDate の全導出アイテムを対象 lens でチェック済みに。
- * ボディ: { dataSourceKey, lensKeys[], untilDate, classification? }
+ * untilDate 省略時は全期間（v2.3「言及なしを全部✓」等のワンショット用）。
+ * ボディ: { dataSourceKey, lensKeys[], untilDate?, onlyMentionless?, classification? }
  */
 export async function POST(request: Request) {
   const auth = await requireApiAuth(request, "write");
   if (auth instanceof NextResponse) return auth;
 
   const body = await request.json();
-  if (!body.dataSourceKey || !Array.isArray(body.lensKeys) || !body.untilDate) {
+  if (!body.dataSourceKey || !Array.isArray(body.lensKeys)) {
     return NextResponse.json(
-      { error: "dataSourceKey, lensKeys[] and untilDate are required" },
+      { error: "dataSourceKey and lensKeys[] are required" },
       { status: 400 }
     );
   }
@@ -25,7 +26,7 @@ export async function POST(request: Request) {
       {
         dataSourceKey: body.dataSourceKey,
         lensKeys: body.lensKeys,
-        untilDate: body.untilDate,
+        untilDate: body.untilDate ?? null,
         onlyMentionless: body.onlyMentionless === true,
         classification: body.classification as ClearanceLevel | undefined,
       },

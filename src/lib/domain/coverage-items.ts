@@ -8,7 +8,8 @@
  * - mentions: 坂井新奈への言及有無（(a) AssetEntity リンク OR (b) AssetText 本文一致）。
  * - excerpts: 一致箇所の前後スニペット（url 系・最大3件）。talk は本文先頭プレビュー（最大2件）。
  * - dossiers: アイテム所属アセットを含むドシエ（/dossiers/[id] 導線）。
- * - assets:   アイテム所属アセット（/assets/[id] 導線・件数付き）。
+ * - repAsset: 代表アセット（text 優先）。タイトルの /assets/[id] リンク先（v2.3）。
+ * - imageAssets: 画像アセットのサムネイルストリップ用（v2.3）。
  *
  * 「アイテム所属アセット」= url 系は同一 SourceRecord.url のアセット群、talk はその JST 日の
  * トークアセット群。言及フィルタはページング母集団を絞るため、ソース全体の言及ありキー集合
@@ -41,11 +42,13 @@ export interface ItemDTO {
   isUrl: boolean;
   checked?: boolean; // lensKey 指定時
   checkedLensKeys?: string[]; // lensKey 省略時（アイテム起点ビュー）
-  // --- v2.2 トリアージ・エンリッチ（ページ分のみ）---
+  // --- v2.2/v2.3 トリアージ・エンリッチ（ページ分のみ）---
   mentions?: boolean; // 坂井新奈への言及。talk は全件本人=true。manual は undefined
   excerpts?: string[]; // HTML 安全なスニペット（<mark> を含みうる）
   dossiers?: { id: string; title: string }[];
-  assets?: { id: string; kind: string }[]; // 先頭 MAX_ASSETS 件
+  repAsset?: { id: string; kind: string } | null; // 代表アセット（text 優先・日付順先頭）。タイトルリンク先
+  imageAssets?: { id: string }[]; // サムネイル有りの画像アセット（先頭 MAX_IMAGE_THUMBS 件）
+  imageAssetCount?: number; // 画像アセット総数（「+N」表示用）
   assetCount?: number; // 所属アセット総数
 }
 
@@ -164,7 +167,7 @@ export async function getSourceMentionKeys(sourceKey: string, clearance: string)
 // スニペット生成ヘルパー（HTML 安全 + <mark> ハイライト）
 // ============================================================
 
-const MAX_ASSETS = 8;
+const MAX_IMAGE_THUMBS = 8;
 const MAX_EXCERPTS_URL = 3;
 const MAX_EXCERPTS_TALK = 2;
 const SNIPPET_RADIUS = 60;
@@ -221,6 +224,7 @@ interface AssetRow {
   kind: string;
   canonicalDate: Date | null;
   preview: string | null;
+  hasThumb: boolean; // thumbnailUrl IS NOT NULL（サムネイルストリップ用）
 }
 
 function byDateAsc(a: AssetRow, b: AssetRow): number {
@@ -261,7 +265,8 @@ async function enrichPageItems(
     ];
     rows = await tx.$queryRaw<AssetRow[]>`
       SELECT DISTINCT ${TALK_DAY_SQL}::text AS "itemKey", a.id AS "assetId", a.kind::text AS "kind",
-             a."canonicalDate" AS "canonicalDate", a."messageBodyPreview" AS "preview"
+             a."canonicalDate" AS "canonicalDate", a."messageBodyPreview" AS "preview",
+             (a."thumbnailUrl" IS NOT NULL) AS "hasThumb"
       FROM "Asset" a
       JOIN "SourceRecord" sr ON sr."assetId" = a.id
       WHERE ${Prisma.join(conds, " AND ")}
@@ -274,7 +279,8 @@ async function enrichPageItems(
     ];
     rows = await tx.$queryRaw<AssetRow[]>`
       SELECT DISTINCT sr.url AS "itemKey", a.id AS "assetId", a.kind::text AS "kind",
-             a."canonicalDate" AS "canonicalDate", a."messageBodyPreview" AS "preview"
+             a."canonicalDate" AS "canonicalDate", a."messageBodyPreview" AS "preview",
+             (a."thumbnailUrl" IS NOT NULL) AS "hasThumb"
       FROM "SourceRecord" sr
       JOIN "Asset" a ON a.id = sr."assetId"
       WHERE ${Prisma.join(conds, " AND ")}
@@ -337,7 +343,18 @@ async function enrichPageItems(
     const rowsForItem = (assetsByItem.get(item.itemKey) ?? []).slice().sort(byDateAsc);
 
     item.assetCount = rowsForItem.length;
-    item.assets = rowsForItem.slice(0, MAX_ASSETS).map((r) => ({ id: r.assetId, kind: r.kind }));
+
+    // 代表アセット（text 優先・日付順先頭）= タイトルリンク先（v2.3）
+    const rep = rowsForItem.find((r) => r.kind === "text") ?? rowsForItem[0] ?? null;
+    item.repAsset = rep ? { id: rep.assetId, kind: rep.kind } : null;
+
+    // 画像アセットのサムネイルストリップ用（thumbnail 有りのみ・先頭 MAX_IMAGE_THUMBS 件）
+    const imageRows = rowsForItem.filter((r) => r.kind === "image");
+    item.imageAssetCount = imageRows.length;
+    item.imageAssets = imageRows
+      .filter((r) => r.hasThumb)
+      .slice(0, MAX_IMAGE_THUMBS)
+      .map((r) => ({ id: r.assetId }));
 
     const dm = dossiersByItem.get(item.itemKey);
     item.dossiers = dm ? Array.from(dm, ([id, title]) => ({ id, title })) : [];
