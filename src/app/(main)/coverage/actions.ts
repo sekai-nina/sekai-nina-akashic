@@ -9,9 +9,8 @@ import {
   createDataSource,
   updateDataSource,
   upsertCell,
-  advanceRowToToday,
-  todayDateOnly,
-  toDateOnlyString,
+  toggleCheck,
+  bulkCheck,
   type CreateLensInput,
   type UpdateLensInput,
   type CreateDataSourceInput,
@@ -31,13 +30,12 @@ function errorMessage(e: unknown): string {
   return String(e);
 }
 
-// ---- cells ----
+// ---- cell notes (not_applicable / メモ) ----
 
 export async function upsertCellAction(input: {
   lensKey: string;
   dataSourceKey: string;
   status: CoverageStatus;
-  collectedUntil: string | null;
   note: string | null;
 }) {
   const user = await requireEditor();
@@ -50,34 +48,36 @@ export async function upsertCellAction(input: {
   }
 }
 
-/** セル単位で「今日まで反映」（tracked で今日に upsert）。 */
-export async function setCellTodayAction(lensKey: string, dataSourceKey: string) {
+// ---- item checks ----
+
+export async function toggleCheckAction(input: {
+  lensKey: string;
+  dataSourceKey: string;
+  itemKey: string;
+  checked: boolean;
+}) {
   const user = await requireEditor();
   try {
-    const cell = await upsertCell(
-      {
-        lensKey,
-        dataSourceKey,
-        status: "tracked",
-        collectedUntil: toDateOnlyString(todayDateOnly()),
-      },
-      user.clearance,
-      user.id
-    );
+    const result = await toggleCheck(input, user.clearance, user.id);
+    revalidatePath(`/coverage/${input.dataSourceKey}`);
     revalidatePath("/coverage");
-    return { ok: true as const, cell };
+    return { ok: true as const, result };
   } catch (e) {
     return { ok: false as const, error: errorMessage(e) };
   }
 }
 
-/** 行（Lens）単位で「今日まで反映」（既存 tracked セルのみ前進）。 */
-export async function setRowTodayAction(lensKey: string) {
+export async function bulkCheckAction(input: {
+  dataSourceKey: string;
+  lensKeys: string[];
+  untilDate: string;
+}) {
   const user = await requireEditor();
   try {
-    const count = await advanceRowToToday(lensKey, user.clearance, user.id);
+    const result = await bulkCheck(input, user.clearance, user.id);
+    revalidatePath(`/coverage/${input.dataSourceKey}`);
     revalidatePath("/coverage");
-    return { ok: true as const, count };
+    return { ok: true as const, result };
   } catch (e) {
     return { ok: false as const, error: errorMessage(e) };
   }

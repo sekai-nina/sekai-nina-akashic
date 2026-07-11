@@ -3,11 +3,9 @@
 import { useMemo, useRef, useState, useTransition, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import type { CoverageMatrixDTO } from "@/lib/domain/coverage";
-import type { CoverageStatus, DataSourceKind } from "@prisma/client";
+import type { CoverageStatus, DataSourceKind, ItemRule } from "@prisma/client";
 import {
   upsertCellAction,
-  setCellTodayAction,
-  setRowTodayAction,
   createLensAction,
   updateLensAction,
   createDataSourceAction,
@@ -42,11 +40,26 @@ const KIND_LABELS: Record<DataSourceKind, string> = {
   other: "その他",
 };
 
+const ITEM_RULES: ItemRule[] = ["blog_url", "talk_date", "source_url", "manual"];
+
+const ITEM_RULE_LABELS: Record<ItemRule, string> = {
+  blog_url: "記事URL単位 (blog_url)",
+  talk_date: "日単位 (talk_date)",
+  source_url: "URL単位 (source_url)",
+  manual: "導出なし (manual)",
+};
+
+/** "YYYY-MM-DD" -> "M/D" */
+function shortDate(dateStr: string): string {
+  const [, m, d] = dateStr.split("-");
+  return `${Number(m)}/${Number(d)}`;
+}
+
 function todayStr(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-/** collectedUntil(YYYY-MM-DD) から今日までの経過日数。 */
+/** continuousUntil(YYYY-MM-DD) から今日までの経過日数。 */
 function daysAgo(dateStr: string): number {
   const d = new Date(dateStr + "T00:00:00.000Z").getTime();
   const today = new Date(todayStr() + "T00:00:00.000Z").getTime();
@@ -118,7 +131,7 @@ function TabButton({
 
 function Matrix({ matrix, canEdit }: { matrix: CoverageMatrixDTO; canEdit: boolean }) {
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -134,18 +147,6 @@ function Matrix({ matrix, canEdit }: { matrix: CoverageMatrixDTO; canEdit: boole
 
   function refresh() {
     startTransition(() => router.refresh());
-  }
-
-  function handleRowToday(lens: Lens) {
-    if (!confirm(`「${lens.name}」の記録済みセルをすべて今日（${todayStr()}）まで反映しますか？`))
-      return;
-    setMsg(null);
-    startTransition(async () => {
-      const res = await setRowTodayAction(lens.key);
-      if (!res.ok) setMsg(`エラー: ${res.error}`);
-      else setMsg(`${lens.name}: ${res.count} 件を今日まで反映`);
-      router.refresh();
-    });
   }
 
   if (lenses.length === 0 || dataSources.length === 0) {
@@ -186,24 +187,12 @@ function Matrix({ matrix, canEdit }: { matrix: CoverageMatrixDTO; canEdit: boole
             {lenses.map((lens) => (
               <tr key={lens.id} className="hover:bg-slate-50/50">
                 <th className="sticky left-0 z-10 bg-white px-3 py-2 text-left font-medium text-slate-700 border-b border-r border-slate-200 align-top">
-                  <div className="flex flex-col gap-1">
-                    <span title={lens.description}>
-                      {lens.name}
-                      {!lens.public && (
-                        <span className="ml-1 text-[10px] text-slate-400">(非公開)</span>
-                      )}
-                    </span>
-                    {canEdit && (
-                      <button
-                        onClick={() => handleRowToday(lens)}
-                        disabled={isPending}
-                        className="self-start text-[11px] px-1.5 py-0.5 rounded bg-slate-900 text-white hover:bg-slate-900/90 disabled:opacity-50"
-                        title="この行の記録済みセルをすべて今日まで反映"
-                      >
-                        行を今日まで
-                      </button>
+                  <span title={lens.description}>
+                    {lens.name}
+                    {!lens.public && (
+                      <span className="ml-1 text-[10px] text-slate-400">(非公開)</span>
                     )}
-                  </div>
+                  </span>
                 </th>
                 {dataSources.map((d) => {
                   const key = `${lens.id}:${d.id}`;
@@ -215,14 +204,12 @@ function Matrix({ matrix, canEdit }: { matrix: CoverageMatrixDTO; canEdit: boole
                     >
                       <MatrixCell
                         cell={cell}
+                        dataSource={d}
                         canEdit={canEdit}
                         open={openKey === key}
-                        onToggle={() =>
-                          setOpenKey(openKey === key ? null : canEdit ? key : null)
-                        }
+                        onEditToggle={() => setOpenKey(openKey === key ? null : key)}
                         onClose={() => setOpenKey(null)}
                         lensKey={lens.key}
-                        dataSourceKey={d.key}
                         onDone={(m) => {
                           setMsg(m ?? null);
                           setOpenKey(null);
@@ -238,8 +225,9 @@ function Matrix({ matrix, canEdit }: { matrix: CoverageMatrixDTO; canEdit: boole
         </table>
       </div>
       <p className="text-xs text-slate-400 mt-3">
-        セルをクリックで編集。グレー「—」= 対象外(not_applicable)、空セル = 未着手。
-        経過日数は補助表示です。
+        セル = <span className="tabular-nums">済/総</span> と「〜M/D済」（連続チェック済みの日付）。
+        セルをクリックするとアイテム一覧が開きます。グレー「—」= 対象外(not_applicable)。
+        {canEdit && " 右上の ⋯ で対象外/メモを編集。"}
       </p>
     </div>
   );
@@ -247,58 +235,85 @@ function Matrix({ matrix, canEdit }: { matrix: CoverageMatrixDTO; canEdit: boole
 
 function MatrixCell({
   cell,
+  dataSource,
   canEdit,
   open,
-  onToggle,
+  onEditToggle,
   onClose,
   lensKey,
-  dataSourceKey,
   onDone,
 }: {
   cell: Cell | null;
+  dataSource: DataSource;
   canEdit: boolean;
   open: boolean;
-  onToggle: () => void;
+  onEditToggle: () => void;
   onClose: () => void;
   lensKey: string;
-  dataSourceKey: string;
   onDone: (msg?: string) => void;
 }) {
+  const router = useRouter();
+
+  function goToItems() {
+    router.push(`/coverage/${dataSource.key}?lens=${lensKey}`);
+  }
+
   let content: React.ReactNode;
-  if (!cell) {
-    content = <span className="text-slate-300">＋</span>;
-  } else if (cell.status === "not_applicable") {
+  if (cell && cell.status === "not_applicable") {
     content = <span className="text-slate-300">—</span>;
-  } else if (cell.collectedUntil) {
-    const days = daysAgo(cell.collectedUntil);
+  } else if (dataSource.totalItems === 0) {
+    content =
+      dataSource.itemRule === "manual" ? (
+        <span className="text-slate-300 text-[11px]">アイテム未定義</span>
+      ) : (
+        <span className="text-slate-400 tabular-nums">0/0</span>
+      );
+  } else {
+    const checked = cell?.checkedItems ?? 0;
+    const total = dataSource.totalItems;
+    const complete = checked >= total && total > 0;
     content = (
       <div className="leading-tight">
-        <div className="text-slate-800 tabular-nums">{cell.collectedUntil}</div>
-        <div className={`text-[10px] ${freshnessClass(days)}`}>
-          {days === 0 ? "今日" : `${days}日前`}
+        <div className={`tabular-nums ${complete ? "text-emerald-600 font-medium" : "text-slate-800"}`}>
+          {checked}/{total}
         </div>
+        {cell?.continuousUntil ? (
+          <div className={`text-[10px] ${freshnessClass(daysAgo(cell.continuousUntil))}`}>
+            〜{shortDate(cell.continuousUntil)}済
+          </div>
+        ) : (
+          <div className="text-[10px] text-slate-300">未</div>
+        )}
       </div>
     );
-  } else {
-    content = <span className="text-slate-400 text-xs">日付未設定</span>;
   }
 
   return (
     <>
       <button
-        onClick={onToggle}
-        disabled={!canEdit}
-        className={`w-full h-full px-2 py-2 text-xs min-h-[3rem] ${
-          canEdit ? "cursor-pointer hover:bg-slate-100" : "cursor-default"
-        } ${!cell ? "bg-slate-50/40" : ""}`}
+        onClick={goToItems}
+        className="w-full h-full px-2 py-2 text-xs min-h-[3rem] cursor-pointer hover:bg-slate-100"
+        title={`${dataSource.name} のアイテム一覧を開く`}
       >
         {content}
       </button>
+      {canEdit && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onEditToggle();
+          }}
+          className="absolute top-0.5 right-0.5 text-[11px] leading-none text-slate-300 hover:text-slate-600 px-1"
+          title="対象外/メモを編集"
+        >
+          ⋯
+        </button>
+      )}
       {open && canEdit && (
-        <CellPopover
+        <CellNotePopover
           cell={cell}
           lensKey={lensKey}
-          dataSourceKey={dataSourceKey}
+          dataSourceKey={dataSource.key}
           onClose={onClose}
           onDone={onDone}
         />
@@ -307,7 +322,7 @@ function MatrixCell({
   );
 }
 
-function CellPopover({
+function CellNotePopover({
   cell,
   lensKey,
   dataSourceKey,
@@ -323,7 +338,6 @@ function CellPopover({
   const ref = useRef<HTMLDivElement>(null);
   const [isPending, startTransition] = useTransition();
   const [status, setStatus] = useState<CoverageStatus>(cell?.status ?? "tracked");
-  const [date, setDate] = useState<string>(cell?.collectedUntil ?? todayStr());
   const [note, setNote] = useState<string>(cell?.note ?? "");
   const [err, setErr] = useState<string | null>(null);
 
@@ -349,7 +363,6 @@ function CellPopover({
         lensKey,
         dataSourceKey,
         status,
-        collectedUntil: status === "not_applicable" ? null : date || null,
         note: note.trim() || null,
       });
       if (!res.ok) setErr(res.error);
@@ -357,50 +370,21 @@ function CellPopover({
     });
   }
 
-  function setToday() {
-    setErr(null);
-    startTransition(async () => {
-      const res = await setCellTodayAction(lensKey, dataSourceKey);
-      if (!res.ok) setErr(res.error);
-      else onDone(`${lensKey} × ${dataSourceKey} を今日まで反映`);
-    });
-  }
-
   return (
     <div
       ref={ref}
-      className="absolute z-30 top-full left-1/2 -translate-x-1/2 mt-1 w-64 bg-white border border-slate-300 rounded-lg shadow-lg p-3 text-left"
+      className="absolute z-30 top-full right-0 mt-1 w-64 bg-white border border-slate-300 rounded-lg shadow-lg p-3 text-left"
       onClick={(e) => e.stopPropagation()}
     >
-      <button
-        onClick={setToday}
-        disabled={isPending}
-        className="w-full mb-3 px-3 py-2 text-sm rounded-md bg-slate-900 text-white hover:bg-slate-900/90 disabled:opacity-50 font-medium"
-      >
-        今日（{todayStr()}）まで反映
-      </button>
-
       <label className="block text-xs text-slate-500 mb-1">状態</label>
       <select
         value={status}
         onChange={(e) => setStatus(e.target.value as CoverageStatus)}
         className="w-full px-2 py-1.5 rounded-md border border-slate-200 text-sm mb-2"
       >
-        <option value="tracked">記録する（日付あり）</option>
+        <option value="tracked">追跡する（済/総を表示）</option>
         <option value="not_applicable">対象外（—）</option>
       </select>
-
-      {status === "tracked" && (
-        <>
-          <label className="block text-xs text-slate-500 mb-1">反映日（この日まで）</label>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="w-full px-2 py-1.5 rounded-md border border-slate-200 text-sm mb-2"
-          />
-        </>
-      )}
 
       <label className="block text-xs text-slate-500 mb-1">メモ（内部・非公開）</label>
       <textarea
@@ -669,6 +653,9 @@ function DataSourceSettings({ dataSources, canEdit }: { dataSources: DataSource[
               </option>
             ))}
           </select>
+          <p className="text-[11px] text-slate-400 mt-1">
+            アイテム導出規則（itemRule）は作成後に各行の「編集」から設定します（既定は manual）。
+          </p>
           <label className="flex items-center gap-1.5 mt-2 text-sm text-slate-700">
             <input type="checkbox" checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} />
             公開サイトの鮮度表示に出す
@@ -703,6 +690,9 @@ function DataSourceRow({ ds, canEdit }: { ds: DataSource; canEdit: boolean }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(ds.name);
   const [kind, setKind] = useState<DataSourceKind>(ds.kind);
+  const [itemRule, setItemRule] = useState<ItemRule>(ds.itemRule);
+  const [publisherPattern, setPublisherPattern] = useState(ds.publisherPattern ?? "");
+  const [titlePattern, setTitlePattern] = useState(ds.titlePattern ?? "");
   const [isPublic, setIsPublic] = useState(ds.public);
   const [active, setActive] = useState(ds.active);
   const [err, setErr] = useState<string | null>(null);
@@ -712,7 +702,15 @@ function DataSourceRow({ ds, canEdit }: { ds: DataSource; canEdit: boolean }) {
     setErr(null);
     setBusy(true);
     startTransition(async () => {
-      const res = await updateDataSourceAction(ds.id, { name, kind, public: isPublic, active });
+      const res = await updateDataSourceAction(ds.id, {
+        name,
+        kind,
+        itemRule,
+        publisherPattern: publisherPattern.trim() || null,
+        titlePattern: titlePattern.trim() || null,
+        public: isPublic,
+        active,
+      });
       setBusy(false);
       if (!res.ok) setErr(res.error);
       else {
@@ -727,13 +725,36 @@ function DataSourceRow({ ds, canEdit }: { ds: DataSource; canEdit: boolean }) {
       <li className="py-3">
         <div className="text-[11px] text-slate-400 font-mono mb-1">{ds.key}</div>
         <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
-        <select className={inputCls + " mt-2"} value={kind} onChange={(e) => setKind(e.target.value as DataSourceKind)}>
+        <label className={labelCls}>種別</label>
+        <select className={inputCls} value={kind} onChange={(e) => setKind(e.target.value as DataSourceKind)}>
           {DATA_SOURCE_KINDS.map((k) => (
             <option key={k} value={k}>
               {KIND_LABELS[k]}
             </option>
           ))}
         </select>
+        <label className={labelCls}>アイテム導出規則（itemRule）</label>
+        <select className={inputCls} value={itemRule} onChange={(e) => setItemRule(e.target.value as ItemRule)}>
+          {ITEM_RULES.map((r) => (
+            <option key={r} value={r}>
+              {ITEM_RULE_LABELS[r]}
+            </option>
+          ))}
+        </select>
+        <label className={labelCls}>publisherPattern（SourceRecord.publisher への SQL LIKE・空=不問）</label>
+        <input
+          className={inputCls}
+          value={publisherPattern}
+          onChange={(e) => setPublisherPattern(e.target.value)}
+          placeholder="例: 日向坂46公式ブログ"
+        />
+        <label className={labelCls}>titlePattern（SourceRecord.title への SQL LIKE・空=不問）</label>
+        <input
+          className={inputCls}
+          value={titlePattern}
+          onChange={(e) => setTitlePattern(e.target.value)}
+          placeholder="例: %日向坂で会いましょう%"
+        />
         <div className="flex gap-4 mt-2">
           <label className="flex items-center gap-1.5 text-sm text-slate-700">
             <input type="checkbox" checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} />
@@ -767,6 +788,15 @@ function DataSourceRow({ ds, canEdit }: { ds: DataSource; canEdit: boolean }) {
           {!ds.public && <span className="ml-1.5 text-[10px] text-slate-400">非公開</span>}
         </div>
         <div className="text-xs text-slate-400 font-mono">{ds.key}</div>
+        <div className="text-[11px] text-slate-500 mt-0.5">
+          {ITEM_RULE_LABELS[ds.itemRule]} · {ds.totalItems} 件
+          {ds.publisherPattern && (
+            <span className="ml-1 text-slate-400">pub: {ds.publisherPattern}</span>
+          )}
+          {ds.titlePattern && (
+            <span className="ml-1 text-slate-400">title: {ds.titlePattern}</span>
+          )}
+        </div>
       </div>
       {canEdit && (
         <button onClick={() => setEditing(true)} className="text-xs px-2 py-1 rounded text-slate-500 hover:bg-slate-100 shrink-0">
