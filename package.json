@@ -21,7 +21,8 @@
     "cli:thumbnails": "tsx src/cli/generate-thumbnails.ts",
     "cli:backfill-relations": "tsx src/cli/backfill-relations.ts",
     "cli:lighten-dossier-images": "tsx src/cli/lighten-dossier-images.ts",
-    "cli:import-curepo": "tsx src/cli/import-curepo.ts"
+    "cli:import-curepo": "tsx src/cli/import-curepo.ts",
+    "cli:seed-coverage": "tsx src/cli/seed-coverage.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
