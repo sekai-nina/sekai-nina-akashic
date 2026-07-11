@@ -4,8 +4,9 @@ import { getMatrix, listItems } from "@/lib/domain/coverage";
 import { ItemListClient } from "./items-client";
 
 /**
- * アイテム一覧ページ（v2 の主戦場）。ソースの導出アイテムを観点タブで見ながら
- * チェックしていく。行を展開すると全観点のチェックボックスが並ぶ（アイテム起点ビュー）。
+ * アイテム一覧ページ（v2.3 = アイテム主導の消化フロー）。2モード制:
+ * - 消化モード（既定・Todo型）: 全観点チップ常時表示。全観点✓で行が消える
+ * - 観点モード: 選択観点のみ。✓した行が消える（単観点スイープ）
  * admin / member は編集可、viewer は閲覧のみ。
  */
 export default async function ItemListPage({
@@ -13,7 +14,13 @@ export default async function ItemListPage({
   searchParams,
 }: {
   params: Promise<{ sourceKey: string }>;
-  searchParams: Promise<{ lens?: string; order?: string; page?: string; mentions?: string }>;
+  searchParams: Promise<{
+    lens?: string;
+    order?: string;
+    page?: string;
+    mentions?: string;
+    mode?: string;
+  }>;
 }) {
   const session = await auth();
   if (!session?.user) notFound();
@@ -25,6 +32,7 @@ export default async function ItemListPage({
   const order: "asc" | "desc" = sp.order === "desc" ? "desc" : "asc";
   const page = Math.max(1, Number(sp.page ?? "1") || 1);
   const pageSize = 100;
+  const mode: "digest" | "lens" = sp.mode === "lens" ? "lens" : "digest"; // 消化モードが既定
 
   // マトリクスから当該ソースの情報・観点別進捗を得る（済/総・continuousUntil）
   const matrix = await getMatrix(clearance);
@@ -85,6 +93,7 @@ export default async function ItemListPage({
         lensProgress={lensProgress}
         selectedLensKey={selectedLensKey}
         items={items.items}
+        mode={mode}
         order={order}
         page={items.page}
         pageSize={items.pageSize}
