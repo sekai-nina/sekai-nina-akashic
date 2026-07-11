@@ -45,32 +45,73 @@ const LENSES: LensSeed[] = [
   { key: "funny_replies", name: "面白い返答", description: "ミーグリ・配信等での面白い返答・やりとり" },
 ];
 
+// パターンは SourceRecord への SQL LIKE。publisherPattern/titlePattern とも `|` 区切りで
+// 複数パターン（OR）を書ける（v2.2）。publisher/title は末尾に改行が入る行があるため前方一致 `%` で吸収する。
+// 詳細な根拠は docs/coverage-design.md §2「ソース設定（v2.2 シード）」を参照。
 const DATA_SOURCES: DataSourceSeed[] = [
-  // blog/talk はアイテム導出規則を持つ。他は当面 manual（管理 UI から設定）。
   {
     key: "blog",
     name: "公式ブログ",
     kind: "blog",
     itemRule: "blog_url",
-    publisherPattern: "日向坂46公式ブログ",
+    publisherPattern: "日向坂46公式ブログ%",
   },
   {
     key: "talk",
     name: "トーク（メッセージ）",
     kind: "talk",
     itemRule: "talk_date",
-    publisherPattern: "Talk (Sony Music)",
+    publisherPattern: "Talk (Sony Music)%",
   },
-  { key: "hinaai", name: "日向坂で会いましょう", kind: "tv" },
-  { key: "hinachan", name: "日向坂ちゃんねる", kind: "youtube" },
-  { key: "ninarimashou", name: "日向坂になりましょう", kind: "tv" },
-  { key: "official_ch", name: "日向坂46公式チャンネル", kind: "youtube" },
+  // 日向坂で会いましょう: 番号のみ表記(#362等)と【配信】表記の2形式
+  {
+    key: "hinaai",
+    name: "日向坂で会いましょう",
+    kind: "tv",
+    itemRule: "source_url",
+    publisherPattern: "Lemino%",
+    titlePattern: "【%配信】#%|%日向坂で会いましょう%|#3__%|#4__%",
+  },
+  // 日向坂になりましょう: 「#N 企画名」形式（#0〜26）
+  {
+    key: "ninarimashou",
+    name: "日向坂になりましょう",
+    kind: "tv",
+    itemRule: "source_url",
+    publisherPattern: "Lemino%",
+    titlePattern: "#_ %|#__ %",
+  },
+  {
+    key: "hinachan",
+    name: "日向坂ちゃんねる",
+    kind: "youtube",
+    itemRule: "source_url",
+    publisherPattern: "YouTube%",
+    titlePattern: "日向坂ちゃんねる%",
+  },
+  {
+    key: "official_ch",
+    name: "日向坂46公式チャンネル",
+    kind: "youtube",
+    itemRule: "source_url",
+    publisherPattern: "YouTube%",
+    titlePattern: "日向坂46公式チャンネル%",
+  },
+  // 雑誌: 誌名=publisher。新誌が来たら設定タブで追記
+  {
+    key: "magazine",
+    name: "雑誌",
+    kind: "magazine",
+    itemRule: "source_url",
+    publisherPattern:
+      "EX大衆%|BRODY%|週刊少年チャンピオン%|グラビアチャンピオン%|Ray%|BUBKA%|B.L.T.%",
+  },
+  // 以下は Akashic にアセット未取込のため manual（取込が始まったら設定タブで導出規則を設定）。
   { key: "instagram", name: "Instagram", kind: "sns" },
   { key: "tiktok", name: "TikTok", kind: "sns" },
   { key: "x_official", name: "X（公式）", kind: "sns" },
   { key: "showroom", name: "SHOWROOM", kind: "sns" },
   { key: "radio", name: "ラジオ（radiko）", kind: "radio" },
-  { key: "magazine", name: "雑誌", kind: "magazine" },
 ];
 
 async function main() {
