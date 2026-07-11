@@ -453,7 +453,7 @@ GET <そのパス> → 画像バイナリ
 
 Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` を持ち RLS が有効（clearance ベース）。導出クエリも clearance トランザクション経由なので Asset/SourceRecord の RLS が効く。`public` は「公開サイトの鮮度表示に出すか」を表す別の関心事。`Coverage` セルは v2 で **not_applicable マーク・メモ専用**に格下げ（追跡値は持たない）。
 
-**itemRule**（`DataSource`）: `blog_url`（publisher が一致する SourceRecord の distinct url = 記事1本）/ `talk_date`（publisher が一致する Asset の canonicalDate 日単位 distinct）/ `source_url`（pattern が一致する distinct url = 番組回・動画単位）/ `manual`（導出なし）。`publisherPattern` / `titlePattern` は SourceRecord への SQL LIKE（null=不問）。
+**itemRule**（`DataSource`）: `blog_url`（publisher が一致する SourceRecord の distinct url = 記事1本）/ `talk_date`（publisher が一致する Asset の canonicalDate 日単位 distinct）/ `source_url`（pattern が一致する distinct url = 番組回・動画単位）/ `manual`（導出なし）。`publisherPattern` / `titlePattern` は SourceRecord への SQL LIKE（null=不問）。いずれも `|` 区切りで複数パターンを書ける（いずれかに一致で OR。番組の切り分け・雑誌の複数誌対応。空要素は無視）。
 
 ### GET /lenses
 
@@ -521,19 +521,34 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 
 ### GET /coverage/items
 
-ソースのアイテム一覧。**クエリ:** `source`（必須・DataSource.key）, `lens`（省略時は全観点の `checkedLensKeys` 付き）, `checked`（`0`/`1`。`lens` 指定時のみ有効）, `order`（`asc`〈既定〉/`desc`）, `page`（既定 1）, `pageSize`（既定 100・最大 500）。`total` はフィルタ後の件数（ページング前）。
+ソースのアイテム一覧（トリアージ・エンリッチ込み）。**クエリ:** `source`（必須・DataSource.key）, `lens`（省略時は全観点の `checkedLensKeys` 付き）, `checked`（`0`/`1`。`lens` 指定時のみ有効）, `mentions`（`1`=坂井新奈への言及ありのみ / `0`=言及なしのみ。url 系ソースのみ有効・talk/manual では無視）, `order`（`asc`〈既定〉/`desc`）, `page`（既定 1）, `pageSize`（既定 100・最大 500）。`total` はフィルタ後の件数（ページング前）。
+
+返却する**ページ分のアイテム**には以下がエンリッチされる（ソース全体ではなくページ分のみ・N+1 なしのバッチクエリ）:
+
+- `mentions`（boolean）— 坂井新奈への言及。判定 = (a) 所属アセットに坂井新奈への `AssetEntity` リンク **または** (b) 所属アセットの `AssetText` 本文が canonicalName/aliases に一致。talk は全件本人=`true`。言及集合はソース全体で導出し数分キャッシュする。
+- `excerpts`（string[]）— url 系は一致箇所の前後スニペット（最大3件・一致語を `<mark>` で囲む HTML 安全文字列）。talk は本文先頭プレビュー（最大2件・`messageBodyPreview`）。
+- `dossiers`（`{id,title}[]`）— アイテム所属アセットを含むドシエ（重複除去・`/dossiers/[id]` 導線用）。
+- `assets`（`{id,kind}[]`）＋ `assetCount`（number）— アイテム所属アセット（先頭数件＋総数・`/assets/[id]` 導線用）。
+
+「アイテム所属アセット」= url 系は同一 `SourceRecord.url` のアセット群、talk はその JST 日のトークアセット群。`source.mentionApplicable` は言及フィルタが有効か（url 系のみ `true`）。
 
 ```json
 {
-  "source": { "key": "blog", "name": "公式ブログ", "itemRule": "blog_url", "totalItems": 3421 },
-  "lensKey": "food", "order": "asc", "page": 1, "pageSize": 100, "total": 3421,
+  "source": { "key": "blog", "name": "公式ブログ", "itemRule": "blog_url", "totalItems": 3421, "mentionApplicable": true },
+  "lensKey": null, "order": "asc", "page": 1, "pageSize": 100, "total": 274, "mentions": true,
   "items": [
-    { "itemKey": "https://...", "itemDate": "2020-09-19", "itemTitle": "記事タイトル", "isUrl": true, "checked": false }
+    {
+      "itemKey": "https://...", "itemDate": "2020-09-19", "itemTitle": "記事タイトル", "isUrl": true,
+      "checkedLensKeys": ["food"], "mentions": true,
+      "excerpts": ["…今日は<mark>にぃな</mark>とごはん…"],
+      "dossiers": [{ "id": "...", "title": "2020-09-19 おでかけ" }],
+      "assets": [{ "id": "...", "kind": "text" }], "assetCount": 1
+    }
   ]
 }
 ```
 
-`lens` 省略時は各アイテムに `checked` の代わりに `checkedLensKeys`（チェック済み観点の key 配列）が付く。
+`lens` 指定時は各アイテムに `checkedLensKeys` の代わりに `checked`（boolean）が付く。
 
 ### PUT /coverage/checks
 
@@ -541,7 +556,7 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 
 ### POST /coverage/checks/bulk
 
-範囲一括チェック。**ボディ:** `dataSourceKey`, `lensKeys[]`, `untilDate`（`YYYY-MM-DD`）, `classification?`。`itemDate <= untilDate` の全導出アイテムを対象 lens すべてに `createMany skipDuplicates`。返り値 `{ created, targetItems, lensKeys }`。監査は AuditLog `coverage.bulk_check`。
+範囲一括チェック。**ボディ:** `dataSourceKey`, `lensKeys[]`, `untilDate`（`YYYY-MM-DD`）, `onlyMentionless?`（boolean・既定 false）, `classification?`。`itemDate <= untilDate` の全導出アイテムを対象 lens すべてに `createMany skipDuplicates`。`onlyMentionless=true` のときはさらに**坂井新奈への言及がないアイテムだけ**に絞る（「言及なしをここまで一括✓」= 退屈な9割を一掃する省力化。言及集合はソース全体で導出・数分キャッシュ。url 系のみ有効・talk は全件本人）。返り値 `{ created, targetItems, lensKeys }`。監査は AuditLog `coverage.bulk_check`。
 
 ### GET /coverage/summary
 
