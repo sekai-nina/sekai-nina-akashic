@@ -10,7 +10,7 @@
  *   pnpm cli:seed-coverage
  */
 
-import { PrismaClient, DataSourceKind } from "@prisma/client";
+import { PrismaClient, DataSourceKind, ItemRule } from "@prisma/client";
 import "dotenv/config";
 
 const prisma = new PrismaClient({
@@ -27,6 +27,9 @@ interface DataSourceSeed {
   key: string;
   name: string;
   kind: DataSourceKind;
+  itemRule?: ItemRule;
+  publisherPattern?: string | null;
+  titlePattern?: string | null;
 }
 
 // 設計書 §4 の順序を sortOrder に反映（10 刻み）。
@@ -43,8 +46,21 @@ const LENSES: LensSeed[] = [
 ];
 
 const DATA_SOURCES: DataSourceSeed[] = [
-  { key: "blog", name: "公式ブログ", kind: "blog" },
-  { key: "talk", name: "トーク（メッセージ）", kind: "talk" },
+  // blog/talk はアイテム導出規則を持つ。他は当面 manual（管理 UI から設定）。
+  {
+    key: "blog",
+    name: "公式ブログ",
+    kind: "blog",
+    itemRule: "blog_url",
+    publisherPattern: "日向坂46公式ブログ",
+  },
+  {
+    key: "talk",
+    name: "トーク（メッセージ）",
+    kind: "talk",
+    itemRule: "talk_date",
+    publisherPattern: "Talk (Sony Music)",
+  },
   { key: "hinaai", name: "日向坂で会いましょう", kind: "tv" },
   { key: "hinachan", name: "日向坂ちゃんねる", kind: "youtube" },
   { key: "ninarimashou", name: "日向坂になりましょう", kind: "tv" },
@@ -84,12 +100,23 @@ async function main() {
     const d = DATA_SOURCES[i];
     await prisma.dataSource.upsert({
       where: { key: d.key },
-      update: { name: d.name, kind: d.kind, sortOrder: (i + 1) * 10 },
+      // 既存行の itemRule/publisherPattern/titlePattern も更新する（再実行で規則を反映）。
+      update: {
+        name: d.name,
+        kind: d.kind,
+        sortOrder: (i + 1) * 10,
+        itemRule: d.itemRule ?? "manual",
+        publisherPattern: d.publisherPattern ?? null,
+        titlePattern: d.titlePattern ?? null,
+      },
       create: {
         key: d.key,
         name: d.name,
         kind: d.kind,
         sortOrder: (i + 1) * 10,
+        itemRule: d.itemRule ?? "manual",
+        publisherPattern: d.publisherPattern ?? null,
+        titlePattern: d.titlePattern ?? null,
       },
     });
     dsCount++;
