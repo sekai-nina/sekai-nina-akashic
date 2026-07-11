@@ -7,7 +7,7 @@
  *
  * - mentions: 坂井新奈への言及有無（(a) AssetEntity リンク OR (b) AssetText 本文一致）。
  * - authored / authors: 坂井新奈が著者か・著者エンティティ名（roleLabel='author'）。v2.4
- * - excerpts: 一致箇所の前後スニペット（url 系・最大3件）。talk は本文先頭プレビュー（最大2件）。
+ * - excerpts: 一致箇所の前後スニペット（url 系・全一致をウィンドウ化、表示は最大5件＋excerptsMore で残数明示）。talk は本文先頭プレビュー（最大2件）。
  * - dossiers: アイテム所属アセットを含むドシエ（/dossiers/[id] 導線）。
  * - repAsset: 代表アセット（text 優先）。タイトルの /assets/[id] リンク先（v2.3）。
  * - imageAssets: 画像アセットのサムネイルストリップ用（v2.3）。
@@ -48,6 +48,7 @@ export interface ItemDTO {
   authored?: boolean; // 坂井新奈が著者（AssetEntity roleLabel='author'）。v2.4
   authors?: string[]; // 所属アセットの著者エンティティ名（重複除去）。v2.4
   excerpts?: string[]; // HTML 安全なスニペット（<mark> を含みうる）
+  excerptsMore?: number; // 表示上限を超えた言及ウィンドウ数（見落とし防止のため明示。url 系のみ）
   dossiers?: { id: string; title: string }[];
   repAsset?: { id: string; kind: string } | null; // 代表アセット（text 優先・日付順先頭）。タイトルリンク先
   imageAssets?: { id: string }[]; // サムネ有り画像（先頭 MAX_IMAGE_THUMBS 件）。表示は thumbnail API（R2）のみ
@@ -211,7 +212,7 @@ export async function getSourceAuthorKeys(sourceKey: string, clearance: string):
 // ============================================================
 
 const MAX_IMAGE_THUMBS = 8;
-const MAX_EXCERPTS_URL = 3;
+const MAX_EXCERPTS_URL = 5;
 const MAX_EXCERPTS_TALK = 2;
 const SNIPPET_RADIUS = 60;
 const TALK_PREVIEW_LEN = 140;
@@ -224,24 +225,29 @@ function regexEscape(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** block 内で最初に一致する一致語の位置を返す（大文字小文字無視）。 */
-function firstMatch(block: string, terms: string[]): { index: number; term: string } | null {
-  const lower = block.toLowerCase();
-  let best: { index: number; term: string } | null = null;
-  for (const t of terms) {
-    const i = lower.indexOf(t.toLowerCase());
-    if (i >= 0 && (best === null || i < best.index)) best = { index: i, term: t };
+/** block 内の**全**一致箇所を、前後 ~SNIPPET_RADIUS 字のウィンドウとして返す。
+ * 近接・重複するウィンドウはマージ（1スニペットに複数の <mark> が入る）。
+ * 「最初の一致だけ拾って以降の離れた言及を見落とす」事故を防ぐため、必ず全件拾う。 */
+function allMatchWindows(block: string, terms: string[]): { start: number; end: number }[] {
+  const escaped = terms.map(regexEscape).filter(Boolean);
+  if (escaped.length === 0) return [];
+  const re = new RegExp(escaped.join("|"), "gi");
+  const windows: { start: number; end: number }[] = [];
+  for (const m of block.matchAll(re)) {
+    const start = Math.max(0, m.index - SNIPPET_RADIUS);
+    const end = Math.min(block.length, m.index + m[0].length + SNIPPET_RADIUS);
+    const last = windows[windows.length - 1];
+    if (last && start <= last.end) last.end = Math.max(last.end, end); // マージ
+    else windows.push({ start, end });
   }
-  return best;
+  return windows;
 }
 
-/** 一致箇所の前後 ~SNIPPET_RADIUS 字を切り出し、HTML エスケープ後に一致語を <mark> で囲む。 */
-function markedSnippet(block: string, terms: string[], match: { index: number; term: string }): string {
-  const start = Math.max(0, match.index - SNIPPET_RADIUS);
-  const end = Math.min(block.length, match.index + match.term.length + SNIPPET_RADIUS);
-  const seg = block.slice(start, end);
-  const prefix = start > 0 ? "…" : "";
-  const suffix = end < block.length ? "…" : "";
+/** ウィンドウ範囲を切り出し、HTML エスケープ後に一致語を <mark> で囲む。 */
+function windowSnippet(block: string, terms: string[], win: { start: number; end: number }): string {
+  const seg = block.slice(win.start, win.end);
+  const prefix = win.start > 0 ? "…" : "";
+  const suffix = win.end < block.length ? "…" : "";
   let html = escapeHtml(seg);
   const escaped = terms.map((t) => regexEscape(escapeHtml(t))).filter(Boolean);
   if (escaped.length > 0) {
@@ -432,21 +438,26 @@ async function enrichPageItems(
       }
       item.excerpts = previews;
     } else {
-      // url: 一致箇所スニペット（最大3件）
+      // url: 一致箇所スニペット。**全一致箇所**をウィンドウ化して拾い（近接はマージ）、
+      // 表示上限を超えた分は excerptsMore で件数を明示する（黙って切り捨てない）。
       const excerpts: string[] = [];
-      outer: for (const r of rowsForItem) {
+      let total = 0;
+      for (const r of rowsForItem) {
         for (const content of textsByAsset.get(r.assetId) ?? []) {
           for (const rawBlock of content.split(/\n{2,}/)) {
             const block = rawBlock.trim();
             if (!block) continue;
-            const m = firstMatch(block, terms);
-            if (!m) continue;
-            excerpts.push(markedSnippet(block, terms, m));
-            if (excerpts.length >= MAX_EXCERPTS_URL) break outer;
+            for (const win of allMatchWindows(block, terms)) {
+              total++;
+              if (excerpts.length < MAX_EXCERPTS_URL) {
+                excerpts.push(windowSnippet(block, terms, win));
+              }
+            }
           }
         }
       }
       item.excerpts = excerpts;
+      if (total > excerpts.length) item.excerptsMore = total - excerpts.length;
     }
   }
 }

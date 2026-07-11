@@ -553,6 +553,11 @@ export function ItemListClient({
                               dangerouslySetInnerHTML={{ __html: ex }}
                             />
                           ))}
+                          {(item.excerptsMore ?? 0) > 0 && (
+                            <p className="text-[11px] font-medium text-amber-700">
+                              ⚠ 他 {item.excerptsMore} 箇所の言及あり — アセットを開いて確認してください
+                            </p>
+                          )}
                         </div>
                       )}
 
