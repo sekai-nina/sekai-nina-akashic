@@ -590,7 +590,7 @@ export function ItemListClient({
                               key={img.id}
                               type="button"
                               onClick={() => setLightbox({ images, index: i, title: titleText })}
-                              className="h-12 w-12 rounded overflow-hidden bg-slate-100 hover:opacity-80 transition-opacity shrink-0"
+                              className="h-28 w-28 rounded overflow-hidden bg-slate-100 hover:opacity-80 transition-opacity shrink-0"
                               title="拡大表示"
                             >
                               {/* eslint-disable-next-line @next/next/no-img-element */}

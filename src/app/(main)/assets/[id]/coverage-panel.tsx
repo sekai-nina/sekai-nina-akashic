@@ -35,6 +35,7 @@ export function AssetCoveragePanel({
 }) {
   const [items, setItems] = useState<PanelItem[]>(initialItems);
   const [msg, setMsg] = useState<string | null>(null);
+  const [minimized, setMinimized] = useState(false);
 
   function setLocal(idx: number, lensKeys: string[], checked: boolean) {
     setItems((prev) =>
@@ -87,11 +88,36 @@ export function AssetCoveragePanel({
     }
   }
 
+  // フロート表示: アセットを読みながらスクロール位置に依らずチェックできるよう、
+  // 右下固定＋最小化トグル（内容を覆わないように）。
+  if (minimized) {
+    return (
+      <button
+        type="button"
+        onClick={() => setMinimized(false)}
+        className="fixed bottom-4 right-4 z-40 rounded-full bg-slate-800 text-white text-xs px-4 py-2.5 shadow-lg hover:bg-slate-700 transition-colors"
+        title="収集カバレッジのチェックパネルを開く"
+      >
+        ✓ カバレッジ
+      </button>
+    );
+  }
+
   return (
-    <div className="bg-white border border-slate-200 rounded-lg p-4">
-      <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">
-        収集カバレッジ
-      </h2>
+    <div className="fixed bottom-4 right-4 z-40 w-80 max-h-[70vh] overflow-y-auto bg-white border border-slate-300 rounded-lg p-4 shadow-xl">
+      <div className="flex items-start justify-between mb-1">
+        <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+          収集カバレッジ
+        </h2>
+        <button
+          type="button"
+          onClick={() => setMinimized(true)}
+          className="text-slate-400 hover:text-slate-600 text-xs leading-none px-1"
+          title="最小化"
+        >
+          ―
+        </button>
+      </div>
       <p className="text-[10px] text-slate-400 mb-3">
         チェックはこのアセット単体ではなく、記事/日のアイテム全体に付きます
       </p>
