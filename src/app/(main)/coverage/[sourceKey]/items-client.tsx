@@ -43,25 +43,6 @@ function thumbUrl(assetId: string): string {
   return `/api/v1/assets/${assetId}/thumbnail`;
 }
 
-// ============================================================
-// スクロール位置の保存/復元
-// アセットページ（?hl=nina の自動スクロールあり）からブラウザバックしたとき、
-// App Router の復元が動的ページで効かずアセット側のスクロール位置が残る問題への対処。
-// アセットへ遷移するクリック時にだけ保存する（新規訪問では発火しない＝通常はトップ表示のまま）。
-// ============================================================
-
-function scrollKey(): string {
-  return `coverage-scroll:${location.pathname}${location.search}`;
-}
-
-function rememberScroll(): void {
-  try {
-    sessionStorage.setItem(scrollKey(), String(window.scrollY));
-  } catch {
-    /* sessionStorage 不可の環境では何もしない */
-  }
-}
-
 export function ItemListClient({
   source,
   lenses,
@@ -100,22 +81,6 @@ export function ItemListClient({
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showCompleted, setShowCompleted] = useState(false);
-
-  // アセットページからの戻りでスクロール位置を復元（rememberScroll 参照）
-  useEffect(() => {
-    try {
-      const k = scrollKey();
-      const v = sessionStorage.getItem(k);
-      if (v == null) return;
-      sessionStorage.removeItem(k); // 一度使ったら消す（新規訪問での誤復元防止）
-      const y = parseInt(v, 10);
-      if (Number.isNaN(y) || y <= 0) return;
-      // リストの描画高さが出てから復元（2フレーム待ち）
-      requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, y)));
-    } catch {
-      /* noop */
-    }
-  }, []);
   const [msg, setMsg] = useState<string | null>(null);
   const [undo, setUndo] = useState<UndoState | null>(null);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -529,7 +494,6 @@ export function ItemListClient({
                         {titleHref ? (
                           <Link
                             href={titleHref}
-                            onClick={rememberScroll}
                             className="text-sm text-slate-800 hover:text-slate-950 hover:underline truncate"
                           >
                             {titleText}
@@ -614,7 +578,6 @@ export function ItemListClient({
                           {item.repAsset?.kind === "text" && (
                             <Link
                               href={`/assets/${item.repAsset.id}?hl=nina`}
-                              onClick={rememberScroll}
                               className="inline-flex items-center gap-0.5 text-[10px] text-slate-400 hover:text-slate-700"
                               title="テキストアセットを開く"
                             >
@@ -863,10 +826,7 @@ export function ItemListClient({
             </p>
             <Link
               href={`/assets/${lightbox.images[lightbox.index].id}?hl=nina`}
-              onClick={(e) => {
-                e.stopPropagation();
-                rememberScroll();
-              }}
+              onClick={(e) => e.stopPropagation()}
               className="inline-flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white text-sm font-medium rounded-full px-4 py-2 mt-3 transition-colors"
             >
               <ExternalLink size={16} />
