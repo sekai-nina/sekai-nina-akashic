@@ -52,8 +52,11 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 | GET | `/datasources` | read | データソース一覧 |
 | POST | `/datasources` | write | データソース作成 |
 | PATCH | `/datasources/:id` | write | データソース更新 |
-| GET | `/coverage` | read | カバレッジ・マトリクス |
-| PUT | `/coverage` | write | セル upsert |
+| GET | `/coverage` | read | カバレッジ・マトリクス（導出値入りセル） |
+| PUT | `/coverage` | write | セル注記 upsert（not_applicable / note） |
+| GET | `/coverage/items` | read | ソースのアイテム一覧 |
+| PUT | `/coverage/checks` | write | アイテムチェックのトグル |
+| POST | `/coverage/checks/bulk` | write | 範囲一括チェック |
 | GET | `/coverage/summary` | read | 公開サイト用の要約 |
 
 ---
@@ -444,11 +447,13 @@ GET <そのパス> → 画像バイナリ
 
 ---
 
-## 収集カバレッジ (Coverage)
+## 収集カバレッジ (Coverage) — v2（アイテム単位チェック）
 
-観点 (Lens) × データソース (DataSource) ごとに「何日の分まで反映したか」(`collectedUntil`) を記録する。カーソルは日付1点 (`YYYY-MM-DD`) のみ。詳細は `docs/coverage-design.md` を参照。
+観点 (Lens) × データソース (DataSource) の2軸。v2 ではチェックの最小単位を **アイテム**（ソースごとの投稿/ドキュメント単位: ブログ記事1本・トーク1日分・番組回1つ）にした。アイテムはテーブル実体化せず、`DataSource.itemRule` に従って `SourceRecord`/`Asset` から導出する（導出ビュー）。セルの表示値（済/総・「〜◯日まで反映済み」= `continuousUntil`）は `LensItemCheck` からの**導出値**。v1 の日付カーソル `collectedUntil` は廃止。詳細は `docs/coverage-design.md` を参照。
 
-Lens / DataSource / Coverage の3テーブルはいずれも `classification` を持ち RLS が有効（他テーブルと同じ clearance ベース）。`public` は「公開サイトの鮮度表示に出すか」を表す別の関心事。
+Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` を持ち RLS が有効（clearance ベース）。導出クエリも clearance トランザクション経由なので Asset/SourceRecord の RLS が効く。`public` は「公開サイトの鮮度表示に出すか」を表す別の関心事。`Coverage` セルは v2 で **not_applicable マーク・メモ専用**に格下げ（追跡値は持たない）。
+
+**itemRule**（`DataSource`）: `blog_url`（publisher が一致する SourceRecord の distinct url = 記事1本）/ `talk_date`（publisher が一致する Asset の canonicalDate 日単位 distinct）/ `source_url`（pattern が一致する distinct url = 番組回・動画単位）/ `manual`（導出なし）。`publisherPattern` / `titlePattern` は SourceRecord への SQL LIKE（null=不問）。
 
 ### GET /lenses
 
@@ -484,38 +489,63 @@ Lens / DataSource / Coverage の3テーブルはいずれも `classification` �
 
 ### PATCH /datasources/:id
 
-`name` / `kind` / `description` / `sortOrder` / `active` / `public` / `classification` を更新。`key` は不変。
+`name` / `kind` / `description` / `sortOrder` / `active` / `public` / `classification` / `itemRule` / `publisherPattern` / `titlePattern` を更新。`key` は不変。
 
 ### GET /coverage
 
-マトリクス全体（`lenses` / `dataSources` / `cells`）を返す。`?public=1` を付けると public かつ active な行・列のみに絞り、各セルの `note`（内部メモ）を除去する。
+マトリクス全体（`lenses` / `dataSources` / `cells`）を返す。`?public=1` を付けると public かつ active な行・列のみに絞り、各セルの `note`（内部メモ）を除去する。`dataSources` には `itemRule` / `publisherPattern` / `titlePattern` / `totalItems`（導出アイテム総数）を含む。`cells` は全 lens×source の組み合わせ分（導出値入り）。
 
 ```json
 {
   "lenses": [ { "id": "...", "key": "food", "name": "食べたもの", "sortOrder": 50, "active": true, "public": true, "classification": "internal" } ],
-  "dataSources": [ { "id": "...", "key": "blog", "name": "公式ブログ", "kind": "blog", "sortOrder": 10, "active": true, "public": true, "classification": "internal" } ],
+  "dataSources": [ { "id": "...", "key": "blog", "name": "公式ブログ", "kind": "blog", "sortOrder": 10, "active": true, "public": true, "classification": "internal", "itemRule": "blog_url", "publisherPattern": "日向坂46公式ブログ", "titlePattern": null, "totalItems": 3421 } ],
   "cells": [
     {
-      "id": "...", "lensId": "...", "dataSourceId": "...",
+      "lensId": "...", "dataSourceId": "...",
       "lensKey": "food", "dataSourceKey": "blog",
-      "status": "tracked", "collectedUntil": "2026-06-25",
-      "note": "...", "updatedById": "...", "updatedAt": "..."
+      "status": "tracked", "note": null,
+      "totalItems": 3421, "checkedItems": 120,
+      "continuousUntil": "2026-06-25", "lastCheckedAt": "2026-07-11T..."
     }
   ]
 }
 ```
 
-セルの状態: `tracked`（`collectedUntil` まで収集済み） / `not_applicable`（対象外・`collectedUntil` は常に null）。マトリクスに現れないセル（行なし）は「未着手」を表す。
+セル導出値: `totalItems`（ソース共通の導出アイテム総数）/ `checkedItems`（当該観点でチェック済みの件数）/ `continuousUntil`（最古の未チェックの直前アイテムの日付。全チェックなら最新日、先頭から未チェックなら null）/ `lastCheckedAt`。`status=not_applicable` は対象外マーク（Coverage 行がある場合のみ。無ければ `tracked` 扱い）。
 
 ### PUT /coverage
 
-セルを upsert する（`lensKey` + `dataSourceKey` で特定）。
+セル注記を upsert する（`lensKey` + `dataSourceKey`）。v2 では日付カーソルを廃止し、`status`（`tracked` / `not_applicable`）と `note` のみ。
 
-**ボディ:** `lensKey`（必須）, `dataSourceKey`（必須）, `status`（`tracked` / `not_applicable`, 既定 `tracked`）, `collectedUntil`（`YYYY-MM-DD`）, `note`, `classification`。`status=not_applicable` のとき `collectedUntil` は強制的に null になる。監査は AuditLog `coverage.update` に記録。
+**ボディ:** `lensKey`（必須）, `dataSourceKey`（必須）, `status`（既定 `tracked`）, `note`, `classification`。監査は AuditLog `coverage.update`。
+
+### GET /coverage/items
+
+ソースのアイテム一覧。**クエリ:** `source`（必須・DataSource.key）, `lens`（省略時は全観点の `checkedLensKeys` 付き）, `checked`（`0`/`1`。`lens` 指定時のみ有効）, `order`（`asc`〈既定〉/`desc`）, `page`（既定 1）, `pageSize`（既定 100・最大 500）。`total` はフィルタ後の件数（ページング前）。
+
+```json
+{
+  "source": { "key": "blog", "name": "公式ブログ", "itemRule": "blog_url", "totalItems": 3421 },
+  "lensKey": "food", "order": "asc", "page": 1, "pageSize": 100, "total": 3421,
+  "items": [
+    { "itemKey": "https://...", "itemDate": "2020-09-19", "itemTitle": "記事タイトル", "isUrl": true, "checked": false }
+  ]
+}
+```
+
+`lens` 省略時は各アイテムに `checked` の代わりに `checkedLensKeys`（チェック済み観点の key 配列）が付く。
+
+### PUT /coverage/checks
+
+アイテムチェックのトグル（冪等）。**ボディ:** `lensKey`, `dataSourceKey`, `itemKey`, `checked`（boolean・必須）, `note?`, `classification?`。`checked=true` は upsert（`itemDate`/`itemTitle` は導出値のスナップショットを保存。導出に無い `itemKey` は 400）、`checked=false` は削除。監査は AuditLog `coverage.check`。
+
+### POST /coverage/checks/bulk
+
+範囲一括チェック。**ボディ:** `dataSourceKey`, `lensKeys[]`, `untilDate`（`YYYY-MM-DD`）, `classification?`。`itemDate <= untilDate` の全導出アイテムを対象 lens すべてに `createMany skipDuplicates`。返り値 `{ created, targetItems, lensKeys }`。監査は AuditLog `coverage.bulk_check`。
 
 ### GET /coverage/summary
 
-公開サイト用の要約（`note` なし）。public かつ active な Lens × DataSource の tracked セルのみ。`minCollectedUntil` はその観点で最も遅れているソースの日付。`not_applicable` と未着手は含めない。
+公開サイト用の要約（`note` なし）。public かつ active な Lens × DataSource で、導出アイテムのある（`total > 0`）かつ not_applicable でないセルのみ。`minContinuousUntil` はその観点で最も遅れているソースの `continuousUntil`（どれか1つでも先頭から未チェック=null なら null）。
 
 ```json
 {
@@ -524,10 +554,10 @@ Lens / DataSource / Coverage の3テーブルはいずれも `classification` �
     {
       "key": "food", "name": "食べたもの",
       "sources": [
-        {"key": "blog", "name": "公式ブログ", "collectedUntil": "2026-06-25"},
-        {"key": "talk", "name": "トーク", "collectedUntil": "2026-05-30"}
+        {"key": "blog", "name": "公式ブログ", "continuousUntil": "2026-06-25", "checked": 120, "total": 150},
+        {"key": "talk", "name": "トーク", "continuousUntil": "2026-05-30", "checked": 80, "total": 200}
       ],
-      "minCollectedUntil": "2026-05-30"
+      "minContinuousUntil": "2026-05-30"
     }
   ]
 }
