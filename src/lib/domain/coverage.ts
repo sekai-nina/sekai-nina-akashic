@@ -17,7 +17,7 @@ import { ClearanceLevel, CoverageStatus, DataSourceKind, ItemRule, Prisma } from
 import { unstable_cache } from "next/cache";
 import { withClearance, type TransactionClient } from "@/lib/db";
 import { logAudit } from "./audit";
-import { getSourceMentionKeys } from "./coverage-items";
+import { getSourceMentionKeys, getSourceAuthorKeys } from "./coverage-items";
 
 // ============================================================
 // 日付正規化 (YYYY-MM-DD <-> Date(UTC 00:00))
@@ -869,23 +869,24 @@ export interface BulkCheckInput {
   dataSourceKey: string;
   lensKeys: string[];
   untilDate?: string | null; // YYYY-MM-DD（この日以前の導出アイテムを対象）。省略=全期間（v2.3）
-  onlyMentionless?: boolean; // true: 坂井新奈への言及なしのアイテムだけを対象にする
+  onlyIrrelevant?: boolean; // true: 関連なし（言及なし かつ 本人著でない）のアイテムだけを対象にする（v2.4）
   classification?: ClearanceLevel;
 }
 
 export interface BulkCheckResult {
   created: number; // 実際に作成された LensItemCheck 行数（既存はスキップ）
-  targetItems: number; // 対象導出アイテム数（untilDate/onlyMentionless 適用後）
+  targetItems: number; // 対象導出アイテム数（untilDate/onlyIrrelevant 適用後）
   lensKeys: string[];
 }
 
 /**
  * 範囲一括チェック。untilDate 以前（itemDate <= untilDate）の全導出アイテムを、
  * 対象 lens すべてに createMany skipDuplicates でチェック済みにする。
- * untilDate 省略時は**全期間**（「言及なしを全部✓」のワンショット用・v2.3）。
- * onlyMentionless=true のときは、さらに坂井新奈への言及がないアイテムだけに絞る
- * （「言及なしをここまで一括✓」= 退屈な9割を一掃する省力化）。言及集合はソース全体で
- * 導出する（getSourceMentionKeys・数分キャッシュ）。url 系ソースのみ有効（talk は全件本人）。
+ * untilDate 省略時は**全期間**（v2.3）。
+ * onlyIrrelevant=true のときは**関連なし = 言及なし かつ 本人著でない**アイテムだけに絞る
+ * （v2.4「関連なしをここまで✓」。本人ブログには本人への言及が無いことがあるため、
+ * 言及だけでなく著者軸も除外条件に含めて誤爆を防ぐ）。キー集合はソース全体で導出する
+ * （getSourceMentionKeys ∪ getSourceAuthorKeys・数分キャッシュ）。url 系のみ有効（talk は全件本人）。
  */
 export async function bulkCheck(
   input: BulkCheckInput,
@@ -897,10 +898,15 @@ export async function bulkCheck(
     throw new Error("lensKeys is required");
   }
 
-  // 言及なし絞り込み用のソース全体の言及ありキー集合（url 系のみ非空）。
-  const mentionKeys = input.onlyMentionless
-    ? new Set(await getSourceMentionKeys(input.dataSourceKey, clearance))
-    : null;
+  // 関連あり（言及 ∪ 本人著）キー集合 = onlyIrrelevant の除外対象（url 系のみ非空）。
+  let relevantKeys: Set<string> | null = null;
+  if (input.onlyIrrelevant) {
+    const [mentionKeys, authorKeys] = await Promise.all([
+      getSourceMentionKeys(input.dataSourceKey, clearance),
+      getSourceAuthorKeys(input.dataSourceKey, clearance),
+    ]);
+    relevantKeys = new Set([...mentionKeys, ...authorKeys]);
+  }
 
   const result = await withClearance(clearance, async (tx) => {
     const ds = await tx.dataSource.findUnique({ where: { key: input.dataSourceKey } });
@@ -912,7 +918,7 @@ export async function bulkCheck(
 
     const derived = await deriveItems(tx, ds);
     let targets = until ? derived.filter((d) => d.itemDate && d.itemDate <= until) : derived;
-    if (mentionKeys) targets = targets.filter((d) => !mentionKeys.has(d.itemKey));
+    if (relevantKeys) targets = targets.filter((d) => !relevantKeys.has(d.itemKey));
 
     let created = 0;
     if (targets.length > 0) {
@@ -944,7 +950,7 @@ export async function bulkCheck(
       dataSourceKey: input.dataSourceKey,
       lensKeys: input.lensKeys,
       untilDate: input.untilDate ?? null, // null = 全期間
-      onlyMentionless: input.onlyMentionless ?? false,
+      onlyIrrelevant: input.onlyIrrelevant ?? false,
       created: result.created,
       targetItems: result.targetItems,
     },

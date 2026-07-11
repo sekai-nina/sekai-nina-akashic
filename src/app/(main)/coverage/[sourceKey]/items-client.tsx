@@ -14,7 +14,7 @@ interface SourceMeta {
   itemRule: ItemRule;
   totalItems: number;
   public: boolean;
-  mentionApplicable: boolean;
+  relevantApplicable: boolean; // 関連フィルタ（言及∪本人著）が有効か（url 系のみ）
 }
 
 interface LensMeta {
@@ -54,7 +54,7 @@ export function ItemListClient({
   page,
   pageSize,
   total,
-  mentionOn,
+  relevantOn,
   canEdit,
 }: {
   source: SourceMeta;
@@ -67,7 +67,7 @@ export function ItemListClient({
   page: number;
   pageSize: number;
   total: number;
-  mentionOn: boolean;
+  relevantOn: boolean;
   canEdit: boolean;
 }) {
   const router = useRouter();
@@ -91,7 +91,7 @@ export function ItemListClient({
   const selProgress = sel ? progress[sel] : undefined;
 
   // ============================================================
-  // ナビゲーション（URL パラメータ: mode / lens / order / mentions / page）
+  // ナビゲーション（URL パラメータ: mode / lens / order / relevant / page）
   // ============================================================
 
   function nav(next: {
@@ -99,14 +99,14 @@ export function ItemListClient({
     lens?: string;
     order?: "asc" | "desc";
     page?: number;
-    mentions?: boolean;
+    relevant?: boolean;
   }) {
     const p = new URLSearchParams();
     p.set("mode", next.mode ?? mode);
     p.set("lens", next.lens ?? sel ?? "");
     p.set("order", next.order ?? order);
-    const nextMentions = next.mentions ?? mentionOn;
-    if (source.mentionApplicable) p.set("mentions", nextMentions ? "1" : "0");
+    const nextRelevant = next.relevant ?? relevantOn;
+    if (source.relevantApplicable) p.set("relevant", nextRelevant ? "1" : "0");
     if (next.page && next.page > 1) p.set("page", String(next.page));
     router.push(`/coverage/${source.key}?${p.toString()}`);
   }
@@ -252,14 +252,16 @@ export function ItemListClient({
     }
   }
 
-  /** 範囲一括（ここまで全部✓ / 言及なしをここまで✓） */
-  async function bulk(item: ItemDTO, scope: "one" | "all", onlyMentionless = false) {
+  /** 範囲一括（ここまで全部✓ / 関連なしをここまで✓） */
+  async function bulk(item: ItemDTO, scope: "one" | "all", onlyIrrelevant = false) {
     if (!canEdit || !item.itemDate) return;
     const lensKeys = scope === "one" ? (sel ? [sel] : []) : lenses.map((l) => l.key);
     if (lensKeys.length === 0) return;
     const label =
       scope === "one" ? `「${lenses.find((l) => l.key === sel)?.name ?? sel}」` : "全観点";
-    const kind = onlyMentionless ? "言及なしの全アイテム" : "全アイテム";
+    const kind = onlyIrrelevant
+      ? "関連なし（言及なし・本人著でない）の全アイテム"
+      : "全アイテム";
     if (
       !confirm(
         `${item.itemDate} 以前の${kind}（${source.name}）を ${label} でチェック済みにします。よろしいですか？`
@@ -271,37 +273,14 @@ export function ItemListClient({
       dataSourceKey: source.key,
       lensKeys,
       untilDate: item.itemDate,
-      onlyMentionless,
+      onlyIrrelevant,
     });
     if (!res.ok) {
       setMsg(`エラー: ${res.error}`);
     } else {
       setMsg(
-        `${label}${onlyMentionless ? "・言及なし" : ""}: ${res.result.created} 件をチェック済みにしました`
+        `${label}${onlyIrrelevant ? "・関連なし" : ""}: ${res.result.created} 件をチェック済みにしました`
       );
-      startTransition(() => router.refresh());
-    }
-  }
-
-  /** ヘッダの「言及なしを全部✓」（全期間・全観点・ワンショット） */
-  async function bulkAllMentionless() {
-    if (!canEdit) return;
-    if (
-      !confirm(
-        `${source.name} の坂井新奈への言及がない全アイテム（全期間）を、全観点でチェック済みにします。よろしいですか？`
-      )
-    )
-      return;
-    setMsg(null);
-    const res = await bulkCheckAction({
-      dataSourceKey: source.key,
-      lensKeys: lenses.map((l) => l.key),
-      onlyMentionless: true,
-    });
-    if (!res.ok) {
-      setMsg(`エラー: ${res.error}`);
-    } else {
-      setMsg(`言及なし（全期間・全観点）: ${res.result.created} 件をチェック済みにしました`);
       startTransition(() => router.refresh());
     }
   }
@@ -450,14 +429,17 @@ export function ItemListClient({
                 {items.length} 行
               </span>
             )}
-            {source.mentionApplicable && (
-              <label className="flex items-center gap-1.5 text-slate-600 text-xs">
+            {source.relevantApplicable && (
+              <label
+                className="flex items-center gap-1.5 text-slate-600 text-xs"
+                title="言及あり または 坂井新奈が著者"
+              >
                 <input
                   type="checkbox"
-                  checked={mentionOn}
-                  onChange={(e) => nav({ mentions: e.target.checked, page: 1 })}
+                  checked={relevantOn}
+                  onChange={(e) => nav({ relevant: e.target.checked, page: 1 })}
                 />
-                坂井新奈に言及あり
+                坂井新奈に関連あり（言及/本人著）
               </label>
             )}
             <label className="flex items-center gap-1.5 text-slate-600 text-xs">
@@ -474,14 +456,6 @@ export function ItemListClient({
             >
               並び: {order === "asc" ? "古い順 ↑" : "新しい順 ↓"}
             </button>
-            {canEdit && source.mentionApplicable && (
-              <button
-                onClick={bulkAllMentionless}
-                className="px-2 py-1 rounded-md border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 text-xs"
-              >
-                言及なしを全部✓（全期間・全観点）
-              </button>
-            )}
           </div>
 
           {msg && <p className="text-xs text-slate-500 mb-2">{msg}</p>}
@@ -546,9 +520,25 @@ export function ItemListClient({
                             <ExternalLink size={13} />
                           </a>
                         )}
-                        {source.mentionApplicable && item.mentions && (
+                        {source.relevantApplicable && item.mentions && (
                           <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700 font-medium">
                             言及
+                          </span>
+                        )}
+                        {source.relevantApplicable && item.authored && (
+                          <span
+                            className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-sky-100 text-sky-700 font-medium"
+                            title="坂井新奈が著者"
+                          >
+                            本人
+                          </span>
+                        )}
+                        {(item.authors ?? []).length > 0 && (
+                          <span
+                            className="shrink-0 text-[10px] text-slate-400 truncate max-w-[10rem]"
+                            title={`著者: ${(item.authors ?? []).join("、")}`}
+                          >
+                            ✍ {(item.authors ?? []).join("、")}
                           </span>
                         )}
                       </div>
@@ -691,7 +681,7 @@ export function ItemListClient({
                         >
                           ここまで全部✓（全観点）
                         </button>
-                        {source.mentionApplicable && (
+                        {source.relevantApplicable && (
                           <>
                             <button
                               onClick={() => bulk(item, "one", true)}
@@ -699,13 +689,13 @@ export function ItemListClient({
                               className="text-xs px-2 py-1 rounded-md border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 disabled:opacity-50"
                               title={mode === "digest" ? "観点モードで使用できます" : undefined}
                             >
-                              言及なしをここまで✓（この観点）
+                              関連なしをここまで✓（この観点）
                             </button>
                             <button
                               onClick={() => bulk(item, "all", true)}
                               className="text-xs px-2 py-1 rounded-md border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
                             >
-                              言及なしをここまで✓（全観点）
+                              関連なしをここまで✓（全観点）
                             </button>
                           </>
                         )}

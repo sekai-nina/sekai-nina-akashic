@@ -71,8 +71,8 @@ export async function toggleCheckAction(input: {
 export async function bulkCheckAction(input: {
   dataSourceKey: string;
   lensKeys: string[];
-  untilDate?: string; // 省略 = 全期間（v2.3「言及なしを全部✓」）
-  onlyMentionless?: boolean;
+  untilDate?: string; // 省略 = 全期間（v2.3）
+  onlyIrrelevant?: boolean; // 関連なし（言及なし かつ 本人著でない）のみ対象（v2.4）
 }) {
   const user = await requireEditor();
   try {

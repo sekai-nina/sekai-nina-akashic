@@ -522,27 +522,29 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 
 ### GET /coverage/items
 
-ソースのアイテム一覧（トリアージ・エンリッチ込み）。**クエリ:** `source`（必須・DataSource.key）, `lens`（省略時は全観点の `checkedLensKeys` 付き）, `checked`（`0`/`1`。`lens` 指定時のみ有効）, `mentions`（`1`=坂井新奈への言及ありのみ / `0`=言及なしのみ。url 系ソースのみ有効・talk/manual では無視）, `order`（`asc`〈既定〉/`desc`）, `page`（既定 1）, `pageSize`（既定 100・最大 500）。`total` はフィルタ後の件数（ページング前）。
+ソースのアイテム一覧（トリアージ・エンリッチ込み）。**クエリ:** `source`（必須・DataSource.key）, `lens`（省略時は全観点の `checkedLensKeys` 付き）, `checked`（`0`/`1`。`lens` 指定時のみ有効）, `relevant`（`1`=坂井新奈に**関連あり**〈言及 ∪ 本人著〉のみ / `0`=関連なしのみ。url 系ソースのみ有効・talk/manual では無視。旧名 `mentions` もエイリアスとして受付）, `order`（`asc`〈既定〉/`desc`）, `page`（既定 1）, `pageSize`（既定 100・最大 500）。`total` はフィルタ後の件数（ページング前）。
 
 返却する**ページ分のアイテム**には以下がエンリッチされる（ソース全体ではなくページ分のみ・N+1 なしのバッチクエリ）:
 
-- `mentions`（boolean）— 坂井新奈への言及。判定 = (a) 所属アセットに坂井新奈への `AssetEntity` リンク **または** (b) 所属アセットの `AssetText` 本文が canonicalName/aliases に一致。talk は全件本人=`true`。言及集合はソース全体で導出し数分キャッシュする。
+- `mentions`（boolean）— 坂井新奈への言及。判定 = (a) 所属アセットに坂井新奈への `AssetEntity` リンク **または** (b) 所属アセットの `AssetText` 本文が canonicalName/aliases に一致。talk は全件本人=`true`。キー集合はソース全体で導出し数分キャッシュする。
+- `authored`（boolean）— 坂井新奈が著者（所属アセットに `AssetEntity roleLabel='author'` リンク）。本人ブログには本人への言及が無いことがあるため、関連判定は 言及 ∪ 本人著 の2軸（v2.4）。
+- `authors`（string[]）— 所属アセットの著者エンティティ名（重複除去）。例 `["山下葉留花"]`（v2.4）。
 - `excerpts`（string[]）— url 系は一致箇所の前後スニペット（最大3件・一致語を `<mark>` で囲む HTML 安全文字列）。talk は本文先頭プレビュー（最大2件・`messageBodyPreview`）。
 - `dossiers`（`{id,title}[]`）— アイテム所属アセットを含むドシエ（重複除去・`/dossiers/[id]` 導線用）。
 - `repAsset`（`{id,kind} | null`）— 代表アセット（text 優先・日付順先頭）。タイトルの `/assets/[id]` リンク先（v2.3）。
-- `imageAssets`（`{id}[]`）＋ `imageAssetCount`（number）— サムネイル有りの画像アセット（先頭8件＋画像総数）。`GET /assets/[id]/thumbnail`（認証不要・302 リダイレクト）でサムネイルストリップを組む（v2.3）。
+- `imageAssets`（`{id}[]`）＋ `imageAssetCount`（number）— サムネイル有りの画像アセット（先頭8件＋画像総数）。`GET /assets/[id]/thumbnail`（302 リダイレクト）でサムネイルストリップ・ライトボックスを組む（v2.3）。
 - `assetCount`（number）— 所属アセット総数。
 
-「アイテム所属アセット」= url 系は同一 `SourceRecord.url` のアセット群、talk はその JST 日のトークアセット群。`source.mentionApplicable` は言及フィルタが有効か（url 系のみ `true`）。
+「アイテム所属アセット」= url 系は同一 `SourceRecord.url` のアセット群、talk はその JST 日のトークアセット群。`source.relevantApplicable` は関連フィルタが有効か（url 系のみ `true`）。
 
 ```json
 {
-  "source": { "key": "blog", "name": "公式ブログ", "itemRule": "blog_url", "totalItems": 3421, "mentionApplicable": true },
-  "lensKey": null, "order": "asc", "page": 1, "pageSize": 100, "total": 274, "mentions": true,
+  "source": { "key": "blog", "name": "公式ブログ", "itemRule": "blog_url", "totalItems": 3421, "relevantApplicable": true },
+  "lensKey": null, "order": "asc", "page": 1, "pageSize": 100, "total": 274, "relevant": true,
   "items": [
     {
       "itemKey": "https://...", "itemDate": "2020-09-19", "itemTitle": "記事タイトル", "isUrl": true,
-      "checkedLensKeys": ["food"], "mentions": true,
+      "checkedLensKeys": ["food"], "mentions": true, "authored": false, "authors": ["山下葉留花"],
       "excerpts": ["…今日は<mark>にぃな</mark>とごはん…"],
       "dossiers": [{ "id": "...", "title": "2020-09-19 おでかけ" }],
       "repAsset": { "id": "...", "kind": "text" },
@@ -560,7 +562,7 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 
 ### POST /coverage/checks/bulk
 
-範囲一括チェック。**ボディ:** `dataSourceKey`, `lensKeys[]`, `untilDate?`（`YYYY-MM-DD`・省略時は**全期間**〈v2.3「言及なしを全部✓」等のワンショット用〉）, `onlyMentionless?`（boolean・既定 false）, `classification?`。`itemDate <= untilDate` の全導出アイテムを対象 lens すべてに `createMany skipDuplicates`。`onlyMentionless=true` のときはさらに**坂井新奈への言及がないアイテムだけ**に絞る（「言及なしをここまで一括✓」= 退屈な9割を一掃する省力化。言及集合はソース全体で導出・数分キャッシュ。url 系のみ有効・talk は全件本人）。返り値 `{ created, targetItems, lensKeys }`。監査は AuditLog `coverage.bulk_check`。
+範囲一括チェック。**ボディ:** `dataSourceKey`, `lensKeys[]`, `untilDate?`（`YYYY-MM-DD`・省略時は**全期間**〈v2.3〉）, `onlyIrrelevant?`（boolean・既定 false）, `classification?`。`itemDate <= untilDate` の全導出アイテムを対象 lens すべてに `createMany skipDuplicates`。`onlyIrrelevant=true` のときは**関連なし = 言及なし かつ 本人著でない**アイテムだけに絞る（v2.4「関連なしをここまで✓」。本人ブログには本人への言及が無いことがあるため著者軸も除外条件に含めて誤爆を防ぐ。キー集合はソース全体で導出・数分キャッシュ。url 系のみ有効・talk は全件本人）。返り値 `{ created, targetItems, lensKeys }`。監査は AuditLog `coverage.bulk_check`。
 
 ### GET /coverage/summary
 

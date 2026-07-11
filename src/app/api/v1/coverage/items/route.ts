@@ -24,12 +24,14 @@ export async function GET(request: Request) {
       : checkedParam === "0" || checkedParam === "false"
         ? false
         : undefined;
-  // 言及フィルタ: 1=言及あり / 0=言及なし（url 系のみ有効）
-  const mentionsParam = url.searchParams.get("mentions");
-  const mentions =
-    mentionsParam === "1" || mentionsParam === "true"
+  // 関連フィルタ（v2.4: 言及∪本人著）: 1=関連あり / 0=関連なし（url 系のみ有効）。
+  // 旧パラメータ名 mentions もエイリアスとして受け付ける。
+  const relevantParam =
+    url.searchParams.get("relevant") ?? url.searchParams.get("mentions");
+  const relevant =
+    relevantParam === "1" || relevantParam === "true"
       ? true
-      : mentionsParam === "0" || mentionsParam === "false"
+      : relevantParam === "0" || relevantParam === "false"
         ? false
         : undefined;
   const order = url.searchParams.get("order") === "desc" ? "desc" : "asc";
@@ -39,7 +41,7 @@ export async function GET(request: Request) {
   try {
     const result = await listItems(
       source,
-      { lensKey: lensKey ?? undefined, checked, mentions, order, page, pageSize },
+      { lensKey: lensKey ?? undefined, checked, relevant, order, page, pageSize },
       { id: auth.id, clearance: auth.clearance }
     );
     return NextResponse.json(result);

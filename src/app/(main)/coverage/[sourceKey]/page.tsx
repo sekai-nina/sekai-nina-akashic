@@ -18,7 +18,7 @@ export default async function ItemListPage({
     lens?: string;
     order?: string;
     page?: string;
-    mentions?: string;
+    relevant?: string;
     mode?: string;
   }>;
 }) {
@@ -45,15 +45,15 @@ export default async function ItemListPage({
       ? sp.lens
       : (lenses[0]?.key ?? null);
 
-  // 言及フィルタ: url 系のみ有効。ブログは既定 ON（母集団の大半が無関係なため）。
-  // ページ URL では mentions=1（言及ありのみ）/ mentions=0（全件表示）の2状態のみ使う。
-  const mentionApplicable =
+  // 関連フィルタ（v2.4: 言及∪本人著）: url 系のみ有効。ブログは既定 ON（大半が無関係なため）。
+  // ページ URL では relevant=1（関連ありのみ）/ relevant=0（全件表示）の2状態のみ使う。
+  const relevantApplicable =
     source.itemRule === "blog_url" || source.itemRule === "source_url";
-  let mentions: boolean | undefined;
-  if (mentionApplicable) {
-    if (sp.mentions === "1") mentions = true;
-    else if (sp.mentions === "0") mentions = undefined;
-    else mentions = source.key === "blog" ? true : undefined; // 既定
+  let relevant: boolean | undefined;
+  if (relevantApplicable) {
+    if (sp.relevant === "1") relevant = true;
+    else if (sp.relevant === "0") relevant = undefined;
+    else relevant = source.key === "blog" ? true : undefined; // 既定
   }
 
   // 観点別進捗（このソースのセルから）
@@ -71,10 +71,10 @@ export default async function ItemListPage({
   }
 
   // アイテム行（lens 未指定 = 全観点の checkedLensKeys 付き。行展開に必要）
-  // 言及フィルタは母集団を絞るためサーバー側で適用（total/ページングに反映）。
+  // 関連フィルタは母集団を絞るためサーバー側で適用（total/ページングに反映）。
   const items = await listItems(
     sourceKey,
-    { order, page, pageSize, mentions },
+    { order, page, pageSize, relevant },
     { id: session.user.id, clearance }
   );
 
@@ -87,7 +87,7 @@ export default async function ItemListPage({
           itemRule: source.itemRule,
           totalItems: source.totalItems,
           public: source.public,
-          mentionApplicable,
+          relevantApplicable,
         }}
         lenses={lenses.map((l) => ({ key: l.key, name: l.name }))}
         lensProgress={lensProgress}
@@ -98,7 +98,7 @@ export default async function ItemListPage({
         page={items.page}
         pageSize={items.pageSize}
         total={items.total}
-        mentionOn={mentions === true}
+        relevantOn={relevant === true}
         canEdit={canEdit}
       />
     </div>

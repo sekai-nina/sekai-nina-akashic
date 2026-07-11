@@ -6,14 +6,15 @@
  * 返却するページ分のアイテムに以下をエンリッチする（アイテム毎の N+1 は禁止・バッチクエリ）:
  *
  * - mentions: 坂井新奈への言及有無（(a) AssetEntity リンク OR (b) AssetText 本文一致）。
+ * - authored / authors: 坂井新奈が著者か・著者エンティティ名（roleLabel='author'）。v2.4
  * - excerpts: 一致箇所の前後スニペット（url 系・最大3件）。talk は本文先頭プレビュー（最大2件）。
  * - dossiers: アイテム所属アセットを含むドシエ（/dossiers/[id] 導線）。
  * - repAsset: 代表アセット（text 優先）。タイトルの /assets/[id] リンク先（v2.3）。
  * - imageAssets: 画像アセットのサムネイルストリップ用（v2.3）。
  *
  * 「アイテム所属アセット」= url 系は同一 SourceRecord.url のアセット群、talk はその JST 日の
- * トークアセット群。言及フィルタはページング母集団を絞るため、ソース全体の言及ありキー集合
- * (getSourceMentionKeys) を数分キャッシュして使う（内部管理画面なので許容）。
+ * トークアセット群。関連フィルタ（言及∪本人著・v2.4）はページング母集団を絞るため、ソース全体の
+ * キー集合 (getSourceMentionKeys / getSourceAuthorKeys) を数分キャッシュして使う。
  *
  * 坂井新奈エンティティ（type=person, canonicalName='坂井新奈'）は Entity テーブルから引く
  * （ハードコードしない）。canonicalName + aliases を一致語に使う。
@@ -42,12 +43,14 @@ export interface ItemDTO {
   isUrl: boolean;
   checked?: boolean; // lensKey 指定時
   checkedLensKeys?: string[]; // lensKey 省略時（アイテム起点ビュー）
-  // --- v2.2/v2.3 トリアージ・エンリッチ（ページ分のみ）---
+  // --- v2.2〜v2.4 トリアージ・エンリッチ（ページ分のみ）---
   mentions?: boolean; // 坂井新奈への言及。talk は全件本人=true。manual は undefined
+  authored?: boolean; // 坂井新奈が著者（AssetEntity roleLabel='author'）。v2.4
+  authors?: string[]; // 所属アセットの著者エンティティ名（重複除去）。v2.4
   excerpts?: string[]; // HTML 安全なスニペット（<mark> を含みうる）
   dossiers?: { id: string; title: string }[];
   repAsset?: { id: string; kind: string } | null; // 代表アセット（text 優先・日付順先頭）。タイトルリンク先
-  imageAssets?: { id: string }[]; // サムネイル有りの画像アセット（先頭 MAX_IMAGE_THUMBS 件）
+  imageAssets?: { id: string }[]; // サムネ有り画像（先頭 MAX_IMAGE_THUMBS 件）。表示は thumbnail API（R2）のみ
   imageAssetCount?: number; // 画像アセット総数（「+N」表示用）
   assetCount?: number; // 所属アセット総数
 }
@@ -58,21 +61,21 @@ export interface ListItemsResult {
     name: string;
     itemRule: ItemRule;
     totalItems: number; // 導出総数（フィルタ前）
-    mentionApplicable: boolean; // 言及フィルタが有効か（url 系のみ true）
+    relevantApplicable: boolean; // 関連フィルタ（言及∪本人著）が有効か（url 系のみ true）
   };
   lensKey: string | null;
   order: "asc" | "desc";
   page: number;
   pageSize: number;
   total: number; // フィルタ後の件数（ページング前）
-  mentions: boolean | null; // 適用中の言及フィルタ（true=言及あり / false=言及なし / null=なし）
+  relevant: boolean | null; // 適用中の関連フィルタ（true=関連あり / false=関連なし / null=なし）
   items: ItemDTO[];
 }
 
 export interface ListItemsOptions {
   lensKey?: string | null;
   checked?: boolean; // lensKey 指定時のみ有効
-  mentions?: boolean; // 言及フィルタ（true=言及あり / false=言及なし）。url 系のみ有効
+  relevant?: boolean; // 関連フィルタ（true=言及あり∪本人著 / false=どちらでもない）。url 系のみ有効
   order?: "asc" | "desc";
   page?: number;
   pageSize?: number;
@@ -159,6 +162,46 @@ export async function getSourceMentionKeys(sourceKey: string, clearance: string)
     () => computeSourceMentionKeys(clearance, sourceKey),
     ["coverage-mention-keys", sourceKey, clearance],
     { revalidate: 120, tags: ["coverage-mention-keys"] }
+  );
+  return cached();
+}
+
+// ============================================================
+// ソース全体の「坂井新奈が著者」キー集合（v2.4・url 系のみ・数分キャッシュ)
+// ============================================================
+
+async function computeSourceAuthorKeys(clearance: string, sourceKey: string): Promise<string[]> {
+  // AssetEntity(entityId, roleLabel='author') の等値結合のみ（本文スキャン無し）で軽い。
+  return withClearance(clearance, async (tx) => {
+    const ds = await tx.dataSource.findUnique({ where: { key: sourceKey } });
+    if (!ds || !itemRuleIsUrl(ds.itemRule)) return [];
+    const entity = await getNinaEntity(tx);
+    if (!entity) return [];
+
+    const whereBase = Prisma.join(
+      [Prisma.sql`sr.url IS NOT NULL AND sr.url <> ''`, ...sourcePatternConds(ds)],
+      " AND "
+    );
+    const rows = await tx.$queryRaw<{ itemKey: string }[]>`
+      SELECT DISTINCT sr.url AS "itemKey"
+      FROM "SourceRecord" sr
+      JOIN "AssetEntity" ae ON ae."assetId" = sr."assetId"
+      WHERE ${whereBase} AND ae."entityId" = ${entity.id} AND ae."roleLabel" = 'author'
+    `;
+    return rows.map((r) => r.itemKey);
+  });
+}
+
+/**
+ * ソース全体の「坂井新奈が著者（roleLabel='author'）」itemKey 集合を返す（url 系のみ非空）。
+ * 本人ブログには本人への言及が無いことがあるため、関連判定は 言及 ∪ 本人著 の2軸（v2.4）。
+ * getSourceMentionKeys と同構造・同キャッシュ方式（120秒・source×clearance キー）。
+ */
+export async function getSourceAuthorKeys(sourceKey: string, clearance: string): Promise<string[]> {
+  const cached = unstable_cache(
+    () => computeSourceAuthorKeys(clearance, sourceKey),
+    ["coverage-author-keys", sourceKey, clearance],
+    { revalidate: 120, tags: ["coverage-author-keys"] }
   );
   return cached();
 }
@@ -325,6 +368,18 @@ async function enrichPageItems(
     }
   }
 
+  // 著者（AssetEntity roleLabel='author' の Entity 名）。v2.4・バッチ1クエリ
+  const authorsByAsset = new Map<string, string[]>();
+  if (assetIdArr.length > 0) {
+    const auRows = await tx.$queryRaw<{ assetId: string; name: string }[]>`
+      SELECT ae."assetId" AS "assetId", e."canonicalName" AS "name"
+      FROM "AssetEntity" ae
+      JOIN "Entity" e ON e.id = ae."entityId"
+      WHERE ae."assetId" = ANY(${assetIdArr}) AND ae."roleLabel" = 'author'
+    `;
+    for (const r of auRows) pushMap(authorsByAsset, r.assetId, r.name);
+  }
+
   // 本文（url 系のみ。talk は messageBodyPreview を使うので取得しない）
   const textsByAsset = new Map<string, string[]>();
   let terms: string[] = [];
@@ -358,6 +413,13 @@ async function enrichPageItems(
 
     const dm = dossiersByItem.get(item.itemKey);
     item.dossiers = dm ? Array.from(dm, ([id, title]) => ({ id, title })) : [];
+
+    // 著者名（所属アセット横断で重複除去・日付順）
+    const authorSet = new Set<string>();
+    for (const r of rowsForItem) {
+      for (const n of authorsByAsset.get(r.assetId) ?? []) authorSet.add(n);
+    }
+    item.authors = [...authorSet];
 
     if (isTalk) {
       // talk: 本文先頭プレビュー（最大2件・言及判定なし）
@@ -411,12 +473,14 @@ export async function listItems(
   const page = Math.max(1, opts.page ?? 1);
   const pageSize = Math.min(500, Math.max(1, opts.pageSize ?? 100));
 
-  // ソース全体の言及ありキー（url 系のみ非空）と導出アイテム。どちらもキャッシュ付き独立 tx。
-  const [mentionKeyArr, derived] = await Promise.all([
+  // ソース全体の言及あり/本人著キー（url 系のみ非空）と導出アイテム。すべてキャッシュ付き独立 tx。
+  const [mentionKeyArr, authorKeyArr, derived] = await Promise.all([
     getSourceMentionKeys(sourceKey, actor.clearance),
+    getSourceAuthorKeys(sourceKey, actor.clearance),
     getDerivedItems(sourceKey, actor.clearance),
   ]);
   const mentionSet = new Set(mentionKeyArr);
+  const authorSet = new Set(authorKeyArr);
 
   return withSession(actor, async (tx) => {
     const ds = await tx.dataSource.findUnique({ where: { key: sourceKey } });
@@ -424,17 +488,21 @@ export async function listItems(
 
     const isUrl = itemRuleIsUrl(ds.itemRule);
     const isTalk = ds.itemRule === "talk_date";
-    const mentionApplicable = isUrl; // talk=全件本人 / manual=アイテム無し
+    const relevantApplicable = isUrl; // talk=全件本人 / manual=アイテム無し
 
     const mentionOf = (key: string): boolean | undefined =>
-      mentionApplicable ? mentionSet.has(key) : isTalk ? true : undefined;
+      relevantApplicable ? mentionSet.has(key) : isTalk ? true : undefined;
+    const authoredOf = (key: string): boolean | undefined =>
+      relevantApplicable ? authorSet.has(key) : isTalk ? true : undefined;
+    // 関連 = 言及 ∪ 本人著（v2.4）
+    const isRelevant = (key: string): boolean => mentionSet.has(key) || authorSet.has(key);
 
-    // 言及フィルタ（母集団を絞る。url 系のみ）
+    // 関連フィルタ（母集団を絞る。url 系のみ）
     let filtered: DerivedItem[] = derived;
-    if (mentionApplicable && opts.mentions === true) {
-      filtered = filtered.filter((d) => mentionSet.has(d.itemKey));
-    } else if (mentionApplicable && opts.mentions === false) {
-      filtered = filtered.filter((d) => !mentionSet.has(d.itemKey));
+    if (relevantApplicable && opts.relevant === true) {
+      filtered = filtered.filter((d) => isRelevant(d.itemKey));
+    } else if (relevantApplicable && opts.relevant === false) {
+      filtered = filtered.filter((d) => !isRelevant(d.itemKey));
     }
 
     let items: ItemDTO[];
@@ -452,6 +520,7 @@ export async function listItems(
         itemTitle: d.itemTitle,
         isUrl,
         mentions: mentionOf(d.itemKey),
+        authored: authoredOf(d.itemKey),
         checked: checkedSet.has(d.itemKey),
       }));
       if (opts.checked === true) items = items.filter((i) => i.checked);
@@ -469,6 +538,7 @@ export async function listItems(
         itemTitle: d.itemTitle,
         isUrl,
         mentions: mentionOf(d.itemKey),
+        authored: authoredOf(d.itemKey),
         checkedLensKeys: byItem.get(d.itemKey) ?? [],
       }));
     }
@@ -488,15 +558,136 @@ export async function listItems(
         name: ds.name,
         itemRule: ds.itemRule,
         totalItems: derived.length,
-        mentionApplicable,
+        relevantApplicable,
       },
       lensKey: opts.lensKey ?? null,
       order,
       page,
       pageSize,
       total,
-      mentions: mentionApplicable ? opts.mentions ?? null : null,
+      relevant: relevantApplicable ? opts.relevant ?? null : null,
       items: pageItems,
     };
+  });
+}
+
+// ============================================================
+// アセット → 所属カバレッジアイテムの逆引き (findItemsForAsset) — v2.4
+// ============================================================
+
+export interface AssetCoverageItem {
+  sourceKey: string;
+  sourceName: string;
+  itemRule: ItemRule;
+  itemKey: string; // url または "YYYY-MM-DD"
+  itemTitle: string | null;
+  checkedLensKeys: string[]; // 現在のチェック状態（全観点）
+}
+
+/**
+ * SQL LIKE パターン（% と _）を JS の正規表現に変換する（大文字小文字は区別 = Postgres LIKE と同じ）。
+ * `|` OR は呼び出し側で分割する。
+ */
+function likeToRegex(pattern: string): RegExp {
+  const escaped = pattern
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/%/g, "[\\s\\S]*")
+    .replace(/_/g, "[\\s\\S]");
+  return new RegExp(`^${escaped}$`);
+}
+
+/** 値が `|` 区切り LIKE パターンのいずれかに一致するか。パターン空/null は不問(true)。 */
+function matchesLikeOr(value: string | null | undefined, pattern: string | null): boolean {
+  const parts = (pattern ?? "")
+    .split("|")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  if (parts.length === 0) return true;
+  const v = value ?? "";
+  return parts.some((p) => likeToRegex(p).test(v));
+}
+
+/** canonicalDate（UTC naive 格納）→ JST 壁時計の "YYYY-MM-DD"（deriveItems の talk_date と同じ規約）。 */
+function jstDayString(d: Date): string {
+  return new Date(d.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+/**
+ * アセットが属するカバレッジアイテムを逆引きする（アセットページ内チェックパネル用・v2.4）。
+ * アセットの SourceRecord.url / canonicalDate(JST日) を、derivable な各 DataSource の
+ * publisher/title パターン（LIKE・`|` OR）とアプリ側で突き合わせる。通常 0〜1 件。
+ * クエリはアセット1・データソース1・チェック1 の計3本（アイテム毎の導出クエリは発行しない）。
+ */
+export async function findItemsForAsset(
+  assetId: string,
+  clearance: string
+): Promise<AssetCoverageItem[]> {
+  return withClearance(clearance, async (tx) => {
+    const asset = await tx.asset.findUnique({
+      where: { id: assetId },
+      select: {
+        id: true,
+        canonicalDate: true,
+        sourceRecords: { select: { url: true, publisher: true, title: true } },
+      },
+    });
+    if (!asset || asset.sourceRecords.length === 0) return [];
+
+    const sources = await tx.dataSource.findMany({
+      where: { active: true, itemRule: { not: "manual" } },
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    });
+
+    const found: {
+      ds: (typeof sources)[number];
+      itemKey: string;
+      itemTitle: string | null;
+    }[] = [];
+    const seen = new Set<string>();
+
+    for (const ds of sources) {
+      const matching = asset.sourceRecords.filter(
+        (sr) =>
+          matchesLikeOr(sr.publisher, ds.publisherPattern) &&
+          matchesLikeOr(sr.title, ds.titlePattern)
+      );
+      if (matching.length === 0) continue;
+
+      if (ds.itemRule === "talk_date") {
+        if (!asset.canonicalDate) continue; // 導出対象外（deriveItems と同条件）
+        const day = jstDayString(asset.canonicalDate);
+        const dedupe = `${ds.id}:${day}`;
+        if (seen.has(dedupe)) continue;
+        seen.add(dedupe);
+        found.push({ ds, itemKey: day, itemTitle: `トーク ${day}` });
+      } else {
+        // blog_url / source_url — url を持つ SourceRecord のみアイテムになる
+        for (const sr of matching) {
+          if (!sr.url) continue;
+          const dedupe = `${ds.id}:${sr.url}`;
+          if (seen.has(dedupe)) continue;
+          seen.add(dedupe);
+          found.push({ ds, itemKey: sr.url, itemTitle: sr.title || null });
+        }
+      }
+    }
+    if (found.length === 0) return [];
+
+    // 現在のチェック状態（全観点）を1クエリで
+    const checks = await tx.lensItemCheck.findMany({
+      where: { OR: found.map((f) => ({ dataSourceId: f.ds.id, itemKey: f.itemKey })) },
+      select: { dataSourceId: true, itemKey: true, lens: { select: { key: true } } },
+    });
+    const checkedByItem = new Map<string, string[]>();
+    for (const c of checks) pushMap(checkedByItem, `${c.dataSourceId}:${c.itemKey}`, c.lens.key);
+
+    return found.map((f) => ({
+      sourceKey: f.ds.key,
+      sourceName: f.ds.name,
+      itemRule: f.ds.itemRule,
+      itemKey: f.itemKey,
+      itemTitle: f.itemTitle,
+      checkedLensKeys: checkedByItem.get(`${f.ds.id}:${f.itemKey}`) ?? [],
+    }));
   });
 }
