@@ -116,6 +116,23 @@ enum PlaceStatus {
   candidate
 }
 
+enum DataSourceKind {
+  blog
+  talk
+  tv
+  youtube
+  sns
+  radio
+  magazine
+  live_event
+  other
+}
+
+enum CoverageStatus {
+  tracked
+  not_applicable
+}
+
 model User {
   id           String         @id @default(cuid())
   email        String         @unique
@@ -140,24 +157,24 @@ model User {
 }
 
 model Asset {
-  id               String          @id @default(cuid())
-  kind             AssetKind
-  title            String          @default("")
-  description      String          @default("")
-  status           AssetStatus     @default(inbox)
-  trustLevel       TrustLevel      @default(unverified)
-  canonicalDate    DateTime?
-  originalFilename String?
-  mimeType         String?
-  fileSize         Int?
-  sha256           String?
-  sourceType       SourceType      @default(manual)
-  storageProvider  StorageProvider  @default(local_none)
-  storageKey       String?
-  storageUrl       String?
-  thumbnailUrl     String?
+  id                 String          @id @default(cuid())
+  kind               AssetKind
+  title              String          @default("")
+  description        String          @default("")
+  status             AssetStatus     @default(inbox)
+  trustLevel         TrustLevel      @default(unverified)
+  canonicalDate      DateTime?
+  originalFilename   String?
+  mimeType           String?
+  fileSize           Int?
+  sha256             String?
+  sourceType         SourceType      @default(manual)
+  storageProvider    StorageProvider @default(local_none)
+  storageKey         String?
+  storageUrl         String?
+  thumbnailUrl       String?
   messageBodyPreview String?
-  classification     ClearanceLevel @default(internal)
+  classification     ClearanceLevel  @default(internal)
 
   // Discord metadata
   discordGuildId    String?
@@ -176,12 +193,12 @@ model Asset {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  texts           AssetText[]
-  entities        AssetEntity[]
-  sourceRecords   SourceRecord[]
-  annotations     Annotation[]
-  dossierItems    DossierItem[]
-  testimonials    Testimonial[]
+  texts             AssetText[]
+  entities          AssetEntity[]
+  sourceRecords     SourceRecord[]
+  annotations       Annotation[]
+  dossierItems      DossierItem[]
+  testimonials      Testimonial[]
   relationsAsSource AssetRelation[] @relation("RelationSource")
   relationsAsTarget AssetRelation[] @relation("RelationTarget")
 
@@ -282,17 +299,17 @@ model Annotation {
 }
 
 model Dossier {
-  id              String                  @id @default(cuid())
-  ownerId         String
-  owner           User                    @relation(fields: [ownerId], references: [id])
-  title           String
-  summary         String                  @default("")
-  classification  ClearanceLevel          @default(internal)
-  viewMode        DossierAccessMode       @default(private)
-  editMode        DossierAccessMode       @default(private)
+  id             String            @id @default(cuid())
+  ownerId        String
+  owner          User              @relation(fields: [ownerId], references: [id])
+  title          String
+  summary        String            @default("")
+  classification ClearanceLevel    @default(internal)
+  viewMode       DossierAccessMode @default(private)
+  editMode       DossierAccessMode @default(private)
 
-  createdAt       DateTime                @default(now())
-  updatedAt       DateTime                @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   items           DossierItem[]
   placeCandidates DossierPlaceCandidate[]
@@ -303,35 +320,35 @@ model Dossier {
 }
 
 model DossierItem {
-  id                    String          @id @default(cuid())
-  dossierId             String
-  dossier               Dossier         @relation(fields: [dossierId], references: [id], onDelete: Cascade)
-  kind                  DossierItemKind @default(asset_ref)
+  id        String          @id @default(cuid())
+  dossierId String
+  dossier   Dossier         @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  kind      DossierItemKind @default(asset_ref)
 
   // kind=asset_ref
-  assetId               String?
-  asset                 Asset?          @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  assetId String?
+  asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: Cascade)
 
   // kind=external_link
-  externalUrl           String?
+  externalUrl String?
 
   // kind=external_image (stored in R2)
   externalImageKey      String?
   externalImageThumbKey String?
 
   // Common metadata
-  caption               String          @default("")
-  note                  String          @default("")
+  caption String @default("")
+  note    String @default("")
 
   // Excerpt (range selection from AssetText)
-  excerpt               String          @default("")
-  excerptType           TextType?
-  excerptStart          Int?
-  excerptEnd            Int?
+  excerpt      String    @default("")
+  excerptType  TextType?
+  excerptStart Int?
+  excerptEnd   Int?
 
-  sortOrder             Int             @default(0)
-  createdAt             DateTime        @default(now())
-  updatedAt             DateTime        @updatedAt
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // NOTE: intentionally no @@unique([dossierId, assetId]) — a single asset can
   // be added to a dossier multiple times, once per excerpt (range selection).
@@ -340,11 +357,11 @@ model DossierItem {
 }
 
 model DossierPlaceCandidate {
-  id            String   @id @default(cuid())
-  dossierId     String
-  dossier       Dossier  @relation(fields: [dossierId], references: [id], onDelete: Cascade)
-  placeId       String?
-  place         Place?   @relation(fields: [placeId], references: [id], onDelete: SetNull)
+  id        String  @id @default(cuid())
+  dossierId String
+  dossier   Dossier @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  placeId   String?
+  place     Place?  @relation(fields: [placeId], references: [id], onDelete: SetNull)
 
   // Inline fallback fields when placeId is null
   name          String   @default("")
@@ -366,7 +383,7 @@ model ApiKey {
   id          String    @id @default(cuid())
   name        String
   keyHash     String    @unique
-  keyPrefix   String    // 先頭8文字を保持（UI表示用）
+  keyPrefix   String // 先頭8文字を保持（UI表示用）
   userId      String
   user        User      @relation(fields: [userId], references: [id])
   permissions Json      @default("[\"read\",\"write\"]") // 許可する操作
@@ -439,11 +456,11 @@ enum TestimonialCategory {
 }
 
 model Testimonial {
-  id              String              @id @default(cuid())
-  assetId         String
-  asset           Asset               @relation(fields: [assetId], references: [id], onDelete: Cascade)
-  entityId        String
-  entity          Entity              @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  id       String @id @default(cuid())
+  assetId  String
+  asset    Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  entityId String
+  entity   Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
 
   quote           String
   trait           String              @default("")
@@ -453,12 +470,12 @@ model Testimonial {
   sourceUrl       String?
   sourceDate      DateTime?
 
-  status          TestimonialStatus   @default(pending)
-  confidence      Float               @default(0)
+  status     TestimonialStatus @default(pending)
+  confidence Float             @default(0)
 
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
-  reviewedAt      DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  reviewedAt DateTime?
 
   @@unique([assetId, entityId, quote])
   @@index([entityId, status])
@@ -499,9 +516,9 @@ enum RepoTweetStatus {
 model RepoCollection {
   id              String         @id @default(cuid())
   name            String
-  groups          Json           // [{ tags: string[], op: "and" | "or" }]
+  groups          Json // [{ tags: string[], op: "and" | "or" }]
   groupOp         String         @default("or")
-  query           String         // 構築済み X API クエリ（日付は別送信）
+  query           String // 構築済み X API クエリ（日付は別送信）
   startDate       String? // JST "YYYY-MM-DD"（TZ事故回避のため文字列保持）
   endDate         String?
   excludeRetweets Boolean        @default(true)
@@ -556,4 +573,64 @@ model RepoTweetMedia {
   altText   String    @default("")
 
   @@unique([tweetId, mediaKey])
+}
+
+// ============================================================
+// 収集カバレッジ管理 (観点 × データソース)
+// 「どの観点を、どのデータソースに、何日の分まで反映したか」を記録する。
+// 3 モデルとも classification を持ち、RLS は Place/RepoCollection と同じ
+// direct-classification パターン。public は「公開サイトの鮮度表示に出すか」
+// で classification とは別関心事。
+// ============================================================
+
+model Lens {
+  id             String         @id @default(cuid())
+  key            String         @unique // 機械名: live, meetgreet, food, possessions, ...
+  name           String // 表示名: ライブ, ミーグリ, 食べたもの, ...
+  description    String // 観点の詳細説明（何を拾うか・拾わないか）
+  sortOrder      Int            @default(0)
+  active         Boolean        @default(true)
+  public         Boolean        @default(true) // 公開サイトの鮮度表示に出すか
+  classification ClearanceLevel @default(internal)
+  coverages      Coverage[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([classification])
+}
+
+model DataSource {
+  id             String         @id @default(cuid())
+  key            String         @unique // blog, talk, hinaai, hinachan, ...
+  name           String
+  kind           DataSourceKind
+  description    String?
+  sortOrder      Int            @default(0)
+  active         Boolean        @default(true)
+  public         Boolean        @default(true)
+  classification ClearanceLevel @default(internal)
+  coverages      Coverage[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([classification])
+}
+
+model Coverage {
+  id             String         @id @default(cuid())
+  lensId         String
+  lens           Lens           @relation(fields: [lensId], references: [id], onDelete: Cascade)
+  dataSourceId   String
+  dataSource     DataSource     @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+  status         CoverageStatus @default(tracked)
+  collectedUntil DateTime? // 日付として扱う（YYYY-MM-DD）。not_applicable なら null
+  note           String? // 内部メモ（公開しない）
+  classification ClearanceLevel @default(internal)
+  updatedById    String?
+  updatedAt      DateTime       @updatedAt
+  createdAt      DateTime       @default(now())
+
+  @@unique([lensId, dataSourceId])
+  @@index([dataSourceId])
+  @@index([classification])
 }
