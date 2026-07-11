@@ -1,16 +1,20 @@
 /**
- * 収集カバレッジ管理 (観点 × データソース) のドメイン層。
+ * 収集カバレッジ管理 (観点 × データソース) のドメイン層 — v2（アイテム単位チェック）。
  *
- * 「どの観点(Lens)を、どのデータソース(DataSource)に、何日の分まで反映したか」を
- * Coverage セルとして記録する。カーソルは日付1点 (YYYY-MM-DD) のみ。
+ * v1 は「セルに手動の日付カーソル(collectedUntil)」を持っていたが、v2 では
+ * チェックの最小単位を **アイテム**（ソースごとの投稿/ドキュメント単位）にした。
+ * アイテムはテーブル実体化せず、DataSource.itemRule に従って SourceRecord/Asset から
+ * 導出する（導出ビュー）。セルの表示値（済/総・「〜◯日まで反映済み」）は
+ * LensItemCheck からの導出値。
  *
- * Lens / DataSource / Coverage は RLS 有効（direct-classification）。owner ベースは
- * 無いので withClearance(clearance, ...) で十分。日付は TZ 事故回避のため常に
- * UTC 00:00 に正規化し、外向きには YYYY-MM-DD 文字列で扱う。
+ * Lens / DataSource / Coverage / LensItemCheck は RLS 有効（direct-classification）。
+ * owner ベースは無いので withClearance(clearance, ...) で十分。導出クエリ($queryRaw)も
+ * withClearance の tx 経由で流すため、Asset/SourceRecord の RLS が自動で効く。
+ * 日付は TZ 事故回避のため常に UTC 00:00 に正規化し、外向きには YYYY-MM-DD 文字列で扱う。
  */
 
-import { ClearanceLevel, CoverageStatus, DataSourceKind } from "@prisma/client";
-import { withClearance } from "@/lib/db";
+import { ClearanceLevel, CoverageStatus, DataSourceKind, ItemRule, Prisma } from "@prisma/client";
+import { withClearance, type TransactionClient } from "@/lib/db";
 import { logAudit } from "./audit";
 
 // ============================================================
@@ -37,8 +41,7 @@ export function parseDateOnly(s: string | null | undefined): Date | null {
 
 /** 今日 (JST) を Date(UTC 00:00) で返す。
  * このプロダクトの日付ドメインは日本時間（ブログ日付・運用者とも JST）。
- * UTC 基準だと JST 0〜9時の「今日まで反映」が前日を記録してしまう。
- * 格納規約は従来どおり「YYYY-MM-DD の UTC 00:00」で不変。 */
+ * 格納規約は「YYYY-MM-DD の UTC 00:00」で不変。 */
 export function todayDateOnly(): Date {
   // en-CA ロケールは YYYY-MM-DD 形式を返す
   const jst = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(new Date());
@@ -155,6 +158,9 @@ export interface CreateDataSourceInput {
   sortOrder?: number;
   public?: boolean;
   classification?: ClearanceLevel;
+  itemRule?: ItemRule;
+  publisherPattern?: string | null;
+  titlePattern?: string | null;
 }
 
 export interface UpdateDataSourceInput {
@@ -165,6 +171,9 @@ export interface UpdateDataSourceInput {
   active?: boolean;
   public?: boolean;
   classification?: ClearanceLevel;
+  itemRule?: ItemRule;
+  publisherPattern?: string | null;
+  titlePattern?: string | null;
 }
 
 export async function listDataSources(clearance: string, includeInactive = true) {
@@ -195,6 +204,9 @@ export async function createDataSource(
         sortOrder: input.sortOrder ?? 0,
         public: input.public ?? true,
         classification: input.classification ?? "internal",
+        itemRule: input.itemRule ?? "manual",
+        publisherPattern: input.publisherPattern ?? null,
+        titlePattern: input.titlePattern ?? null,
       },
     })
   );
@@ -230,6 +242,11 @@ export async function updateDataSource(
         ...(input.classification !== undefined
           ? { classification: input.classification }
           : {}),
+        ...(input.itemRule !== undefined ? { itemRule: input.itemRule } : {}),
+        ...(input.publisherPattern !== undefined
+          ? { publisherPattern: input.publisherPattern }
+          : {}),
+        ...(input.titlePattern !== undefined ? { titlePattern: input.titlePattern } : {}),
       },
     })
   );
@@ -246,92 +263,274 @@ export async function updateDataSource(
 }
 
 // ============================================================
-// Coverage (マトリクス / セル upsert / summary)
+// アイテム導出 (itemRule 別。SourceRecord/Asset から導出)
 // ============================================================
 
-export interface CoverageCellDTO {
+export interface DerivedItem {
+  itemKey: string; // url または "YYYY-MM-DD"
+  itemDate: Date | null; // Date(UTC 00:00) or null
+  itemTitle: string | null;
+}
+
+type DerivableSource = {
   id: string;
+  itemRule: ItemRule;
+  publisherPattern: string | null;
+  titlePattern: string | null;
+};
+
+/**
+ * DataSource のアイテムを導出する（itemRule 別）。withClearance の tx 経由で呼ぶこと
+ * （Asset/SourceRecord の RLS が効く）。返り値は itemDate 昇順（null は末尾）でソート済み。
+ *
+ * - blog_url / source_url: publisher/title パターンに一致する SourceRecord を url で distinct。
+ *   itemDate = その url の Asset.canonicalDate(無ければ publishedAt) の min。itemTitle = 代表 title。
+ * - talk_date: パターンに一致する Asset の canonicalDate を日単位で distinct。itemTitle = "トーク YYYY-MM-DD"。
+ * - manual: 空リスト。
+ *
+ * opts.onlyKeys を渡すと導出を対象 itemKey に絞る（トグルのスナップショット取得用）。
+ */
+async function deriveItems(
+  tx: TransactionClient,
+  ds: DerivableSource,
+  opts: { onlyKeys?: string[] } = {}
+): Promise<DerivedItem[]> {
+  const { onlyKeys } = opts;
+  if (ds.itemRule === "manual") return [];
+  if (onlyKeys && onlyKeys.length === 0) return [];
+
+  let rows: DerivedItem[];
+
+  if (ds.itemRule === "talk_date") {
+    const conds: Prisma.Sql[] = [Prisma.sql`a."canonicalDate" IS NOT NULL`];
+    if (ds.publisherPattern) conds.push(Prisma.sql`sr.publisher LIKE ${ds.publisherPattern}`);
+    if (ds.titlePattern) conds.push(Prisma.sql`sr.title LIKE ${ds.titlePattern}`);
+    if (onlyKeys) conds.push(Prisma.sql`(a."canonicalDate"::date)::text = ANY(${onlyKeys})`);
+    rows = await tx.$queryRaw<DerivedItem[]>`
+      SELECT (a."canonicalDate"::date)::text AS "itemKey",
+             a."canonicalDate"::date         AS "itemDate",
+             NULL::text                      AS "itemTitle"
+      FROM "Asset" a
+      JOIN "SourceRecord" sr ON sr."assetId" = a.id
+      WHERE ${Prisma.join(conds, " AND ")}
+      GROUP BY a."canonicalDate"::date
+    `;
+    for (const r of rows) r.itemTitle = `トーク ${r.itemKey}`;
+  } else {
+    // blog_url / source_url — SourceRecord を url で distinct
+    const conds: Prisma.Sql[] = [Prisma.sql`sr.url IS NOT NULL AND sr.url <> ''`];
+    if (ds.publisherPattern) conds.push(Prisma.sql`sr.publisher LIKE ${ds.publisherPattern}`);
+    if (ds.titlePattern) conds.push(Prisma.sql`sr.title LIKE ${ds.titlePattern}`);
+    if (onlyKeys) conds.push(Prisma.sql`sr.url = ANY(${onlyKeys})`);
+    rows = await tx.$queryRaw<DerivedItem[]>`
+      SELECT sr.url                                                  AS "itemKey",
+             MIN(COALESCE(a."canonicalDate", sr."publishedAt"))::date AS "itemDate",
+             MAX(NULLIF(sr.title, ''))                               AS "itemTitle"
+      FROM "SourceRecord" sr
+      JOIN "Asset" a ON a.id = sr."assetId"
+      WHERE ${Prisma.join(conds, " AND ")}
+      GROUP BY sr.url
+    `;
+  }
+
+  // itemDate 昇順（null は末尾）、tiebreak は itemKey 昇順
+  rows.sort((a, b) => {
+    if (a.itemDate && b.itemDate) {
+      const d = a.itemDate.getTime() - b.itemDate.getTime();
+      if (d !== 0) return d;
+    } else if (a.itemDate && !b.itemDate) {
+      return -1;
+    } else if (!a.itemDate && b.itemDate) {
+      return 1;
+    }
+    return a.itemKey < b.itemKey ? -1 : a.itemKey > b.itemKey ? 1 : 0;
+  });
+
+  return rows;
+}
+
+function itemRuleIsUrl(rule: ItemRule): boolean {
+  return rule === "blog_url" || rule === "source_url";
+}
+
+/**
+ * 「この日まで全部見た」と言える導出日付。
+ * itemDate 昇順で見て、最古の未チェックの直前のアイテムの日付。
+ * 未チェックが無ければ最新アイテムの日付。先頭から未チェックなら null。
+ */
+function computeContinuousUntil(
+  items: DerivedItem[],
+  checked: Set<string> | undefined
+): Date | null {
+  if (!checked || checked.size === 0) return null;
+  let cur: Date | null = null;
+  for (const item of items) {
+    if (!item.itemDate) continue; // 日付なしアイテムはカーソルに影響させない
+    if (checked.has(item.itemKey)) cur = item.itemDate;
+    else break;
+  }
+  return cur;
+}
+
+// ============================================================
+// マトリクス (導出値入りセル)
+// ============================================================
+
+export interface CoverageLensDTO {
+  id: string;
+  key: string;
+  name: string;
+  description: string;
+  sortOrder: number;
+  active: boolean;
+  public: boolean;
+  classification: ClearanceLevel;
+}
+
+export interface CoverageDataSourceDTO {
+  id: string;
+  key: string;
+  name: string;
+  kind: DataSourceKind;
+  description: string | null;
+  sortOrder: number;
+  active: boolean;
+  public: boolean;
+  classification: ClearanceLevel;
+  itemRule: ItemRule;
+  publisherPattern: string | null;
+  titlePattern: string | null;
+  totalItems: number; // 導出アイテム総数（lens に依らずソース共通）
+}
+
+export interface CoverageCellDTO {
   lensId: string;
   dataSourceId: string;
   lensKey: string;
   dataSourceKey: string;
-  status: CoverageStatus;
-  collectedUntil: string | null; // YYYY-MM-DD
-  note: string | null;
-  updatedById: string | null;
-  updatedAt: string;
+  status: CoverageStatus; // Coverage 行が無ければ tracked
+  note: string | null; // 内部メモ（publicOnly では null）
+  totalItems: number;
+  checkedItems: number;
+  continuousUntil: string | null; // YYYY-MM-DD
+  lastCheckedAt: string | null; // ISO
 }
 
 export interface CoverageMatrixDTO {
-  lenses: {
-    id: string;
-    key: string;
-    name: string;
-    description: string;
-    sortOrder: number;
-    active: boolean;
-    public: boolean;
-    classification: ClearanceLevel;
-  }[];
-  dataSources: {
-    id: string;
-    key: string;
-    name: string;
-    kind: DataSourceKind;
-    description: string | null;
-    sortOrder: number;
-    active: boolean;
-    public: boolean;
-    classification: ClearanceLevel;
-  }[];
+  lenses: CoverageLensDTO[];
+  dataSources: CoverageDataSourceDTO[];
+  cells: CoverageCellDTO[];
+}
+
+interface BuiltMatrix {
+  lenses: Awaited<ReturnType<TransactionClient["lens"]["findMany"]>>;
+  dataSources: Awaited<ReturnType<TransactionClient["dataSource"]["findMany"]>>;
+  derivedBySource: Map<string, DerivedItem[]>;
   cells: CoverageCellDTO[];
 }
 
 /**
- * マトリクス全体を取得する。
+ * lens / dataSource / 導出アイテム / チェックを N+1 無しで集めてセル導出値を組む。
+ * 導出は「ソース別に1回」（≤ ソース数）、チェックは「全体1回」の集約。
+ * セル単位のクエリは発行しない（設計書 §4）。
+ */
+async function buildMatrix(
+  tx: TransactionClient,
+  options: { publicOnly?: boolean } = {}
+): Promise<BuiltMatrix> {
+  const { publicOnly = false } = options;
+
+  const [lenses, dataSources, coverages] = await Promise.all([
+    tx.lens.findMany({
+      where: publicOnly ? { public: true, active: true } : {},
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    }),
+    tx.dataSource.findMany({
+      where: publicOnly ? { public: true, active: true } : {},
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    }),
+    tx.coverage.findMany({
+      include: { lens: { select: { key: true } }, dataSource: { select: { key: true } } },
+    }),
+  ]);
+
+  // ソース別にアイテム導出（≤ ソース数のクエリ。manual は即空）
+  const derivedBySource = new Map<string, DerivedItem[]>();
+  for (const ds of dataSources) {
+    derivedBySource.set(ds.id, await deriveItems(tx, ds));
+  }
+
+  // チェックは全体1回。(lensId:dataSourceId) 別に itemKey 集合＋最終チェック時刻を集約。
+  const lensIds = lenses.map((l) => l.id);
+  const dsIds = dataSources.map((d) => d.id);
+  const checks =
+    lensIds.length && dsIds.length
+      ? await tx.lensItemCheck.findMany({
+          where: { lensId: { in: lensIds }, dataSourceId: { in: dsIds } },
+          select: { lensId: true, dataSourceId: true, itemKey: true, checkedAt: true },
+        })
+      : [];
+
+  const checkMap = new Map<string, { keys: Set<string>; last: Date | null }>();
+  for (const c of checks) {
+    const k = `${c.lensId}:${c.dataSourceId}`;
+    let g = checkMap.get(k);
+    if (!g) {
+      g = { keys: new Set(), last: null };
+      checkMap.set(k, g);
+    }
+    g.keys.add(c.itemKey);
+    if (!g.last || c.checkedAt > g.last) g.last = c.checkedAt;
+  }
+
+  const covMap = new Map<string, (typeof coverages)[number]>();
+  for (const c of coverages) covMap.set(`${c.lensId}:${c.dataSourceId}`, c);
+
+  const cells: CoverageCellDTO[] = [];
+  for (const lens of lenses) {
+    for (const ds of dataSources) {
+      const derived = derivedBySource.get(ds.id) ?? [];
+      const g = checkMap.get(`${lens.id}:${ds.id}`);
+      const checkedKeys = g?.keys;
+      // 導出アイテムと itemKey が一致するチェックのみ数える
+      const checkedItems = checkedKeys
+        ? derived.reduce((n, d) => (checkedKeys.has(d.itemKey) ? n + 1 : n), 0)
+        : 0;
+      const continuousUntil = computeContinuousUntil(derived, checkedKeys);
+      const cov = covMap.get(`${lens.id}:${ds.id}`);
+      cells.push({
+        lensId: lens.id,
+        dataSourceId: ds.id,
+        lensKey: lens.key,
+        dataSourceKey: ds.key,
+        status: cov?.status ?? "tracked",
+        note: publicOnly ? null : cov?.note ?? null,
+        totalItems: derived.length,
+        checkedItems,
+        continuousUntil: toDateOnlyString(continuousUntil),
+        lastCheckedAt: g?.last ? g.last.toISOString() : null,
+      });
+    }
+  }
+
+  return { lenses, dataSources, derivedBySource, cells };
+}
+
+/**
+ * マトリクス全体を取得する（導出値入りセル）。
  * options.publicOnly=true のとき public な Lens×DataSource のみ・cell の note を除去。
  */
 export async function getMatrix(
   clearance: string,
   options: { publicOnly?: boolean } = {}
 ): Promise<CoverageMatrixDTO> {
-  const { publicOnly = false } = options;
-
   return withClearance(clearance, async (tx) => {
-    const [lenses, dataSources, coverages] = await Promise.all([
-      tx.lens.findMany({
-        where: publicOnly ? { public: true, active: true } : {},
-        orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-      }),
-      tx.dataSource.findMany({
-        where: publicOnly ? { public: true, active: true } : {},
-        orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-      }),
-      tx.coverage.findMany({
-        include: { lens: { select: { key: true } }, dataSource: { select: { key: true } } },
-      }),
-    ]);
-
-    const lensIds = new Set(lenses.map((l) => l.id));
-    const dsIds = new Set(dataSources.map((d) => d.id));
-
-    const cells: CoverageCellDTO[] = coverages
-      .filter((c) => lensIds.has(c.lensId) && dsIds.has(c.dataSourceId))
-      .map((c) => ({
-        id: c.id,
-        lensId: c.lensId,
-        dataSourceId: c.dataSourceId,
-        lensKey: c.lens.key,
-        dataSourceKey: c.dataSource.key,
-        status: c.status,
-        collectedUntil: toDateOnlyString(c.collectedUntil),
-        note: publicOnly ? null : c.note,
-        updatedById: c.updatedById,
-        updatedAt: c.updatedAt.toISOString(),
-      }));
+    const built = await buildMatrix(tx, options);
+    const totalBySource = new Map<string, number>();
+    for (const [dsId, items] of built.derivedBySource) totalBySource.set(dsId, items.length);
 
     return {
-      lenses: lenses.map((l) => ({
+      lenses: built.lenses.map((l) => ({
         id: l.id,
         key: l.key,
         name: l.name,
@@ -341,7 +540,7 @@ export async function getMatrix(
         public: l.public,
         classification: l.classification,
       })),
-      dataSources: dataSources.map((d) => ({
+      dataSources: built.dataSources.map((d) => ({
         id: d.id,
         key: d.key,
         name: d.name,
@@ -351,33 +550,48 @@ export async function getMatrix(
         active: d.active,
         public: d.public,
         classification: d.classification,
+        itemRule: d.itemRule,
+        publisherPattern: d.publisherPattern,
+        titlePattern: d.titlePattern,
+        totalItems: totalBySource.get(d.id) ?? 0,
       })),
-      cells,
+      cells: built.cells,
     };
   });
 }
+
+// ============================================================
+// セル注記 (not_applicable / note 専用に縮退)
+// ============================================================
 
 export interface UpsertCellInput {
   lensKey: string;
   dataSourceKey: string;
   status?: CoverageStatus;
-  collectedUntil?: string | null; // YYYY-MM-DD
   note?: string | null;
   classification?: ClearanceLevel;
 }
 
+export interface CoverageCellNoteDTO {
+  id: string;
+  lensKey: string;
+  dataSourceKey: string;
+  status: CoverageStatus;
+  note: string | null;
+  classification: ClearanceLevel;
+  updatedAt: string;
+}
+
 /**
- * セルを upsert する（lensKey + dataSourceKey で特定）。
- * status=not_applicable のときは collectedUntil を強制的に null にする。
+ * セル注記を upsert する（lensKey + dataSourceKey で特定）。
+ * v2 では日付カーソルを廃止し、status=not_applicable（対象外マーク）と note のみを扱う。
  */
 export async function upsertCell(
   input: UpsertCellInput,
   clearance: string,
   actorId?: string | null
-): Promise<CoverageCellDTO> {
+): Promise<CoverageCellNoteDTO> {
   const status: CoverageStatus = input.status ?? "tracked";
-  const collectedUntil =
-    status === "not_applicable" ? null : parseDateOnly(input.collectedUntil);
 
   const cell = await withClearance(clearance, async (tx) => {
     const lens = await tx.lens.findUnique({ where: { key: input.lensKey } });
@@ -395,14 +609,12 @@ export async function upsertCell(
         lensId: lens.id,
         dataSourceId: dataSource.id,
         status,
-        collectedUntil,
         note: input.note ?? null,
         classification: input.classification ?? "internal",
         updatedById: actorId ?? null,
       },
       update: {
         status,
-        collectedUntil,
         ...(input.note !== undefined ? { note: input.note } : {}),
         ...(input.classification !== undefined
           ? { classification: input.classification }
@@ -425,61 +637,316 @@ export async function upsertCell(
       lensKey: input.lensKey,
       dataSourceKey: input.dataSourceKey,
       status,
-      collectedUntil: toDateOnlyString(collectedUntil),
     },
   });
 
   return {
     id: cell.id,
-    lensId: cell.lensId,
-    dataSourceId: cell.dataSourceId,
     lensKey: cell.lens.key,
     dataSourceKey: cell.dataSource.key,
     status: cell.status,
-    collectedUntil: toDateOnlyString(cell.collectedUntil),
     note: cell.note,
-    updatedById: cell.updatedById,
+    classification: cell.classification,
     updatedAt: cell.updatedAt.toISOString(),
   };
 }
 
+// ============================================================
+// アイテム一覧 (listItems)
+// ============================================================
+
+export interface ItemDTO {
+  itemKey: string;
+  itemDate: string | null; // YYYY-MM-DD
+  itemTitle: string | null;
+  isUrl: boolean;
+  checked?: boolean; // lensKey 指定時
+  checkedLensKeys?: string[]; // lensKey 省略時（アイテム起点ビュー）
+}
+
+export interface ListItemsResult {
+  source: {
+    key: string;
+    name: string;
+    itemRule: ItemRule;
+    totalItems: number; // 導出総数（フィルタ前）
+  };
+  lensKey: string | null;
+  order: "asc" | "desc";
+  page: number;
+  pageSize: number;
+  total: number; // フィルタ後の件数（ページング前）
+  items: ItemDTO[];
+}
+
+export interface ListItemsOptions {
+  lensKey?: string | null;
+  checked?: boolean; // lensKey 指定時のみ有効
+  order?: "asc" | "desc";
+  page?: number;
+  pageSize?: number;
+}
+
 /**
- * 行 (Lens) 単位で「今日まで反映」する。
- * 既存の tracked セルのみを今日 (UTC) に前進させる（not_applicable と未着手には触れない）。
- * 更新した件数を返す。
+ * ソースのアイテム一覧を返す。lensKey 指定時は当該観点の checked フラグと checked フィルタ、
+ * 省略時は全観点の checkedLensKeys を各アイテムに付ける（アイテム起点ビュー）。
+ * 昇順が既定（「ここまで✓」の直感に合わせる）。
  */
-export async function advanceRowToToday(
-  lensKey: string,
-  clearance: string,
-  actorId?: string | null
-): Promise<number> {
-  const today = todayDateOnly();
+export async function listItems(
+  sourceKey: string,
+  opts: ListItemsOptions,
+  clearance: string
+): Promise<ListItemsResult> {
+  const order: "asc" | "desc" = opts.order === "desc" ? "desc" : "asc";
+  const page = Math.max(1, opts.page ?? 1);
+  const pageSize = Math.min(500, Math.max(1, opts.pageSize ?? 100));
 
-  const count = await withClearance(clearance, async (tx) => {
-    const lens = await tx.lens.findUnique({ where: { key: lensKey } });
-    if (!lens) throw new Error(`Lens not found: ${lensKey}`);
-    const result = await tx.coverage.updateMany({
-      where: { lensId: lens.id, status: "tracked" },
-      data: { collectedUntil: today, updatedById: actorId ?? null },
-    });
-    return result.count;
+  return withClearance(clearance, async (tx) => {
+    const ds = await tx.dataSource.findUnique({ where: { key: sourceKey } });
+    if (!ds) throw new Error(`DataSource not found: ${sourceKey}`);
+
+    const derived = await deriveItems(tx, ds);
+    const isUrl = itemRuleIsUrl(ds.itemRule);
+
+    let items: ItemDTO[];
+
+    if (opts.lensKey) {
+      const lens = await tx.lens.findUnique({ where: { key: opts.lensKey } });
+      if (!lens) throw new Error(`Lens not found: ${opts.lensKey}`);
+      const checks = await tx.lensItemCheck.findMany({
+        where: { lensId: lens.id, dataSourceId: ds.id },
+        select: { itemKey: true },
+      });
+      const checkedSet = new Set(checks.map((c) => c.itemKey));
+      items = derived.map((d) => ({
+        itemKey: d.itemKey,
+        itemDate: toDateOnlyString(d.itemDate),
+        itemTitle: d.itemTitle,
+        isUrl,
+        checked: checkedSet.has(d.itemKey),
+      }));
+      if (opts.checked === true) items = items.filter((i) => i.checked);
+      else if (opts.checked === false) items = items.filter((i) => !i.checked);
+    } else {
+      const checks = await tx.lensItemCheck.findMany({
+        where: { dataSourceId: ds.id },
+        select: { itemKey: true, lens: { select: { key: true } } },
+      });
+      const byItem = new Map<string, string[]>();
+      for (const c of checks) {
+        const arr = byItem.get(c.itemKey) ?? [];
+        arr.push(c.lens.key);
+        byItem.set(c.itemKey, arr);
+      }
+      items = derived.map((d) => ({
+        itemKey: d.itemKey,
+        itemDate: toDateOnlyString(d.itemDate),
+        itemTitle: d.itemTitle,
+        isUrl,
+        checkedLensKeys: byItem.get(d.itemKey) ?? [],
+      }));
+    }
+
+    if (order === "desc") items.reverse();
+
+    const total = items.length;
+    const start = (page - 1) * pageSize;
+    const pageItems = items.slice(start, start + pageSize);
+
+    return {
+      source: {
+        key: ds.key,
+        name: ds.name,
+        itemRule: ds.itemRule,
+        totalItems: derived.length,
+      },
+      lensKey: opts.lensKey ?? null,
+      order,
+      page,
+      pageSize,
+      total,
+      items: pageItems,
+    };
   });
-
-  if (count > 0) {
-    await logAudit({
-      actorId,
-      action: "coverage.update",
-      targetType: "Lens",
-      targetId: lensKey,
-      metadata: { op: "advanceRowToToday", lensKey, count, date: toDateOnlyString(today) },
-    });
-  }
-
-  return count;
 }
 
 // ============================================================
-// Summary (サイト公開用の要約)
+// チェックのトグル / 範囲一括
+// ============================================================
+
+export interface ToggleCheckInput {
+  lensKey: string;
+  dataSourceKey: string;
+  itemKey: string;
+  checked: boolean;
+  note?: string | null;
+  classification?: ClearanceLevel;
+}
+
+export interface ToggleCheckResult {
+  checked: boolean;
+  lensKey: string;
+  dataSourceKey: string;
+  itemKey: string;
+}
+
+/**
+ * アイテムチェックをトグルする（冪等）。
+ * checked=true: LensItemCheck を upsert（itemDate/itemTitle は導出値のスナップショットを保存）。
+ *   導出に無い itemKey はエラー（不正なチェック防止）。
+ * checked=false: 削除（無ければ何もしない）。
+ */
+export async function toggleCheck(
+  input: ToggleCheckInput,
+  clearance: string,
+  actorId?: string | null
+): Promise<ToggleCheckResult> {
+  const result = await withClearance(clearance, async (tx) => {
+    const lens = await tx.lens.findUnique({ where: { key: input.lensKey } });
+    if (!lens) throw new Error(`Lens not found: ${input.lensKey}`);
+    const ds = await tx.dataSource.findUnique({ where: { key: input.dataSourceKey } });
+    if (!ds) throw new Error(`DataSource not found: ${input.dataSourceKey}`);
+
+    if (input.checked) {
+      const [item] = await deriveItems(tx, ds, { onlyKeys: [input.itemKey] });
+      if (!item) throw new Error(`Item not found in source ${input.dataSourceKey}: ${input.itemKey}`);
+      const rec = await tx.lensItemCheck.upsert({
+        where: {
+          lensId_dataSourceId_itemKey: {
+            lensId: lens.id,
+            dataSourceId: ds.id,
+            itemKey: input.itemKey,
+          },
+        },
+        create: {
+          lensId: lens.id,
+          dataSourceId: ds.id,
+          itemKey: input.itemKey,
+          itemDate: item.itemDate,
+          itemTitle: item.itemTitle,
+          note: input.note ?? null,
+          classification: input.classification ?? "internal",
+          checkedById: actorId ?? null,
+        },
+        update: {
+          // スナップショットを最新の導出値に追従（冪等）
+          itemDate: item.itemDate,
+          itemTitle: item.itemTitle,
+          ...(input.note !== undefined ? { note: input.note } : {}),
+          ...(input.classification !== undefined
+            ? { classification: input.classification }
+            : {}),
+        },
+      });
+      return { recId: rec.id, checked: true, lensId: lens.id, dsId: ds.id };
+    } else {
+      await tx.lensItemCheck.deleteMany({
+        where: { lensId: lens.id, dataSourceId: ds.id, itemKey: input.itemKey },
+      });
+      return { recId: null, checked: false, lensId: lens.id, dsId: ds.id };
+    }
+  });
+
+  await logAudit({
+    actorId,
+    action: "coverage.check",
+    targetType: "LensItemCheck",
+    targetId: result.recId ?? `${result.lensId}:${result.dsId}:${input.itemKey}`,
+    metadata: {
+      lensKey: input.lensKey,
+      dataSourceKey: input.dataSourceKey,
+      itemKey: input.itemKey,
+      checked: input.checked,
+    },
+  });
+
+  return {
+    checked: result.checked,
+    lensKey: input.lensKey,
+    dataSourceKey: input.dataSourceKey,
+    itemKey: input.itemKey,
+  };
+}
+
+export interface BulkCheckInput {
+  dataSourceKey: string;
+  lensKeys: string[];
+  untilDate: string; // YYYY-MM-DD（この日以前の導出アイテムを対象）
+  classification?: ClearanceLevel;
+}
+
+export interface BulkCheckResult {
+  created: number; // 実際に作成された LensItemCheck 行数（既存はスキップ）
+  targetItems: number; // untilDate 以前の導出アイテム数
+  lensKeys: string[];
+}
+
+/**
+ * 範囲一括チェック。untilDate 以前（itemDate <= untilDate）の全導出アイテムを、
+ * 対象 lens すべてに createMany skipDuplicates でチェック済みにする。
+ */
+export async function bulkCheck(
+  input: BulkCheckInput,
+  clearance: string,
+  actorId?: string | null
+): Promise<BulkCheckResult> {
+  const until = parseDateOnly(input.untilDate);
+  if (!until) throw new Error("untilDate is required (YYYY-MM-DD)");
+  if (!input.lensKeys || input.lensKeys.length === 0) {
+    throw new Error("lensKeys is required");
+  }
+
+  const result = await withClearance(clearance, async (tx) => {
+    const ds = await tx.dataSource.findUnique({ where: { key: input.dataSourceKey } });
+    if (!ds) throw new Error(`DataSource not found: ${input.dataSourceKey}`);
+    const lenses = await tx.lens.findMany({ where: { key: { in: input.lensKeys } } });
+    if (lenses.length !== new Set(input.lensKeys).size) {
+      throw new Error("Unknown lensKey in lensKeys");
+    }
+
+    const derived = await deriveItems(tx, ds);
+    const targets = derived.filter((d) => d.itemDate && d.itemDate <= until);
+
+    let created = 0;
+    if (targets.length > 0) {
+      for (const lens of lenses) {
+        const res = await tx.lensItemCheck.createMany({
+          data: targets.map((t) => ({
+            lensId: lens.id,
+            dataSourceId: ds.id,
+            itemKey: t.itemKey,
+            itemDate: t.itemDate,
+            itemTitle: t.itemTitle,
+            classification: input.classification ?? "internal",
+            checkedById: actorId ?? null,
+          })),
+          skipDuplicates: true,
+        });
+        created += res.count;
+      }
+    }
+    return { created, targetItems: targets.length };
+  });
+
+  await logAudit({
+    actorId,
+    action: "coverage.bulk_check",
+    targetType: "DataSource",
+    targetId: input.dataSourceKey,
+    metadata: {
+      dataSourceKey: input.dataSourceKey,
+      lensKeys: input.lensKeys,
+      untilDate: input.untilDate,
+      created: result.created,
+      targetItems: result.targetItems,
+    },
+  });
+
+  return { created: result.created, targetItems: result.targetItems, lensKeys: input.lensKeys };
+}
+
+// ============================================================
+// Summary (サイト公開用の要約) — v2
 // ============================================================
 
 export interface CoverageSummaryDTO {
@@ -487,74 +954,82 @@ export interface CoverageSummaryDTO {
   lenses: {
     key: string;
     name: string;
-    sources: { key: string; name: string; collectedUntil: string }[];
-    minCollectedUntil: string;
+    sources: {
+      key: string;
+      name: string;
+      continuousUntil: string | null; // YYYY-MM-DD
+      checked: number;
+      total: number;
+    }[];
+    minContinuousUntil: string | null;
   }[];
 }
 
 /**
- * サイト公開用の要約を生成する。
+ * サイト公開用の要約を生成する（v2）。
  * - public な Lens × public な DataSource のみ（いずれも active）
- * - tracked かつ collectedUntil あり のセルのみ（not_applicable / 未着手は除外）
+ * - 導出アイテムのあるソース（total > 0）かつ not_applicable でないセルのみ
  * - note は含めない
- * - minCollectedUntil = その観点で最も遅れているソースの日付
- * - tracked ソースが1つも無い Lens は含めない
+ * - minContinuousUntil = その観点で最も遅れているソースの continuousUntil
+ *   （どれか1つでも先頭から未チェック=null なら null）
+ * - 対象ソースが1つも無い Lens は含めない
  */
 export async function getSummary(clearance: string): Promise<CoverageSummaryDTO> {
   return withClearance(clearance, async (tx) => {
-    const [lenses, coverages] = await Promise.all([
-      tx.lens.findMany({
-        where: { public: true, active: true },
-        orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-      }),
-      tx.coverage.findMany({
-        where: {
-          status: "tracked",
-          collectedUntil: { not: null },
-          lens: { public: true, active: true },
-          dataSource: { public: true, active: true },
-        },
-        include: {
-          dataSource: { select: { key: true, name: true, sortOrder: true } },
-        },
-      }),
-    ]);
+    const built = await buildMatrix(tx, { publicOnly: true });
 
-    // lensId -> sorted sources
-    const byLens = new Map<
-      string,
-      { key: string; name: string; sortOrder: number; collectedUntil: string }[]
-    >();
-    for (const c of coverages) {
-      const arr = byLens.get(c.lensId) ?? [];
-      arr.push({
-        key: c.dataSource.key,
-        name: c.dataSource.name,
-        sortOrder: c.dataSource.sortOrder,
-        collectedUntil: toDateOnlyString(c.collectedUntil)!,
-      });
-      byLens.set(c.lensId, arr);
+    const dsById = new Map(built.dataSources.map((d) => [d.id, d]));
+    const cellsByLens = new Map<string, CoverageCellDTO[]>();
+    for (const cell of built.cells) {
+      const arr = cellsByLens.get(cell.lensId) ?? [];
+      arr.push(cell);
+      cellsByLens.set(cell.lensId, arr);
     }
 
-    const resultLenses = lenses
+    const resultLenses = built.lenses
       .map((l) => {
-        const sources = (byLens.get(l.id) ?? []).sort(
-          (a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name)
+        const cells = (cellsByLens.get(l.id) ?? []).filter(
+          (c) => c.status !== "not_applicable" && c.totalItems > 0
         );
-        if (sources.length === 0) return null;
-        const minCollectedUntil = sources.reduce(
-          (min, s) => (s.collectedUntil < min ? s.collectedUntil : min),
-          sources[0].collectedUntil
-        );
+        if (cells.length === 0) return null;
+
+        const sources = cells
+          .map((c) => {
+            const ds = dsById.get(c.dataSourceId)!;
+            return {
+              key: c.dataSourceKey,
+              name: ds.name,
+              sortOrder: ds.sortOrder,
+              continuousUntil: c.continuousUntil,
+              checked: c.checkedItems,
+              total: c.totalItems,
+            };
+          })
+          .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+
+        // 最も遅れているソース: null があれば null、無ければ最小の日付
+        let minContinuousUntil: string | null = sources[0].continuousUntil;
+        for (const s of sources) {
+          if (s.continuousUntil === null) {
+            minContinuousUntil = null;
+            break;
+          }
+          if (minContinuousUntil !== null && s.continuousUntil < minContinuousUntil) {
+            minContinuousUntil = s.continuousUntil;
+          }
+        }
+
         return {
           key: l.key,
           name: l.name,
           sources: sources.map((s) => ({
             key: s.key,
             name: s.name,
-            collectedUntil: s.collectedUntil,
+            continuousUntil: s.continuousUntil,
+            checked: s.checked,
+            total: s.total,
           })),
-          minCollectedUntil,
+          minContinuousUntil,
         };
       })
       .filter((x): x is NonNullable<typeof x> => x !== null);
