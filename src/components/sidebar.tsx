@@ -22,6 +22,7 @@ import {
   BarChart3,
   MapPin,
   Twitter,
+  Grid3x3,
 } from "lucide-react";
 import { QuickCreateModal } from "@/components/quick-create-modal";
 
@@ -39,6 +40,7 @@ const navItems = [
   { href: "/dossiers", label: "特定支援", icon: FolderSearch },
   { href: "/testimonials", label: "口コミ管理", icon: MessageCircle },
   { href: "/repo", label: "レポ収集", icon: Twitter },
+  { href: "/coverage", label: "収集カバレッジ", icon: Grid3x3 },
   { href: "/graph", label: "グラフ", icon: Network },
   { href: "/analysis", label: "テキスト分析", icon: BarChart3 },
   { href: "/dashboard", label: "ダッシュボード", icon: LayoutDashboard },
