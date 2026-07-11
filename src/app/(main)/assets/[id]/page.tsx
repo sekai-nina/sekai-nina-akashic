@@ -17,10 +17,13 @@ import {
   formatDate,
 } from "@/lib/utils";
 import { getAssetRelations, getAssetGraph } from "@/lib/domain/relations";
+import { findItemsForAsset } from "@/lib/domain/coverage-items";
+import { listLenses } from "@/lib/domain/coverage";
 import type { ClearanceLevel } from "@prisma/client";
 import { SubmitButton } from "@/components/submit-button";
 import { BackButton } from "@/components/back-button";
 import { StatusWorkflow } from "./status-workflow";
+import { AssetCoveragePanel } from "./coverage-panel";
 import { CopySourceRef } from "./copy-source-ref";
 import { ParentAssets, ChildAssets } from "./related-assets";
 import { SubGraph } from "./sub-graph";
@@ -183,6 +186,13 @@ export default async function AssetDetailPage({
 
   if (!pageData) notFound();
   const { asset, relations, graph, duplicates, embeddedImageAssets, prevAsset, nextAsset } = pageData;
+
+  // カバレッジパネル（v2.4）: このアセットが属するカバレッジアイテムの逆引き＋アクティブ観点
+  const canEditCoverage = ["admin", "member"].includes(session!.user.role);
+  const [coverageItems, activeLenses] = await Promise.all([
+    findItemsForAsset(id, userClearance),
+    listLenses(userClearance, false), // active のみ
+  ]);
 
   // Editable dossiers + which of them already contain this asset
   const editableDossiers = await listEditableDossiers(session!.user);
@@ -530,6 +540,21 @@ export default async function AssetDetailPage({
 
           {/* Status */}
           <StatusWorkflow assetId={id} initialStatus={asset.status} />
+
+          {/* Coverage panel (v2.4): 所属カバレッジアイテムへの観点チェック */}
+          {coverageItems.length > 0 && activeLenses.length > 0 && (
+            <AssetCoveragePanel
+              items={coverageItems.map((ci) => ({
+                sourceKey: ci.sourceKey,
+                sourceName: ci.sourceName,
+                itemKey: ci.itemKey,
+                itemTitle: ci.itemTitle,
+                checkedLensKeys: ci.checkedLensKeys,
+              }))}
+              lenses={activeLenses.map((l) => ({ key: l.key, name: l.name }))}
+              canEdit={canEditCoverage}
+            />
+          )}
 
           {/* Metadata */}
           <div className="bg-white border border-slate-200 rounded-lg p-4">
