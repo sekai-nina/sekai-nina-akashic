@@ -16,6 +16,7 @@
 import { ClearanceLevel, CoverageStatus, DataSourceKind, ItemRule, Prisma } from "@prisma/client";
 import { withClearance, type TransactionClient } from "@/lib/db";
 import { logAudit } from "./audit";
+import { getSourceMentionKeys } from "./coverage-items";
 
 // ============================================================
 // 日付正規化 (YYYY-MM-DD <-> Date(UTC 00:00))
@@ -280,6 +281,40 @@ type DerivableSource = {
 };
 
 /**
+ * `|` 区切りの複数 LIKE を OR で結合した条件を作る（v2.2）。空要素は無視。
+ * 例: "A%|B%" → `(col LIKE 'A%' OR col LIKE 'B%')`。null/空/全要素空なら null。
+ * colSql は固定のカラム参照フラグメント（Prisma.sql`sr.publisher` 等）を渡す。
+ */
+function likeOrSql(colSql: Prisma.Sql, pattern: string | null | undefined): Prisma.Sql | null {
+  const parts = (pattern ?? "")
+    .split("|")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  if (parts.length === 0) return null;
+  const ors = parts.map((p) => Prisma.sql`${colSql} LIKE ${p}`);
+  return Prisma.sql`(${Prisma.join(ors, " OR ")})`;
+}
+
+/**
+ * SourceRecord (別名 sr) の publisher/title に対するパターン条件を返す（`|` OR 対応）。
+ * deriveItems と items エンリッチの両方で同じ絞り込みを共有するためエクスポートする。
+ */
+export function sourcePatternConds(ds: {
+  publisherPattern: string | null;
+  titlePattern: string | null;
+}): Prisma.Sql[] {
+  const out: Prisma.Sql[] = [];
+  const p = likeOrSql(Prisma.sql`sr.publisher`, ds.publisherPattern);
+  const t = likeOrSql(Prisma.sql`sr.title`, ds.titlePattern);
+  if (p) out.push(p);
+  if (t) out.push(t);
+  return out;
+}
+
+/** トークの「JST 壁時計の日付」式（Asset 別名 a を前提）。deriveItems/エンリッチで共有。 */
+export const TALK_DAY_SQL = Prisma.sql`(((a."canonicalDate" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Tokyo')::date)`;
+
+/**
  * DataSource のアイテムを導出する（itemRule 別）。withClearance の tx 経由で呼ぶこと
  * （Asset/SourceRecord の RLS が効く）。返り値は itemDate 昇順（null は末尾）でソート済み。
  *
@@ -290,7 +325,7 @@ type DerivableSource = {
  *
  * opts.onlyKeys を渡すと導出を対象 itemKey に絞る（トグルのスナップショット取得用）。
  */
-async function deriveItems(
+export async function deriveItems(
   tx: TransactionClient,
   ds: DerivableSource,
   opts: { onlyKeys?: string[] } = {}
@@ -305,9 +340,7 @@ async function deriveItems(
   // 保存されているため、素の ::date（=UTC日付）だと JST 0〜9時のデータが前日に落ちる
   // （実測: トーク26,794件中1,515件≒5.7%がずれる）。AT TIME ZONE で JST の壁時計に直してから date 化する。
   if (ds.itemRule === "talk_date") {
-    const conds: Prisma.Sql[] = [Prisma.sql`a."canonicalDate" IS NOT NULL`];
-    if (ds.publisherPattern) conds.push(Prisma.sql`sr.publisher LIKE ${ds.publisherPattern}`);
-    if (ds.titlePattern) conds.push(Prisma.sql`sr.title LIKE ${ds.titlePattern}`);
+    const conds: Prisma.Sql[] = [Prisma.sql`a."canonicalDate" IS NOT NULL`, ...sourcePatternConds(ds)];
     if (onlyKeys)
       conds.push(
         Prisma.sql`(((a."canonicalDate" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Tokyo')::date)::text = ANY(${onlyKeys})`
@@ -324,9 +357,10 @@ async function deriveItems(
     for (const r of rows) r.itemTitle = `トーク ${r.itemKey}`;
   } else {
     // blog_url / source_url — SourceRecord を url で distinct
-    const conds: Prisma.Sql[] = [Prisma.sql`sr.url IS NOT NULL AND sr.url <> ''`];
-    if (ds.publisherPattern) conds.push(Prisma.sql`sr.publisher LIKE ${ds.publisherPattern}`);
-    if (ds.titlePattern) conds.push(Prisma.sql`sr.title LIKE ${ds.titlePattern}`);
+    const conds: Prisma.Sql[] = [
+      Prisma.sql`sr.url IS NOT NULL AND sr.url <> ''`,
+      ...sourcePatternConds(ds),
+    ];
     if (onlyKeys) conds.push(Prisma.sql`sr.url = ANY(${onlyKeys})`);
     rows = await tx.$queryRaw<DerivedItem[]>`
       SELECT sr.url                                                  AS "itemKey",
@@ -355,7 +389,7 @@ async function deriveItems(
   return rows;
 }
 
-function itemRuleIsUrl(rule: ItemRule): boolean {
+export function itemRuleIsUrl(rule: ItemRule): boolean {
   return rule === "blog_url" || rule === "source_url";
 }
 
@@ -658,123 +692,12 @@ export async function upsertCell(
 }
 
 // ============================================================
-// アイテム一覧 (listItems)
+// アイテム一覧 (listItems) — トリアージ UX のエンリッチを含むため coverage-items.ts に分離。
+// 公開インポート面は @/lib/domain/coverage のまま維持する（後方互換の再エクスポート）。
 // ============================================================
 
-export interface ItemDTO {
-  itemKey: string;
-  itemDate: string | null; // YYYY-MM-DD
-  itemTitle: string | null;
-  isUrl: boolean;
-  checked?: boolean; // lensKey 指定時
-  checkedLensKeys?: string[]; // lensKey 省略時（アイテム起点ビュー）
-}
-
-export interface ListItemsResult {
-  source: {
-    key: string;
-    name: string;
-    itemRule: ItemRule;
-    totalItems: number; // 導出総数（フィルタ前）
-  };
-  lensKey: string | null;
-  order: "asc" | "desc";
-  page: number;
-  pageSize: number;
-  total: number; // フィルタ後の件数（ページング前）
-  items: ItemDTO[];
-}
-
-export interface ListItemsOptions {
-  lensKey?: string | null;
-  checked?: boolean; // lensKey 指定時のみ有効
-  order?: "asc" | "desc";
-  page?: number;
-  pageSize?: number;
-}
-
-/**
- * ソースのアイテム一覧を返す。lensKey 指定時は当該観点の checked フラグと checked フィルタ、
- * 省略時は全観点の checkedLensKeys を各アイテムに付ける（アイテム起点ビュー）。
- * 昇順が既定（「ここまで✓」の直感に合わせる）。
- */
-export async function listItems(
-  sourceKey: string,
-  opts: ListItemsOptions,
-  clearance: string
-): Promise<ListItemsResult> {
-  const order: "asc" | "desc" = opts.order === "desc" ? "desc" : "asc";
-  const page = Math.max(1, opts.page ?? 1);
-  const pageSize = Math.min(500, Math.max(1, opts.pageSize ?? 100));
-
-  return withClearance(clearance, async (tx) => {
-    const ds = await tx.dataSource.findUnique({ where: { key: sourceKey } });
-    if (!ds) throw new Error(`DataSource not found: ${sourceKey}`);
-
-    const derived = await deriveItems(tx, ds);
-    const isUrl = itemRuleIsUrl(ds.itemRule);
-
-    let items: ItemDTO[];
-
-    if (opts.lensKey) {
-      const lens = await tx.lens.findUnique({ where: { key: opts.lensKey } });
-      if (!lens) throw new Error(`Lens not found: ${opts.lensKey}`);
-      const checks = await tx.lensItemCheck.findMany({
-        where: { lensId: lens.id, dataSourceId: ds.id },
-        select: { itemKey: true },
-      });
-      const checkedSet = new Set(checks.map((c) => c.itemKey));
-      items = derived.map((d) => ({
-        itemKey: d.itemKey,
-        itemDate: toDateOnlyString(d.itemDate),
-        itemTitle: d.itemTitle,
-        isUrl,
-        checked: checkedSet.has(d.itemKey),
-      }));
-      if (opts.checked === true) items = items.filter((i) => i.checked);
-      else if (opts.checked === false) items = items.filter((i) => !i.checked);
-    } else {
-      const checks = await tx.lensItemCheck.findMany({
-        where: { dataSourceId: ds.id },
-        select: { itemKey: true, lens: { select: { key: true } } },
-      });
-      const byItem = new Map<string, string[]>();
-      for (const c of checks) {
-        const arr = byItem.get(c.itemKey) ?? [];
-        arr.push(c.lens.key);
-        byItem.set(c.itemKey, arr);
-      }
-      items = derived.map((d) => ({
-        itemKey: d.itemKey,
-        itemDate: toDateOnlyString(d.itemDate),
-        itemTitle: d.itemTitle,
-        isUrl,
-        checkedLensKeys: byItem.get(d.itemKey) ?? [],
-      }));
-    }
-
-    if (order === "desc") items.reverse();
-
-    const total = items.length;
-    const start = (page - 1) * pageSize;
-    const pageItems = items.slice(start, start + pageSize);
-
-    return {
-      source: {
-        key: ds.key,
-        name: ds.name,
-        itemRule: ds.itemRule,
-        totalItems: derived.length,
-      },
-      lensKey: opts.lensKey ?? null,
-      order,
-      page,
-      pageSize,
-      total,
-      items: pageItems,
-    };
-  });
-}
+export { listItems } from "./coverage-items";
+export type { ItemDTO, ListItemsResult, ListItemsOptions } from "./coverage-items";
 
 // ============================================================
 // チェックのトグル / 範囲一括
@@ -878,18 +801,22 @@ export interface BulkCheckInput {
   dataSourceKey: string;
   lensKeys: string[];
   untilDate: string; // YYYY-MM-DD（この日以前の導出アイテムを対象）
+  onlyMentionless?: boolean; // true: 坂井新奈への言及なしのアイテムだけを対象にする
   classification?: ClearanceLevel;
 }
 
 export interface BulkCheckResult {
   created: number; // 実際に作成された LensItemCheck 行数（既存はスキップ）
-  targetItems: number; // untilDate 以前の導出アイテム数
+  targetItems: number; // untilDate 以前（onlyMentionless 時は言及なしに限定）の導出アイテム数
   lensKeys: string[];
 }
 
 /**
  * 範囲一括チェック。untilDate 以前（itemDate <= untilDate）の全導出アイテムを、
  * 対象 lens すべてに createMany skipDuplicates でチェック済みにする。
+ * onlyMentionless=true のときは、さらに坂井新奈への言及がないアイテムだけに絞る
+ * （「言及なしをここまで一括✓」= 退屈な9割を一掃する省力化）。言及集合はソース全体で
+ * 導出する（getSourceMentionKeys・数分キャッシュ）。url 系ソースのみ有効（talk は全件本人）。
  */
 export async function bulkCheck(
   input: BulkCheckInput,
@@ -902,6 +829,11 @@ export async function bulkCheck(
     throw new Error("lensKeys is required");
   }
 
+  // 言及なし絞り込み用のソース全体の言及ありキー集合（url 系のみ非空）。
+  const mentionKeys = input.onlyMentionless
+    ? new Set(await getSourceMentionKeys(input.dataSourceKey, clearance))
+    : null;
+
   const result = await withClearance(clearance, async (tx) => {
     const ds = await tx.dataSource.findUnique({ where: { key: input.dataSourceKey } });
     if (!ds) throw new Error(`DataSource not found: ${input.dataSourceKey}`);
@@ -911,7 +843,8 @@ export async function bulkCheck(
     }
 
     const derived = await deriveItems(tx, ds);
-    const targets = derived.filter((d) => d.itemDate && d.itemDate <= until);
+    let targets = derived.filter((d) => d.itemDate && d.itemDate <= until);
+    if (mentionKeys) targets = targets.filter((d) => !mentionKeys.has(d.itemKey));
 
     let created = 0;
     if (targets.length > 0) {
@@ -943,6 +876,7 @@ export async function bulkCheck(
       dataSourceKey: input.dataSourceKey,
       lensKeys: input.lensKeys,
       untilDate: input.untilDate,
+      onlyMentionless: input.onlyMentionless ?? false,
       created: result.created,
       targetItems: result.targetItems,
     },

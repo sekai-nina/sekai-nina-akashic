@@ -26,6 +26,7 @@ export async function POST(request: Request) {
         dataSourceKey: body.dataSourceKey,
         lensKeys: body.lensKeys,
         untilDate: body.untilDate,
+        onlyMentionless: body.onlyMentionless === true,
         classification: body.classification as ClearanceLevel | undefined,
       },
       auth.clearance,

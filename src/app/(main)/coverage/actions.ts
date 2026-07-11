@@ -71,6 +71,7 @@ export async function bulkCheckAction(input: {
   dataSourceKey: string;
   lensKeys: string[];
   untilDate: string;
+  onlyMentionless?: boolean;
 }) {
   const user = await requireEditor();
   try {

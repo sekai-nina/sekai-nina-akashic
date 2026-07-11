@@ -24,6 +24,14 @@ export async function GET(request: Request) {
       : checkedParam === "0" || checkedParam === "false"
         ? false
         : undefined;
+  // 言及フィルタ: 1=言及あり / 0=言及なし（url 系のみ有効）
+  const mentionsParam = url.searchParams.get("mentions");
+  const mentions =
+    mentionsParam === "1" || mentionsParam === "true"
+      ? true
+      : mentionsParam === "0" || mentionsParam === "false"
+        ? false
+        : undefined;
   const order = url.searchParams.get("order") === "desc" ? "desc" : "asc";
   const page = Number(url.searchParams.get("page") ?? "1") || 1;
   const pageSize = Number(url.searchParams.get("pageSize") ?? "100") || 100;
@@ -31,8 +39,8 @@ export async function GET(request: Request) {
   try {
     const result = await listItems(
       source,
-      { lensKey: lensKey ?? undefined, checked, order, page, pageSize },
-      auth.clearance
+      { lensKey: lensKey ?? undefined, checked, mentions, order, page, pageSize },
+      { id: auth.id, clearance: auth.clearance }
     );
     return NextResponse.json(result);
   } catch (e) {
