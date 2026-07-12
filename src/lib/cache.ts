@@ -148,7 +148,7 @@ export const getCachedNinaStatsRecent = unstable_cache(
         where: { sourceType: "web", kind: "text", canonicalDate: { gte: since }, entities: { some: { entityId: ninaEntityId } } },
       }),
       prismaInternal.asset.count({
-        where: { sourceType: "import", kind: "text", canonicalDate: { gte: since } },
+        where: { sourceType: "import", kind: "text", canonicalDate: { gte: since }, entities: { some: { entityId: ninaEntityId } } },
       }),
       prismaInternal.assetEntity.count({
         where: {
