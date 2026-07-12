@@ -84,6 +84,12 @@ export interface UpdateAssetData {
   discordAuthorId?: string | null;
   discordAuthorName?: string | null;
   discordPostedAt?: Date | null;
+  // 指定時はアセットの texts を全置換する（ライブのセトリ修正など）
+  texts?: Array<{
+    textType: TextType;
+    content: string;
+    language?: string;
+  }>;
   entities?: Array<{
     entityId: string;
     roleLabel?: string;
@@ -186,7 +192,7 @@ export async function updateAsset(
   userId: string | null,
   clearance: string
 ) {
-  const { entities, sourceRecords, ...assetFields } = data;
+  const { texts, entities, sourceRecords, ...assetFields } = data;
 
   // If changing classification, check user can set the new level
   if (data.classification) {
@@ -202,6 +208,23 @@ export async function updateAsset(
         updatedById: userId ?? null,
       },
     });
+
+    // texts: 指定時は全置換（既存を削除して作り直す）
+    if (texts) {
+      await tx.assetText.deleteMany({ where: { assetId: id } });
+      if (texts.length > 0) {
+        await tx.assetText.createMany({
+          data: texts.map((t) => ({
+            assetId: id,
+            textType: t.textType,
+            content: t.content,
+            normalizedContent: normalizeText(t.content),
+            language: t.language,
+            createdById: userId ?? null,
+          })),
+        });
+      }
+    }
 
     // entities: upsert（既存は roleLabel を更新、新規は追加）
     if (entities) {
