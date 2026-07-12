@@ -142,22 +142,23 @@ export const getCachedNinaStatsRecent = unstable_cache(
   async () => {
     const since = new Date(Date.now() - SEVEN_DAYS_MS);
     const ninaEntityId = "cmmtp8vrg0004mo381neyztvn";
+    // 「直近7日」は公開/放送日(canonicalDate)基準。createdAtだと一括インポート時刻を拾い実態と乖離する。
     const [blogPosts, talkMessages, media, lives] = await Promise.all([
       prismaInternal.asset.count({
-        where: { sourceType: "web", kind: "text", createdAt: { gte: since }, entities: { some: { entityId: ninaEntityId } } },
+        where: { sourceType: "web", kind: "text", canonicalDate: { gte: since }, entities: { some: { entityId: ninaEntityId } } },
       }),
       prismaInternal.asset.count({
-        where: { sourceType: "import", kind: "text", createdAt: { gte: since } },
+        where: { sourceType: "import", kind: "text", canonicalDate: { gte: since } },
       }),
       prismaInternal.assetEntity.count({
         where: {
-          createdAt: { gte: since },
+          asset: { canonicalDate: { gte: since } },
           entity: { type: "tag", canonicalName: { in: ["日向坂で会いましょう", "まだまだ！日向坂で会いましょう", "日向坂になりましょう", "日向坂ちゃんねる", "日向坂46公式チャンネル", "雑誌"] } },
         },
       }),
       prisma.assetEntity.count({
         where: {
-          createdAt: { gte: since },
+          asset: { canonicalDate: { gte: since } },
           entity: { type: "tag", canonicalName: "ライブ" },
         },
       }),
