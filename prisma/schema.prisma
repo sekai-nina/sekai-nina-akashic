@@ -69,6 +69,7 @@ enum TextType {
   transcript
   note
   extracted
+  annotation
 }
 
 enum SourceKind {
