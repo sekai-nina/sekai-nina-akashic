@@ -21,6 +21,7 @@ export interface DashboardStats {
     hinach: number;
     official: number;
     magazine: number;
+    radio: number;
   };
   live: {
     count: number;
@@ -49,6 +50,7 @@ interface CountsRow {
   hinach: bigint;
   official: bigint;
   magazine: bigint;
+  radio: bigint;
   live: bigint;
 }
 
@@ -89,13 +91,14 @@ export async function getDashboardStats(): Promise<DashboardStats> {
           WHERE a."sourceType" = 'import' AND a.kind = 'audio' AND ae."entityId" = ${NINA_ENTITY_ID}
         ) AS talk_audios,
         (SELECT COUNT(*) FROM "Asset") AS total_assets,
-        (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '今日の発見') AS discovery,
+        (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" JOIN "Asset" a ON a.id = ae."assetId" WHERE e.type = 'tag' AND e."normalizedName" = '今日の発見' AND a.kind = 'text') AS discovery,
         (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '日向坂で会いましょう') AS hinaai,
         (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = 'まだまだ!日向坂で会いましょう') AS madamada,
         (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '日向坂になりましょう') AS hinanari,
         (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '日向坂ちゃんねる') AS hinach,
         (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '日向坂46公式チャンネル') AS official,
         (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '雑誌') AS magazine,
+        (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = 'ラジオ') AS radio,
         (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."canonicalName" = 'ライブ') AS live
     `,
     prisma.$queryRaw<[CharsRow]>`
@@ -157,6 +160,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
       hinach: Number(counts.hinach),
       official: Number(counts.official),
       magazine: Number(counts.magazine),
+      radio: Number(counts.radio),
     },
     live: {
       count: Number(counts.live),
