@@ -110,6 +110,7 @@ export interface ListAssetsFilters {
   trustLevel?: TrustLevel;
   sourceType?: SourceType;
   updatedSince?: Date;
+  entityId?: string; // 指定エンティティ(タグ/人物等)が紐づくアセットのみに絞る
   page?: number;
   perPage?: number;
   include?: string[];
@@ -307,7 +308,7 @@ export async function getAsset(id: string, clearance: string) {
 }
 
 export async function listAssets(filters: ListAssetsFilters = {}, clearance: string) {
-  const { status, kind, trustLevel, sourceType, updatedSince, page = 1, perPage = 20, include } = filters;
+  const { status, kind, trustLevel, sourceType, updatedSince, entityId, page = 1, perPage = 20, include } = filters;
 
   return withClearance(clearance, async (tx) => {
     const where = {
@@ -316,6 +317,7 @@ export async function listAssets(filters: ListAssetsFilters = {}, clearance: str
       ...(trustLevel ? { trustLevel } : {}),
       ...(sourceType ? { sourceType } : {}),
       ...(updatedSince ? { updatedAt: { gte: updatedSince } } : {}),
+      ...(entityId ? { entities: { some: { entityId } } } : {}),
     };
 
     const skip = (page - 1) * perPage;
