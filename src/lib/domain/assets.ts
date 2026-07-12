@@ -90,6 +90,13 @@ export interface UpdateAssetData {
     content: string;
     language?: string;
   }>;
+  // 指定した textType のみを非破壊で追加/更新する（body 等の既存 text を消さない）。
+  // 今日の発見の extracted(引用)/annotation(見出し) 保存などに使う。texts と併用不可。
+  upsertTexts?: Array<{
+    textType: TextType;
+    content: string;
+    language?: string;
+  }>;
   entities?: Array<{
     entityId: string;
     roleLabel?: string;
@@ -193,7 +200,7 @@ export async function updateAsset(
   userId: string | null,
   clearance: string
 ) {
-  const { texts, entities, sourceRecords, ...assetFields } = data;
+  const { texts, upsertTexts, entities, sourceRecords, ...assetFields } = data;
 
   // If changing classification, check user can set the new level
   if (data.classification) {
@@ -225,6 +232,24 @@ export async function updateAsset(
           })),
         });
       }
+    }
+
+    // upsertTexts: 指定した textType のみ非破壊で追加/更新（body 等は残す）
+    if (upsertTexts && upsertTexts.length > 0) {
+      const types = [...new Set(upsertTexts.map((t) => t.textType))];
+      await tx.assetText.deleteMany({
+        where: { assetId: id, textType: { in: types } },
+      });
+      await tx.assetText.createMany({
+        data: upsertTexts.map((t) => ({
+          assetId: id,
+          textType: t.textType,
+          content: t.content,
+          normalizedContent: normalizeText(t.content),
+          language: t.language,
+          createdById: userId ?? null,
+        })),
+      });
     }
 
     // entities: upsert（既存は roleLabel を更新、新規は追加）
