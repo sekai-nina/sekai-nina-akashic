@@ -20,6 +20,7 @@ export async function GET(request: Request) {
     trustLevel: (url.searchParams.get("trustLevel") as ListAssetsFilters["trustLevel"]) || undefined,
     sourceType: (url.searchParams.get("sourceType") as ListAssetsFilters["sourceType"]) || undefined,
     updatedSince: updatedSinceParam ? new Date(updatedSinceParam) : undefined,
+    entityId: url.searchParams.get("entityId") || undefined,
     page: Number(url.searchParams.get("page")) || 1,
     perPage: Math.min(Number(url.searchParams.get("perPage")) || 20, 100),
     include: includeParam ? includeParam.split(",") : undefined,
