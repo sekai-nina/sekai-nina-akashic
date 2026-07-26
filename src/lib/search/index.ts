@@ -13,6 +13,11 @@ export interface SearchQuery {
   sourceType?: SourceType;
   entityId?: string;
   entityIds?: string[];
+  /**
+   * entityIds の結合方法。
+   * "any" (既定) = いずれかを含む (OR) / "all" = すべてを含む (AND)
+   */
+  entityMatch?: "any" | "all";
   /** Match assets where any of these entities is linked with roleLabel='author' (OR semantics). */
   authorIds?: string[];
   dateFrom?: Date;
@@ -213,20 +218,27 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
     ? Prisma.sql`AND ${Prisma.join(assetWhereConditions, " AND ")}`
     : Prisma.empty;
 
-  // Entity filter as subquery (supports multiple entityIds with AND logic)
+  // Entity filter as subquery.
+  // 既定は OR（いずれかのタグ/人物を含む）。entityMatch: "all" で AND になる。
   const allEntityIds = [
     ...(query.entityId ? [query.entityId] : []),
     ...(query.entityIds ?? []),
   ];
-  const entityFilter = allEntityIds.length > 0
-    ? Prisma.sql`${Prisma.join(
-        allEntityIds.map(
-          (eid) =>
-            Prisma.sql`AND EXISTS (SELECT 1 FROM "AssetEntity" ae WHERE ae."assetId" = a."id" AND ae."entityId" = ${eid})`
-        ),
-        " "
-      )}`
-    : Prisma.empty;
+  const entityFilter = allEntityIds.length === 0
+    ? Prisma.empty
+    : query.entityMatch === "all"
+      ? Prisma.sql`${Prisma.join(
+          allEntityIds.map(
+            (eid) =>
+              Prisma.sql`AND EXISTS (SELECT 1 FROM "AssetEntity" ae WHERE ae."assetId" = a."id" AND ae."entityId" = ${eid})`
+          ),
+          " "
+        )}`
+      : Prisma.sql`AND EXISTS (
+          SELECT 1 FROM "AssetEntity" ae
+          WHERE ae."assetId" = a."id"
+          AND ae."entityId" IN (${Prisma.join(allEntityIds)})
+        )`;
 
   // Author filter: any of the given entities linked with roleLabel='author' (OR within group)
   const authorIds = query.authorIds ?? [];
