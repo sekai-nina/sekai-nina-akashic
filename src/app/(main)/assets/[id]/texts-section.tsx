@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Quote, Check, ExternalLink } from "lucide-react";
 import { AddToDossier } from "@/components/add-to-dossier";
+import { rememberScroll, useRestoreScroll } from "./scroll-return";
 
 const TEXT_TYPE_LABELS: Record<string, string> = {
   title: "タイトル",
@@ -58,6 +59,9 @@ export function TextsSection({
 }: TextsSectionProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [activeSelection, setActiveSelection] = useState<Selection>(null);
+
+  // 本文中の画像から戻ってきたときに、元のスクロール位置に復帰させる
+  useRestoreScroll(assetId, containerRef);
 
   useEffect(() => {
     if (editableDossiers.length === 0) return;
@@ -147,6 +151,9 @@ export function TextsSection({
                 content={text.content}
                 embeddedImages={embeddedImages}
                 highlightTerms={highlightTerms}
+                onImageNavigate={(imageAssetId, imageEl) =>
+                  rememberScroll(assetId, imageAssetId, imageEl)
+                }
               />
             </li>
           ))}
@@ -204,10 +211,13 @@ function RichTextContent({
   content,
   embeddedImages,
   highlightTerms = [],
+  onImageNavigate,
 }: {
   content: string;
   embeddedImages: Record<string, EmbeddedImage>;
   highlightTerms?: string[];
+  /** 本文中の画像から離れる直前に呼ばれる（戻ってきたときの復元用） */
+  onImageNavigate?: (imageAssetId: string, imageEl: HTMLElement) => void;
 }) {
   const parts = content.split(/(\{\{IMG:[a-zA-Z0-9_-]+\}\})/);
   return (
@@ -219,7 +229,13 @@ function RichTextContent({
           const img = embeddedImages[assetId];
           if (img?.thumbnailUrl) {
             return (
-              <Link key={i} href={`/assets/${assetId}`} className="block my-2 select-none" contentEditable={false}>
+              <Link
+                key={i}
+                href={`/assets/${assetId}`}
+                onClick={(e) => onImageNavigate?.(assetId, e.currentTarget)}
+                className="block my-2 select-none"
+                contentEditable={false}
+              >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={img.thumbnailUrl}
