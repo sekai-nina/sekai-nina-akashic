@@ -216,7 +216,12 @@ async function SearchResults({
                 )}
                 <div className="p-2">
                   <p className="text-xs font-medium text-slate-800 line-clamp-2">{item.assetTitle}</p>
-                  <div className="mt-1"><KindBadge kind={item.assetKind} /></div>
+                  <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                    <KindBadge kind={item.assetKind} />
+                    <span className="text-[11px] text-slate-400">
+                      {formatDate(item.canonicalDate ?? item.createdAt)}
+                    </span>
+                  </div>
                 </div>
               </Link>
               {editableDossiers.length > 0 && (
@@ -261,7 +266,7 @@ async function SearchResults({
                     )}
                   </div>
                   <div className="flex items-center gap-2 mt-1 text-xs text-slate-400 flex-wrap">
-                    {item.canonicalDate && <span>{formatDate(item.canonicalDate)}</span>}
+                    <span>{formatDate(item.canonicalDate ?? item.createdAt)}</span>
                     {item.personNames.length > 0 && (
                       <span>{item.personNames.join(", ")}</span>
                     )}
