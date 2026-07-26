@@ -180,13 +180,99 @@ async function getBodyPreviews(
   }
   return map;
 }
+/**
+ * キーワード一致した AssetText から、一致箇所の周辺だけを1アセット1行で取り出す。
+ * 全文を転送すると1行あたり数KBになるため、位置を求めて窓を切る。
+ */
+async function getTextMatches(
+  assetIds: string[],
+  tx: Parameters<Parameters<typeof withClearance>[1]>[0],
+  terms: string[],
+  likePatterns: string[],
+  normalizedLikePatterns: string[]
+): Promise<Map<string, { textType: string; content: string }>> {
+  if (assetIds.length === 0 || terms.length === 0) return new Map();
+
+  const positionExpression = Prisma.sql`LEAST(${Prisma.join(
+    terms.map(
+      (t) => Prisma.sql`COALESCE(NULLIF(position(lower(${t}) in lower(t."content")), 0), 999999)`
+    ),
+    ", "
+  )})`;
+
+  const rows = await tx.$queryRaw<Array<{ assetId: string; textType: string; content: string }>>`
+    SELECT DISTINCT ON (t."assetId")
+      t."assetId", t."textType",
+      substring(t."content" FROM GREATEST(1, ${positionExpression} - 150) FOR 800) as content
+    FROM "AssetText" t
+    WHERE t."assetId"::text = ANY(${assetIds})
+      AND (${Prisma.join(
+        likePatterns.flatMap((pat, i) => [
+          Prisma.sql`t."content" ILIKE ${pat}`,
+          Prisma.sql`t."normalizedContent" ILIKE ${normalizedLikePatterns[i]}`,
+        ]),
+        " OR "
+      )})
+    ORDER BY t."assetId", ${positionExpression}
+  `;
+
+  const map = new Map<string, { textType: string; content: string }>();
+  for (const row of rows) {
+    map.set(row.assetId, { textType: row.textType, content: row.content });
+  }
+  return map;
+}
+
+/** キーワードに一致したタグ/人物名を、1アセット1件だけ取り出す */
+async function getMatchingEntityNames(
+  assetIds: string[],
+  tx: Parameters<Parameters<typeof withClearance>[1]>[0],
+  likePatterns: string[],
+  normalizedLikePatterns: string[]
+): Promise<Map<string, string>> {
+  if (assetIds.length === 0 || likePatterns.length === 0) return new Map();
+
+  const rows = await tx.$queryRaw<Array<{ assetId: string; name: string }>>`
+    SELECT DISTINCT ON (ae."assetId") ae."assetId", e."canonicalName" as name
+    FROM "AssetEntity" ae
+    JOIN "Entity" e ON e."id" = ae."entityId"
+    WHERE ae."assetId"::text = ANY(${assetIds})
+      AND (${Prisma.join(
+        likePatterns.flatMap((pat, i) => [
+          Prisma.sql`e."canonicalName" ILIKE ${pat}`,
+          Prisma.sql`e."normalizedName" ILIKE ${normalizedLikePatterns[i]}`,
+        ]),
+        " OR "
+      )})
+    ORDER BY ae."assetId", length(e."canonicalName")
+  `;
+
+  const map = new Map<string, string>();
+  for (const row of rows) map.set(row.assetId, row.name);
+  return map;
+}
+
+interface AssetRow {
+  id: string;
+  title: string;
+  description: string;
+  kind: AssetKind;
+  status: AssetStatus;
+  thumbnailUrl: string | null;
+  storageUrl: string | null;
+  storageProvider: string | null;
+  storageKey: string | null;
+  messageBodyPreview: string | null;
+  createdAt: Date;
+  canonicalDate: Date | null;
+}
 
 export async function search(query: SearchQuery, clearance: string): Promise<SearchResult> {
   const { q, target = "all", page = 1, perPage = 20 } = query;
   const offset = (page - 1) * perPage;
   const hasKeyword = q.trim().length > 0;
 
-  // Support OR search with | separator
+  // "/" 区切りで OR 検索
   const terms = hasKeyword
     ? q.split("/").map((t) => t.trim()).filter(Boolean)
     : [];
@@ -257,263 +343,208 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
     return { items: [], total: 0, page, perPage };
   }
 
-  // Run search queries in parallel (each gets its own DB connection from pool).
-  // When there's no keyword, run searchAssets regardless of target — there's
-  // nothing to match inside text content or entity names, so we fall back to
-  // listing assets filtered by kind/date/entity.
-  const searchAssets = (target === "all" || target === "assets" || !hasKeyword)
-    ? withClearance(clearance, async (tx) => {
-        const keywordCondition = hasKeyword
-          ? Prisma.sql`(${Prisma.join(
-              likePatterns.map(
-                (pat) => Prisma.sql`a."title" ILIKE ${pat} OR a."description" ILIKE ${pat} OR a."messageBodyPreview" ILIKE ${pat}`
-              ),
-              " OR "
-            )})`
-          : Prisma.sql`TRUE`;
+  // 一致条件はソースごとに分けて UNION する。
+  // OR でまとめてしまうと trigram インデックスが使えず Asset 全件走査になる
+  // (計測: 84,966行の Seq Scan で 920ms → ソース別 UNION で 205ms)。
+  const anyOf = (column: Prisma.Sql, patterns: string[]) =>
+    Prisma.sql`(${Prisma.join(patterns.map((pat) => Prisma.sql`${column} ILIKE ${pat}`), " OR ")})`;
 
-        return tx.$queryRaw<Array<{
-          id: string;
-          title: string;
-          description: string;
-          kind: AssetKind;
-          status: AssetStatus;
-          thumbnailUrl: string | null;
-          storageUrl: string | null;
-          storageProvider: string | null;
-          storageKey: string | null;
-          messageBodyPreview: string | null;
-          createdAt: Date;
-          canonicalDate: Date | null;
-        }>>`
-          SELECT
-            a."id", a."title", a."description", a."kind", a."status",
-            a."thumbnailUrl", a."storageUrl", a."storageProvider", a."storageKey",
-            a."messageBodyPreview", a."createdAt", a."canonicalDate"
-          FROM "Asset" a
-          WHERE ${keywordCondition}
-          ${baseFilter}
-          ${entityFilter}
-          ${authorFilter}
-          ORDER BY COALESCE(a."canonicalDate", a."createdAt") DESC
-          LIMIT ${perPage} OFFSET ${offset}
-        `;
-      })
-    : Promise.resolve([]);
+  /** 素の列と正規化列の両方に対する一致条件 */
+  const plainOrNormalized = (plain: Prisma.Sql, normalized: Prisma.Sql) =>
+    Prisma.sql`(${Prisma.join(
+      likePatterns.flatMap((pat, i) => [
+        Prisma.sql`${plain} ILIKE ${pat}`,
+        Prisma.sql`${normalized} ILIKE ${normalizedLikePatterns[i]}`,
+      ]),
+      " OR "
+    )})`;
 
-  // For text search: extract a ~800-char window around the first matching term
-  // instead of transferring the full content (could be many KB per row).
-  // This trades exhaustive match detection in long texts for a massive reduction
-  // in data transfer (often 3-10x smaller payload, 2x faster end-to-end).
-  const positionExpressions = terms.length > 0
-    ? Prisma.sql`LEAST(${Prisma.join(
-        terms.map(
-          (t) => Prisma.sql`COALESCE(NULLIF(position(lower(${t}) in lower(t."content")), 0), 999999)`
-        ),
-        ", "
-      )})`
-    : Prisma.sql`1`;
+  // target=texts は本文のみ、target=assets は本文を除く
+  const searchAssetFields = target === "all" || target === "assets";
+  const searchTextContent = target === "all" || target === "texts";
 
-  const searchTexts = (hasKeyword && (target === "all" || target === "texts"))
-    ? withClearance(clearance, (tx) =>
-        tx.$queryRaw<Array<{
-          id: string;
-          assetId: string;
-          textType: string;
-          content: string;
-          asset_title: string;
-          asset_kind: AssetKind;
-          asset_status: AssetStatus;
-          asset_thumbnailUrl: string | null;
-          asset_storageUrl: string | null;
-          asset_storageProvider: string | null;
-          asset_storageKey: string | null;
-          asset_createdAt: Date;
-          asset_canonicalDate: Date | null;
-        }>>`
-          SELECT
-            t."id", t."assetId", t."textType",
-            substring(t."content"
-              FROM GREATEST(1, ${positionExpressions} - 150)
-              FOR 800
-            ) as content,
-            a."title" as asset_title, a."kind" as asset_kind, a."status" as asset_status,
-            a."thumbnailUrl" as "asset_thumbnailUrl", a."storageUrl" as "asset_storageUrl",
-            a."storageProvider" as "asset_storageProvider", a."storageKey" as "asset_storageKey",
-            a."createdAt" as "asset_createdAt", a."canonicalDate" as "asset_canonicalDate"
-          FROM "AssetText" t
-          JOIN "Asset" a ON a."id" = t."assetId"
-          WHERE (${Prisma.join(
-              likePatterns.flatMap((pat, i) => [
-                Prisma.sql`t."content" ILIKE ${pat}`,
-                Prisma.sql`t."normalizedContent" ILIKE ${normalizedLikePatterns[i]}`,
-              ]),
-              " OR "
-            )})
-          ${baseFilter}
-          ${entityFilter}
-          ${authorFilter}
-          ORDER BY t."assetId" DESC
-          LIMIT ${perPage} OFFSET ${offset}
-        `
+  const assetFilters = Prisma.sql`${baseFilter} ${entityFilter} ${authorFilter}`;
+  // Asset 側の絞り込みが無いなら、AssetText / AssetEntity から引くブランチで
+  // Asset を JOIN する必要がない (RLS は各テーブル側でも親の分類を見ている)。
+  // 無駄な JOIN を外すと素のキーワード検索が 1810ms → 1354ms になる。
+  const hasAssetFilters =
+    assetWhereConditions.length > 0 || allEntityIds.length > 0 || authorIds.length > 0;
+  const joinAssetForFilters = hasAssetFilters
+    ? Prisma.sql`JOIN "Asset" a ON a."id" = ae."assetId"`
+    : Prisma.empty;
+  const joinAssetForTextFilters = hasAssetFilters
+    ? Prisma.sql`JOIN "Asset" a ON a."id" = t."assetId"`
+    : Prisma.empty;
+  const filtersIfJoined = hasAssetFilters ? assetFilters : Prisma.empty;
+
+  /** 一致元ごとの候補。rank は旧実装のスコアを踏襲 (タイトル3 / 説明・タグ2 / それ以外1)。 */
+  const branches: Prisma.Sql[] = [];
+  if (hasKeyword) {
+    if (searchAssetFields) {
+      branches.push(Prisma.sql`
+        SELECT a."id", 3 AS rank FROM "Asset" a
+        WHERE ${anyOf(Prisma.sql`a."title"`, likePatterns)} ${assetFilters}`);
+      branches.push(Prisma.sql`
+        SELECT a."id", 2 AS rank FROM "Asset" a
+        WHERE ${anyOf(Prisma.sql`a."description"`, likePatterns)} ${assetFilters}`);
+      // COALESCE で包むとインデックスが使えなくなるので、NULL はそのまま外れさせる
+      branches.push(Prisma.sql`
+        SELECT a."id", 1 AS rank FROM "Asset" a
+        WHERE ${anyOf(Prisma.sql`a."messageBodyPreview"`, likePatterns)} ${assetFilters}`);
+      branches.push(Prisma.sql`
+        SELECT ae."assetId" AS id, 2 AS rank
+        FROM "AssetEntity" ae
+        JOIN "Entity" e ON e."id" = ae."entityId"
+        ${joinAssetForFilters}
+        WHERE ${plainOrNormalized(Prisma.sql`e."canonicalName"`, Prisma.sql`e."normalizedName"`)} ${filtersIfJoined}`);
+    }
+    if (searchTextContent) {
+      branches.push(Prisma.sql`
+        SELECT t."assetId" AS id, 1 AS rank
+        FROM "AssetText" t
+        ${joinAssetForTextFilters}
+        WHERE ${plainOrNormalized(Prisma.sql`t."content"`, Prisma.sql`t."normalizedContent"`)} ${filtersIfJoined}`);
+    }
+  } else {
+    // キーワード無しはフィルタだけで絞る
+    branches.push(Prisma.sql`
+      SELECT a."id", 1 AS rank FROM "Asset" a WHERE TRUE ${assetFilters}`);
+  }
+
+  // 以前は「タイトル等」「タグ名」「本文」を別々のクエリで LIMIT していたため、
+  // マージ時に溢れた一致がどのページにも現れなかった。候補を1つに束ねて
+  // count(*) OVER () で総数も同時に取る。
+  const rows = await withClearance(clearance, (tx) =>
+    tx.$queryRaw<Array<AssetRow & { rank: number; total_count: bigint }>>`
+      WITH matched AS (
+        ${Prisma.join(branches, " UNION ALL ")}
+      ), ranked AS (
+        SELECT id, max(rank) AS rank FROM matched GROUP BY id
       )
-    : Promise.resolve([]);
+      SELECT
+        a."id", a."title", a."description", a."kind", a."status",
+        a."thumbnailUrl", a."storageUrl", a."storageProvider", a."storageKey",
+        a."messageBodyPreview", a."createdAt", a."canonicalDate",
+        r."rank", count(*) OVER () AS total_count
+      FROM ranked r
+      JOIN "Asset" a ON a."id" = r."id"
+      ORDER BY r."rank" DESC,
+        COALESCE(a."canonicalDate", a."createdAt") DESC,
+        a."id" ASC
+      LIMIT ${perPage} OFFSET ${offset}
+    `
+  );
 
-  const searchEntities = (hasKeyword && (target === "all" || target === "assets"))
-    ? withClearance(clearance, (tx) =>
-        tx.$queryRaw<Array<{
-          assetId: string;
-          asset_title: string;
-          asset_kind: AssetKind;
-          asset_status: AssetStatus;
-          asset_thumbnailUrl: string | null;
-          asset_storageUrl: string | null;
-          asset_storageProvider: string | null;
-          asset_storageKey: string | null;
-          asset_createdAt: Date;
-          asset_canonicalDate: Date | null;
-          entity_name: string;
-        }>>`
-          SELECT DISTINCT ON (ae."assetId")
-            ae."assetId",
-            a."title" as asset_title, a."kind" as asset_kind, a."status" as asset_status,
-            a."thumbnailUrl" as "asset_thumbnailUrl", a."storageUrl" as "asset_storageUrl",
-            a."storageProvider" as "asset_storageProvider", a."storageKey" as "asset_storageKey",
-            a."createdAt" as "asset_createdAt", a."canonicalDate" as "asset_canonicalDate",
-            e."canonicalName" as entity_name
-          FROM "Entity" e
-          JOIN "AssetEntity" ae ON ae."entityId" = e."id"
-          JOIN "Asset" a ON a."id" = ae."assetId"
-          WHERE (${Prisma.join(
-              likePatterns.flatMap((pat, i) => [
-                Prisma.sql`e."canonicalName" ILIKE ${pat}`,
-                Prisma.sql`e."normalizedName" ILIKE ${normalizedLikePatterns[i]}`,
-              ]),
-              " OR "
-            )})
-          ${baseFilter}
-          ${authorFilter}
-          ORDER BY ae."assetId", a."createdAt" DESC
-          LIMIT ${perPage}
-        `
-      )
-    : Promise.resolve([]);
+  const total = rows.length > 0 ? Number(rows[0].total_count) : 0;
 
-  const [assetResults, textResults, entityAssets] = await Promise.all([
-    searchAssets,
-    searchTexts,
-    searchEntities,
-  ]);
+  if (rows.length === 0) {
+    return { items: [], total, page, perPage };
+  }
 
-  // Process asset results
-  const results: SearchResultItem[] = [];
+  const termsLower = terms.map((t) => t.toLowerCase());
+  const matchesAny = (text: string | null) =>
+    hasKeyword && !!text && termsLower.some((t) => text.toLowerCase().includes(t));
 
-  for (const row of assetResults) {
-    const termsLower = terms.map((t) => t.toLowerCase());
-    const titleMatch = hasKeyword && termsLower.some((t) => row.title.toLowerCase().includes(t));
-    const descMatch = hasKeyword && termsLower.some((t) => row.description.toLowerCase().includes(t));
-    const previewMatch = hasKeyword && termsLower.some((t) => (row.messageBodyPreview || "").toLowerCase().includes(t));
-    const matchField = titleMatch ? "title" : descMatch ? "description" : previewMatch ? "messageBodyPreview" : "title";
-    const matchText = titleMatch ? row.title : descMatch ? row.description : previewMatch ? (row.messageBodyPreview || "") : row.title;
-    results.push({
-      type: "asset",
+  // アセット行だけで一致箇所が分かるものと、本文/タグを引き当てる必要があるものを分ける
+  const needsLookup = rows.filter(
+    (row) =>
+      hasKeyword &&
+      !(searchAssetFields &&
+        (matchesAny(row.title) || matchesAny(row.description) || matchesAny(row.messageBodyPreview)))
+  );
+  const lookupIds = needsLookup.map((row) => row.id);
+  const assetIds = rows.map((row) => row.id);
+
+  const { persons, tags, textMatches, entityNameHits, bodyPreviews } = await withClearance(
+    clearance,
+    async (tx) => {
+      const [names, texts, entityHits] = await Promise.all([
+        getEntityNames(assetIds, tx),
+        searchTextContent
+          ? getTextMatches(lookupIds, tx, terms, likePatterns, normalizedLikePatterns)
+          : Promise.resolve(new Map<string, { textType: string; content: string }>()),
+        searchAssetFields
+          ? getMatchingEntityNames(lookupIds, tx, likePatterns, normalizedLikePatterns)
+          : Promise.resolve(new Map<string, string>()),
+      ]);
+      // 本文が一致源でないものには、トーク本文などのプレビューを別途付ける
+      const previewIds = rows
+        .filter((row) => !texts.has(row.id))
+        .map((row) => row.id);
+      const previews = await getBodyPreviews(previewIds, tx);
+      return {
+        persons: names.persons,
+        tags: names.tags,
+        textMatches: texts,
+        entityNameHits: entityHits,
+        bodyPreviews: previews,
+      };
+    }
+  );
+
+  const items: SearchResultItem[] = rows.map((row) => {
+    const titleHit = searchAssetFields && matchesAny(row.title);
+    const descHit = searchAssetFields && matchesAny(row.description);
+    const previewHit = searchAssetFields && matchesAny(row.messageBodyPreview);
+    const textHit = textMatches.get(row.id);
+    const entityHit = entityNameHits.get(row.id);
+
+    let type: "asset" | "text" = "asset";
+    let matchField = "title";
+    let matchText = row.title;
+    let score = 0;
+    let snippets: string[];
+    let matchCount = 0;
+
+    if (!hasKeyword) {
+      snippets = [row.title];
+    } else if (titleHit) {
+      matchField = "title";
+      score = 3;
+      ({ snippets, matchCount } = buildSnippets(row.title, q));
+    } else if (descHit) {
+      matchField = "description";
+      matchText = row.description;
+      score = 2;
+      ({ snippets, matchCount } = buildSnippets(row.description, q));
+    } else if (previewHit) {
+      matchField = "messageBodyPreview";
+      matchText = row.messageBodyPreview ?? "";
+      score = 1;
+      ({ snippets, matchCount } = buildSnippets(matchText, q));
+    } else if (textHit) {
+      type = "text";
+      matchField = textHit.textType;
+      score = 1;
+      ({ snippets, matchCount } = buildSnippets(textHit.content, q));
+    } else if (entityHit) {
+      matchField = "entity";
+      score = 2;
+      snippets = [`タグ/人物: ${entityHit}`];
+      matchCount = 1;
+    } else {
+      snippets = [row.title];
+    }
+
+    return {
+      type,
       assetId: row.id,
       assetTitle: row.title || "(無題)",
       assetKind: row.kind,
       assetStatus: row.status,
       thumbnailUrl: resolveImageUrl(row.thumbnailUrl, row.storageProvider, row.storageKey, row.kind),
       storageUrl: row.storageUrl,
-      ...(hasKeyword ? buildSnippets(matchText, q) : { snippets: [row.title], matchCount: 0 }),
+      snippets,
+      matchCount,
       matchField,
-      // Filled in below by a batched AssetText lookup (トーク本文など).
-      bodyPreview: null,
-      score: titleMatch ? 3 : descMatch ? 2 : previewMatch ? 1 : 0,
+      bodyPreview: type === "text" ? null : bodyPreviews.get(row.id) ?? null,
+      score,
       createdAt: row.createdAt,
       canonicalDate: row.canonicalDate,
-      personNames: [],
-      tagNames: [],
-    });
-  }
-
-  // Process text results
-  for (const row of textResults) {
-    results.push({
-      type: "text",
-      assetId: row.assetId,
-      assetTitle: row.asset_title || "(無題)",
-      assetKind: row.asset_kind,
-      assetStatus: row.asset_status,
-      thumbnailUrl: resolveImageUrl(row.asset_thumbnailUrl, row.asset_storageProvider, row.asset_storageKey, row.asset_kind),
-      storageUrl: row.asset_storageUrl,
-      ...buildSnippets(row.content, q),
-      matchField: row.textType,
-      bodyPreview: null,
-      score: 1,
-      createdAt: row.asset_createdAt,
-      canonicalDate: row.asset_canonicalDate,
-      personNames: [],
-      tagNames: [],
-    });
-  }
-
-  // Process entity match results
-  for (const row of entityAssets) {
-    if (!results.some(r => r.assetId === row.assetId)) {
-      results.push({
-        type: "asset",
-        assetId: row.assetId,
-        assetTitle: row.asset_title || "(無題)",
-        assetKind: row.asset_kind,
-        assetStatus: row.asset_status,
-        thumbnailUrl: resolveImageUrl(row.asset_thumbnailUrl, row.asset_storageProvider, row.asset_storageKey, row.asset_kind),
-        storageUrl: row.asset_storageUrl,
-        snippets: [`タグ/人物: ${row.entity_name}`],
-        matchCount: 1,
-        matchField: "entity",
-        bodyPreview: null,
-        score: 2,
-        createdAt: row.asset_createdAt,
-        canonicalDate: row.asset_canonicalDate,
-        personNames: [],
-        tagNames: [],
-      });
-    }
-  }
-
-  // Sort by score descending, then by canonical/created date
-  results.sort((a, b) => {
-    if (b.score !== a.score) return b.score - a.score;
-    const aDate = (a.canonicalDate ?? a.createdAt).getTime();
-    const bDate = (b.canonicalDate ?? b.createdAt).getTime();
-    return bDate - aDate;
+      personNames: persons.get(row.id) ?? [],
+      tagNames: tags.get(row.id) ?? [],
+    };
   });
 
-  const sliced = results.slice(0, perPage);
-
-  // Batch fetch person/tag names, plus a body preview for results whose match
-  // did NOT come from the body (title/entity/date). Text matches already show a
-  // body-derived snippet, so they don't need a separate preview.
-  const assetIds = [...new Set(sliced.map((r) => r.assetId))];
-  const bodyNeededIds = [...new Set(sliced.filter((r) => r.type !== "text").map((r) => r.assetId))];
-  const [{ persons, tags }, bodyPreviews] = await withClearance(clearance, async (tx) => {
-    const [names, bodies] = await Promise.all([
-      getEntityNames(assetIds, tx),
-      getBodyPreviews(bodyNeededIds, tx),
-    ]);
-    return [names, bodies] as const;
-  });
-  for (const item of sliced) {
-    item.personNames = persons.get(item.assetId) ?? [];
-    item.tagNames = tags.get(item.assetId) ?? [];
-    if (item.type !== "text") {
-      item.bodyPreview = bodyPreviews.get(item.assetId) ?? null;
-    }
-  }
-
-  return {
-    items: sliced,
-    total: results.length,
-    page,
-    perPage,
-  };
+  return { items, total, page, perPage };
 }
