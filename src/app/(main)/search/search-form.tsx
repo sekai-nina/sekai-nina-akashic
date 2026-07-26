@@ -6,6 +6,7 @@ import { Loader2, RotateCcw } from "lucide-react";
 import { ASSET_KIND_LABELS, ENTITY_TYPE_LABELS } from "@/lib/utils";
 import { EntityFilter } from "./entity-filter";
 import { AuthorFilter } from "./author-filter";
+import { CARRIED_PARAM_KEYS } from "./params";
 
 const NINA_ENTITY_ID = "cmmtp8vrg0004mo381neyztvn";
 
@@ -44,6 +45,8 @@ export function SearchForm({
     new Set(initialAuthorIds)
   );
   const qInputRef = useRef<HTMLInputElement>(null);
+  const dateFromRef = useRef<HTMLInputElement>(null);
+  const dateToRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setSearching(false);
@@ -81,7 +84,10 @@ export function SearchForm({
     setNinaOnly(false);
     setFilterEntityIds(new Set());
     setFilterAuthorIds(new Set());
-    if (qInputRef.current) qInputRef.current.value = "";
+    // 日付は非制御 input なので、明示的に消さないと次の検索に持ち越される
+    for (const ref of [qInputRef, dateFromRef, dateToRef]) {
+      if (ref.current) ref.current.value = "";
+    }
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(STORAGE_KEY);
     }
@@ -182,8 +188,11 @@ export function SearchForm({
     if (dateFrom) p.set("dateFrom", dateFrom);
     if (dateTo) p.set("dateTo", dateTo);
 
-    const view = searchParams.get("view");
-    if (view) p.set("view", view);
+    // フォームに UI が無いパラメータ（表示形式・テキスト分析からの絞り込み）は引き継ぐ
+    for (const key of CARRIED_PARAM_KEYS) {
+      const value = searchParams.get(key);
+      if (value) p.set(key, value);
+    }
 
     router.push(`/search?${p.toString()}`, { scroll: false });
   }
@@ -309,6 +318,7 @@ export function SearchForm({
             <div>
               <label className="block text-xs text-slate-500 mb-1">開始日</label>
               <input
+                ref={dateFromRef}
                 type="date"
                 name="dateFrom"
                 defaultValue={searchParams.get("dateFrom") ?? ""}
@@ -318,6 +328,7 @@ export function SearchForm({
             <div>
               <label className="block text-xs text-slate-500 mb-1">終了日</label>
               <input
+                ref={dateToRef}
                 type="date"
                 name="dateTo"
                 defaultValue={searchParams.get("dateTo") ?? ""}
