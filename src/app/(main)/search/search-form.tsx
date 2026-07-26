@@ -1,14 +1,17 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2, RotateCcw } from "lucide-react";
 import { ASSET_KIND_LABELS, ENTITY_TYPE_LABELS } from "@/lib/utils";
 import { EntityFilter } from "./entity-filter";
 import { AuthorFilter } from "./author-filter";
 import { CARRIED_PARAM_KEYS } from "./params";
+import { GENERATION_LABELS } from "@/lib/members";
 
 const NINA_ENTITY_ID = "cmmtp8vrg0004mo381neyztvn";
+/** チップで一括選択できるようにしている期 */
+const FEATURED_GENERATION = 5;
 
 // チップの並び順（よく使う種別を先頭に）
 const KIND_CHIPS = ["text", "image", "video", "audio", "document", "other"] as const;
@@ -22,7 +25,13 @@ interface SearchFormProps {
   initialEntityIds: string[];
   initialEntityMatch: "any" | "all";
   initialAuthorIds: string[];
-  entities: { id: string; canonicalName: string; type: string }[];
+  entities: {
+    id: string;
+    canonicalName: string;
+    type: string;
+    generation?: number | null;
+    reading?: string | null;
+  }[];
 }
 
 export function SearchForm({
@@ -117,6 +126,32 @@ export function SearchForm({
       return next;
     });
   }, []);
+
+  // 「五期生」チップ: その期のメンバー全員を著者フィルタに入れる (OR)
+  const generationAuthorIds = useMemo(() => {
+    const ids = entities
+      .filter((e) => e.type === "person" && e.generation === FEATURED_GENERATION)
+      .map((e) => e.id);
+    return ids;
+  }, [entities]);
+
+  const generationActive =
+    generationAuthorIds.length > 0 &&
+    generationAuthorIds.every((id) => filterAuthorIds.has(id));
+
+  const handleGenerationToggle = useCallback(() => {
+    setFilterAuthorIds((prev) => {
+      const next = new Set(prev);
+      const alreadyOn = generationAuthorIds.every((id) => next.has(id));
+      for (const id of generationAuthorIds) {
+        if (alreadyOn) next.delete(id);
+        else next.add(id);
+      }
+      // 坂井新奈トグルの見た目を著者フィルタの実態に合わせる
+      setNinaOnly(alreadyOn ? false : next.has(NINA_ENTITY_ID));
+      return next;
+    });
+  }, [generationAuthorIds]);
 
   const handleNinaToggle = useCallback(() => {
     setNinaOnly((prev) => {
@@ -266,6 +301,19 @@ export function SearchForm({
         >
           坂井新奈
         </button>
+        {generationAuthorIds.length > 0 && (
+          <button
+            type="button"
+            onClick={handleGenerationToggle}
+            className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+              generationActive
+                ? "bg-purple-600 text-white"
+                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+            }`}
+          >
+            {GENERATION_LABELS[FEATURED_GENERATION]}
+          </button>
+        )}
         <button
           type="button"
           onClick={handleReset}

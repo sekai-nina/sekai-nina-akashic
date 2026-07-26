@@ -103,7 +103,14 @@ export const getCachedEntities = unstable_cache(
 export const getCachedEntityList = unstable_cache(
   () =>
     prisma.entity.findMany({
-      select: { id: true, type: true, canonicalName: true, normalizedName: true },
+      select: {
+        id: true,
+        type: true,
+        canonicalName: true,
+        normalizedName: true,
+        generation: true,
+        reading: true,
+      },
       orderBy: [{ type: "asc" }, { canonicalName: "asc" }],
     }),
   ["entities-list-light"],

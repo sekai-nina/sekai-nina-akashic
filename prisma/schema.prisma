@@ -245,6 +245,10 @@ model Entity {
   normalizedName String     @default("")
   aliases        Json       @default("[]")
   description    String     @default("")
+  /// 日向坂46の期別 (person のみ。1〜5)
+  generation     Int?
+  /// 五十音順の並び替え用の読み仮名 (ひらがな)
+  reading        String?
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
