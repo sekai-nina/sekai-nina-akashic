@@ -6,6 +6,8 @@ export interface SearchQuery {
   q: string;
   target?: "all" | "assets" | "texts";
   kind?: AssetKind;
+  /** Match assets of any of these kinds (OR semantics). Merged with `kind`. */
+  kinds?: AssetKind[];
   status?: AssetStatus;
   trustLevel?: TrustLevel;
   sourceType?: SourceType;
@@ -190,7 +192,12 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
   const assetWhereConditions: Prisma.Sql[] = [];
 
   // Base filters (no classificationFilterSql needed — RLS handles it)
-  if (query.kind) assetWhereConditions.push(Prisma.sql`a."kind" = ${query.kind}::"AssetKind"`);
+  const kinds = [...new Set([...(query.kind ? [query.kind] : []), ...(query.kinds ?? [])])];
+  if (kinds.length > 0) {
+    assetWhereConditions.push(
+      Prisma.sql`a."kind" IN (${Prisma.join(kinds.map((k) => Prisma.sql`${k}::"AssetKind"`))})`
+    );
+  }
   if (query.status) assetWhereConditions.push(Prisma.sql`a."status" = ${query.status}::"AssetStatus"`);
   if (query.trustLevel) assetWhereConditions.push(Prisma.sql`a."trustLevel" = ${query.trustLevel}::"TrustLevel"`);
   if (query.sourceType) assetWhereConditions.push(Prisma.sql`a."sourceType" = ${query.sourceType}::"SourceType"`);

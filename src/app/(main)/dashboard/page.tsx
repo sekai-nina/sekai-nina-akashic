@@ -6,6 +6,7 @@ import {
   getCachedInboxCount,
   getCachedKindCountsRecent,
   getCachedNinaStatsRecent,
+  getCachedEntityList,
 } from "@/lib/cache";
 import { auth } from "@/lib/auth";
 import { ASSET_KIND_LABELS, ASSET_STATUS_LABELS, formatDate } from "@/lib/utils";
@@ -26,7 +27,7 @@ export default async function DashboardPage() {
   if (!session?.user) redirect("/login");
   const clearance = session.user.clearance as ClearanceLevel;
 
-  const [stats, kindCounts, statusCounts, recentAssets, inboxCount, kindCountsRecent, ninaRecent] =
+  const [stats, kindCounts, statusCounts, recentAssets, inboxCount, kindCountsRecent, ninaRecent, entities] =
     await Promise.all([
       getCachedDashboardStats(),
       getCachedKindCounts(clearance),
@@ -35,7 +36,21 @@ export default async function DashboardPage() {
       getCachedInboxCount(clearance),
       getCachedKindCountsRecent(clearance),
       getCachedNinaStatsRecent(),
+      getCachedEntityList(),
     ]);
+
+  // 検索側の mode プリセットを廃止したので、ここでタグ ID を解決してリンクする
+  const entityIdByName = (name: string) =>
+    entities.find((e) => e.canonicalName === name)?.id;
+  const MEDIA_SHOW_NAMES = [
+    "日向坂で会いましょう",
+    "日向坂になりましょう",
+    "日向坂ちゃんねる",
+    "日向坂46公式チャンネル",
+    "雑誌",
+  ];
+  const mediaShowIds = MEDIA_SHOW_NAMES.map(entityIdByName).filter(Boolean).join(",");
+  const liveEntityId = entityIdByName("ライブ");
 
   const totalMedia =
     stats.media.hinaai +
@@ -148,7 +163,7 @@ export default async function DashboardPage() {
               坂井新奈
             </h2>
             <div className="grid grid-cols-2 gap-4">
-              <Link href="/search?mode=text&entityIds=cmmtp8vr40001mo38wc2n1y8p" className="group">
+              <Link href="/search?kind=text&entityIds=cmmtp8vr40001mo38wc2n1y8p" className="group">
                 <p className="text-2xl font-bold text-slate-900 group-hover:text-blue-600 transition-colors flex items-center gap-1.5">
                   {stats.blog.postCount}
                   <Delta value={ninaRecent.blogPosts} />
@@ -158,7 +173,7 @@ export default async function DashboardPage() {
                   {stats.blog.totalChars.toLocaleString()} 字
                 </p>
               </Link>
-              <Link href="/search?mode=text&entityIds=cmn3mvlmn01mumowwgb9y0mc4" className="group">
+              <Link href="/search?kind=text&entityIds=cmn3mvlmn01mumowwgb9y0mc4" className="group">
                 <p className="text-2xl font-bold text-slate-900 group-hover:text-blue-600 transition-colors flex items-center gap-1.5">
                   {stats.talk.messageCount.toLocaleString()}
                   <Delta value={ninaRecent.talkMessages} />
@@ -168,14 +183,14 @@ export default async function DashboardPage() {
                   {stats.talk.totalChars.toLocaleString()} 字
                 </p>
               </Link>
-              <Link href="/search?mode=media" className="group">
+              <Link href={`/search?entityIds=${mediaShowIds}`} className="group">
                 <p className="text-2xl font-bold text-slate-900 group-hover:text-blue-600 transition-colors flex items-center gap-1.5">
                   {totalMedia}
                   <Delta value={ninaRecent.media} />
                 </p>
                 <p className="text-xs text-slate-500">メディア出演</p>
               </Link>
-              <Link href="/search?mode=live" className="group">
+              <Link href={`/search?entityIds=${liveEntityId ?? ""}`} className="group">
                 <p className="text-2xl font-bold text-slate-900 group-hover:text-blue-600 transition-colors flex items-center gap-1.5">
                   {stats.live.count}
                   <Delta value={ninaRecent.lives} />
