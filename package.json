@@ -22,7 +22,9 @@
     "cli:backfill-relations": "tsx src/cli/backfill-relations.ts",
     "cli:lighten-dossier-images": "tsx src/cli/lighten-dossier-images.ts",
     "cli:import-curepo": "tsx src/cli/import-curepo.ts",
-    "cli:seed-coverage": "tsx src/cli/seed-coverage.ts"
+    "cli:seed-coverage": "tsx src/cli/seed-coverage.ts",
+    "cli:sync-members": "tsx src/cli/sync-members.ts",
+    "cli:merge-entities": "tsx src/cli/merge-entities.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
