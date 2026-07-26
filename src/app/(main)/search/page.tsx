@@ -11,30 +11,19 @@ import type { AssetKind, ClearanceLevel } from "@prisma/client";
 
 interface EditableDossier { id: string; title: string }
 
-type SearchMode = "all" | "text" | "media" | "image" | "live";
+/** Kinds that are best browsed as a grid — selecting only these defaults to gallery view. */
+const VISUAL_KINDS: AssetKind[] = ["image", "video"];
 
-const MEDIA_SHOW_NAMES = [
-  "日向坂で会いましょう",
-  "日向坂になりましょう",
-  "日向坂ちゃんねる",
-  "日向坂46公式チャンネル",
-  "雑誌",
-];
-
-interface ModePreset {
-  kind?: AssetKind;
-  target?: "all" | "assets" | "texts";
-  view?: "list" | "gallery";
-  entityNames?: string[];
+function parseKinds(raw: string | undefined): AssetKind[] {
+  if (!raw) return [];
+  const valid = new Set(Object.keys(ASSET_KIND_LABELS));
+  return raw.split(",").filter((k) => valid.has(k)) as AssetKind[];
 }
 
-const MODE_PRESETS: Record<SearchMode, ModePreset> = {
-  all: {},
-  text: { kind: "text", target: "texts" },
-  media: { entityNames: MEDIA_SHOW_NAMES },
-  image: { kind: "image", view: "gallery" },
-  live: { entityNames: ["ライブ"] },
-};
+/** Gallery is the natural default when every selected kind is visual. */
+function defaultView(kinds: AssetKind[]): "list" | "gallery" {
+  return kinds.length > 0 && kinds.every((k) => VISUAL_KINDS.includes(k)) ? "gallery" : "list";
+}
 
 function KindBadge({ kind }: { kind: string }) {
   return (
@@ -113,33 +102,21 @@ async function SearchResults({
   editableDossiers: EditableDossier[];
 }) {
   const q = params.q ?? "";
-  const mode = (params.mode as SearchMode) || "all";
-  const preset = MODE_PRESETS[mode] ?? {};
   const page = Math.max(1, parseInt(params.page ?? "1"));
 
-  const effectiveTarget = (params.target as "all" | "assets" | "texts") || preset.target || "all";
-  const effectiveKind = (params.kind as AssetKind | undefined) || preset.kind;
-  const effectiveView = params.view ? (params.view as "list" | "gallery") : (preset.view ?? "list");
+  const effectiveTarget = (params.target as "all" | "assets" | "texts") || "all";
+  const effectiveKinds = parseKinds(params.kind);
+  const effectiveView = params.view ? (params.view as "list" | "gallery") : defaultView(effectiveKinds);
 
-  const entities = await getCachedEntityList();
-  const presetEntityIds: string[] = [];
-  if (preset.entityNames) {
-    for (const name of preset.entityNames) {
-      const found = entities.find((e) => e.canonicalName === name);
-      if (found) presetEntityIds.push(found.id);
-    }
-  }
-
-  const selectedEntityIds: string[] = params.entityIds
+  const effectiveEntityIds: string[] = params.entityIds
     ? params.entityIds.split(",").filter(Boolean)
     : [];
-  const effectiveEntityIds = selectedEntityIds.length > 0 ? selectedEntityIds : presetEntityIds;
 
   const selectedAuthorIds: string[] = params.authorIds
     ? params.authorIds.split(",").filter(Boolean)
     : [];
 
-  const hasFilters = !!(effectiveKind || params.dateFrom || params.dateTo || effectiveEntityIds.length > 0 || selectedAuthorIds.length > 0);
+  const hasFilters = !!(effectiveKinds.length > 0 || params.dateFrom || params.dateTo || effectiveEntityIds.length > 0 || selectedAuthorIds.length > 0);
 
   if (!q.trim() && !hasFilters) {
     return (
@@ -150,7 +127,7 @@ async function SearchResults({
   }
 
   const results = await search({
-    q, target: effectiveTarget, kind: effectiveKind,
+    q, target: effectiveTarget, kinds: effectiveKinds.length > 0 ? effectiveKinds : undefined,
     entityIds: effectiveEntityIds.length > 0 ? effectiveEntityIds : undefined,
     authorIds: selectedAuthorIds.length > 0 ? selectedAuthorIds : undefined,
     dateFrom: params.dateFrom ? new Date(params.dateFrom) : undefined,
@@ -162,7 +139,6 @@ async function SearchResults({
     const p = new URLSearchParams();
     const merged = { ...params, ...overrides };
     if (merged.q) p.set("q", merged.q);
-    if (merged.mode && merged.mode !== "all") p.set("mode", merged.mode);
     if (merged.view) p.set("view", merged.view);
     if (merged.page && merged.page !== "1") p.set("page", merged.page);
     if (merged.entityIds) p.set("entityIds", merged.entityIds);
@@ -324,8 +300,7 @@ export default async function SearchPage({
 
   const params = await searchParams;
   const q = params.q ?? "";
-  const mode = (params.mode as SearchMode) || "all";
-  const preset = MODE_PRESETS[mode] ?? {};
+  const selectedKinds = parseKinds(params.kind);
 
   const selectedEntityIds: string[] = params.entityIds
     ? params.entityIds.split(",").filter(Boolean)
@@ -334,9 +309,7 @@ export default async function SearchPage({
     ? params.authorIds.split(",").filter(Boolean)
     : [];
 
-  const mediaShowEntities = entities.filter((e) => MEDIA_SHOW_NAMES.includes(e.canonicalName));
-
-  const hasQuery = !!(q.trim() || params.kind || preset.kind || params.dateFrom || params.dateTo || selectedEntityIds.length > 0 || selectedAuthorIds.length > 0 || preset.entityNames);
+  const hasQuery = !!(q.trim() || selectedKinds.length > 0 || params.dateFrom || params.dateTo || selectedEntityIds.length > 0 || selectedAuthorIds.length > 0);
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -346,11 +319,10 @@ export default async function SearchPage({
 
       <Suspense>
         <SearchForm
-          initialMode={mode}
           initialQ={q}
+          initialKinds={selectedKinds}
           initialEntityIds={selectedEntityIds}
           initialAuthorIds={selectedAuthorIds}
-          mediaShowEntities={mediaShowEntities}
           entities={entities}
         />
       </Suspense>
@@ -361,7 +333,7 @@ export default async function SearchPage({
         </Suspense>
       ) : (
         <div className="text-center py-16 text-slate-400">
-          <p>キーワードを入力するか、モードを選択して検索してください</p>
+          <p>キーワードを入力するか、種別を選択して検索してください</p>
         </div>
       )}
     </div>

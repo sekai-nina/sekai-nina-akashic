@@ -9,48 +9,31 @@ import { AuthorFilter } from "./author-filter";
 
 const NINA_ENTITY_ID = "cmmtp8vrg0004mo381neyztvn";
 
-type SearchMode = "all" | "text" | "media" | "image" | "live";
+// チップの並び順（よく使う種別を先頭に）
+const KIND_CHIPS = ["text", "image", "video", "audio", "document", "other"] as const;
 
-const SEARCH_MODES: { key: SearchMode; label: string }[] = [
-  { key: "all", label: "すべて" },
-  { key: "text", label: "テキスト" },
-  { key: "media", label: "メディア" },
-  { key: "image", label: "画像" },
-  { key: "live", label: "ライブ" },
-];
-
-const MODE_KIND_MAP: Partial<Record<SearchMode, string>> = {
-  text: "text",
-  image: "image",
-};
-
-// テキストモードのサブフィルタ用タグ名
+// テキスト種別のサブフィルタ用タグ名
 const TEXT_SUB_TAGS = ["ブログ", "トーク"];
 
 interface SearchFormProps {
-  initialMode: SearchMode;
   initialQ: string;
+  initialKinds: string[];
   initialEntityIds: string[];
   initialAuthorIds: string[];
-  mediaShowEntities: { id: string; canonicalName: string }[];
   entities: { id: string; canonicalName: string; type: string }[];
 }
 
 export function SearchForm({
-  initialMode,
   initialQ,
+  initialKinds,
   initialEntityIds,
   initialAuthorIds,
-  mediaShowEntities,
   entities,
 }: SearchFormProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const [mode, setMode] = useState<SearchMode>(initialMode);
-  const [kind, setKind] = useState<string>(
-    searchParams.get("kind") ?? MODE_KIND_MAP[initialMode] ?? ""
-  );
+  const [kinds, setKinds] = useState<Set<string>>(new Set(initialKinds));
   const [ninaOnly, setNinaOnly] = useState(initialAuthorIds.includes(NINA_ENTITY_ID));
   const [searching, setSearching] = useState(false);
 
@@ -94,8 +77,7 @@ export function SearchForm({
   }, [searchParams]);
 
   const handleReset = useCallback(() => {
-    setMode("all");
-    setKind("");
+    setKinds(new Set());
     setNinaOnly(false);
     setFilterEntityIds(new Set());
     setFilterAuthorIds(new Set());
@@ -112,19 +94,16 @@ export function SearchForm({
     entityTypes.map((t) => [t, entities.filter((e) => e.type === t)])
   );
 
-  // テキストモードのサブフィルタ用エンティティ
+  // テキスト種別のサブフィルタ用エンティティ
   const textSubEntities = TEXT_SUB_TAGS
     .map((name) => entities.find((e) => e.canonicalName === name && e.type === "tag"))
     .filter((e): e is NonNullable<typeof e> => e != null);
 
-  const handleModeChange = useCallback((newMode: SearchMode) => {
-    setMode(newMode);
-    setKind(MODE_KIND_MAP[newMode] ?? "");
-
-    setFilterEntityIds(new Set());
-    setFilterAuthorIds((prev) => {
-      const next = new Set<string>();
-      if (prev.has(NINA_ENTITY_ID)) next.add(NINA_ENTITY_ID);
+  const toggleKind = useCallback((kind: string) => {
+    setKinds((prev) => {
+      const next = new Set(prev);
+      if (next.has(kind)) next.delete(kind);
+      else next.add(kind);
       return next;
     });
   }, []);
@@ -187,8 +166,9 @@ export function SearchForm({
 
     const q = formData.get("q") as string;
     if (q) p.set("q", q);
-    if (mode !== "all") p.set("mode", mode);
-    if (kind) p.set("kind", kind);
+    // チップ順に正規化して、同じ選択なら常に同じ URL になるようにする
+    const orderedKinds = KIND_CHIPS.filter((k) => kinds.has(k));
+    if (orderedKinds.length > 0) p.set("kind", orderedKinds.join(","));
 
     if (filterEntityIds.size > 0) {
       p.set("entityIds", [...filterEntityIds].join(","));
@@ -208,7 +188,7 @@ export function SearchForm({
     router.push(`/search?${p.toString()}`, { scroll: false });
   }
 
-  // テキストモードで選択中のサブフィルタ
+  // テキスト種別で選択中のサブフィルタ
   const activeTextSub = textSubEntities.find((e) => filterEntityIds.has(e.id));
 
   return (
@@ -232,20 +212,31 @@ export function SearchForm({
         </button>
       </div>
 
-      {/* Mode chips + Nina toggle */}
+      {/* 種別チップ（複数選択・OR）+ 坂井新奈トグル */}
       <div className="flex gap-1.5 flex-wrap items-center">
-        {SEARCH_MODES.map((m) => (
+        <button
+          type="button"
+          onClick={() => setKinds(new Set())}
+          className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+            kinds.size === 0
+              ? "bg-blue-600 text-white"
+              : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+          }`}
+        >
+          すべて
+        </button>
+        {KIND_CHIPS.map((k) => (
           <button
-            key={m.key}
+            key={k}
             type="button"
-            onClick={() => handleModeChange(m.key)}
+            onClick={() => toggleKind(k)}
             className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
-              mode === m.key
+              kinds.has(k)
                 ? "bg-blue-600 text-white"
                 : "bg-slate-100 text-slate-600 hover:bg-slate-200"
             }`}
           >
-            {m.label}
+            {ASSET_KIND_LABELS[k]}
           </button>
         ))}
         <span className="text-slate-300 mx-0.5">|</span>
@@ -271,8 +262,8 @@ export function SearchForm({
         </button>
       </div>
 
-      {/* Text mode: blog/talk sub-filter */}
-      {mode === "text" && textSubEntities.length > 0 && (
+      {/* テキスト種別: ブログ/トークのサブフィルタ */}
+      {kinds.has("text") && textSubEntities.length > 0 && (
         <div className="flex gap-1 flex-wrap pl-1">
           <button
             type="button"
@@ -308,26 +299,6 @@ export function SearchForm({
         </div>
       )}
 
-      {/* Media mode: show sub-filter */}
-      {mode === "media" && mediaShowEntities.length > 0 && (
-        <div className="flex gap-1 flex-wrap pl-1">
-          {mediaShowEntities.map((e) => (
-            <button
-              key={e.id}
-              type="button"
-              onClick={() => toggleFilterEntity(e.id)}
-              className={`px-2.5 py-1 rounded-full text-xs transition-colors ${
-                filterEntityIds.has(e.id)
-                  ? "bg-blue-100 text-blue-700"
-                  : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"
-              }`}
-            >
-              {e.canonicalName}
-            </button>
-          ))}
-        </div>
-      )}
-
       {/* Filters */}
       <details className="bg-white border border-slate-200 rounded-lg">
         <summary className="px-4 py-2.5 text-sm text-slate-500 cursor-pointer hover:text-slate-700">
@@ -335,19 +306,6 @@ export function SearchForm({
         </summary>
         <div className="px-4 pb-4 pt-1 space-y-3">
           <div className="flex flex-wrap gap-3 items-end">
-            <div>
-              <label className="block text-xs text-slate-500 mb-1">種別</label>
-              <select
-                value={kind}
-                onChange={(e) => setKind(e.target.value)}
-                className="border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">すべて</option>
-                {Object.entries(ASSET_KIND_LABELS).map(([v, l]) => (
-                  <option key={v} value={v}>{l}</option>
-                ))}
-              </select>
-            </div>
             <div>
               <label className="block text-xs text-slate-500 mb-1">開始日</label>
               <input

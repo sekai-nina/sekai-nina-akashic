@@ -263,7 +263,7 @@ export function AnalysisClient({
     const { dateFrom: df, dateTo: dt } = bucketToDateRange(bucket);
     const params = new URLSearchParams();
     if (word) params.set("q", word);
-    params.set("mode", "text");
+    params.set("kind", "text");
     params.set("target", "texts");
     params.set("dateFrom", df);
     params.set("dateTo", dt);

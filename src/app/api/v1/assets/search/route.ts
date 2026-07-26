@@ -13,7 +13,10 @@ export async function GET(request: Request) {
   const query: SearchQuery = {
     q,
     target: (url.searchParams.get("target") as SearchQuery["target"]) || "all",
-    kind: (url.searchParams.get("kind") as SearchQuery["kind"]) || undefined,
+    // `kind` accepts a comma-separated list (e.g. kind=image,video) — OR semantics.
+    kinds: url.searchParams.get("kind")
+      ? (url.searchParams.get("kind")!.split(",").filter(Boolean) as NonNullable<SearchQuery["kinds"]>)
+      : undefined,
     status: (url.searchParams.get("status") as SearchQuery["status"]) || undefined,
     trustLevel: (url.searchParams.get("trustLevel") as SearchQuery["trustLevel"]) || undefined,
     sourceType: (url.searchParams.get("sourceType") as SearchQuery["sourceType"]) || undefined,
