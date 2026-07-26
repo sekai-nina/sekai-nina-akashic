@@ -6,8 +6,9 @@ import { listEditableDossiers } from "@/lib/domain/dossiers";
 import { AddToDossier } from "@/components/add-to-dossier";
 import { ASSET_KIND_LABELS, formatDate } from "@/lib/utils";
 import { SearchForm } from "./search-form";
+import { SEARCH_PARAM_KEYS } from "./params";
 import Link from "next/link";
-import type { AssetKind, ClearanceLevel } from "@prisma/client";
+import type { AssetKind, ClearanceLevel, SourceType } from "@prisma/client";
 
 interface EditableDossier { id: string; title: string }
 
@@ -105,6 +106,7 @@ async function SearchResults({
   const page = Math.max(1, parseInt(params.page ?? "1"));
 
   const effectiveTarget = (params.target as "all" | "assets" | "texts") || "all";
+  const effectiveSourceType = params.sourceType as SourceType | undefined;
   const effectiveKinds = parseKinds(params.kind);
   const effectiveView = params.view ? (params.view as "list" | "gallery") : defaultView(effectiveKinds);
 
@@ -116,18 +118,19 @@ async function SearchResults({
     ? params.authorIds.split(",").filter(Boolean)
     : [];
 
-  const hasFilters = !!(effectiveKinds.length > 0 || params.dateFrom || params.dateTo || effectiveEntityIds.length > 0 || selectedAuthorIds.length > 0);
+  const hasFilters = !!(effectiveKinds.length > 0 || effectiveSourceType || params.dateFrom || params.dateTo || effectiveEntityIds.length > 0 || selectedAuthorIds.length > 0);
 
   if (!q.trim() && !hasFilters) {
     return (
       <div className="text-center py-16 text-slate-400">
-        <p>キーワードを入力するか、モードを選択して検索してください</p>
+        <p>キーワードを入力するか、種別を選択して検索してください</p>
       </div>
     );
   }
 
   const results = await search({
-    q, target: effectiveTarget, kinds: effectiveKinds.length > 0 ? effectiveKinds : undefined,
+    q, target: effectiveTarget, sourceType: effectiveSourceType,
+    kinds: effectiveKinds.length > 0 ? effectiveKinds : undefined,
     entityIds: effectiveEntityIds.length > 0 ? effectiveEntityIds : undefined,
     authorIds: selectedAuthorIds.length > 0 ? selectedAuthorIds : undefined,
     dateFrom: params.dateFrom ? new Date(params.dateFrom) : undefined,
@@ -135,17 +138,16 @@ async function SearchResults({
     page, perPage: 20,
   }, clearance);
 
+  // 表示切替やページ送りで絞り込みが落ちないよう、既知のパラメータはすべて引き継ぐ
   function buildUrl(overrides: Record<string, string | undefined>) {
     const p = new URLSearchParams();
     const merged = { ...params, ...overrides };
-    if (merged.q) p.set("q", merged.q);
-    if (merged.view) p.set("view", merged.view);
-    if (merged.page && merged.page !== "1") p.set("page", merged.page);
-    if (merged.entityIds) p.set("entityIds", merged.entityIds);
-    if (merged.authorIds) p.set("authorIds", merged.authorIds);
-    if (merged.kind) p.set("kind", merged.kind);
-    if (merged.dateFrom) p.set("dateFrom", merged.dateFrom);
-    if (merged.dateTo) p.set("dateTo", merged.dateTo);
+    for (const key of SEARCH_PARAM_KEYS) {
+      const value = merged[key];
+      if (!value) continue;
+      if (key === "page" && value === "1") continue;
+      p.set(key, value);
+    }
     return `/search?${p.toString()}`;
   }
 
