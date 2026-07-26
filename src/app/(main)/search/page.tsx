@@ -141,6 +141,9 @@ async function SearchResults({
     page, perPage: 20,
   }, clearance);
 
+  // 件数が正確になったので、最終ページで「次へ」が空振りしないよう total で判定する
+  const hasNextPage = page * results.perPage < results.total;
+
   // 表示切替やページ送りで絞り込みが落ちないよう、既知のパラメータはすべて引き継ぐ
   function buildUrl(overrides: Record<string, string | undefined>) {
     const p = new URLSearchParams();
@@ -277,7 +280,7 @@ async function SearchResults({
         </div>
       )}
 
-      {(page > 1 || results.items.length === results.perPage) && (
+      {(page > 1 || hasNextPage) && (
         <div className="flex items-center justify-between mt-4">
           <span className="text-sm text-slate-500">{page} ページ目</span>
           <div className="flex gap-2">
@@ -285,7 +288,7 @@ async function SearchResults({
               <Link scroll={false} href={buildUrl({ page: String(page - 1) })}
                 className="border border-slate-300 text-slate-700 px-3 py-1.5 rounded text-sm hover:bg-slate-50">← 前へ</Link>
             )}
-            {results.items.length === results.perPage && (
+            {hasNextPage && (
               <Link scroll={false} href={buildUrl({ page: String(page + 1) })}
                 className="border border-slate-300 text-slate-700 px-3 py-1.5 rounded text-sm hover:bg-slate-50">次へ →</Link>
             )}
