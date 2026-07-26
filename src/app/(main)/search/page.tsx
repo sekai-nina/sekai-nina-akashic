@@ -113,6 +113,8 @@ async function SearchResults({
   const effectiveEntityIds: string[] = params.entityIds
     ? params.entityIds.split(",").filter(Boolean)
     : [];
+  // 既定は OR（いずれかを含む）。すべてを含む絞り込みは entityMatch=all で明示する。
+  const effectiveEntityMatch = params.entityMatch === "all" ? "all" : "any";
 
   const selectedAuthorIds: string[] = params.authorIds
     ? params.authorIds.split(",").filter(Boolean)
@@ -132,6 +134,7 @@ async function SearchResults({
     q, target: effectiveTarget, sourceType: effectiveSourceType,
     kinds: effectiveKinds.length > 0 ? effectiveKinds : undefined,
     entityIds: effectiveEntityIds.length > 0 ? effectiveEntityIds : undefined,
+    entityMatch: effectiveEntityMatch,
     authorIds: selectedAuthorIds.length > 0 ? selectedAuthorIds : undefined,
     dateFrom: params.dateFrom ? new Date(params.dateFrom) : undefined,
     dateTo: params.dateTo ? new Date(params.dateTo) : undefined,
@@ -329,6 +332,7 @@ export default async function SearchPage({
           initialQ={q}
           initialKinds={selectedKinds}
           initialEntityIds={selectedEntityIds}
+          initialEntityMatch={params.entityMatch === "all" ? "all" : "any"}
           initialAuthorIds={selectedAuthorIds}
           entities={entities}
         />

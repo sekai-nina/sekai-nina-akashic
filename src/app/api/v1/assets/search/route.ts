@@ -21,6 +21,8 @@ export async function GET(request: Request) {
     trustLevel: (url.searchParams.get("trustLevel") as SearchQuery["trustLevel"]) || undefined,
     sourceType: (url.searchParams.get("sourceType") as SearchQuery["sourceType"]) || undefined,
     entityId: url.searchParams.get("entityId") || undefined,
+    entityMatch:
+      url.searchParams.get("entityMatch") === "all" ? "all" : undefined,
     entityIds: url.searchParams.get("entityIds")
       ? url.searchParams.get("entityIds")!.split(",").filter(Boolean)
       : undefined,

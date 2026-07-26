@@ -20,6 +20,7 @@ interface SearchFormProps {
   initialQ: string;
   initialKinds: string[];
   initialEntityIds: string[];
+  initialEntityMatch: "any" | "all";
   initialAuthorIds: string[];
   entities: { id: string; canonicalName: string; type: string }[];
 }
@@ -28,6 +29,7 @@ export function SearchForm({
   initialQ,
   initialKinds,
   initialEntityIds,
+  initialEntityMatch,
   initialAuthorIds,
   entities,
 }: SearchFormProps) {
@@ -41,6 +43,7 @@ export function SearchForm({
   const [filterEntityIds, setFilterEntityIds] = useState<Set<string>>(
     new Set(initialEntityIds)
   );
+  const [entityMatch, setEntityMatch] = useState<"any" | "all">(initialEntityMatch);
   const [filterAuthorIds, setFilterAuthorIds] = useState<Set<string>>(
     new Set(initialAuthorIds)
   );
@@ -84,6 +87,7 @@ export function SearchForm({
     setNinaOnly(false);
     setFilterEntityIds(new Set());
     setFilterAuthorIds(new Set());
+    setEntityMatch("any");
     // 日付は非制御 input なので、明示的に消さないと次の検索に持ち越される
     for (const ref of [qInputRef, dateFromRef, dateToRef]) {
       if (ref.current) ref.current.value = "";
@@ -178,6 +182,8 @@ export function SearchForm({
 
     if (filterEntityIds.size > 0) {
       p.set("entityIds", [...filterEntityIds].join(","));
+      // OR が既定なので、AND のときだけ URL に出す
+      if (entityMatch === "all") p.set("entityMatch", "all");
     }
     if (filterAuthorIds.size > 0) {
       p.set("authorIds", [...filterAuthorIds].join(","));
@@ -342,6 +348,8 @@ export function SearchForm({
             onToggle={toggleFilterAuthor}
           />
           <EntityFilter
+            match={entityMatch}
+            onMatchChange={setEntityMatch}
             entityTypes={entityTypes}
             entitiesByType={entitiesByType}
             typeLabels={ENTITY_TYPE_LABELS}

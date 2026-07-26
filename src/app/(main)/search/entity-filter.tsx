@@ -12,6 +12,9 @@ interface EntityFilterProps {
   typeLabels: Record<string, string>;
   selected: Set<string>;
   onToggle: (id: string) => void;
+  /** "any" = いずれかを含む (OR、既定) / "all" = すべてを含む (AND) */
+  match: "any" | "all";
+  onMatchChange: (match: "any" | "all") => void;
 }
 
 export function EntityFilter({
@@ -20,6 +23,8 @@ export function EntityFilter({
   typeLabels,
   selected,
   onToggle,
+  match,
+  onMatchChange,
 }: EntityFilterProps) {
   const value = [...selected].join(",");
 
@@ -33,6 +38,29 @@ export function EntityFilter({
   return (
     <>
       <input type="hidden" name="entityIds" value={value} />
+
+      {selected.size > 1 && (
+        <div className="flex items-center gap-1.5 mb-2">
+          <span className="text-xs text-slate-500">絞り込み方</span>
+          {([
+            { key: "any", label: "いずれかを含む" },
+            { key: "all", label: "すべてを含む" },
+          ] as const).map((opt) => (
+            <button
+              key={opt.key}
+              type="button"
+              onClick={() => onMatchChange(opt.key)}
+              className={`px-2 py-0.5 rounded-full text-xs transition-colors ${
+                match === opt.key
+                  ? "bg-blue-600 text-white"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {selected.size > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-2">

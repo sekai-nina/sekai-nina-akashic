@@ -9,6 +9,7 @@ export const SEARCH_PARAM_KEYS = [
   "q",
   "kind",
   "entityIds",
+  "entityMatch",
   "authorIds",
   "dateFrom",
   "dateTo",
