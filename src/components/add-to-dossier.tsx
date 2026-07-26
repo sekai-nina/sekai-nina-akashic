@@ -131,10 +131,10 @@ export function AddToDossier({
     });
   }
 
-  function createAndAdd() {
-    if (!newTitle.trim()) return;
+  function createAndAdd(title: string) {
+    if (!title.trim()) return;
     startTransition(async () => {
-      const result = await createDossierWithAssetAction(newTitle.trim(), assetId, {
+      const result = await createDossierWithAssetAction(title.trim(), assetId, {
         caption: defaultCaption,
         excerpt: excerpt?.text,
         excerptType: excerpt?.textType as never,
@@ -143,6 +143,7 @@ export function AddToDossier({
       });
       setAddedIds((prev) => new Set(prev).add(result.dossierId));
       setNewTitle("");
+      setQuery("");
       setCreating(false);
       if (onAdded) {
         onAdded(result.dossierId, result.title);
@@ -151,9 +152,16 @@ export function AddToDossier({
     });
   }
 
+  const trimmedQuery = query.trim();
   const filtered = query
     ? dossiers.filter((d) => d.title.toLowerCase().includes(query.toLowerCase()))
     : dossiers;
+
+  // 検索欄に入れた名前が既存のドシエと一致しなければ、そのまま作れるようにする
+  const hasExactMatch = dossiers.some(
+    (d) => d.title.trim().toLowerCase() === trimmedQuery.toLowerCase()
+  );
+  const canQuickCreate = trimmedQuery.length > 0 && !hasExactMatch;
 
   const trigger =
     variant === "button" ? (
@@ -204,11 +212,18 @@ export function AddToDossier({
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="ドシエを検索..."
+            onKeyDown={(e) => {
+              // 一致するドシエが1つも無いなら、Enter でそのまま作成
+              if (e.key === "Enter" && canQuickCreate && filtered.length === 0) {
+                e.preventDefault();
+                createAndAdd(trimmedQuery);
+              }
+            }}
+            placeholder="ドシエを検索 / 新規作成..."
             className="w-full text-xs border border-slate-300 rounded px-2 py-1 mb-2 focus:outline-none focus:ring-1 focus:ring-indigo-500"
           />
           <ul className="flex-1 min-h-0 overflow-y-auto space-y-0.5">
-            {filtered.length === 0 && (
+            {filtered.length === 0 && !canQuickCreate && (
               <li className="text-[11px] text-slate-400 px-2 py-1.5">該当なし</li>
             )}
             {filtered.map((d) => {
@@ -237,13 +252,31 @@ export function AddToDossier({
             })}
           </ul>
           <div className="mt-2 shrink-0 border-t border-slate-100 pt-2">
-            <button
-              type="button"
-              onClick={() => setCreating(true)}
-              className="w-full text-xs text-indigo-600 hover:underline flex items-center gap-1 px-2 py-1"
-            >
-              <Plus className="h-3 w-3" /> 新規ドシエを作成
-            </button>
+            {canQuickCreate ? (
+              <button
+                type="button"
+                onClick={() => createAndAdd(trimmedQuery)}
+                disabled={isPending}
+                className="w-full text-left text-xs text-indigo-600 hover:bg-indigo-50 rounded flex items-center gap-1 px-2 py-1.5 disabled:opacity-50"
+              >
+                {isPending ? (
+                  <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                ) : (
+                  <Plus className="h-3 w-3 shrink-0" />
+                )}
+                <span className="truncate">
+                  「{trimmedQuery}」を新規作成
+                </span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setCreating(true)}
+                className="w-full text-xs text-indigo-600 hover:underline flex items-center gap-1 px-2 py-1"
+              >
+                <Plus className="h-3 w-3" /> 新規ドシエを作成
+              </button>
+            )}
           </div>
         </>
       ) : (
@@ -253,6 +286,12 @@ export function AddToDossier({
             autoFocus
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && newTitle.trim() && !isPending) {
+                e.preventDefault();
+                createAndAdd(newTitle);
+              }
+            }}
             placeholder="タイトル"
             className="w-full text-xs border border-slate-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500"
           />
@@ -269,7 +308,7 @@ export function AddToDossier({
             </button>
             <button
               type="button"
-              onClick={createAndAdd}
+              onClick={() => createAndAdd(newTitle)}
               disabled={!newTitle.trim() || isPending}
               className="bg-indigo-600 text-white px-2 py-1 rounded text-xs font-medium hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center gap-1"
             >
