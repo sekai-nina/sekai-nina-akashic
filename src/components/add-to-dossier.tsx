@@ -1,8 +1,14 @@
 "use client";
 
-import { useState, useTransition, useRef, useEffect } from "react";
+import { useState, useTransition, useRef, useEffect, useCallback, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import { Plus, Check, Loader2, FolderSearch } from "lucide-react";
 import { addAssetToDossierAction, createDossierWithAssetAction } from "@/app/(main)/dossiers/actions";
+
+/** パネルの実寸。位置計算に使うので Tailwind のクラスと揃えること。 */
+const PANEL_WIDTH = 256; // w-64
+const PANEL_MAX_HEIGHT = 320;
+const VIEWPORT_MARGIN = 8;
 
 interface EditableDossier {
   id: string;
@@ -48,18 +54,58 @@ export function AddToDossier({
   const [creating, setCreating] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [isPending, startTransition] = useTransition();
-  const popoverRef = useRef<HTMLDivElement>(null);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState<{ top: number; left: number; maxHeight: number } | null>(null);
+
+  // トリガーがビューポート端にあってもパネルが画面外に出ないよう、
+  // 実際の位置を測って上下反転・左右クランプする。
+  const updatePosition = useCallback(() => {
+    const anchor = anchorRef.current;
+    if (!anchor) return;
+    const rect = anchor.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom - VIEWPORT_MARGIN;
+    const spaceAbove = rect.top - VIEWPORT_MARGIN;
+    const openUpward = spaceBelow < Math.min(PANEL_MAX_HEIGHT, spaceAbove);
+    const maxHeight = Math.max(160, Math.min(PANEL_MAX_HEIGHT, openUpward ? spaceAbove : spaceBelow));
+
+    // 既定はトリガーの右端揃え。はみ出す場合だけ画面内に寄せる。
+    const left = Math.min(
+      Math.max(VIEWPORT_MARGIN, rect.right - PANEL_WIDTH),
+      window.innerWidth - PANEL_WIDTH - VIEWPORT_MARGIN
+    );
+    const top = openUpward ? rect.top - 4 - maxHeight : rect.bottom + 4;
+    setPosition({ top, left, maxHeight });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    updatePosition();
+  }, [open, updatePosition]);
 
   useEffect(() => {
     if (!open) return;
     function handleDown(e: MouseEvent) {
-      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      const target = e.target as Node;
+      if (anchorRef.current?.contains(target)) return;
+      if (panelRef.current?.contains(target)) return;
+      setOpen(false);
     }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    // スクロール/リサイズで位置がずれるので追従させる（capture でネストしたスクロールも拾う）
     document.addEventListener("mousedown", handleDown);
-    return () => document.removeEventListener("mousedown", handleDown);
-  }, [open]);
+    document.addEventListener("keydown", handleKey);
+    window.addEventListener("scroll", updatePosition, true);
+    window.addEventListener("resize", updatePosition);
+    return () => {
+      document.removeEventListener("mousedown", handleDown);
+      document.removeEventListener("keydown", handleKey);
+      window.removeEventListener("scroll", updatePosition, true);
+      window.removeEventListener("resize", updatePosition);
+    };
+  }, [open, updatePosition]);
 
   function addToExisting(dossierId: string) {
     if (addedIds.has(dossierId)) return;
@@ -139,94 +185,107 @@ export function AddToDossier({
       </button>
     );
 
-  return (
-    <div ref={popoverRef} className="relative inline-block">
-      {trigger}
-      {open && (
-        <div className="absolute right-0 mt-1 z-50 w-64 bg-white text-slate-700 border border-slate-200 rounded-lg shadow-lg p-2">
-          {!creating ? (
-            <>
-              <input
-                autoFocus
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="ドシエを検索..."
-                className="w-full text-xs border border-slate-300 rounded px-2 py-1 mb-2 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              />
-              <ul className="max-h-56 overflow-y-auto space-y-0.5">
-                {filtered.length === 0 && (
-                  <li className="text-[11px] text-slate-400 px-2 py-1.5">該当なし</li>
-                )}
-                {filtered.map((d) => {
-                  const added = addedIds.has(d.id);
-                  return (
-                    <li key={d.id}>
-                      <button
-                        type="button"
-                        onClick={() => addToExisting(d.id)}
-                        disabled={added || isPending}
-                        className={`w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded text-xs ${
-                          added
-                            ? "text-slate-400 cursor-default"
-                            : "text-slate-700 hover:bg-indigo-50"
-                        }`}
-                      >
-                        <span className="truncate">{d.title || "(無題)"}</span>
-                        {added ? (
-                          <Check className="h-3 w-3 text-emerald-500 shrink-0" />
-                        ) : pendingId === d.id ? (
-                          <Loader2 className="h-3 w-3 animate-spin shrink-0" />
-                        ) : null}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-              <div className="mt-2 border-t border-slate-100 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setCreating(true)}
-                  className="w-full text-xs text-indigo-600 hover:underline flex items-center gap-1 px-2 py-1"
-                >
-                  <Plus className="h-3 w-3" /> 新規ドシエを作成
-                </button>
-              </div>
-            </>
-          ) : (
-            <div className="space-y-2">
-              <p className="text-xs font-semibold text-slate-600">新規ドシエ</p>
-              <input
-                autoFocus
-                value={newTitle}
-                onChange={(e) => setNewTitle(e.target.value)}
-                placeholder="タイトル"
-                className="w-full text-xs border border-slate-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              />
-              <p className="text-[10px] text-slate-400">
-                作成と同時に、このアセットを新しいドシエに追加します。
-              </p>
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setCreating(false)}
-                  className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1"
-                >
-                  キャンセル
-                </button>
-                <button
-                  type="button"
-                  onClick={createAndAdd}
-                  disabled={!newTitle.trim() || isPending}
-                  className="bg-indigo-600 text-white px-2 py-1 rounded text-xs font-medium hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center gap-1"
-                >
-                  {isPending && <Loader2 className="h-3 w-3 animate-spin" />}
-                  作成して追加
-                </button>
-              </div>
-            </div>
-          )}
+  // ポータルに出す理由: 親の overflow / stacking context に切り取られないようにするため。
+  // position: fixed なので、位置が確定するまでは描画しない。
+  const panel = open && position && (
+    <div
+      ref={panelRef}
+      style={{
+        top: position.top,
+        left: position.left,
+        width: PANEL_WIDTH,
+        maxHeight: position.maxHeight,
+      }}
+      className="fixed z-50 flex flex-col overflow-hidden bg-white text-slate-700 border border-slate-200 rounded-lg shadow-lg p-2"
+    >
+      {!creating ? (
+        <>
+          <input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="ドシエを検索..."
+            className="w-full text-xs border border-slate-300 rounded px-2 py-1 mb-2 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          />
+          <ul className="flex-1 min-h-0 overflow-y-auto space-y-0.5">
+            {filtered.length === 0 && (
+              <li className="text-[11px] text-slate-400 px-2 py-1.5">該当なし</li>
+            )}
+            {filtered.map((d) => {
+              const added = addedIds.has(d.id);
+              return (
+                <li key={d.id}>
+                  <button
+                    type="button"
+                    onClick={() => addToExisting(d.id)}
+                    disabled={added || isPending}
+                    className={`w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded text-xs ${
+                      added
+                        ? "text-slate-400 cursor-default"
+                        : "text-slate-700 hover:bg-indigo-50"
+                    }`}
+                  >
+                    <span className="truncate">{d.title || "(無題)"}</span>
+                    {added ? (
+                      <Check className="h-3 w-3 text-emerald-500 shrink-0" />
+                    ) : pendingId === d.id ? (
+                      <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                    ) : null}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          <div className="mt-2 shrink-0 border-t border-slate-100 pt-2">
+            <button
+              type="button"
+              onClick={() => setCreating(true)}
+              className="w-full text-xs text-indigo-600 hover:underline flex items-center gap-1 px-2 py-1"
+            >
+              <Plus className="h-3 w-3" /> 新規ドシエを作成
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold text-slate-600">新規ドシエ</p>
+          <input
+            autoFocus
+            value={newTitle}
+            onChange={(e) => setNewTitle(e.target.value)}
+            placeholder="タイトル"
+            className="w-full text-xs border border-slate-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          />
+          <p className="text-[10px] text-slate-400">
+            作成と同時に、このアセットを新しいドシエに追加します。
+          </p>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setCreating(false)}
+              className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1"
+            >
+              キャンセル
+            </button>
+            <button
+              type="button"
+              onClick={createAndAdd}
+              disabled={!newTitle.trim() || isPending}
+              className="bg-indigo-600 text-white px-2 py-1 rounded text-xs font-medium hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center gap-1"
+            >
+              {isPending && <Loader2 className="h-3 w-3 animate-spin" />}
+              作成して追加
+            </button>
+          </div>
         </div>
       )}
+    </div>
+  );
+
+  return (
+    <div ref={anchorRef} className="relative inline-block">
+      {trigger}
+      {panel && createPortal(panel, document.body)}
     </div>
   );
 }
