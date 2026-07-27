@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { search } from "@/lib/search";
+import { search, splitQueryTerms } from "@/lib/search";
 import { auth } from "@/lib/auth";
 import { getCachedEntityList } from "@/lib/cache";
 import { listEditableDossiers } from "@/lib/domain/dossiers";
@@ -41,8 +41,7 @@ function stripPlaceholders(text: string): string {
 function HighlightedSnippet({ text, query }: { text: string; query: string }) {
   const cleaned = stripPlaceholders(text);
   if (!query.trim()) return <>{cleaned}</>;
-  // Backend splits the query on "/" — keep these in sync.
-  const terms = query.split("/").map((t) => t.trim()).filter(Boolean);
+  const terms = splitQueryTerms(query);
   if (terms.length === 0) return <>{cleaned}</>;
   const pattern = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
   const regex = new RegExp(`(${pattern})`, "gi");
@@ -63,7 +62,7 @@ function HighlightedSnippet({ text, query }: { text: string; query: string }) {
 
 const MATCH_FIELD_LABELS: Record<string, string> = {
   title: "タイトル", description: "説明", messageBodyPreview: "メッセージ",
-  entity: "エンティティ", note: "メモ", body: "本文",
+  entity: "エンティティ", note: "メモ", body: "本文", sourceUrl: "URL",
   ocr: "OCR", transcript: "文字起こし", extracted: "抽出テキスト",
 };
 

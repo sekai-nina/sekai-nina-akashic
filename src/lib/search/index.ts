@@ -75,7 +75,7 @@ export interface SearchResult {
  * Nearby occurrences are merged into a single snippet.
  */
 function buildSnippets(text: string, query: string, contextLen = 80): { snippets: string[]; matchCount: number } {
-  const terms = query.split("/").map((t) => t.trim()).filter(Boolean);
+  const terms = splitQueryTerms(query);
   if (terms.length === 0) return { snippets: [text.slice(0, contextLen * 2) + (text.length > contextLen * 2 ? "…" : "")], matchCount: 0 };
 
   const lower = text.toLowerCase();
@@ -252,6 +252,41 @@ async function getMatchingEntityNames(
   return map;
 }
 
+/**
+ * URL がそのまま貼られたときの照合候補。URL でなければ空配列。
+ *
+ * 共有 URL には ?ima=0000 のような追跡パラメータが付くので、クエリと
+ * フラグメントを落として比較する。ILIKE ではなく完全一致で引くのは、
+ * RLS 下でも leakproof な `=` なら遅くならないため (ILIKE 606ms → = 121ms)。
+ */
+export function urlMatchCandidates(q: string): string[] {
+  const trimmed = q.trim();
+  if (!/^https?:\/\//i.test(trimmed)) return [];
+
+  let normalized = trimmed;
+  try {
+    const parsed = new URL(trimmed);
+    parsed.hash = "";
+    parsed.search = "";
+    normalized = parsed.toString();
+  } catch {
+    // パースできなければ入力のまま使う
+  }
+  const withoutTrailingSlash = normalized.replace(/\/+$/, "");
+  return [...new Set([trimmed, normalized, withoutTrailingSlash, `${withoutTrailingSlash}/`])];
+}
+
+/**
+ * 検索語の分割。"/" 区切りで OR 検索するが、URL は "/" を含むので分割しない。
+ * ハイライト表示と条件生成で同じ結果を使う必要がある。
+ */
+export function splitQueryTerms(q: string): string[] {
+  const trimmed = q.trim();
+  if (!trimmed) return [];
+  if (urlMatchCandidates(trimmed).length > 0) return [trimmed];
+  return trimmed.split("/").map((t) => t.trim()).filter(Boolean);
+}
+
 interface AssetRow {
   id: string;
   title: string;
@@ -272,10 +307,12 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
   const offset = (page - 1) * perPage;
   const hasKeyword = q.trim().length > 0;
 
+  // URL は "/" を含むので、OR 分割せず1語として扱う
+  const urlCandidates = urlMatchCandidates(q);
+  const isUrlQuery = urlCandidates.length > 0;
+
   // "/" 区切りで OR 検索
-  const terms = hasKeyword
-    ? q.split("/").map((t) => t.trim()).filter(Boolean)
-    : [];
+  const terms = hasKeyword ? splitQueryTerms(q) : [];
   const normalizedTerms = terms.map((t) => normalizeText(t));
   const likePatterns = terms.map((t) => `%${t}%`);
   const normalizedLikePatterns = normalizedTerms.map((t) => `%${t}%`);
@@ -379,7 +416,21 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
 
   /** 一致元ごとの候補。rank は旧実装のスコアを踏襲 (タイトル3 / 説明・タグ2 / それ以外1)。 */
   const branches: Prisma.Sql[] = [];
-  if (hasKeyword) {
+  if (isUrlQuery) {
+    // URL を貼った場合は「そのURLのアセットを引く」用途なので、本文などの
+    // 部分一致は当てずに URL 列だけを見る。完全一致なので RLS 下でも速い。
+    branches.push(Prisma.sql`
+      SELECT s."assetId" AS id, 3 AS rank
+      FROM "SourceRecord" s
+      JOIN "Asset" a ON a."id" = s."assetId"
+      WHERE s."url" = ANY(${urlCandidates}) ${assetFilters}`);
+    branches.push(Prisma.sql`
+      SELECT a."id", 3 AS rank FROM "Asset" a
+      WHERE a."storageUrl" = ANY(${urlCandidates}) ${assetFilters}`);
+    branches.push(Prisma.sql`
+      SELECT a."id", 3 AS rank FROM "Asset" a
+      WHERE a."discordMessageUrl" = ANY(${urlCandidates}) ${assetFilters}`);
+  } else if (hasKeyword) {
     if (searchAssetFields) {
       branches.push(Prisma.sql`
         SELECT a."id", 3 AS rank FROM "Asset" a
@@ -498,6 +549,11 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
 
     if (!hasKeyword) {
       snippets = [row.title];
+    } else if (isUrlQuery) {
+      matchField = "sourceUrl";
+      score = 3;
+      snippets = [q.trim()];
+      matchCount = 1;
     } else if (titleHit) {
       matchField = "title";
       score = 3;
