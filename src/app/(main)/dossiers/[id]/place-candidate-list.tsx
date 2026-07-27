@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useTransition, useEffect, useRef } from "react";
-import { Plus, X, ExternalLink, Trash2, MapPin, BadgeCheck, Search, Loader2, Link2 } from "lucide-react";
+import { useState, useTransition } from "react";
+import { Plus, X, ExternalLink, Trash2, MapPin, BadgeCheck } from "lucide-react";
 import { DynamicMap } from "@/components/dynamic-map";
+import { PlaceLookup } from "@/components/place-lookup";
 import {
   addPlaceCandidateAction,
   removePlaceCandidateAction,
@@ -32,15 +33,6 @@ interface PlaceCandidateListProps {
   editable: boolean;
 }
 
-type PlaceSearchResult = {
-  placeId: string;
-  name: string;
-  address: string;
-  lat: number;
-  lng: number;
-  googleMapsUrl: string;
-};
-
 export function PlaceCandidateList({ dossierId, candidates, editable }: PlaceCandidateListProps) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
@@ -51,83 +43,6 @@ export function PlaceCandidateList({ dossierId, candidates, editable }: PlaceCan
   const [note, setNote] = useState("");
   const [confidence, setConfidence] = useState("0");
   const [isPending, startTransition] = useTransition();
-
-  // Google Places search
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<PlaceSearchResult[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
-  const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (searchDebounce.current) clearTimeout(searchDebounce.current);
-    if (!searchQuery.trim()) {
-      setSearchResults([]);
-      setSearchError(null);
-      return;
-    }
-    searchDebounce.current = setTimeout(async () => {
-      setSearching(true);
-      setSearchError(null);
-      try {
-        const res = await fetch(`/api/v1/places/search?q=${encodeURIComponent(searchQuery)}`);
-        if (!res.ok) {
-          if (res.status === 503) setSearchError("Google Places APIキーが未設定です");
-          else setSearchError("検索に失敗しました");
-          setSearchResults([]);
-          return;
-        }
-        const data = (await res.json()) as { results: PlaceSearchResult[] };
-        setSearchResults(data.results);
-      } catch {
-        setSearchError("検索に失敗しました");
-        setSearchResults([]);
-      } finally {
-        setSearching(false);
-      }
-    }, 400);
-    return () => {
-      if (searchDebounce.current) clearTimeout(searchDebounce.current);
-    };
-  }, [searchQuery]);
-
-  function selectSearchResult(r: PlaceSearchResult) {
-    setName(r.name);
-    setAddress(r.address);
-    setLatitude(String(r.lat));
-    setLongitude(String(r.lng));
-    setGoogleMapsUrl(r.googleMapsUrl);
-    setSearchQuery("");
-    setSearchResults([]);
-  }
-
-  // Resolve Google Maps URL → coords
-  const [resolving, setResolving] = useState(false);
-  const [resolveError, setResolveError] = useState<string | null>(null);
-
-  async function resolveUrl(url: string) {
-    const trimmed = url.trim();
-    if (!trimmed) return;
-    setResolving(true);
-    setResolveError(null);
-    try {
-      const res = await fetch(`/api/v1/places/resolve-url?url=${encodeURIComponent(trimmed)}`);
-      if (!res.ok) {
-        if (res.status === 422) setResolveError("URLから緯度経度を抽出できませんでした");
-        else setResolveError("URL解決に失敗しました");
-        return;
-      }
-      const data = (await res.json()) as { lat: number; lng: number; name: string; googleMapsUrl: string };
-      setLatitude(String(data.lat));
-      setLongitude(String(data.lng));
-      if (!name && data.name) setName(data.name);
-      if (data.googleMapsUrl && data.googleMapsUrl !== trimmed) setGoogleMapsUrl(data.googleMapsUrl);
-    } catch {
-      setResolveError("URL解決に失敗しました");
-    } finally {
-      setResolving(false);
-    }
-  }
 
   function add() {
     if (!name && !address && !latitude) return;
@@ -148,10 +63,6 @@ export function PlaceCandidateList({ dossierId, candidates, editable }: PlaceCan
       setGoogleMapsUrl("");
       setNote("");
       setConfidence("0");
-      setSearchQuery("");
-      setSearchResults([]);
-      setSearchError(null);
-      setResolveError(null);
       setOpen(false);
     });
   }
@@ -279,66 +190,19 @@ export function PlaceCandidateList({ dossierId, candidates, editable }: PlaceCan
             </button>
           </div>
 
-          {/* Place search */}
-          <div className="relative mb-2">
-            <div className="relative">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-              <input
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="店名・施設名で検索 (例: スターバックス 渋谷)"
-                className="w-full pl-7 pr-7 border border-slate-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-              {searching && (
-                <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 animate-spin" />
-              )}
-            </div>
-            {searchError && (
-              <p className="mt-1 text-[10px] text-rose-500">{searchError}</p>
-            )}
-            {searchResults.length > 0 && (
-              <ul className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded shadow-lg max-h-64 overflow-y-auto">
-                {searchResults.map((r) => (
-                  <li key={r.placeId || `${r.lat},${r.lng}`}>
-                    <button
-                      type="button"
-                      onClick={() => selectSearchResult(r)}
-                      className="w-full text-left px-2 py-1.5 hover:bg-indigo-50 border-b border-slate-100 last:border-b-0"
-                    >
-                      <p className="text-xs font-medium text-slate-900 truncate">{r.name}</p>
-                      <p className="text-[10px] text-slate-500 truncate">{r.address}</p>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          {/* URL paste */}
-          <div className="mb-2">
-            <div className="relative">
-              <Link2 className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-              <input
-                value={googleMapsUrl}
-                onChange={(e) => setGoogleMapsUrl(e.target.value)}
-                onBlur={(e) => {
-                  if (e.target.value && !latitude) resolveUrl(e.target.value);
-                }}
-                onPaste={(e) => {
-                  const v = e.clipboardData.getData("text");
-                  if (v) setTimeout(() => resolveUrl(v), 0);
-                }}
-                placeholder="または Google Maps URL を貼り付け (短縮URL対応)"
-                className="w-full pl-7 pr-7 border border-slate-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-              {resolving && (
-                <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 animate-spin" />
-              )}
-            </div>
-            {resolveError && (
-              <p className="mt-1 text-[10px] text-rose-500">{resolveError}</p>
-            )}
-          </div>
+          <PlaceLookup
+            size="sm"
+            googleMapsUrl={googleMapsUrl}
+            onGoogleMapsUrlChange={setGoogleMapsUrl}
+            hasCoordinates={latitude !== ""}
+            onResolved={(place) => {
+              if (place.name && !name) setName(place.name);
+              if (place.address) setAddress(place.address);
+              if (place.lat != null) setLatitude(String(place.lat));
+              if (place.lng != null) setLongitude(String(place.lng));
+              if (place.googleMapsUrl) setGoogleMapsUrl(place.googleMapsUrl);
+            }}
+          />
 
           <div className="border-t border-slate-100 pt-2 mt-2">
             <p className="text-[10px] text-slate-400 mb-1.5">詳細・微修正</p>
