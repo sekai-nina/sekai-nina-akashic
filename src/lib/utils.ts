@@ -76,3 +76,18 @@ export const RELATION_TYPE_LABELS: Record<string, string> = {
   reference: "関連",
   same_content: "同一コンテンツ",
 };
+
+export const ARTICLE_TYPE_LABELS: Record<string, string> = {
+  attribute: "属性",
+  event: "出来事",
+  quote: "語録",
+  column: "コラム",
+  item: "アイテム",
+  quiz: "クイズ",
+};
+
+export const ARTICLE_SOURCE_STATUS_LABELS: Record<string, string> = {
+  applied: "反映済み",
+  pending: "未反映",
+  unresolved: "未解決",
+};
