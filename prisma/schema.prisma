@@ -209,6 +209,7 @@ model Asset {
   testimonials      Testimonial[]
   relationsAsSource AssetRelation[] @relation("RelationSource")
   relationsAsTarget AssetRelation[] @relation("RelationTarget")
+  articleSources    ArticleSource[]
 
   @@index([sha256])
   @@index([status])
@@ -670,5 +671,126 @@ model LensItemCheck {
 
   @@unique([lensId, dataSourceId, itemKey])
   @@index([dataSourceId, itemDate])
+  @@index([classification])
+}
+
+// ---------------------------------------------------------------------------
+// 記事 (世界新奈)
+//
+// 実体は別リポジトリ sekai-nina/sekai-nina-public の Markdown。
+// akashic 側の DB を編集バッファとし、溜まったら一括で GitHub へ push する
+// (= GitHub は出力先に徹する)。したがって DB が単一の真実で、frontmatter は
+// push 時に丸ごと生成する。
+// ---------------------------------------------------------------------------
+
+enum ArticleType {
+  attribute
+  event
+  quote
+  column
+  item
+  quiz
+}
+
+/// ArticleSource が記事本文に反映済みか。
+/// - applied: frontmatter の source[] に載っており、本文が脚注で参照している
+/// - pending: akashic 側で紐づけただけ。AI / 人が本文に反映する対象
+/// - unresolved: 元の ref が akashic に実在しない (取り込み時に検出)。要調査
+enum ArticleSourceStatus {
+  applied
+  pending
+  unresolved
+}
+
+/// 公開記事のミラー。公開サイトに出る内容なので**非保護テーブル** (素の prisma で扱う)。
+model Article {
+  id      String       @id @default(cuid())
+  /// frontmatter の short_id。全記事に振られている安定 ID
+  shortId String       @unique
+  /// リポジトリ内のパス (例: attribute/癖.md)
+  path    String       @unique
+  slug    String?
+  title   String       @default("")
+  type    ArticleType?
+  tags    Json         @default("[]")
+
+  /// 本文 (frontmatter を除いた Markdown)
+  body String @default("")
+
+  // frontmatter の日付系
+  date             DateTime?
+  dateDisplay      String?
+  dateMode         String?
+  publishedAt      DateTime?
+  /// frontmatter の updated_at (レコードの updatedAt とは別物)
+  articleUpdatedAt DateTime?
+
+  draft    Boolean @default(false)
+  unlisted Boolean @default(false)
+  ongoing  Boolean @default(false)
+
+  lat Float?
+  lng Float?
+
+  /// 本モデルで持たない frontmatter (featured_quotes / locations / dossier 等) の退避先。
+  /// push 時に frontmatter を丸ごと生成するため、ここに残さないと元データを壊す。
+  frontmatterExtra Json @default("{}")
+
+  /// 取り込み元 blob の SHA。push 時の衝突検出に使う
+  githubSha    String?
+  /// DB 側に未 push の変更があるか
+  dirty        Boolean   @default(false)
+  lastSyncedAt DateTime?
+  lastPushedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sources ArticleSource[]
+
+  @@index([type])
+  @@index([dirty])
+  @@index([publishedAt])
+}
+
+/// 記事とアセットの紐づけ。記事 frontmatter の source[] 1 要素に対応する。
+/// アセット本文の抜粋を持つので **保護テーブル** (withClearance 経由で扱う)。
+/// 抜粋の持ち方は DossierItem と同形。同一アセットを抜粋ごとに複数回紐づけられるよう、
+/// 意図的に @@unique([articleId, assetId]) を持たない。
+model ArticleSource {
+  id        String  @id @default(cuid())
+  articleId String
+  article   Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  /// unresolved のときは null (元の ref は originalRef に残す)
+  assetId String?
+  asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: SetNull)
+
+  status ArticleSourceStatus @default(pending)
+
+  /// 記事内の脚注番号 (frontmatter source[].id)。本文の ^[n] と対応する
+  sourceNo    Int?
+  label       String    @default("")
+  url         String?
+  date        DateTime?
+  /// dangling だった場合の元 ref。復旧調査の手がかりとして残す
+  originalRef String?
+
+  // 抜粋 (AssetText からの範囲選択)。DossierItem と同形
+  excerpt      String    @default("")
+  excerptType  TextType?
+  excerptStart Int?
+  excerptEnd   Int?
+
+  note           String         @default("")
+  sortOrder      Int            @default(0)
+  classification ClearanceLevel @default(internal)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([articleId])
+  @@index([assetId])
+  @@index([status])
   @@index([classification])
 }

@@ -23,6 +23,7 @@ import {
   MapPin,
   Twitter,
   Grid3x3,
+  FileText,
 } from "lucide-react";
 import { QuickCreateModal } from "@/components/quick-create-modal";
 
@@ -38,6 +39,7 @@ const navItems = [
   { href: "/entities", label: "エンティティ", icon: Tag },
   { href: "/places", label: "聖地マップ", icon: MapPin },
   { href: "/dossiers", label: "特定支援", icon: FolderSearch },
+  { href: "/articles", label: "記事", icon: FileText },
   { href: "/testimonials", label: "口コミ管理", icon: MessageCircle },
   { href: "/repo", label: "レポ収集", icon: Twitter },
   { href: "/coverage", label: "収集カバレッジ", icon: Grid3x3 },

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Quote, Check, ExternalLink } from "lucide-react";
 import { AddToDossier } from "@/components/add-to-dossier";
+import { AddToArticle, type PickerArticle } from "@/components/add-to-article";
 import { rememberScroll, useRestoreScroll } from "./scroll-return";
 
 const TEXT_TYPE_LABELS: Record<string, string> = {
@@ -37,6 +38,8 @@ interface TextsSectionProps {
   assetId: string;
   assetTitle: string;
   texts: AssetText[];
+  /** 抜粋の紐づけ先候補。空配列なら記事ボタンを出さない */
+  articles?: PickerArticle[];
   embeddedImages: Record<string, EmbeddedImage>;
   editableDossiers: EditableDossier[];
   /** 言及ハイライト語彙（?hl=nina 時のみ非空。長い語が先＝交替の優先順） */
@@ -55,6 +58,7 @@ export function TextsSection({
   texts,
   embeddedImages,
   editableDossiers,
+  articles = [],
   highlightTerms = [],
 }: TextsSectionProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -64,7 +68,7 @@ export function TextsSection({
   useRestoreScroll(assetId, containerRef);
 
   useEffect(() => {
-    if (editableDossiers.length === 0) return;
+    if (editableDossiers.length === 0 && articles.length === 0) return;
 
     function handleUp(e: MouseEvent) {
       // Ignore clicks originating inside the floater itself (popover, buttons),
@@ -122,7 +126,7 @@ export function TextsSection({
       document.removeEventListener("mouseup", handleUp);
       document.removeEventListener("mousedown", handleDown);
     };
-  }, [editableDossiers.length]);
+  }, [editableDossiers.length, articles.length]);
 
   return (
     <div className="bg-white border border-slate-200 rounded-lg p-5">
@@ -166,6 +170,7 @@ export function TextsSection({
           assetId={assetId}
           assetTitle={assetTitle}
           editableDossiers={editableDossiers}
+          articles={articles}
           onDone={() => setActiveSelection(null)}
         />
       )}
@@ -259,15 +264,18 @@ function ExcerptFloater({
   assetId,
   assetTitle,
   editableDossiers,
+  articles,
   onDone,
 }: {
   selection: NonNullable<Selection>;
   assetId: string;
   assetTitle: string;
   editableDossiers: EditableDossier[];
+  articles: PickerArticle[];
   onDone: () => void;
 }) {
   const [confirmation, setConfirmation] = useState<{ id: string; title: string } | null>(null);
+  const [articleConfirmation, setArticleConfirmation] = useState<string | null>(null);
 
   // Position the floater above the selection (clamped to viewport)
   const top = window.scrollY + selection.rect.top - 38;
@@ -275,10 +283,25 @@ function ExcerptFloater({
   const left = confirmation ? baseLeft - 130 : baseLeft - 80;
 
   useEffect(() => {
-    if (!confirmation) return;
+    if (!confirmation && !articleConfirmation) return;
     const t = setTimeout(() => onDone(), 3500);
     return () => clearTimeout(t);
-  }, [confirmation, onDone]);
+  }, [confirmation, articleConfirmation, onDone]);
+
+  if (articleConfirmation) {
+    return (
+      <div
+        data-excerpt-floater
+        style={{ position: "absolute", top, left, zIndex: 60 }}
+        className="bg-emerald-600 text-white rounded-lg shadow-lg px-3 py-1.5 flex items-center gap-2"
+      >
+        <Check className="h-3.5 w-3.5" />
+        <span className="text-[11px]">
+          記事「<span className="font-semibold">{articleConfirmation}</span>」に紐づけました
+        </span>
+      </div>
+    );
+  }
 
   if (confirmation) {
     return (
@@ -317,6 +340,16 @@ function ExcerptFloater({
         variant="button"
         onAdded={(id, title) => setConfirmation({ id, title })}
       />
+      {articles.length > 0 && (
+        <AddToArticle
+          assetId={assetId}
+          articles={articles}
+          defaultLabel={assetTitle}
+          excerpt={{ text: selection.text, textType: selection.textType }}
+          variant="button"
+          onAdded={(_id, title) => setArticleConfirmation(title)}
+        />
+      )}
       <button
         type="button"
         onClick={onDone}

@@ -1,7 +1,9 @@
 import { withClearance, withSession } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { listEditableDossiers } from "@/lib/domain/dossiers";
+import { listArticlesForPicker } from "@/lib/domain/articles";
 import { AddToDossier } from "@/components/add-to-dossier";
+import { AddToArticle } from "@/components/add-to-article";
 import {
   addEntityToAsset,
   addAssetText,
@@ -230,6 +232,9 @@ export default async function AssetDetailPage({
     : [];
   const dossierIdsContaining = dossiersContainingAsset.map((r) => r.dossierId);
 
+  // 記事の紐づけ先候補。Article は非保護なので withClearance を通さない。
+  const pickerArticles = await listArticlesForPicker();
+
   const isImage = asset.kind === "image";
   let previewUrl = asset.thumbnailUrl;
   if (isImage && !previewUrl) {
@@ -317,6 +322,12 @@ export default async function AssetDetailPage({
             alreadyAdded={dossierIdsContaining}
             variant="button"
           />
+          <AddToArticle
+            assetId={asset.id}
+            articles={pickerArticles}
+            defaultLabel={asset.title || ""}
+            variant="button"
+          />
           <CopySourceRef
             assetId={asset.id}
             title={asset.title || "(無題)"}
@@ -383,6 +394,7 @@ export default async function AssetDetailPage({
                 texts={asset.texts.map((t) => ({ id: t.id, textType: t.textType, content: t.content }))}
                 embeddedImages={embeddedImages}
                 editableDossiers={editableDossiers}
+                articles={pickerArticles}
                 highlightTerms={hlNina ? ninaTerms : []}
               />
               <div className="bg-white border border-slate-200 rounded-lg p-5 mt-4">
