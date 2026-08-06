@@ -1,4 +1,5 @@
-import { withClearance } from "@/lib/db";
+import { withClearance, prisma } from "@/lib/db";
+import { assertClearance } from "@/lib/classification";
 import {
   ArticleSourceStatus,
   type ArticleType,
@@ -99,14 +100,18 @@ export async function getArticleByShortId(shortId: string, clearance: string) {
   );
 }
 
-/** 紐づけ用の軽量な記事一覧 (ピッカーに渡す) */
-export async function listArticlesForPicker(clearance: string) {
-  return withClearance(clearance, (tx) =>
-    tx.article.findMany({
-      orderBy: [{ title: "asc" }],
-      select: { id: true, shortId: true, title: true, type: true },
-    }),
-  );
+/**
+ * 紐づけ用の軽量な記事一覧 (ピッカーに渡す)。
+ *
+ * Article は非保護テーブルなので withClearance は不要 (トランザクション 1 本分の
+ * 往復が丸ごと無駄になる)。shortId はピッカーで使わないので select しない
+ * (332 件 × 7 文字でペイロードが無駄に膨らむ)。
+ */
+export async function listArticlesForPicker() {
+  return prisma.article.findMany({
+    orderBy: [{ title: "asc" }],
+    select: { id: true, title: true, type: true },
+  });
 }
 
 export interface AddAssetToArticleInput {
@@ -127,9 +132,26 @@ export interface AddAssetToArticleInput {
  *
  * DossierItem と同じく、同一アセットを抜粋ごとに複数回紐づけられる
  * (= 重複チェックをしない)。
+ *
+ * **classification は元アセットから継承する。** ArticleSource の RLS は
+ * 自テーブルの classification しか見ない (親アセットと連動しない) ため、
+ * internal 決め打ちにすると confidential なアセットの抜粋が internal に
+ * 格下げされて下位クリアランスから読めてしまう。記事詳細は asset が RLS で
+ * 落ちても label / excerpt は表示するので、実際に漏れる経路になる。
  */
 export async function addAssetToArticle(input: AddAssetToArticleInput, clearance: string) {
   return withClearance(clearance, async (tx) => {
+    // RLS 下で引くので、見えないアセットは null になる (= 存在確認を兼ねる)
+    const asset = await tx.asset.findUnique({
+      where: { id: input.assetId },
+      select: { classification: true },
+    });
+    if (!asset) throw new Error("Asset not found or not accessible");
+
+    // RLS は読みを守るが、自分より上のクリアランスを付けて書く操作は
+    // アプリ層で止める (このリポジトリの規約)
+    assertClearance(clearance, asset.classification);
+
     const last = await tx.articleSource.findFirst({
       where: { articleId: input.articleId },
       orderBy: { sortOrder: "desc" },
@@ -146,28 +168,25 @@ export async function addAssetToArticle(input: AddAssetToArticleInput, clearance
         excerptStart: input.excerptStart,
         excerptEnd: input.excerptEnd,
         sortOrder: (last?.sortOrder ?? -1) + 1,
-        classification: "internal",
+        classification: asset.classification,
       },
       select: { id: true, articleId: true },
     });
   });
 }
 
-/** 紐づけの削除 */
+/**
+ * 紐づけの削除。
+ *
+ * **pending のものだけ消せる。** applied は取り込み由来で記事本文の脚注と
+ * 対応しており、消すと出典が壊れる。UI では pending にしかボタンを出して
+ * いないが、Server Action は任意の id を受け取れるのでサーバ側で担保する。
+ */
 export async function removeArticleSource(id: string, clearance: string) {
-  return withClearance(clearance, (tx) => tx.articleSource.delete({ where: { id } }));
-}
-
-/** そのアセットが既に紐づいている記事の id 一覧 (ピッカーのグレーアウト用) */
-export async function getArticleIdsForAsset(assetId: string, clearance: string) {
-  const rows = await withClearance(clearance, (tx) =>
-    tx.articleSource.findMany({
-      where: { assetId },
-      select: { articleId: true },
-      distinct: ["articleId"],
-    }),
+  const { count } = await withClearance(clearance, (tx) =>
+    tx.articleSource.deleteMany({ where: { id, status: ArticleSourceStatus.pending } }),
   );
-  return rows.map((r) => r.articleId);
+  if (count === 0) throw new Error("削除できる紐づけが見つかりません (pending のみ削除可)");
 }
 
 /** 記事一覧の上部に出すサマリー (種別ごとの件数と未解決の総数) */
