@@ -61,14 +61,20 @@ async function walk(dir: string, root: string, out: string[] = []): Promise<stri
   return out;
 }
 
-/** frontmatter の日付は文字列でも Date でも来る。JST 基準の日付として解釈する */
+/**
+ * frontmatter の日付は文字列でも Date でも来る。
+ *
+ * 日付のみの表記は **UTC 深夜** として保存する。既存の取り込み
+ * (src/lib/domain/coverage.ts の `T00:00:00.000Z`) と揃えるため。
+ * JST 深夜 (+09:00) にすると UTC では前日 15:00 になり、`formatDate` が
+ * timeZone 未指定でサーバ TZ に従うせいで、Vercel (UTC) 上だけ日付が
+ * 1 日前にズレる (ローカルの Mac は JST なので気づけない)。
+ */
 function toDate(v: unknown): Date | null {
   if (v == null || v === "") return null;
   if (v instanceof Date) return v;
   const s = String(v).trim();
-  // "2026-04-23" のような日付のみの表記は JST の 0 時として扱う
-  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (m) return new Date(`${s}T00:00:00+09:00`);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(`${s}T00:00:00.000Z`);
   const d = new Date(s);
   return Number.isNaN(d.getTime()) ? null : d;
 }
@@ -271,23 +277,32 @@ async function main() {
       select: { id: true },
     });
 
-    // ArticleSource は全置換する (frontmatter の source[] が正)
-    await prisma.articleSource.deleteMany({ where: { articleId: article.id } });
-    if (resolutions.length) {
-      await prisma.articleSource.createMany({
-        data: resolutions.map((r, i) => ({
-          articleId: article.id,
-          assetId: r.assetId,
-          status: r.status,
-          sourceNo: r.entry.id ?? null,
-          label: r.entry.label ?? "",
-          url: r.entry.url ?? null,
-          date: toDate(r.entry.date),
-          originalRef: r.status === ArticleSourceStatus.unresolved ? (r.entry.ref ?? null) : null,
-          sortOrder: i,
-        })),
-      });
-    }
+    // frontmatter 由来の出典だけを全置換する。
+    //
+    // pending は akashic 側で付けた紐づけで、frontmatter の source[] には
+    // 載っていない。抜粋 (excerpt / excerptStart / excerptEnd / note) は
+    // DB にしか無く Markdown から再生成できないので、巻き込んで消すと
+    // 復旧できないデータロスになる。
+    //
+    // 削除と再作成は 1 トランザクションにまとめる。途中で落ちると
+    // 出典が消えたまま残るため。
+    const replaced = resolutions.map((r, i) => ({
+      articleId: article.id,
+      assetId: r.assetId,
+      status: r.status,
+      sourceNo: r.entry.id ?? null,
+      label: r.entry.label ?? "",
+      url: r.entry.url ?? null,
+      date: toDate(r.entry.date),
+      originalRef: r.status === ArticleSourceStatus.unresolved ? (r.entry.ref ?? null) : null,
+      sortOrder: i,
+    }));
+    await prisma.$transaction([
+      prisma.articleSource.deleteMany({
+        where: { articleId: article.id, status: { not: ArticleSourceStatus.pending } },
+      }),
+      ...(replaced.length ? [prisma.articleSource.createMany({ data: replaced })] : []),
+    ]);
 
     done++;
     if (done % 50 === 0) console.log(`  ${done}/${plan.length}`);
