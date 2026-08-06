@@ -1,7 +1,7 @@
 import { withClearance, withSession } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { listEditableDossiers } from "@/lib/domain/dossiers";
-import { listArticlesForPicker, getArticleIdsForAsset } from "@/lib/domain/articles";
+import { listArticlesForPicker } from "@/lib/domain/articles";
 import { AddToDossier } from "@/components/add-to-dossier";
 import { AddToArticle } from "@/components/add-to-article";
 import {
@@ -232,11 +232,8 @@ export default async function AssetDetailPage({
     : [];
   const dossierIdsContaining = dossiersContainingAsset.map((r) => r.dossierId);
 
-  // 記事の紐づけ先候補。ArticleSource は保護テーブルなので clearance 経由で引く。
-  const [pickerArticles, articleIdsContaining] = await Promise.all([
-    listArticlesForPicker(session!.user.clearance),
-    getArticleIdsForAsset(id, session!.user.clearance),
-  ]);
+  // 記事の紐づけ先候補。Article は非保護なので withClearance を通さない。
+  const pickerArticles = await listArticlesForPicker();
 
   const isImage = asset.kind === "image";
   let previewUrl = asset.thumbnailUrl;
@@ -329,7 +326,6 @@ export default async function AssetDetailPage({
             assetId={asset.id}
             articles={pickerArticles}
             defaultLabel={asset.title || ""}
-            alreadyAdded={articleIdsContaining}
             variant="button"
           />
           <CopySourceRef

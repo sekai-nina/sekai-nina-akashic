@@ -9,11 +9,16 @@ import { ARTICLE_TYPE_LABELS } from "@/lib/utils";
 /** パネルの実寸。位置計算に使うので Tailwind のクラスと揃えること。 */
 const PANEL_WIDTH = 288; // w-72
 const PANEL_MAX_HEIGHT = 340;
+const PANEL_MIN_HEIGHT = 160;
+const PANEL_GAP = 4;
 const VIEWPORT_MARGIN = 8;
+/** 一度に描画する上限。超過分は検索で絞ってもらう */
+const MAX_VISIBLE = 100;
+/** 抜粋プレビューの文字数 (この後さらに line-clamp-2 が掛かる) */
+const EXCERPT_PREVIEW = 60;
 
 export interface PickerArticle {
   id: string;
-  shortId: string;
   title: string;
   type: string | null;
 }
@@ -34,6 +39,8 @@ interface AddToArticleProps {
   /** 既に紐づいている記事 id (グレーアウト用) */
   alreadyAdded?: string[];
   size?: "sm" | "md";
+  /** 紐づけ成功後に呼ばれる。呼び出し側で完了表示を出すため */
+  onAdded?: (articleId: string, articleTitle: string) => void;
 }
 
 export function AddToArticle({
@@ -44,13 +51,16 @@ export function AddToArticle({
   variant = "icon",
   alreadyAdded = [],
   size = "sm",
+  onAdded,
 }: AddToArticleProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set(alreadyAdded));
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const anchorRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<{ top: number; left: number; maxHeight: number } | null>(
     null,
   );
@@ -64,13 +74,13 @@ export function AddToArticle({
     const spaceBelow = window.innerHeight - rect.bottom - VIEWPORT_MARGIN;
     const spaceAbove = rect.top - VIEWPORT_MARGIN;
     const openUpward = spaceBelow < Math.min(PANEL_MAX_HEIGHT, spaceAbove);
-    const maxHeight = Math.max(160, Math.min(PANEL_MAX_HEIGHT, openUpward ? spaceAbove : spaceBelow));
-    const left = Math.min(
-      Math.max(VIEWPORT_MARGIN, rect.left),
-      window.innerWidth - PANEL_WIDTH - VIEWPORT_MARGIN,
+    const maxHeight = Math.max(PANEL_MIN_HEIGHT, Math.min(PANEL_MAX_HEIGHT, openUpward ? spaceAbove : spaceBelow));
+    const left = Math.max(
+      VIEWPORT_MARGIN,
+      Math.min(rect.left, window.innerWidth - PANEL_WIDTH - VIEWPORT_MARGIN),
     );
     setPosition({
-      top: openUpward ? rect.top - maxHeight - 4 : rect.bottom + 4,
+      top: openUpward ? rect.top - maxHeight - PANEL_GAP : rect.bottom + PANEL_GAP,
       left,
       maxHeight,
     });
@@ -91,8 +101,10 @@ export function AddToArticle({
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (t?.closest("[data-article-picker]")) return;
+      const t = e.target as Node | null;
+      // 属性ベースだと同一画面の別インスタンスをクリックしても閉じないので
+      // 自分のアンカー / パネルに含まれるかで判定する
+      if (t && (anchorRef.current?.contains(t) || panelRef.current?.contains(t))) return;
       setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
@@ -113,16 +125,22 @@ export function AddToArticle({
   const add = (article: PickerArticle) => {
     if (addedIds.has(article.id) || isPending) return;
     setPendingId(article.id);
+    setError(null);
     startTransition(async () => {
       try {
+        // excerptType は string のまま渡す。Server Action 側が enum に絞り込む
         await addAssetToArticleAction(article.id, assetId, {
           label: defaultLabel,
           excerpt: excerpt?.text,
-          excerptType: excerpt?.textType as never,
+          excerptType: excerpt?.textType,
           excerptStart: excerpt?.textStart,
           excerptEnd: excerpt?.textEnd,
         });
         setAddedIds((prev) => new Set(prev).add(article.id));
+        onAdded?.(article.id, article.title);
+      } catch (e) {
+        // 握り潰すと「押したのに何も起きない」になる
+        setError(e instanceof Error ? e.message : "紐づけに失敗しました");
       } finally {
         setPendingId(null);
       }
@@ -137,7 +155,7 @@ export function AddToArticle({
         title="記事に紐づける"
         className={
           variant === "button"
-            ? "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-white text-slate-700 border border-slate-200 text-sm hover:bg-slate-50"
+            ? "inline-flex items-center gap-1 px-2 py-1 rounded text-xs border border-slate-300 hover:bg-slate-50"
             : `inline-flex items-center justify-center rounded-md text-slate-500 hover:text-slate-900 hover:bg-slate-100 ${
                 size === "sm" ? "w-6 h-6" : "w-8 h-8"
               }`
@@ -151,7 +169,7 @@ export function AddToArticle({
         position &&
         createPortal(
           <div
-            data-article-picker
+            ref={panelRef}
             style={{
               position: "fixed",
               top: position.top,
@@ -172,16 +190,22 @@ export function AddToArticle({
               />
               {excerpt?.text && (
                 <p className="mt-1.5 text-xs text-slate-400 line-clamp-2">
-                  抜粋: {excerpt.text.slice(0, 60)}
+                  抜粋: {excerpt.text.slice(0, EXCERPT_PREVIEW)}
                 </p>
               )}
             </div>
+
+            {error && (
+              <p className="px-3 py-2 text-xs text-red-600 bg-red-50 border-b border-red-100">
+                {error}
+              </p>
+            )}
 
             <div className="overflow-y-auto flex-1">
               {filtered.length === 0 && (
                 <p className="px-3 py-4 text-center text-xs text-slate-400">該当なし</p>
               )}
-              {filtered.slice(0, 100).map((a) => {
+              {filtered.slice(0, MAX_VISIBLE).map((a) => {
                 const added = addedIds.has(a.id);
                 return (
                   <button
@@ -209,9 +233,9 @@ export function AddToArticle({
                   </button>
                 );
               })}
-              {filtered.length > 100 && (
+              {filtered.length > MAX_VISIBLE && (
                 <p className="px-3 py-2 text-center text-xs text-slate-400">
-                  他 {filtered.length - 100} 件 — 検索で絞り込んでください
+                  他 {filtered.length - MAX_VISIBLE} 件 — 検索で絞り込んでください
                 </p>
               )}
             </div>

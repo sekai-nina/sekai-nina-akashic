@@ -126,7 +126,7 @@ export function TextsSection({
       document.removeEventListener("mouseup", handleUp);
       document.removeEventListener("mousedown", handleDown);
     };
-  }, [editableDossiers.length]);
+  }, [editableDossiers.length, articles.length]);
 
   return (
     <div className="bg-white border border-slate-200 rounded-lg p-5">
@@ -275,6 +275,7 @@ function ExcerptFloater({
   onDone: () => void;
 }) {
   const [confirmation, setConfirmation] = useState<{ id: string; title: string } | null>(null);
+  const [articleConfirmation, setArticleConfirmation] = useState<string | null>(null);
 
   // Position the floater above the selection (clamped to viewport)
   const top = window.scrollY + selection.rect.top - 38;
@@ -282,10 +283,25 @@ function ExcerptFloater({
   const left = confirmation ? baseLeft - 130 : baseLeft - 80;
 
   useEffect(() => {
-    if (!confirmation) return;
+    if (!confirmation && !articleConfirmation) return;
     const t = setTimeout(() => onDone(), 3500);
     return () => clearTimeout(t);
-  }, [confirmation, onDone]);
+  }, [confirmation, articleConfirmation, onDone]);
+
+  if (articleConfirmation) {
+    return (
+      <div
+        data-excerpt-floater
+        style={{ position: "absolute", top, left, zIndex: 60 }}
+        className="bg-emerald-600 text-white rounded-lg shadow-lg px-3 py-1.5 flex items-center gap-2"
+      >
+        <Check className="h-3.5 w-3.5" />
+        <span className="text-[11px]">
+          記事「<span className="font-semibold">{articleConfirmation}</span>」に紐づけました
+        </span>
+      </div>
+    );
+  }
 
   if (confirmation) {
     return (
@@ -331,6 +347,7 @@ function ExcerptFloater({
           defaultLabel={assetTitle}
           excerpt={{ text: selection.text, textType: selection.textType }}
           variant="button"
+          onAdded={(_id, title) => setArticleConfirmation(title)}
         />
       )}
       <button
