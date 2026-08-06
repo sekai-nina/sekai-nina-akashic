@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { TextType } from "@prisma/client";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -94,3 +95,15 @@ export const ARTICLE_SOURCE_STATUS_LABELS: Record<string, string> = {
   pending: "未反映",
   unresolved: "未解決",
 };
+
+/**
+ * 未検証の文字列を TextType に絞り込む。
+ *
+ * 抜粋の textType は DOM の data 属性経由でクライアントから来るため、
+ * Server Action の入り口で必ずこれを通す (型アサーションで押し込まない)。
+ * enum に無い値は undefined にして落とす。
+ */
+export function toTextType(v: unknown): TextType | undefined {
+  if (typeof v !== "string") return undefined;
+  return (Object.values(TextType) as string[]).includes(v) ? (v as TextType) : undefined;
+}

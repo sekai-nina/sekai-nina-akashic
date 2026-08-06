@@ -1,15 +1,21 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { notFound } from "next/navigation";
-import type { TextType } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { addAssetToArticle, removeArticleSource } from "@/lib/domain/articles";
+import { toTextType } from "@/lib/utils";
 
 async function requireUser() {
   const session = await auth();
-  if (!session?.user) notFound();
+  if (!session?.user) throw new Error("Unauthorized");
   return session.user;
+}
+
+/** 書き込み系は admin / member のみ (viewer を弾く)。既存の src/lib/actions.ts と同じ */
+async function requireRole(roles: string[]) {
+  const user = await requireUser();
+  if (!roles.includes(user.role)) throw new Error("Forbidden");
+  return user;
 }
 
 /**
@@ -22,31 +28,31 @@ export async function addAssetToArticleAction(
   options?: {
     label?: string;
     excerpt?: string;
-    excerptType?: TextType;
+    /** クライアント由来なので信用せず、ここで enum に絞り込む */
+    excerptType?: string;
     excerptStart?: number;
     excerptEnd?: number;
   },
 ) {
-  const user = await requireUser();
+  const user = await requireRole(["admin", "member"]);
   const created = await addAssetToArticle(
     {
       articleId,
       assetId,
       label: options?.label,
       excerpt: options?.excerpt,
-      excerptType: options?.excerptType,
+      excerptType: toTextType(options?.excerptType),
       excerptStart: options?.excerptStart,
       excerptEnd: options?.excerptEnd,
     },
     user.clearance,
   );
   revalidatePath("/articles");
-  revalidatePath(`/assets/${assetId}`);
   return created;
 }
 
 export async function removeArticleSourceAction(id: string, shortId: string) {
-  const user = await requireUser();
+  const user = await requireRole(["admin", "member"]);
   await removeArticleSource(id, user.clearance);
   revalidatePath("/articles");
   revalidatePath(`/articles/${shortId}`);
