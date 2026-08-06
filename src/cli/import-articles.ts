@@ -206,6 +206,16 @@ async function main() {
     for (const r of resolutions) {
       if (!r.needsCreate || !CREATE_MISSING) continue;
       const e = r.entry;
+
+      // 照合マップは走査開始前に作るので、同じ run 内で同一 url/label が 2 度出ると
+      // 重複 Asset を作ってしまう。作成のたびにマップを更新して再照合する。
+      const hit = e.url ? urlMap.get(e.url) : e.label ? titleMap.get(e.label) : undefined;
+      if (hit) {
+        r.assetId = hit;
+        r.status = ArticleSourceStatus.applied;
+        continue;
+      }
+
       const asset = await prisma.asset.create({
         data: {
           kind: AssetKind.other,
@@ -223,6 +233,8 @@ async function main() {
         },
         select: { id: true },
       });
+      if (e.url) urlMap.set(e.url, asset.id);
+      if (e.label) titleMap.set(e.label, asset.id);
       r.assetId = asset.id;
       r.status = ArticleSourceStatus.applied;
       stats.created++;
