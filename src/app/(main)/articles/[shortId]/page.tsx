@@ -8,6 +8,7 @@ import {
   ASSET_KIND_LABELS,
   formatDate,
 } from "@/lib/utils";
+import { RemoveSource } from "./remove-source";
 
 const STATUS_STYLE: Record<string, string> = {
   applied: "bg-emerald-100 text-emerald-700",
@@ -106,6 +107,9 @@ export default async function ArticleDetailPage({
                     {ASSET_KIND_LABELS[s.asset.kind] ?? s.asset.kind}
                   </span>
                 )}
+                {/* 解除できるのは akashic 側で付けた未反映の紐づけだけ。
+                    取り込み由来の applied を消すと記事の出典が壊れる。 */}
+                {s.status === "pending" && <RemoveSource id={s.id} shortId={article.shortId} />}
               </div>
 
               {s.excerpt && (

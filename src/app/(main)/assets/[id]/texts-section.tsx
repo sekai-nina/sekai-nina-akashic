@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Quote, Check, ExternalLink } from "lucide-react";
 import { AddToDossier } from "@/components/add-to-dossier";
+import { AddToArticle, type PickerArticle } from "@/components/add-to-article";
 import { rememberScroll, useRestoreScroll } from "./scroll-return";
 
 const TEXT_TYPE_LABELS: Record<string, string> = {
@@ -37,6 +38,8 @@ interface TextsSectionProps {
   assetId: string;
   assetTitle: string;
   texts: AssetText[];
+  /** 抜粋の紐づけ先候補。空配列なら記事ボタンを出さない */
+  articles?: PickerArticle[];
   embeddedImages: Record<string, EmbeddedImage>;
   editableDossiers: EditableDossier[];
   /** 言及ハイライト語彙（?hl=nina 時のみ非空。長い語が先＝交替の優先順） */
@@ -55,6 +58,7 @@ export function TextsSection({
   texts,
   embeddedImages,
   editableDossiers,
+  articles = [],
   highlightTerms = [],
 }: TextsSectionProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -64,7 +68,7 @@ export function TextsSection({
   useRestoreScroll(assetId, containerRef);
 
   useEffect(() => {
-    if (editableDossiers.length === 0) return;
+    if (editableDossiers.length === 0 && articles.length === 0) return;
 
     function handleUp(e: MouseEvent) {
       // Ignore clicks originating inside the floater itself (popover, buttons),
@@ -166,6 +170,7 @@ export function TextsSection({
           assetId={assetId}
           assetTitle={assetTitle}
           editableDossiers={editableDossiers}
+          articles={articles}
           onDone={() => setActiveSelection(null)}
         />
       )}
@@ -259,12 +264,14 @@ function ExcerptFloater({
   assetId,
   assetTitle,
   editableDossiers,
+  articles,
   onDone,
 }: {
   selection: NonNullable<Selection>;
   assetId: string;
   assetTitle: string;
   editableDossiers: EditableDossier[];
+  articles: PickerArticle[];
   onDone: () => void;
 }) {
   const [confirmation, setConfirmation] = useState<{ id: string; title: string } | null>(null);
@@ -317,6 +324,15 @@ function ExcerptFloater({
         variant="button"
         onAdded={(id, title) => setConfirmation({ id, title })}
       />
+      {articles.length > 0 && (
+        <AddToArticle
+          assetId={assetId}
+          articles={articles}
+          defaultLabel={assetTitle}
+          excerpt={{ text: selection.text, textType: selection.textType }}
+          variant="button"
+        />
+      )}
       <button
         type="button"
         onClick={onDone}
