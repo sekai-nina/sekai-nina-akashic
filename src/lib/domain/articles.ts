@@ -1,5 +1,10 @@
 import { withClearance } from "@/lib/db";
-import { ArticleSourceStatus, type ArticleType, type Prisma } from "@prisma/client";
+import {
+  ArticleSourceStatus,
+  type ArticleType,
+  type Prisma,
+  type TextType,
+} from "@prisma/client";
 
 /**
  * 記事 (世界新奈) の取得。
@@ -92,6 +97,77 @@ export async function getArticleByShortId(shortId: string, clearance: string) {
       },
     }),
   );
+}
+
+/** 紐づけ用の軽量な記事一覧 (ピッカーに渡す) */
+export async function listArticlesForPicker(clearance: string) {
+  return withClearance(clearance, (tx) =>
+    tx.article.findMany({
+      orderBy: [{ title: "asc" }],
+      select: { id: true, shortId: true, title: true, type: true },
+    }),
+  );
+}
+
+export interface AddAssetToArticleInput {
+  articleId: string;
+  assetId: string;
+  label?: string;
+  excerpt?: string;
+  excerptType?: TextType;
+  excerptStart?: number;
+  excerptEnd?: number;
+}
+
+/**
+ * アセット (と抜粋) を記事に紐づける。
+ *
+ * status は常に pending。applied は「記事本文に反映済み」を意味するので、
+ * 本文へ反映する処理 (AI / 人) が別途 applied に遷移させる。
+ *
+ * DossierItem と同じく、同一アセットを抜粋ごとに複数回紐づけられる
+ * (= 重複チェックをしない)。
+ */
+export async function addAssetToArticle(input: AddAssetToArticleInput, clearance: string) {
+  return withClearance(clearance, async (tx) => {
+    const last = await tx.articleSource.findFirst({
+      where: { articleId: input.articleId },
+      orderBy: { sortOrder: "desc" },
+      select: { sortOrder: true },
+    });
+    return tx.articleSource.create({
+      data: {
+        articleId: input.articleId,
+        assetId: input.assetId,
+        status: ArticleSourceStatus.pending,
+        label: input.label ?? "",
+        excerpt: input.excerpt ?? "",
+        excerptType: input.excerptType,
+        excerptStart: input.excerptStart,
+        excerptEnd: input.excerptEnd,
+        sortOrder: (last?.sortOrder ?? -1) + 1,
+        classification: "internal",
+      },
+      select: { id: true, articleId: true },
+    });
+  });
+}
+
+/** 紐づけの削除 */
+export async function removeArticleSource(id: string, clearance: string) {
+  return withClearance(clearance, (tx) => tx.articleSource.delete({ where: { id } }));
+}
+
+/** そのアセットが既に紐づいている記事の id 一覧 (ピッカーのグレーアウト用) */
+export async function getArticleIdsForAsset(assetId: string, clearance: string) {
+  const rows = await withClearance(clearance, (tx) =>
+    tx.articleSource.findMany({
+      where: { assetId },
+      select: { articleId: true },
+      distinct: ["articleId"],
+    }),
+  );
+  return rows.map((r) => r.articleId);
 }
 
 /** 記事一覧の上部に出すサマリー (種別ごとの件数と未解決の総数) */
