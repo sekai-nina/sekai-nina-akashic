@@ -1,5 +1,6 @@
 import { unified } from "unified";
 import remarkParse from "remark-parse";
+import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import remarkBreaks from "remark-breaks";
 import remarkRehype from "remark-rehype";
@@ -14,6 +15,7 @@ import { remarkQuoteMarkers } from "./remark/quote-markers";
 import { remarkFootnoteRefs } from "./remark/footnote-refs";
 import { remarkTweets } from "./remark/tweets";
 import { remarkWikilinks } from "./remark/wikilinks";
+import { remarkTableWrapper } from "./remark/table-wrapper";
 
 /**
  * 記事本文の Markdown を HTML にする。
@@ -28,6 +30,8 @@ import { remarkWikilinks } from "./remark/wikilinks";
 function buildProcessor(resolveWikilink: (title: string) => string | undefined) {
   return unified()
     .use(remarkParse)
+    // Astro の markdown は gfm: true が既定。表・打ち消し線・autolink に要る
+    .use(remarkGfm)
     .use(remarkMath)
     .use(remarkCardLink)
     .use(remarkObsidianCallouts)
@@ -40,6 +44,8 @@ function buildProcessor(resolveWikilink: (title: string) => string | undefined) 
     .use(remarkTweets)
     // akashic 独自: [[記事名]] を記事へのリンクにする
     .use(remarkWikilinks(resolveWikilink))
+    // akashic 独自: 表を横スクロール用のラッパーで包む
+    .use(remarkTableWrapper)
     // allowDangerousHtml: 自作プラグインの生 HTML ノードを hast まで運ぶ
     .use(remarkRehype, { allowDangerousHtml: true })
     .use(rehypeRaw)
