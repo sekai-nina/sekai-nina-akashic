@@ -1,6 +1,6 @@
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/db";
-import { uploadToDrive, isDriveEnabled } from "@/lib/drive";
+import { prisma, withClearance } from "@/lib/db";
+import { uploadToDrive, isDriveEnabled, fetchDriveThumbnail } from "@/lib/drive";
 import { generateAndUploadThumbnails } from "@/lib/thumbnails";
 import { createHash } from "crypto";
 import { NextResponse } from "next/server";
@@ -40,7 +40,9 @@ export async function POST(request: Request) {
   const kind = kindOverride || guessMimeKind(mimeType);
 
   // Check duplicate
-  const existing = await prisma.asset.findFirst({ where: { sha256 } });
+  const existing = await withClearance(session.user.clearance, (tx) =>
+    tx.asset.findFirst({ where: { sha256 } })
+  );
   if (existing) {
     return NextResponse.json({
       duplicate: true,
@@ -79,34 +81,59 @@ export async function POST(request: Request) {
     );
   }
 
-  const asset = await prisma.asset.create({
-    data: {
-      kind,
-      title: title || file.name,
-      description: "",
-      status: "inbox",
-      sourceType: "manual",
-      storageProvider,
-      storageUrl,
-      storageKey,
-      sha256,
-      originalFilename: file.name,
-      mimeType,
-      fileSize: buffer.length,
-      thumbnailUrl,
-      createdById: session.user.id,
-      updatedById: session.user.id,
-    },
-  });
+  const asset = await withClearance(session.user.clearance, (tx) =>
+    tx.asset.create({
+      data: {
+        kind,
+        title: title || file.name,
+        description: "",
+        status: "inbox",
+        sourceType: "manual",
+        storageProvider,
+        storageUrl,
+        storageKey,
+        sha256,
+        originalFilename: file.name,
+        mimeType,
+        fileSize: buffer.length,
+        thumbnailUrl,
+        createdById: session.user.id,
+        updatedById: session.user.id,
+      },
+    })
+  );
 
   // Generate R2 thumbnails for images (async, non-blocking for response)
   if (kind === "image") {
     const r2Url = await generateAndUploadThumbnails(asset.id, buffer);
     if (r2Url) {
-      await prisma.asset.update({
-        where: { id: asset.id },
-        data: { thumbnailUrl: r2Url },
-      });
+      await withClearance(session.user.clearance, (tx) =>
+        tx.asset.update({
+          where: { id: asset.id },
+          data: { thumbnailUrl: r2Url },
+        })
+      );
+    }
+  }
+
+  // 動画は原本が mp4 なので縮小できない。Drive が生成したサムネイルを元画像にする。
+  // Drive のサムネイル生成は非同期なのでアップロード直後は取れないことが多い。
+  // 取れなければ thumbnailUrl は null のままにし、後から
+  // `pnpm cli:thumbnails --kind=video` で埋める
+  if (kind === "video" && storageKey) {
+    try {
+      const thumb = await fetchDriveThumbnail(storageKey);
+      const r2Url = thumb ? await generateAndUploadThumbnails(asset.id, thumb) : null;
+      if (r2Url) {
+        await withClearance(session.user.clearance, (tx) =>
+          tx.asset.update({
+            where: { id: asset.id },
+            data: { thumbnailUrl: r2Url },
+          })
+        );
+      }
+    } catch (err) {
+      console.error("動画サムネイルの生成に失敗:", err);
     }
   }
 
