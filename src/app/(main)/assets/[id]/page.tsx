@@ -33,6 +33,7 @@ import { SubGraph } from "./sub-graph";
 import { TextsSection } from "./texts-section";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { entityClearanceWhere } from "@/lib/domain/entities";
 
 
 function RichTextContent({
@@ -122,6 +123,7 @@ export default async function AssetDetailPage({
         include: {
           texts: { orderBy: { createdAt: "asc" } },
           entities: {
+            where: { entity: entityClearanceWhere(userClearance) },
             include: { entity: true },
             orderBy: { createdAt: "asc" },
           },
