@@ -2,6 +2,8 @@
 
 Akashicのデータを外部システムから操作するためのREST API。
 
+> AI アシスタントから使う場合は、同じ API キーで叩ける **MCP サーバー**がある → [docs/mcp.md](./mcp.md)
+
 ## Base URL
 
 ```
