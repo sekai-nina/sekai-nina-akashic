@@ -49,11 +49,27 @@ export async function PATCH(
 
   // Prevent classification escalation above user's clearance
   if (body.classification) {
-    const { assertClearance } = await import("@/lib/classification");
+    const { assertClearance, isClassificationDowngrade } = await import("@/lib/classification");
     try {
       assertClearance(auth.clearance, body.classification);
     } catch {
       return NextResponse.json({ error: "Cannot set classification above your clearance level" }, { status: 403 });
+    }
+
+    // 機密レベルの引き下げは API キーからは行えない。assertClearance は上位を付ける
+    // 操作しか止めないため、restricted -> public のような再分類が素通りしてしまう。
+    // API キーは MCP (LLM がツールを呼ぶ経路) と共通なので、アプリ層で塞ぐ。
+    const current = await getAsset(id, auth.clearance);
+    if (!current) {
+      return NextResponse.json({ error: "Asset not found" }, { status: 404 });
+    }
+    if (isClassificationDowngrade(current.classification, body.classification)) {
+      return NextResponse.json(
+        {
+          error: `Cannot lower classification (${current.classification} -> ${body.classification}) via API key`,
+        },
+        { status: 403 }
+      );
     }
   }
 

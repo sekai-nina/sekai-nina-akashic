@@ -43,6 +43,33 @@ export async function PATCH(
   const { id } = await params;
   const body = await request.json();
 
+  // このルートには元々 assertClearance が無く、上位機密の付与を RLS の WITH CHECK
+  // だけが止めていた。API キーは MCP と共通なので、アプリ層でも引き上げ/引き下げを検査する。
+  if (body.classification) {
+    const { assertClearance, isClassificationDowngrade } = await import("@/lib/classification");
+    try {
+      assertClearance(auth.clearance, body.classification);
+    } catch {
+      return NextResponse.json(
+        { error: "Cannot set classification above your clearance level" },
+        { status: 403 }
+      );
+    }
+
+    const current = await getPlaceById(id, auth.clearance);
+    if (!current) {
+      return NextResponse.json({ error: "Place not found" }, { status: 404 });
+    }
+    if (isClassificationDowngrade(current.classification, body.classification)) {
+      return NextResponse.json(
+        {
+          error: `Cannot lower classification (${current.classification} -> ${body.classification}) via API key`,
+        },
+        { status: 403 }
+      );
+    }
+  }
+
   const place = await updatePlace(
     id,
     {

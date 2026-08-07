@@ -11,7 +11,7 @@ import type {
 } from "@prisma/client";
 import type { ApiKeyUser } from "@/lib/api-auth";
 import { withClearance } from "@/lib/db";
-import { assertClearance } from "@/lib/classification";
+import { assertClearance, isClassificationDowngrade } from "@/lib/classification";
 import { invalidateAssets, invalidatePlaces } from "@/lib/cache";
 import { parseDateOnly } from "@/lib/domain/coverage";
 import { getAsset, updateAsset } from "@/lib/domain/assets";
@@ -77,6 +77,26 @@ function fail(message: string, detail?: Record<string, unknown>) {
       },
     ],
   };
+}
+
+/**
+ * 機密レベルの引き下げを拒否する。問題なければ null。
+ *
+ * assertClearance は上位を付ける操作しか止めないので、restricted -> public のような
+ * 引き下げは素通りする。MCP は LLM がツールを呼ぶ経路で、プロンプトインジェクション
+ * 1 回で機密アセットを公開扱いに落とせてしまうため、既存レコードの再分類は
+ * 「引き上げのみ」に制限する。引き下げは画面から人間が行う。
+ */
+function rejectClassificationDowngrade(
+  current: string,
+  requested: string | undefined
+) {
+  if (!requested) return null;
+  if (!isClassificationDowngrade(current, requested)) return null;
+  return fail(
+    `機密レベルの引き下げ (${current} -> ${requested}) は MCP からは行えません。` +
+      `引き上げのみ可能です。引き下げが必要なら画面から操作してください。`
+  );
 }
 
 /** Google Maps URL の解決失敗を、原因ごとの文言に落とす */
@@ -523,7 +543,13 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
           .describe("inbox=仕分け待ち / triaging=仕分け中 / organized=整理済み / archived=保管"),
         trustLevel: z.enum(TRUST_LEVELS).optional(),
         canonicalDate: DATE_ONLY.optional().describe("公開日・放送日 (JST)"),
-        classification: z.enum(CLEARANCE_LEVELS).optional(),
+        classification: z
+          .enum(CLEARANCE_LEVELS)
+          .optional()
+          .describe(
+            "機密レベル。**引き上げのみ可能**で、現在より低い値を指定するとエラーになる " +
+              "(引き下げは画面から人間が行う)。自分のクリアランスより上も指定できない"
+          ),
         upsertTexts: z
           .array(
             z.object({
@@ -557,6 +583,12 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
           { id: args.id }
         );
       }
+
+      const downgradeA = rejectClassificationDowngrade(
+        existing.classification,
+        args.classification
+      );
+      if (downgradeA) return downgradeA;
 
       const resolution = args.entityNames?.length
         ? await resolveEntityNames(args.entityNames, {
@@ -743,7 +775,13 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
         googleMapsUrl: z.string().url().optional(),
         address: z.string().optional(),
         description: z.string().optional(),
-        classification: z.enum(CLEARANCE_LEVELS).optional(),
+        classification: z
+          .enum(CLEARANCE_LEVELS)
+          .optional()
+          .describe(
+            "機密レベル。**引き上げのみ可能**で、現在より低い値を指定するとエラーになる " +
+              "(引き下げは画面から人間が行う)。自分のクリアランスより上も指定できない"
+          ),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
     },
@@ -765,6 +803,12 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
           { id: args.id }
         );
       }
+
+      const downgradeP = rejectClassificationDowngrade(
+        existing.classification,
+        args.classification
+      );
+      if (downgradeP) return downgradeP;
 
       let latitude = args.latitude;
       let longitude = args.longitude;
