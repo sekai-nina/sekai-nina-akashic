@@ -352,6 +352,8 @@ API キーからは **引き上げしかできない。** `PATCH /assets/:id` �
 
 聖地エンティティ（`type: "place"`）は、紐づく `Place` の `classification` がキーのクリアランスを超える場合に除外される。`GET /entities/:id` も同条件で `404` を返す。
 
+アセットに紐づくエンティティ（`GET /assets/:id` と `GET /assets?include=entities` の `entities`）も同条件で除外される。
+
 **クエリパラメータ:**
 
 | パラメータ | 型 | デフォルト | 説明 |
