@@ -56,8 +56,11 @@ function resolveImageUrl(
 ): string | null {
   // R2 サムネイルがあればそれを優先
   if (thumbnailUrl?.includes("/thumbnails/")) return thumbnailUrl;
-  // Drive 画像はプロキシ経由
-  if ((kind === "image" || kind === "video") && storageProvider === "gdrive" && storageKey) {
+  // Drive 画像はプロキシ経由。
+  // 動画を混ぜてはいけない: storageKey は mp4 本体の fileId なので、プロキシは
+  // video/mp4 を返し <img> では絶対に表示できない（かつ mp4 全体を毎回転送する）。
+  // 動画のサムネイルは R2 に実体を置く方式に一本化した（src/cli/generate-thumbnails.ts）
+  if (kind === "image" && storageProvider === "gdrive" && storageKey) {
     return `/api/drive-image/${storageKey}`;
   }
   return thumbnailUrl;

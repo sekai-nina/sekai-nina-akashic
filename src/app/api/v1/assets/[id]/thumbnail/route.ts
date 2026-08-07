@@ -31,7 +31,7 @@ export async function GET(
   const asset = await withClearance(clearance, (tx) =>
     tx.asset.findUnique({
       where: { id },
-      select: { thumbnailUrl: true, storageProvider: true, storageKey: true },
+      select: { kind: true, thumbnailUrl: true, storageProvider: true, storageKey: true },
     })
   );
   if (!asset) return new NextResponse(null, { status: 404 });
@@ -40,7 +40,9 @@ export async function GET(
   if (asset.thumbnailUrl) {
     return NextResponse.redirect(asset.thumbnailUrl, { status: 302, headers });
   }
-  if (asset.storageProvider === "gdrive" && asset.storageKey) {
+  // 動画は対象外: storageKey は mp4 本体の fileId なので、プロキシは video/mp4 を返し
+  // <img> では表示できない。動画のサムネイルは R2 に実体を置く方式に一本化した
+  if (asset.kind === "image" && asset.storageProvider === "gdrive" && asset.storageKey) {
     // drive-image プロキシはセッション認証必須（同一オリジンの <img> なら cookie が付く）
     return NextResponse.redirect(new URL(`/api/drive-image/${asset.storageKey}`, request.url), {
       status: 302,

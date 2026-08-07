@@ -188,10 +188,10 @@ async function SearchResults({
             <div key={`${item.assetId}-${idx}`} className="relative group">
               <Link href={`/assets/${item.assetId}`}
                 className="block bg-white border border-slate-200 rounded-lg overflow-hidden hover:border-blue-400 transition-colors">
+                {/* storageUrl は Drive の閲覧ページ (HTML) の URL なので <img> には使えない。
+                    サムネイルが無ければ kind ラベルのプレースホルダを出す */}
                 {item.thumbnailUrl ? (
                   <img src={item.thumbnailUrl} alt={item.assetTitle} className="w-full h-32 object-cover" />
-                ) : (item.assetKind === "image" || item.assetKind === "video") && item.storageUrl ? (
-                  <img src={item.storageUrl} alt={item.assetTitle} className="w-full h-32 object-cover" />
                 ) : (
                   <div className="w-full h-32 bg-slate-100 flex items-center justify-center text-slate-400 text-xs">
                     {ASSET_KIND_LABELS[item.assetKind] ?? item.assetKind}
@@ -224,8 +224,14 @@ async function SearchResults({
           {results.items.map((item, idx) => (
             <div key={`${item.assetId}-${idx}`} className="flex items-start gap-3 px-4 py-3 hover:bg-slate-50 transition-colors">
               <Link href={`/assets/${item.assetId}`} className="flex items-start gap-3 flex-1 min-w-0">
-                {(item.thumbnailUrl || ((item.assetKind === "image" || item.assetKind === "video") && item.storageUrl)) && (
-                  <img src={item.thumbnailUrl ?? item.storageUrl!} alt="" className="w-14 h-14 object-cover rounded shrink-0 bg-slate-100" />
+                {/* storageUrl は Drive の閲覧ページ (HTML) の URL なので <img> には使えない。
+                    サムネイルが無ければ kind ラベルのプレースホルダを出す（ギャラリー表示と同じ扱い） */}
+                {item.thumbnailUrl ? (
+                  <img src={item.thumbnailUrl} alt="" className="w-14 h-14 object-cover rounded shrink-0 bg-slate-100" />
+                ) : (
+                  <div className="w-14 h-14 rounded shrink-0 bg-slate-100 flex items-center justify-center text-slate-400 text-[10px] text-center leading-tight px-1">
+                    {ASSET_KIND_LABELS[item.assetKind] ?? item.assetKind}
+                  </div>
                 )}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">

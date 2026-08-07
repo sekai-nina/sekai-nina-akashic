@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
 import { prismaInternal, withClearance } from "@/lib/db";
-import { uploadToDrive, isDriveEnabled } from "@/lib/drive";
+import { uploadToDrive, isDriveEnabled, fetchDriveThumbnail } from "@/lib/drive";
 import { createAsset, updateAsset, type CreateAssetData } from "@/lib/domain/assets";
 import { logAudit } from "@/lib/domain/audit";
 import { generateAndUploadThumbnails } from "@/lib/thumbnails";
@@ -185,6 +185,27 @@ export async function POST(request: Request) {
       }
     } catch (err) {
       console.error("R2 thumbnail generation failed:", err);
+    }
+  }
+
+  // 動画は原本が mp4 なので縮小できない。Drive が生成したサムネイルを元画像にする。
+  // Drive のサムネイル生成は非同期なのでアップロード直後は取れないことが多い。
+  // 取れなければ thumbnailUrl は null のままにし、後から
+  // `pnpm cli:thumbnails --kind=video` で埋める
+  if (kind === "video" && storageKey) {
+    try {
+      const thumb = await fetchDriveThumbnail(storageKey);
+      const r2Url = thumb ? await generateAndUploadThumbnails(asset.id, thumb) : null;
+      if (r2Url) {
+        await withClearance(auth.clearance, (tx) =>
+          tx.asset.update({
+            where: { id: asset.id },
+            data: { thumbnailUrl: r2Url },
+          })
+        );
+      }
+    } catch (err) {
+      console.error("動画サムネイルの生成に失敗:", err);
     }
   }
 

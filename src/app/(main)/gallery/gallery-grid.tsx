@@ -182,8 +182,10 @@ export function GalleryGrid({
   function getGalleryImageUrl(item: GalleryItem): string {
     // R2 サムネイルがあればそれを使う
     if (item.thumbnailUrl?.includes("/thumbnails/")) return item.thumbnailUrl;
-    // Drive 画像はプロキシ経由で表示
-    if (item.storageProvider === "gdrive" && item.storageKey) {
+    // Drive 画像はプロキシ経由で表示。
+    // 動画は除外する: storageKey は mp4 本体の fileId なので、プロキシは video/mp4 を
+    // 返し <img> では表示できない。動画は R2 サムネイル（上の分岐）に一本化した
+    if (item.kind === "image" && item.storageProvider === "gdrive" && item.storageKey) {
       return `/api/drive-image/${item.storageKey}`;
     }
     return item.thumbnailUrl ?? "";

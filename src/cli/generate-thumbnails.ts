@@ -1,16 +1,20 @@
 /**
  * Backfill R2 thumbnails for existing image and video assets.
  *
+ * 画像は Drive の原本をそのまま縮小する。動画は原本が mp4 なので縮小できず、
+ * Drive が自動生成したサムネイル (thumbnailLink) を元画像として使う。
+ *
  * Usage:
  *   pnpm cli:thumbnails                          # Process all missing (images + videos)
  *   pnpm cli:thumbnails --force                   # Regenerate all
  *   pnpm cli:thumbnails --id=xxx                  # Single asset
  *   pnpm cli:thumbnails --kind=video              # Videos only
  *   pnpm cli:thumbnails --kind=image              # Images only
+ *   pnpm cli:thumbnails --kind=video --limit=1000 # 件数を区切って実行（未処理分から順に消化）
  *   pnpm cli:thumbnails --talk-thumbnails=/path   # Use Talk thumbnails from local dir
  */
 
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, type AssetKind } from "@prisma/client";
 import { google } from "googleapis";
 import sharp from "sharp";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
@@ -18,9 +22,15 @@ import { readFileSync, readdirSync, existsSync } from "fs";
 import { join } from "path";
 import "dotenv/config";
 
-const prisma = new PrismaClient();
+// 既定の DATABASE_URL は app_runtime ロールで RLS が効くため、CLI から素で繋ぐと
+// エラーではなく無言で 0 行になる。RLS をバイパスする DIRECT_URL を使う
+const prisma = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL } } });
 
 const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL ?? "";
+
+// src/lib/thumbnails の GALLERY_WIDTH / LIST_WIDTH と同じ値
+const GALLERY_WIDTH = 640;
+const LIST_WIDTH = 200;
 
 const s3 = new S3Client({
   region: "auto",
@@ -50,10 +60,47 @@ async function downloadFromDrive(fileId: string): Promise<Buffer> {
   return Buffer.from(res.data as ArrayBuffer);
 }
 
+/**
+ * Drive が自動生成したサムネイル画像を取得する。
+ *
+ * 動画の storageKey は mp4 本体の fileId なので、downloadFromDrive で取れるのは
+ * 動画バイナリであって画像ではない（sharp に渡しても必ず失敗する）。動画本体を
+ * ダウンロードせずにサムネイルを得る唯一の手段がこの thumbnailLink。
+ * Drive のサムネイル生成は非同期なので、まだ生成されていなければ null を返す。
+ */
+async function fetchDriveThumbnail(fileId: string, size = GALLERY_WIDTH): Promise<Buffer | null> {
+  const drive = getDriveClient();
+  const meta = await drive.files.get({
+    fileId,
+    fields: "hasThumbnail,thumbnailLink",
+    supportsAllDrives: true,
+  });
+  if (!meta.data.hasThumbnail || !meta.data.thumbnailLink) return null;
+
+  // 既定の thumbnailLink は =s220 と小さいので要求サイズに差し替える。
+  // クロップ付きの =s220-c 形式も返りうるので、修飾子は保持する
+  const url = meta.data.thumbnailLink.replace(
+    /=s\d+(-[a-z0-9-]*)?$/i,
+    (_m, modifier: string | undefined) => `=s${size}${modifier ?? ""}`
+  );
+  const res = await fetch(url);
+  if (!res.ok) return null;
+  return Buffer.from(await res.arrayBuffer());
+}
+
+/**
+ * アセット 1 件のサムネイル元画像を取得する。
+ * 画像は原本そのもの、動画は Drive 生成のサムネイルを使う。
+ */
+async function fetchSourceImage(kind: AssetKind, fileId: string): Promise<Buffer | null> {
+  if (kind === "video") return fetchDriveThumbnail(fileId);
+  return downloadFromDrive(fileId);
+}
+
 async function generateAndUpload(assetId: string, buffer: Buffer): Promise<string> {
   const [gallery, list] = await Promise.all([
-    sharp(buffer).resize(640, null, { withoutEnlargement: true }).webp({ quality: 80 }).toBuffer(),
-    sharp(buffer).resize(200, null, { withoutEnlargement: true }).webp({ quality: 75 }).toBuffer(),
+    sharp(buffer).resize(GALLERY_WIDTH, null, { withoutEnlargement: true }).webp({ quality: 80 }).toBuffer(),
+    sharp(buffer).resize(LIST_WIDTH, null, { withoutEnlargement: true }).webp({ quality: 75 }).toBuffer(),
   ]);
 
   const bucket = process.env.R2_BUCKET_NAME ?? "akashic-thumbnails";
@@ -99,6 +146,8 @@ async function main() {
   const singleId = args.find((a) => a.startsWith("--id="))?.split("=")[1];
   const kindFilter = args.find((a) => a.startsWith("--kind="))?.split("=")[1];
   const talkThumbDir = args.find((a) => a.startsWith("--talk-thumbnails="))?.split("=")[1];
+  const limitArg = args.find((a) => a.startsWith("--limit="))?.split("=")[1];
+  const limit = limitArg ? parseInt(limitArg, 10) : undefined;
 
   // --talk-thumbnails モード: Talk のサムネイルファイルから動画サムネイルを生成
   if (talkThumbDir) {
@@ -207,38 +256,47 @@ async function main() {
     where,
     select: { id: true, title: true, kind: true, storageKey: true, thumbnailUrl: true },
     orderBy: { createdAt: "desc" },
+    ...(limit ? { take: limit } : {}),
   });
 
   console.log(`Found ${assets.length} assets to process`);
 
   let success = 0;
+  let noThumb = 0;
   let failed = 0;
   const BATCH_SIZE = 5;
 
   for (let i = 0; i < assets.length; i += BATCH_SIZE) {
     const batch = assets.slice(i, i + BATCH_SIZE);
     const results = await Promise.allSettled(
-      batch.map(async (asset) => {
+      batch.map(async (asset): Promise<"ok" | "no-thumb" | "failed"> => {
         try {
           const idx = i + batch.indexOf(asset) + 1;
           console.log(`[${idx}/${assets.length}] (${asset.kind}) ${asset.title || asset.id}`);
 
-          const buffer = await downloadFromDrive(asset.storageKey!);
+          const buffer = await fetchSourceImage(asset.kind, asset.storageKey!);
+          if (!buffer) {
+            // Drive 側がまだサムネイルを生成していない。後日再実行すれば埋まる
+            console.log(`  No Drive thumbnail yet`);
+            return "no-thumb";
+          }
           const url = await generateAndUpload(asset.id, buffer);
           await prisma.asset.update({
             where: { id: asset.id },
             data: { thumbnailUrl: url },
           });
-          return true;
+          return "ok";
         } catch (err) {
           console.error(`  Failed: ${(err as Error).message}`);
-          return false;
+          return "failed";
         }
       })
     );
 
     for (const r of results) {
-      if (r.status === "fulfilled" && r.value) success++;
+      if (r.status === "rejected") failed++;
+      else if (r.value === "ok") success++;
+      else if (r.value === "no-thumb") noThumb++;
       else failed++;
     }
 
@@ -247,7 +305,7 @@ async function main() {
     }
   }
 
-  console.log(`\nDone: ${success} success, ${failed} failed`);
+  console.log(`\nDone: ${success} success, ${noThumb} no Drive thumbnail, ${failed} failed`);
   await prisma.$disconnect();
 }
 

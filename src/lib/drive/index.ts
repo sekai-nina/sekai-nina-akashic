@@ -197,6 +197,60 @@ export async function downloadFromDrive(fileId: string): Promise<Buffer | null> 
   return Buffer.from(res.data as ArrayBuffer);
 }
 
+/** R2 のギャラリーサムネイル幅 (src/lib/thumbnails の GALLERY_WIDTH) に合わせている */
+const GALLERY_THUMBNAIL_WIDTH = 640;
+
+/**
+ * サムネイル取得はあくまで付加的な処理で、取れなければ後から CLI で埋められる。
+ * アップロード応答をブロックし続けないよう短めで打ち切る。
+ */
+const DRIVE_THUMBNAIL_TIMEOUT_MS = 5_000;
+
+/**
+ * thumbnailLink の末尾のサイズ指定子を差し替える。
+ * `=s220` のほか、クロップ付きの `=s220-c` 形式も返りうる（修飾子は保持する）。
+ */
+function resizeThumbnailLink(link: string, size: number): string {
+  return link.replace(/=s\d+(-[a-z0-9-]*)?$/i, (_m, modifier: string | undefined) =>
+    `=s${size}${modifier ?? ""}`
+  );
+}
+
+/**
+ * Drive が自動生成したサムネイル画像を取得する。
+ *
+ * 動画アセットの `storageKey` は mp4 本体の fileId なので、`downloadFromDrive` で
+ * 取れるのは動画バイナリであって画像ではない。動画のサムネイルを得る唯一の安価な
+ * 手段がこの `thumbnailLink`（動画本体をダウンロードせずに済む）。
+ *
+ * サイズ指定子を差し替えて要求できるが、元サムネの解像度が上限なので拡大はされない
+ * （最大辺 640 に収まる。実測では 640x360 が最頻）。
+ * Drive のサムネイル生成は非同期のため、アップロード直後は `hasThumbnail: false`
+ * になりうる。取得できない場合・タイムアウトした場合は null を返すので、
+ * 呼び出し側で握りつぶしてよい。
+ */
+export async function fetchDriveThumbnail(
+  fileId: string,
+  size = GALLERY_THUMBNAIL_WIDTH,
+  timeoutMs = DRIVE_THUMBNAIL_TIMEOUT_MS
+): Promise<Buffer | null> {
+  const auth = getAuth();
+  if (!auth) return null;
+
+  const drive = google.drive({ version: "v3", auth: auth as Parameters<typeof google.drive>[0]["auth"] });
+  const meta = await drive.files.get(
+    { fileId, fields: "hasThumbnail,thumbnailLink", supportsAllDrives: true },
+    { timeout: timeoutMs }
+  );
+  if (!meta.data.hasThumbnail || !meta.data.thumbnailLink) return null;
+
+  const res = await fetch(resizeThumbnailLink(meta.data.thumbnailLink, size), {
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) return null;
+  return Buffer.from(await res.arrayBuffer());
+}
+
 /**
  * 指定フォルダにファイルをアップロードする（フォルダID指定版）。
  */
