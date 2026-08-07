@@ -309,11 +309,9 @@ export default async function SearchPage({
 }: {
   searchParams: Promise<{ [key: string]: string | undefined }>;
 }) {
-  const [session, entities] = await Promise.all([
-    auth(),
-    getCachedEntityList(),
-  ]);
+  const session = await auth();
   const userClearance = session!.user.clearance as ClearanceLevel;
+  const entities = await getCachedEntityList(userClearance);
   const editableDossiers = (await listEditableDossiers(session!.user)).map((d) => ({ id: d.id, title: d.title }));
 
   const params = await searchParams;

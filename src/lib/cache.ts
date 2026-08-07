@@ -1,6 +1,7 @@
 import { unstable_cache, revalidateTag } from "next/cache";
 import { prisma, prismaInternal, withClearance } from "@/lib/db";
 import { getDashboardStats } from "@/lib/domain/stats";
+import { entityClearanceWhere } from "@/lib/domain/entities";
 import { ClearanceLevel } from "@prisma/client";
 
 // ========== Cache Tags ==========
@@ -89,43 +90,57 @@ export const getCachedInboxCount = (clearance: ClearanceLevel) =>
     { tags: [CACHE_TAGS.assets], revalidate: 30 }
   )();
 
-export const getCachedEntities = unstable_cache(
-  () =>
-    prisma.entity.findMany({
-      include: { _count: { select: { assets: true } } },
-      orderBy: [{ type: "asc" }, { canonicalName: "asc" }],
-    }),
-  ["entities-list"],
-  { tags: [CACHE_TAGS.entities], revalidate: 60 }
-);
+// Entity には実質的な RLS が無いため、クリアランスで見えない聖地エンティティを
+// アプリ層で落とす (詳細は entityClearanceWhere の JSDoc)。キャッシュキーは
+// クリアランス別にする — getCachedPlaces と同じ方式。
+export const getCachedEntities = (clearance: ClearanceLevel) =>
+  unstable_cache(
+    () =>
+      withClearance(clearance, (tx) =>
+        tx.entity.findMany({
+          where: entityClearanceWhere(clearance),
+          include: { _count: { select: { assets: true } } },
+          orderBy: [{ type: "asc" }, { canonicalName: "asc" }],
+        })
+      ),
+    [`entities-list-${clearance}`],
+    { tags: [CACHE_TAGS.entities], revalidate: 60 }
+  )();
 
 /** Lightweight entity list (no _count) for search/filter forms */
-export const getCachedEntityList = unstable_cache(
-  () =>
-    prisma.entity.findMany({
-      select: {
-        id: true,
-        type: true,
-        canonicalName: true,
-        normalizedName: true,
-        generation: true,
-        reading: true,
-      },
-      orderBy: [{ type: "asc" }, { canonicalName: "asc" }],
-    }),
-  ["entities-list-light"],
-  { tags: [CACHE_TAGS.entities], revalidate: 300 }
-);
+export const getCachedEntityList = (clearance: ClearanceLevel) =>
+  unstable_cache(
+    () =>
+      withClearance(clearance, (tx) =>
+        tx.entity.findMany({
+          where: entityClearanceWhere(clearance),
+          select: {
+            id: true,
+            type: true,
+            canonicalName: true,
+            normalizedName: true,
+            generation: true,
+            reading: true,
+          },
+          orderBy: [{ type: "asc" }, { canonicalName: "asc" }],
+        })
+      ),
+    [`entities-list-light-${clearance}`],
+    { tags: [CACHE_TAGS.entities], revalidate: 300 }
+  )();
 
-export const getCachedEntityById = unstable_cache(
-  (id: string) =>
-    prisma.entity.findUnique({
-      where: { id },
-      include: { _count: { select: { assets: true } } },
-    }),
-  ["entity-detail"],
-  { tags: [CACHE_TAGS.entities], revalidate: 60 }
-);
+export const getCachedEntityById = (id: string, clearance: ClearanceLevel) =>
+  unstable_cache(
+    () =>
+      withClearance(clearance, (tx) =>
+        tx.entity.findFirst({
+          where: { AND: [{ id }, entityClearanceWhere(clearance)] },
+          include: { _count: { select: { assets: true } } },
+        })
+      ),
+    [`entity-detail-${clearance}-${id}`],
+    { tags: [CACHE_TAGS.entities], revalidate: 60 }
+  )();
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 

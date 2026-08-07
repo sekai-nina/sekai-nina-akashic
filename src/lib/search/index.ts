@@ -249,6 +249,10 @@ async function getMatchingEntityNames(
     FROM "AssetEntity" ae
     JOIN "Entity" e ON e."id" = ae."entityId"
     WHERE ae."assetId" = ANY(${assetIds})
+      -- 種別を person / tag に限る。Entity の RLS は素通しなので、place を含めると
+      -- 上位機密の聖地名が「タグ/人物: …」のスニペットとして部分一致だけで出てしまう
+      -- (getEntityNames 側は元から同じ絞りを入れている)
+      AND e.type IN ('person', 'tag')
       AND (${Prisma.join(
         likePatterns.flatMap((pat, i) => [
           Prisma.sql`e."canonicalName" ILIKE ${pat}`,

@@ -45,7 +45,7 @@ export default async function EntityDetailPage({
   const session = await auth();
   const userClearance = session!.user.clearance as ClearanceLevel;
 
-  const entity = await getCachedEntityById(id);
+  const entity = await getCachedEntityById(id, userClearance);
 
   if (!entity) notFound();
 
