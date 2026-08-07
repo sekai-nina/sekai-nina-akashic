@@ -139,7 +139,7 @@ async function getEntityNames(
     SELECT ae."assetId", e."canonicalName" as name, e.type
     FROM "AssetEntity" ae
     JOIN "Entity" e ON e.id = ae."entityId"
-    WHERE ae."assetId"::text = ANY(${assetIds})
+    WHERE ae."assetId" = ANY(${assetIds})
       AND e.type IN ('person', 'tag')
   `;
   const persons = new Map<string, string[]>();
@@ -167,7 +167,7 @@ async function getBodyPreviews(
   const rows = await tx.$queryRaw<Array<{ assetId: string; content: string }>>`
     SELECT DISTINCT ON (t."assetId") t."assetId", t."content"
     FROM "AssetText" t
-    WHERE t."assetId"::text = ANY(${assetIds})
+    WHERE t."assetId" = ANY(${assetIds})
       AND t."textType" IN ('message_body', 'body')
     ORDER BY t."assetId",
       CASE t."textType" WHEN 'message_body' THEN 0 WHEN 'body' THEN 1 ELSE 2 END
@@ -200,16 +200,25 @@ async function getTextMatches(
     ", "
   )})`;
 
+  // assetId に ::text を付けると AssetText_assetId_idx が使えなくなるので付けない。
+  // 本文の条件は列を式で包んで PGroonga 索引を使わせない。ページ内の 20 件から
+  // 一致箇所を切り出すだけの後処理で、本文側の索引に載せると 7 万行を走らせる
+  // 計画に倒れうるため、必ず assetId で駆動させる。
   const rows = await tx.$queryRaw<Array<{ assetId: string; textType: string; content: string }>>`
     SELECT DISTINCT ON (t."assetId")
       t."assetId", t."textType",
-      substring(t."content" FROM GREATEST(1, ${positionExpression} - 150) FOR 800) as content
+      CASE WHEN ${positionExpression} = 999999
+        -- 生の content には一致が無い (改行を挟む・全角半角が違う等で正規化列だけで
+        -- 一致した) 場合。そのまま窓を切ると空文字列になり、スニペットが消える
+        THEN substring(t."content" FROM 1 FOR 800)
+        ELSE substring(t."content" FROM GREATEST(1, ${positionExpression} - 150) FOR 800)
+      END as content
     FROM "AssetText" t
-    WHERE t."assetId"::text = ANY(${assetIds})
+    WHERE t."assetId" = ANY(${assetIds})
       AND (${Prisma.join(
         likePatterns.flatMap((pat, i) => [
-          Prisma.sql`t."content" ILIKE ${pat}`,
-          Prisma.sql`t."normalizedContent" ILIKE ${normalizedLikePatterns[i]}`,
+          Prisma.sql`(t."content" || '') ILIKE ${pat}`,
+          Prisma.sql`(t."normalizedContent" || '') ILIKE ${normalizedLikePatterns[i]}`,
         ]),
         " OR "
       )})
@@ -236,7 +245,7 @@ async function getMatchingEntityNames(
     SELECT DISTINCT ON (ae."assetId") ae."assetId", e."canonicalName" as name
     FROM "AssetEntity" ae
     JOIN "Entity" e ON e."id" = ae."entityId"
-    WHERE ae."assetId"::text = ANY(${assetIds})
+    WHERE ae."assetId" = ANY(${assetIds})
       AND (${Prisma.join(
         likePatterns.flatMap((pat, i) => [
           Prisma.sql`e."canonicalName" ILIKE ${pat}`,
@@ -305,17 +314,23 @@ interface AssetRow {
 export async function search(query: SearchQuery, clearance: string): Promise<SearchResult> {
   const { q, target = "all", page = 1, perPage = 20 } = query;
   const offset = (page - 1) * perPage;
-  const hasKeyword = q.trim().length > 0;
 
   // URL は "/" を含むので、OR 分割せず1語として扱う
   const urlCandidates = urlMatchCandidates(q);
   const isUrlQuery = urlCandidates.length > 0;
 
-  // "/" 区切りで OR 検索
-  const terms = hasKeyword ? splitQueryTerms(q) : [];
+  // "/" 区切りで OR 検索。
+  // 正規化後に空になる語 (例: "{{IMG:abc}}" は normalizeText が空にする) は落とす。
+  // 残すと `&@ ''` になり全件に一致してしまう。
+  const rawTerms = q.trim().length > 0 ? splitQueryTerms(q) : [];
+  const terms = rawTerms.filter((t) => normalizeText(t).length > 0);
   const normalizedTerms = terms.map((t) => normalizeText(t));
   const likePatterns = terms.map((t) => `%${t}%`);
   const normalizedLikePatterns = normalizedTerms.map((t) => `%${t}%`);
+
+  // 語が 1 つも残らなければキーワード検索は成立しない。
+  // ここで倒しておかないと Prisma.join([]) が例外を投げて 500 になる ("/" だけの入力など)。
+  const hasKeyword = terms.length > 0;
 
   const assetWhereConditions: Prisma.Sql[] = [];
 
@@ -381,12 +396,21 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
   }
 
   // 一致条件はソースごとに分けて UNION する。
-  // OR でまとめてしまうと trigram インデックスが使えず Asset 全件走査になる
+  // OR でまとめてしまうとインデックスが使えず Asset 全件走査になる
   // (計測: 84,966行の Seq Scan で 920ms → ソース別 UNION で 205ms)。
-  const anyOf = (column: Prisma.Sql, patterns: string[]) =>
-    Prisma.sql`(${Prisma.join(patterns.map((pat) => Prisma.sql`${column} ILIKE ${pat}`), " OR ")})`;
+  //
+  // 一致判定は PGroonga の &@ を使う。ILIKE (texticlike) は leakproof ではなく、
+  // RLS が有効なテーブルでは RLS ポリシーより先に評価できないため索引が効かない。
+  // &@ (pgroonga_match_text) は leakproof なので RLS を保ったまま索引が使える
+  // (app_runtime / clearance=restricted で Asset.title「にぃたん」449ms → 5.9ms)。
+  const matchAny = (column: Prisma.Sql, words: string[]) =>
+    Prisma.sql`(${Prisma.join(words.map((w) => Prisma.sql`${column} &@ ${w}`), " OR ")})`;
 
-  /** 素の列と正規化列の両方に対する一致条件 */
+  /**
+   * 素の列と正規化列の両方に対する一致条件。Entity 用に ILIKE のまま残している。
+   * Entity は 441 行しかなく、このブランチは RLS 下でも 3.0ms で終わるため
+   * PGroonga 索引を張る必要がない (pg_trgm 索引もそのまま使える)。
+   */
   const plainOrNormalized = (plain: Prisma.Sql, normalized: Prisma.Sql) =>
     Prisma.sql`(${Prisma.join(
       likePatterns.flatMap((pat, i) => [
@@ -434,14 +458,14 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
     if (searchAssetFields) {
       branches.push(Prisma.sql`
         SELECT a."id", 3 AS rank FROM "Asset" a
-        WHERE ${anyOf(Prisma.sql`a."title"`, likePatterns)} ${assetFilters}`);
+        WHERE ${matchAny(Prisma.sql`a."title"`, terms)} ${assetFilters}`);
       branches.push(Prisma.sql`
         SELECT a."id", 2 AS rank FROM "Asset" a
-        WHERE ${anyOf(Prisma.sql`a."description"`, likePatterns)} ${assetFilters}`);
+        WHERE ${matchAny(Prisma.sql`a."description"`, terms)} ${assetFilters}`);
       // COALESCE で包むとインデックスが使えなくなるので、NULL はそのまま外れさせる
       branches.push(Prisma.sql`
         SELECT a."id", 1 AS rank FROM "Asset" a
-        WHERE ${anyOf(Prisma.sql`a."messageBodyPreview"`, likePatterns)} ${assetFilters}`);
+        WHERE ${matchAny(Prisma.sql`a."messageBodyPreview"`, terms)} ${assetFilters}`);
       branches.push(Prisma.sql`
         SELECT ae."assetId" AS id, 2 AS rank
         FROM "AssetEntity" ae
@@ -450,11 +474,14 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
         WHERE ${plainOrNormalized(Prisma.sql`e."canonicalName"`, Prisma.sql`e."normalizedName"`)} ${filtersIfJoined}`);
     }
     if (searchTextContent) {
+      // 本文は normalizedContent だけを見る。normalizeText() が {{IMG:xxx}} の除去と
+      // 空白圧縮までしているので素の content より取りこぼしが少なく、両方を OR で
+      // 見ていたときの 9.6s が 2.0s になる (RLS 下・PGroonga 導入前の計測)。
       branches.push(Prisma.sql`
         SELECT t."assetId" AS id, 1 AS rank
         FROM "AssetText" t
         ${joinAssetForTextFilters}
-        WHERE ${plainOrNormalized(Prisma.sql`t."content"`, Prisma.sql`t."normalizedContent"`)} ${filtersIfJoined}`);
+        WHERE ${matchAny(Prisma.sql`t."normalizedContent"`, normalizedTerms)} ${filtersIfJoined}`);
     }
   } else {
     // キーワード無しはフィルタだけで絞る
@@ -465,24 +492,34 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
   // 以前は「タイトル等」「タグ名」「本文」を別々のクエリで LIMIT していたため、
   // マージ時に溢れた一致がどのページにも現れなかった。候補を1つに束ねて
   // count(*) OVER () で総数も同時に取る。
+  //
+  // count(*) OVER () は窓の全行を実体化するので、その段では id / rank /
+  // ソート日付だけに絞る (ordered CTE)。description や messageBodyPreview まで
+  // 載せると 1 文字クエリ (「の」= 70,156 件) で tuplestore が膨れ、
+  // 本体クエリだけで 13.0s かかっていた。表示用の列は 20 件に絞ってから引く。
   const rows = await withClearance(clearance, (tx) =>
     tx.$queryRaw<Array<AssetRow & { rank: number; total_count: bigint }>>`
       WITH matched AS (
         ${Prisma.join(branches, " UNION ALL ")}
       ), ranked AS (
         SELECT id, max(rank) AS rank FROM matched GROUP BY id
+      ), ordered AS (
+        SELECT r."id", r."rank",
+          COALESCE(a."canonicalDate", a."createdAt") AS sort_date,
+          count(*) OVER () AS total_count
+        FROM ranked r
+        JOIN "Asset" a ON a."id" = r."id"
+        ORDER BY r."rank" DESC, sort_date DESC, r."id" ASC
+        LIMIT ${perPage} OFFSET ${offset}
       )
       SELECT
         a."id", a."title", a."description", a."kind", a."status",
         a."thumbnailUrl", a."storageUrl", a."storageProvider", a."storageKey",
         a."messageBodyPreview", a."createdAt", a."canonicalDate",
-        r."rank", count(*) OVER () AS total_count
-      FROM ranked r
-      JOIN "Asset" a ON a."id" = r."id"
-      ORDER BY r."rank" DESC,
-        COALESCE(a."canonicalDate", a."createdAt") DESC,
-        a."id" ASC
-      LIMIT ${perPage} OFFSET ${offset}
+        o."rank", o."total_count"
+      FROM ordered o
+      JOIN "Asset" a ON a."id" = o."id"
+      ORDER BY o."rank" DESC, o."sort_date" DESC, o."id" ASC
     `
   );
 
@@ -492,9 +529,16 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
     return { items: [], total, page, perPage };
   }
 
-  const termsLower = terms.map((t) => t.toLowerCase());
+  // 一致判定は SQL 側 (PGroonga + NormalizerNFKC130) と同じ土俵に揃える。
+  // 生の文字列比較のままだと、NFKC で畳んで拾えた行 (「日向坂46」→「日向坂４６」、
+  // 「！」→「!」) が「一致元不明」に落ち、ハイライトも一致件数も付かないまま出る。
   const matchesAny = (text: string | null) =>
-    hasKeyword && !!text && termsLower.some((t) => text.toLowerCase().includes(t));
+    hasKeyword &&
+    !!text &&
+    (() => {
+      const normalized = normalizeText(text);
+      return normalizedTerms.some((t) => normalized.includes(t));
+    })();
 
   // アセット行だけで一致箇所が分かるものと、本文/タグを引き当てる必要があるものを分ける
   const needsLookup = rows.filter(
