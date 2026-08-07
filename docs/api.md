@@ -42,7 +42,7 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 | POST | `/assets` | write | アセット作成 |
 | GET | `/assets/:id` | read | アセット詳細 |
 | PATCH | `/assets/:id` | write | アセット更新 |
-| GET | `/assets/:id/thumbnail` | セッション or read | サムネイルへ 302 リダイレクト（`<img>` 埋め込み用。同一オリジンの `<img>` はセッション cookie で通る。clearance の RLS 適用） |
+| GET | `/assets/:id/thumbnail` | セッション or read | サムネイルへ 302 リダイレクト（`<img>` 埋め込み用。同一オリジンの `<img>` はセッション cookie で通る。clearance の RLS 適用。サムネイルが無ければ 404） |
 | GET | `/assets/search` | read | 全文検索 |
 | GET | `/entities` | read | エンティティ一覧・検索 |
 | POST | `/entities` | write | エンティティ作成 |
@@ -445,6 +445,14 @@ curl -X POST http://localhost:3000/api/v1/upload \
 GET /assets/:id → response.thumbnailUrl または response.storageUrl を取得
 GET <そのパス> → 画像バイナリ
 ```
+
+### 動画のサムネイル
+
+**`/api/drive-image/<fileId>` を動画のサムネイルとして使ってはいけない。** このエンドポイントは Drive のファイル実体をそのまま返すため、動画アセットでは `video/mp4` が返る（`storageKey` は mp4 本体の fileId）。`<img>` では表示できず、かつ mp4 全体が毎回転送される。ダウンロード用途（`?download=1`）でのみ使う。
+
+同様に `storageUrl` も Drive の閲覧ページ（HTML）の URL なので `<img>` には使えない。
+
+動画のサムネイルは R2 上の実体（`thumbnailUrl`）のみが正となる。元画像には Drive が自動生成したサムネイル（`thumbnailLink`, 実測 640x360 程度）を使い、`pnpm cli:thumbnails --kind=video` で生成・登録する。まだ生成されていない動画は `thumbnailUrl` が `null` になるので、呼び出し側でプレースホルダを出すこと。
 
 ---
 
