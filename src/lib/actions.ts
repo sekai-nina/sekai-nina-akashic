@@ -215,6 +215,8 @@ export async function addEntityToAsset(assetId: string, formData: FormData) {
   const roleLabel = (formData.get("roleLabel") as string) || null;
 
   if (!canonicalName) return;
+  // 聖地は Place と対で作る必要があるので、この汎用フォームからは作らせない
+  if (entityType === "place") return;
 
   const entity = await prisma.entity.upsert({
     where: { type_canonicalName: { type: entityType, canonicalName } },
@@ -247,18 +249,6 @@ export async function removeEntityFromAsset(assetId: string, entityId: string) {
   );
   backupAssetToDrive(assetId).catch(() => {});
   revalidatePath(`/assets/${assetId}`);
-}
-
-export async function searchEntities(query: string, type?: EntityType) {
-  if (!query.trim()) return [];
-  const where: Record<string, unknown> = {
-    OR: [
-      { canonicalName: { contains: query, mode: "insensitive" } },
-      { normalizedName: { contains: normalizeText(query), mode: "insensitive" } },
-    ],
-  };
-  if (type) where.type = type;
-  return prisma.entity.findMany({ where: where as never, take: 20, orderBy: { canonicalName: "asc" } });
 }
 
 // ========== AssetText ==========
