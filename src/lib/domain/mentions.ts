@@ -90,6 +90,9 @@ export async function searchMentions(
           FROM "AssetEntity" ae2
           JOIN "Entity" e2 ON e2."id" = ae2."entityId"
           WHERE ae2."assetId" = a."id"
+            -- 種別を person / tag に限る。Entity の RLS は素通しなので、place を含めると
+            -- 上位機密の聖地名が「関連:」欄と CSV に出てしまう
+            AND e2.type IN ('person', 'tag')
         ) as "linkedEntities",
         (
           SELECT string_agg(
