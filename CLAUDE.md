@@ -39,7 +39,6 @@ pnpm build            # prisma generate && next build
 pnpm db:generate      # Prisma Client 再生成（schema 変更後に必須）
 pnpm db:studio        # Prisma Studio
 pnpm db:seed
-pnpm bot              # Discord bot をローカル実行
 ```
 
 `pnpm cli:*` は運用スクリプト群（`import` / `backup` / `restore` / `thumbnails` / `keygen` 等）。`src/cli/` 参照。
@@ -64,7 +63,7 @@ withSession({ id, clearance }, tx => …)    // 上記 + app.user_id — Dossier
 |---|---|
 | ユーザーへのデータ返却 / CRUD | `withClearance` |
 | Dossier 系（所有者判定が要る） | `withSession` |
-| CLI・Bot・全体統計 | `prismaInternal` |
+| CLI・全体統計 | `prismaInternal` |
 | `User` / `Entity` など非保護テーブル | 素の `prisma` |
 
 - トランザクションの既定タイムアウトは **15,000ms**（Prisma 既定 5s だと重い集約が P2028 になるため引き上げ済み）
@@ -100,7 +99,6 @@ src/
 │   ├── search/index.ts     # 検索サービス層
 │   ├── mcp/                # MCP サーバー（ツール定義・射影・エンティティ解決）
 │   └── r2/, drive/, thumbnails/, twitter/, supabase/, …
-├── bot/            # Discord bot
 ├── cli/            # tsx 実行スクリプト
 └── middleware.ts
 ```
@@ -138,7 +136,6 @@ src/
 | Supabase | Auth + Postgres | `src/lib/supabase/{client,server,admin}.ts` |
 | Cloudflare R2 | サムネイル等 | S3 互換。`isR2Configured()` で任意化 |
 | Google Drive | 画像ソース | OAuth2（個人）/ サービスアカウント（共有ドライブ）の 2 方式 |
-| Discord | `/akashic` コマンド + 「Akashicに登録」 | VPS 上で pm2 (`akashic-bot`) |
 | X (Twitter) | recent search | 有料プラン必須 |
 | OpenAI | 口コミ抽出（Structured Outputs） | |
 
@@ -149,7 +146,7 @@ src/
 ## デプロイ
 
 - **Web: Vercel**。`vercel.json` で **region `hnd1` 固定**（Supabase ap-northeast-1 とのコロケーション。既定の iad1 だとページ読み込みが 5-8 秒かかった）
-- **Bot: VPS + pm2**。`.github/workflows/deploy.yml` が push to `main` で `pnpm typecheck` → SSH で `pm2 restart akashic-bot`
+- **CI**: `.github/workflows/ci.yml` が push to `main` で `pnpm typecheck` を回すだけ（Discord bot は撤去済み）
 - `instrumentation.ts` が起動時に Prisma を事前接続（pooler の ~800ms コールドコネクト回避）
 
 ## ドキュメント
