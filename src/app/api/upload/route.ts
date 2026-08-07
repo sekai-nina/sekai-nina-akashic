@@ -40,7 +40,9 @@ export async function POST(request: Request) {
   const kind = kindOverride || guessMimeKind(mimeType);
 
   // Check duplicate
-  const existing = await prisma.asset.findFirst({ where: { sha256 } });
+  const existing = await withClearance(session.user.clearance, (tx) =>
+    tx.asset.findFirst({ where: { sha256 } })
+  );
   if (existing) {
     return NextResponse.json({
       duplicate: true,
@@ -79,34 +81,38 @@ export async function POST(request: Request) {
     );
   }
 
-  const asset = await prisma.asset.create({
-    data: {
-      kind,
-      title: title || file.name,
-      description: "",
-      status: "inbox",
-      sourceType: "manual",
-      storageProvider,
-      storageUrl,
-      storageKey,
-      sha256,
-      originalFilename: file.name,
-      mimeType,
-      fileSize: buffer.length,
-      thumbnailUrl,
-      createdById: session.user.id,
-      updatedById: session.user.id,
-    },
-  });
+  const asset = await withClearance(session.user.clearance, (tx) =>
+    tx.asset.create({
+      data: {
+        kind,
+        title: title || file.name,
+        description: "",
+        status: "inbox",
+        sourceType: "manual",
+        storageProvider,
+        storageUrl,
+        storageKey,
+        sha256,
+        originalFilename: file.name,
+        mimeType,
+        fileSize: buffer.length,
+        thumbnailUrl,
+        createdById: session.user.id,
+        updatedById: session.user.id,
+      },
+    })
+  );
 
   // Generate R2 thumbnails for images (async, non-blocking for response)
   if (kind === "image") {
     const r2Url = await generateAndUploadThumbnails(asset.id, buffer);
     if (r2Url) {
-      await prisma.asset.update({
-        where: { id: asset.id },
-        data: { thumbnailUrl: r2Url },
-      });
+      await withClearance(session.user.clearance, (tx) =>
+        tx.asset.update({
+          where: { id: asset.id },
+          data: { thumbnailUrl: r2Url },
+        })
+      );
     }
   }
 
