@@ -58,6 +58,8 @@ pnpm cli:keygen <user-email> <key-name>
 
 ### `akashic_list_entities` のページング
 
+聖地エンティティ（`type: "place"`）は、紐づく `Place` の `classification` がキーのクリアランスを超える場合に除外される。`Entity` テーブルの RLS ポリシーは素通しなので、アプリ層で絞っている。
+
 `q` を省略したときだけ `page` / `perPage` によるページングが効き、`total`（総件数）を返す。`q` を指定すると上位 `perPage` 件までの打ち切りになり、総件数は分からないので `{ returned, perPage, hasMore, items }` を返す。
 
 ### 返却形式

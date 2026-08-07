@@ -340,6 +340,8 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 
 ### GET /entities
 
+聖地エンティティ（`type: "place"`）は、紐づく `Place` の `classification` がキーのクリアランスを超える場合に除外される。`GET /entities/:id` も同条件で `404` を返す。
+
 **クエリパラメータ:**
 
 | パラメータ | 型 | デフォルト | 説明 |
@@ -376,6 +378,8 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 ```
 
 ### POST /entities
+
+`type: "place"` は受け付けない（`400`）。聖地は `Place` と対で作る必要があるため `POST /places` を使う。
 
 エンティティを作成する。同じ `type` + `canonicalName` が既に存在する場合は、既存のものがそのまま返る（upsert）。
 

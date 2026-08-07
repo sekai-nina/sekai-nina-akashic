@@ -65,10 +65,19 @@ withSession({ id, clearance }, tx => …)    // 上記 + app.user_id — Dossier
 | Dossier 系（所有者判定が要る） | `withSession` |
 | CLI・全体統計 | `prismaInternal` |
 | `User` / `Entity` など非保護テーブル | 素の `prisma` |
+| `Entity` を**一覧・検索で返す**とき | `listEntities` / `searchEntities` / `getEntityById`（後述） |
 
 - トランザクションの既定タイムアウトは **15,000ms**（Prisma 既定 5s だと重い集約が P2028 になるため引き上げ済み）
 - RLS は読みを守るが、**自分より上のクリアランスを付けて書く操作はアプリ層で止める** → `src/lib/classification.ts` の `assertClearance`
 - 生 SQL は `classificationFilterSql` を通す
+
+#### `Entity` の place だけはクリアランスで絞る
+
+`Entity` の RLS ポリシーは `USING (true)` の素通しなので、`type: "place"` のエンティティは**紐づく `Place` が上位機密でも名前と説明が誰にでも列挙できる**（`Place` 側の RLS は Place 行しか守らない）。
+
+`Entity` は CLI のバックアップを含め 30 箇所以上から素の `prisma` で触られており、DB 側のポリシーを締めると `app.clearance` 未設定の経路が無言で 0 行になる（= バックアップから聖地が欠落する）。加えて索引も効かなくなる。そのため**アプリ層で塞いでいる** → `src/lib/domain/entities.ts` の `entityClearanceWhere()`。
+
+ユーザーに Entity を返す経路（`listEntities` / `searchEntities` / `getEntityById` / `src/lib/cache.ts` の `getCachedEntity*`）はすべてこれを通す。`entityClearanceWhere` は **`withClearance` の中でしか使えない**（素の `prisma` から使うと `Place` の RLS で全 place エンティティが消える）。
 
 ### 保護テーブル
 
