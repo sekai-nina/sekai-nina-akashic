@@ -1,5 +1,6 @@
 import { visit } from "unist-util-visit";
 import type { Root, Text, Html, Parent, RootContent } from "mdast";
+import { replaceOutsideTags } from "./html-text";
 
 /**
  * Obsidian の `[[記事名]]` / `[[記事名|表示名]]` を記事へのリンクに変換する。
@@ -20,7 +21,7 @@ export function remarkWikilinks(resolve: (title: string) => string | undefined) 
   const toHtml = (title: string, label: string) => {
     const shortId = resolve(title);
     return shortId
-      ? `<a class="wikilink" href="/articles/${shortId}">${label}</a>`
+      ? `<a class="wikilink" href="/articles/${escapeHtml(shortId)}">${label}</a>`
       : `<span class="wikilink wikilink-missing" title="未作成の記事">${label}</span>`;
   };
 
@@ -28,8 +29,10 @@ export function remarkWikilinks(resolve: (title: string) => string | undefined) 
     // コールアウトのタイトル等、先行プラグインが生 HTML にした部分も拾う
     visit(tree, "html", (node: Html) => {
       if (!node.value.includes("[[")) return;
-      node.value = node.value.replace(WIKILINK, (_m, t: string, d?: string) =>
-        toHtml(t.trim(), escapeHtml((d ?? t).trim())),
+      node.value = replaceOutsideTags(node.value, (text) =>
+        text.replace(WIKILINK, (_m, t: string, d?: string) =>
+          toHtml(t.trim(), escapeHtml((d ?? t).trim())),
+        ),
       );
     });
 

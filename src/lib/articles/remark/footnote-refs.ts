@@ -1,5 +1,6 @@
 import { visit } from "unist-util-visit";
 import type { Root, Text, Html, Parent, RootContent } from "mdast";
+import { replaceOutsideTags } from "./html-text";
 
 /**
  * 本文中の `^[n]` を出典一覧へのアンカーリンクに変換する。
@@ -21,9 +22,10 @@ export function remarkFootnoteRefs() {
     // 先に走る remarkObsidianCallouts がコールアウトのタイトルを生 HTML ノードに
     // 変換してしまうため、text ノードだけを見ていると中の ^[n] を取りこぼす。
     visit(tree, "html", (node: Html) => {
-      if (node.value.includes("^[")) {
-        node.value = node.value.replace(/\^\[(\d+)\]/g, (_, n) => toAnchor(n));
-      }
+      if (!node.value.includes("^[")) return;
+      node.value = replaceOutsideTags(node.value, (t) =>
+        t.replace(/\^\[(\d+)\]/g, (_, n) => toAnchor(n)),
+      );
     });
 
     visit(tree, "text", (node: Text, index: number | undefined, parent: Parent | undefined) => {
