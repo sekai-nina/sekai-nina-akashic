@@ -35,6 +35,7 @@ pnpm cli:keygen <user-email> <key-name>
 - 認証は `Authorization: Bearer ak_<64hex>`。キーが無効・未指定なら **401**、キーは有効だが `read` を持たないなら **403**（`{"error":"Missing permission: read"}`）
 - **キーの `permissions` によって見えるツールが変わる。** `write` を持たないキーには書き込みツールが `tools/list` に出ない（呼んでも `Tool ... not found`）
 - クリアランスは**キーの持ち主ユーザーのもの**が使われる。読み取りは RLS が、書き込みは `assertClearance` が上位機密の作成を止める
+- **既存レコードの機密レベルは引き上げしかできない。** `akashic_update_asset` / `akashic_update_place` に現在より低い `classification` を渡すとエラーになる。`assertClearance` は「自分のクリアランスより上を付ける」操作しか止めず、引き下げ (例: `restricted` → `public`) は素通りするため。MCP は LLM がツールを呼ぶ経路なので、プロンプトインジェクション 1 回で機密アセットを公開扱いに落とせないようアプリ層で塞いでいる。引き下げは画面から人間が行う
 - 専用のクリアランスを与えたい場合は、AI 用のユーザーを作ってそのユーザーでキーを発行する
 
 ## ツール一覧
@@ -122,6 +123,12 @@ AI は `entityId` を知らないので `entityNames` に名前を渡す。正�
 明示指定 > Discord 情報があれば `discord` > `manual`。
 
 `web` を指定するとブログ扱いになり、`OPENAI_API_KEY` があれば口コミ抽出がバックグラウンドで走る。ブログのアーカイブ以外では指定しない。
+
+### 入力は zod で検証する
+
+MCP のツール引数はもともと zod で検証されるが、REST の `POST /api/v1/assets` は `body as CreateAssetData` の無検証キャストだった。リクエスト JSON の任意のキーが `createAsset` の `...assetFields` 経由で `asset.create` に流れるため、クライアントが `id` を指定できてしまう。
+
+`src/lib/domain/asset-intake.ts` の `AssetIntakeSchema` を REST と共有し、**未知のキーは黙って除去**（拒否ではない）、既知のキーは型を検証する。既存クライアントを壊さないため `classification: ""` は未指定扱いとし、日付は `YYYY-MM-DD` と ISO 8601 の両方を受ける。
 
 ### 本文の更新は非破壊
 
