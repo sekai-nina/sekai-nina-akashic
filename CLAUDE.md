@@ -82,6 +82,7 @@ RLS は `clearance_rank(classification::text) <= clearance_rank(current_setting(
 - Supabase Auth（`@supabase/ssr`）。招待制。**MFA 全ユーザー必須**（`src/middleware.ts` が未登録/未検証をリダイレクト）
 - `auth()` は `React.cache` でリクエスト内 1 回、DB 引きは 5 分キャッシュ
 - 外部システム向けは API キー認証（`Authorization: Bearer ak_<64hex>`）。`requireApiAuth(request, "read"|"write")` は **`ApiKeyUser | NextResponse` を返すので分岐が必須**
+- AI アシスタント向けは MCP サーバー（`POST /api/mcp`）。認証は同じ API キーで、**キーの `permissions` によって `tools/list` に出るツールが変わる** → `docs/mcp.md`
 
 ## 構成
 
@@ -97,6 +98,7 @@ src/
 │   ├── actions.ts          # 汎用 Server Actions
 │   ├── domain/             # ビジネスロジック（coverage, dossiers, assets, …）
 │   ├── search/index.ts     # 検索サービス層
+│   ├── mcp/                # MCP サーバー（ツール定義・射影・エンティティ解決）
 │   └── r2/, drive/, thumbnails/, twitter/, supabase/, …
 ├── bot/            # Discord bot
 ├── cli/            # tsx 実行スクリプト
@@ -156,6 +158,7 @@ src/
 |---|---|
 | `docs/security-dev.md` | **開発者向け鉄則。認可まわりはこれが正** |
 | `docs/api.md` | REST API v1 の完全仕様 |
+| `docs/mcp.md` | MCP サーバー（`/api/mcp`）の仕様と設計判断 |
 | `docs/coverage-design.md` | 収集カバレッジ設計書 |
 | `docs/security.md` / `docs/security-admin.md` | 非エンジニア / 管理者向け |
 | ~~`docs/architecture.md`~~ | **陳腐化**（Next.js 15 / NextAuth / Collection の記述）。参照しない |
