@@ -16,6 +16,7 @@ import { remarkFootnoteRefs } from "./remark/footnote-refs";
 import { remarkTweets } from "./remark/tweets";
 import { remarkWikilinks } from "./remark/wikilinks";
 import { remarkTableWrapper } from "./remark/table-wrapper";
+import { rehypeDropEmptyParagraphs } from "./remark/drop-empty-paragraphs";
 
 /**
  * 記事本文の Markdown を HTML にする。
@@ -34,14 +35,15 @@ function buildProcessor(resolveWikilink: (title: string) => string | undefined) 
     .use(remarkGfm)
     .use(remarkMath)
     .use(remarkCardLink)
+    // akashic 独自: X の画像記法を埋め込み用 blockquote にする。
+    // figureCaption より前に置く。後ろだと画像が先に figure へ畳まれて届かない
+    .use(remarkTweets)
     .use(remarkObsidianCallouts)
     .use(remarkFigureCaption)
     .use(remarkBreaks)
     .use(remarkQuoteMarkers)
     // akashic 独自: ^[n] を出典一覧へのアンカーにする
     .use(remarkFootnoteRefs)
-    // akashic 独自: X の画像記法を埋め込み用 blockquote にする
-    .use(remarkTweets)
     // akashic 独自: [[記事名]] を記事へのリンクにする
     .use(remarkWikilinks(resolveWikilink))
     // akashic 独自: 表を横スクロール用のラッパーで包む
@@ -50,6 +52,8 @@ function buildProcessor(resolveWikilink: (title: string) => string | undefined) 
     .use(remarkRehype, { allowDangerousHtml: true })
     .use(rehypeRaw)
     .use(rehypeKatex)
+    // blockquote が段落を割ってできる空段落を落とす
+    .use(rehypeDropEmptyParagraphs)
     .use(rehypeStringify, { allowDangerousHtml: true });
 }
 
