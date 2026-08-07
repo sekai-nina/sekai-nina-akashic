@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { listEditableDossiers } from "@/lib/domain/dossiers";
 import { getCachedEntityList } from "@/lib/cache";
 import { GalleryGrid } from "./gallery-grid";
+import type { ClearanceLevel } from "@prisma/client";
 
 const PAGE_SIZE = 40;
 const NINA_ENTITY_ID = "cmmtp8vrg0004mo381neyztvn";
@@ -35,7 +36,7 @@ export default async function GalleryPage() {
         },
       })
     ),
-    getCachedEntityList(),
+    getCachedEntityList(session!.user.clearance as ClearanceLevel),
   ]);
 
   const blogEntity = entities.find(

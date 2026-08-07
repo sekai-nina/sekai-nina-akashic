@@ -36,7 +36,7 @@ export default async function DashboardPage() {
       getCachedInboxCount(clearance),
       getCachedKindCountsRecent(clearance),
       getCachedNinaStatsRecent(),
-      getCachedEntityList(),
+      getCachedEntityList(clearance),
     ]);
 
   // 検索側の mode プリセットを廃止したので、ここでタグ ID を解決してリンクする

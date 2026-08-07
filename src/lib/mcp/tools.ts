@@ -304,7 +304,12 @@ function registerReadTools(server: McpServer, { user, baseUrl }: ToolContext) {
       if (q && q.trim()) {
         // searchEntities は総件数を数えないので total は返さない (打ち切り後の件数を
         // total と称すると、AI が「これで全部」と誤認する)
-        const items = await searchEntities(q.trim(), type as EntityType | undefined, limit);
+        const items = await searchEntities(
+          q.trim(),
+          type as EntityType | undefined,
+          limit,
+          user.clearance
+        );
         return ok({
           returned: items.length,
           perPage: limit,
