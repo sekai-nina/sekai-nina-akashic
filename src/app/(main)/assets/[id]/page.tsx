@@ -677,7 +677,9 @@ export default async function AssetDetailPage({
               <form action={addEntityToAsset.bind(null, id)} className="mt-2 space-y-2">
                 <div className="flex gap-2">
                   <select name="entityType" className="border border-slate-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    {Object.entries(ENTITY_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    {Object.entries(ENTITY_TYPE_LABELS)
+                      .filter(([v]) => v !== "place")
+                      .map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                   </select>
                   <input type="text" name="canonicalName" required className="flex-1 min-w-0 border border-slate-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="正規名" />
                 </div>
