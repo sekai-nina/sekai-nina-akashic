@@ -127,7 +127,14 @@ src/
 - `ClearanceLevel` = public / internal / confidential / restricted
 - **`Collection` は `Dossier`（特定支援）に置き換え済み。** 旧名が RLS migration 等に残っている
 
-検索は **pg_trgm + ILIKE**。PGroonga は導入後に撤去済み（`20260428000000_drop_pgroonga`）。
+検索は **PGroonga**（`&@` 演算子）。トークナイザは `TokenNgram`（`unify_alphabet` / `unify_digit` / `unify_symbol` をすべて無効）、ノーマライザは `NormalizerNFKC130`。
+
+- **ILIKE は RLS 下でインデックスが効かない。** `texticlike` が leakproof でないため RLS ポリシーより先に評価できず、必ず Seq Scan になる。PGroonga のマッチ演算子は leakproof なので RLS を保ったまま索引が使える（`20260807000000_add_pgroonga_indexes`）
+- **PGroonga 索引を張った列では `ILIKE` も PGroonga 経由になる。** トークナイザ設定を誤ると `&@` だけでなく既存の ILIKE クエリまで取りこぼす。索引を張った列に ILIKE を当てる箇所（`getTextMatches` 等）は列を `(col || '')` で包んで素の ILIKE に落としてある
+- 索引がある列: `Asset.title` / `.description` / `.messageBodyPreview`、`AssetText.normalizedContent`。`Entity` は 441 行しかないので pg_trgm + ILIKE のまま
+  - `20260807010000_drop_trgm_indexes` のコメントは「`Entity` は RLS 対象外」と書いているが**誤り**。`Entity` にも RLS は張られていて、ポリシーが `USING (true)` なので security qual が実質消えて索引が効いているだけ。ポリシーを非自明な条件に締めた瞬間、ILIKE は無言で Seq Scan に戻る
+- **PGroonga 索引は `pg_relation_size` が 0 bytes、`pg_stat_user_indexes.idx_scan` も増えない。** 実体を Groonga がヒープ外に持つため。未使用インデックスの棚卸しで誤って削除候補に挙げないこと
+- ILIKE との一致は `pnpm cli:verify-pgroonga` で突き合わせる
 
 ## 外部サービス
 

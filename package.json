@@ -26,7 +26,8 @@
     "cli:sync-members": "tsx src/cli/sync-members.ts",
     "cli:merge-entities": "tsx src/cli/merge-entities.ts",
     "cli:normalize-source-urls": "tsx src/cli/normalize-source-urls.ts",
-    "cli:import-articles": "tsx src/cli/import-articles.ts"
+    "cli:import-articles": "tsx src/cli/import-articles.ts",
+    "cli:verify-pgroonga": "tsx src/cli/verify-pgroonga.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
