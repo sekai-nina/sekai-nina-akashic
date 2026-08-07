@@ -194,8 +194,15 @@ export async function removeArticleSource(id: string, clearance: string) {
  * Article は非保護テーブルなので withClearance は不要。
  */
 export async function getWikilinkMap(): Promise<Map<string, string>> {
-  const rows = await prisma.article.findMany({ select: { shortId: true, title: true } });
-  return new Map(rows.map((r) => [r.title, r.shortId]));
+  // 同じタイトルの記事が実在する (【2年目】参加したライブ・披露曲一覧 が 2 件)。
+  // 並び順を固定しないと、その記事への wikilink が実行ごとに別の記事へ飛ぶ。
+  const rows = await prisma.article.findMany({
+    select: { shortId: true, title: true },
+    orderBy: [{ publishedAt: "asc" }, { shortId: "asc" }],
+  });
+  const map = new Map<string, string>();
+  for (const r of rows) if (!map.has(r.title)) map.set(r.title, r.shortId);
+  return map;
 }
 
 /** 記事一覧の上部に出すサマリー (種別ごとの件数と未解決の総数) */
