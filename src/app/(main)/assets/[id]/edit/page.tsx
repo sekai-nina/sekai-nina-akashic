@@ -19,6 +19,7 @@ import { SubmitButton } from "@/components/submit-button";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
+import { entityClearanceWhere } from "@/lib/domain/entities";
 
 
 const TEXT_TYPE_LABELS: Record<string, string> = {
@@ -61,6 +62,7 @@ export default async function AssetEditPage({
       include: {
         texts: { orderBy: { createdAt: "asc" } },
         entities: {
+          where: { entity: entityClearanceWhere(session!.user.clearance) },
           include: { entity: true },
           orderBy: { createdAt: "asc" },
         },

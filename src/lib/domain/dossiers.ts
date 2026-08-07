@@ -7,6 +7,7 @@ import type {
 import { withSession } from "@/lib/db";
 import { canEditDossier, canManageDossier } from "@/lib/auth/dossier-permissions";
 import { logAudit } from "./audit";
+import { entityClearanceWhere } from "./entities";
 
 interface ActingUser {
   id: string;
@@ -139,6 +140,7 @@ export async function getDossierForApi(user: ActingUser, id: string) {
                   },
                 },
                 entities: {
+                  where: { entity: entityClearanceWhere(user.clearance) },
                   select: {
                     roleLabel: true,
                     entity: { select: { type: true, canonicalName: true } },
