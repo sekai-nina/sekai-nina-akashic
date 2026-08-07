@@ -19,7 +19,7 @@ export async function findOrCreateEntity(type: EntityType, canonicalName: string
   });
 }
 
-export async function searchEntities(query: string, type?: EntityType) {
+export async function searchEntities(query: string, type?: EntityType, take: number = 20) {
   const normalizedQuery = normalizeText(query);
 
   return prisma.entity.findMany({
@@ -30,7 +30,7 @@ export async function searchEntities(query: string, type?: EntityType) {
         mode: "insensitive",
       },
     },
-    take: 20,
+    take,
     orderBy: { canonicalName: "asc" },
   });
 }

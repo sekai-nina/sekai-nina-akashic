@@ -35,7 +35,13 @@ export async function middleware(request: NextRequest) {
   const isMfaExempt = MFA_EXEMPT_PREFIXES.some((p) => pathname.startsWith(p));
 
   // MFA enforcement using session claims (no additional API call)
-  if (session?.user && !isMfaExempt && !pathname.startsWith("/api/v1/")) {
+  // APIキー認証のエンドポイント (/api/v1/, /api/mcp) はセッションを持たないので対象外
+  if (
+    session?.user &&
+    !isMfaExempt &&
+    !pathname.startsWith("/api/v1/") &&
+    !pathname.startsWith("/api/mcp")
+  ) {
     const factors = session.user.factors;
     const hasMfaEnrolled = factors && factors.length > 0;
     const hasVerifiedFactor = factors?.some((f) => f.status === "verified");
