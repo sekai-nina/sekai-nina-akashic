@@ -20,7 +20,16 @@ import {
   downloadFromDrive,
 } from "../lib/drive/index.js";
 
-const prisma = new PrismaClient();
+// datasources.url は undefined でも型エラーにならず、schema の env("DATABASE_URL") に
+// 無言でフォールバックする。それだと RLS で 0 行になるので、ここで止める。
+if (!process.env.DIRECT_URL) {
+  console.error("DIRECT_URL が未設定です (このスクリプトは RLS バイパス接続が必須)");
+  process.exit(1);
+}
+
+// リストアは既存行の有無を正しく見る必要があるため DIRECT_URL (RLS バイパス) を使う。
+// 既定の DATABASE_URL だと既存行が見えず、重複レコードを作ってしまう。
+const prisma = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL } } });
 
 async function downloadJson<T>(fileId: string): Promise<T> {
   const buffer = await downloadFromDrive(fileId);

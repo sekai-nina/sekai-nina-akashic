@@ -8,7 +8,16 @@
 import "dotenv/config";
 import { PrismaClient, Prisma } from "@prisma/client";
 
-const prisma = new PrismaClient();
+// datasources.url は undefined でも型エラーにならず、schema の env("DATABASE_URL") に
+// 無言でフォールバックする。それだと RLS で 0 行になるので、ここで止める。
+if (!process.env.DIRECT_URL) {
+  console.error("DIRECT_URL が未設定です (このスクリプトは RLS バイパス接続が必須)");
+  process.exit(1);
+}
+
+// AssetText / AssetRelation を全件走査するため DIRECT_URL (RLS バイパス) を使う。
+// 既定の DATABASE_URL だと app.clearance 未設定で無言の 0 行になる。
+const prisma = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL } } });
 const dryRun = process.argv.includes("--dry-run");
 
 const IMG_REGEX = /\{\{IMG:([a-zA-Z0-9_-]+)\}\}/g;
