@@ -1,14 +1,6 @@
 import * as z from "zod";
+import { $Enums } from "@prisma/client";
 import type { McpServer } from "@modelcontextprotocol/server";
-import type {
-  AssetKind,
-  AssetStatus,
-  ClearanceLevel,
-  EntityType,
-  SourceType,
-  TextType,
-  TrustLevel,
-} from "@prisma/client";
 import type { ApiKeyUser } from "@/lib/api-auth";
 import { withClearance } from "@/lib/db";
 import { assertClearance, isClassificationDowngrade } from "@/lib/classification";
@@ -19,7 +11,11 @@ import { intakeAsset } from "@/lib/domain/asset-intake";
 import { listEntities, searchEntities } from "@/lib/domain/entities";
 import { createPlace, getPlaceById, listPlaces, updatePlace } from "@/lib/domain/places";
 import { search, type SearchQuery } from "@/lib/search";
-import { normalizeText } from "@/lib/utils";
+import {
+  normalizeText,
+  ASSET_STATUS_LABELS,
+  ENTITY_TYPE_LABELS,
+} from "@/lib/utils";
 import { resolveGoogleMapsUrl } from "@/lib/places/resolve-google-maps-url";
 import { logMcpToolCall } from "./audit";
 import { entityResolutionHint, resolveEntityNames } from "./entity-resolution";
@@ -29,27 +25,16 @@ import { toAssetDetail, toEntitySummary, toPlaceSummary, toSearchItem } from "./
 // 共通ヘルパー
 // ============================================================
 
-const ASSET_KINDS = ["image", "video", "audio", "text", "document", "other"] as const;
-const ASSET_STATUSES = ["inbox", "triaging", "organized", "archived"] as const;
-const TRUST_LEVELS = ["unverified", "low", "medium", "high", "official"] as const;
-const SOURCE_TYPES = ["web", "manual", "discord", "import"] as const;
-const ENTITY_TYPES = ["person", "place", "source", "event", "tag"] as const;
-const CLEARANCE_LEVELS = ["public", "internal", "confidential", "restricted"] as const;
-const TEXT_TYPES = [
-  "title",
-  "body",
-  "description",
-  "message_body",
-  "ocr",
-  "transcript",
-  "note",
-  "extracted",
-  "annotation",
-] as const;
 
 // 形式だけでなく暦日として存在するかも見る。new Date("2026-02-30") は例外にならず
 // 3/2 にロールオーバーするので、正規表現だけだと無言のデータ破損になる。
 const DEFAULT_PER_PAGE = 20;
+/** 検索は 1 件あたりのスニペットが大きいので上限を低めにする */
+const MAX_SEARCH_PER_PAGE = 50;
+/** エンティティは 1 件が小さいので多めに返せる */
+const MAX_ENTITY_PER_PAGE = 100;
+/** 未知エラーの詳細をツール結果に載せる最大長 */
+const ERROR_DETAIL_MAX_LENGTH = 200;
 
 const DATE_ONLY = z
   .string()
@@ -79,6 +64,25 @@ function fail(message: string, detail?: Record<string, unknown>) {
       },
     ],
   };
+}
+
+/** enum の説明文を `*_LABELS` から生成する。直書きすると画面表示とズレる */
+function describeEnum(labels: Record<string, string>): string {
+  return Object.entries(labels)
+    .map(([k, v]) => `${k}=${v}`)
+    .join(" / ");
+}
+
+/** classification がキーのクリアランスを超えていれば失敗結果を返す。問題なければ null。 */
+function rejectAboveClearance(user: ApiKeyUser, classification: $Enums.ClearanceLevel) {
+  try {
+    assertClearance(user.clearance, classification);
+    return null;
+  } catch {
+    return fail(
+      `クリアランス (${user.clearance}) を超える classification (${classification}) は指定できません。`
+    );
+  }
 }
 
 /**
@@ -140,7 +144,7 @@ function toToolError(err: unknown, fallback: string) {
   }
 
   // 未知のエラーは 1 行目だけ返す（スタックとクエリは落とす）
-  return fail(fallback, { detail: message.split("\n")[0].slice(0, 200) });
+  return fail(fallback, { detail: message.split("\n")[0].slice(0, ERROR_DETAIL_MAX_LENGTH) });
 }
 
 function hasWrite(user: ApiKeyUser): boolean {
@@ -195,12 +199,12 @@ function registerReadTools(server: McpServer, { user, baseUrl }: ToolContext) {
           .optional()
           .describe("既定は all。texts にすると本文のみを検索する"),
         kinds: z
-          .array(z.enum(ASSET_KINDS))
+          .array(z.enum($Enums.AssetKind))
           .optional()
           .describe("アセット種別で絞る (複数指定は OR)"),
-        status: z.enum(ASSET_STATUSES).optional(),
-        trustLevel: z.enum(TRUST_LEVELS).optional(),
-        sourceType: z.enum(SOURCE_TYPES).optional(),
+        status: z.enum($Enums.AssetStatus).optional(),
+        trustLevel: z.enum($Enums.TrustLevel).optional(),
+        sourceType: z.enum($Enums.SourceType).optional(),
         entityNames: z
           .array(z.string())
           .optional()
@@ -212,7 +216,7 @@ function registerReadTools(server: McpServer, { user, baseUrl }: ToolContext) {
         dateFrom: DATE_ONLY.optional().describe("公開日/放送日の下限 (JST)"),
         dateTo: DATE_ONLY.optional().describe("公開日/放送日の上限 (JST)"),
         page: z.number().int().min(1).optional(),
-        perPage: z.number().int().min(1).max(50).optional().describe("既定 20、最大 50"),
+        perPage: z.number().int().min(1).max(MAX_SEARCH_PER_PAGE).optional().describe(`既定 ${DEFAULT_PER_PAGE}、最大 ${MAX_SEARCH_PER_PAGE}`),
       }),
       annotations: { readOnlyHint: true },
     },
@@ -246,10 +250,10 @@ function registerReadTools(server: McpServer, { user, baseUrl }: ToolContext) {
       const query: SearchQuery = {
         q: args.q,
         target: args.target ?? "all",
-        kinds: args.kinds as AssetKind[] | undefined,
-        status: args.status as AssetStatus | undefined,
-        trustLevel: args.trustLevel as TrustLevel | undefined,
-        sourceType: args.sourceType as SourceType | undefined,
+        kinds: args.kinds,
+        status: args.status,
+        trustLevel: args.trustLevel,
+        sourceType: args.sourceType,
         entityIds,
         entityMatch: args.entityMatch,
         dateFrom: args.dateFrom ? parseDateOnly(args.dateFrom) ?? undefined : undefined,
@@ -314,11 +318,11 @@ function registerReadTools(server: McpServer, { user, baseUrl }: ToolContext) {
               "q を指定した場合はページングが効かず、上位 perPage 件までを返す (総件数は分からない)"
           ),
         type: z
-          .enum(ENTITY_TYPES)
+          .enum($Enums.EntityType)
           .optional()
-          .describe("person=メンバー等の人物 / place=聖地 / tag=タグ / event=イベント / source=情報源"),
+          .describe(describeEnum(ENTITY_TYPE_LABELS)),
         page: z.number().int().min(1).optional().describe("q 省略時のみ有効"),
-        perPage: z.number().int().min(1).max(100).optional().describe("既定 20、最大 100"),
+        perPage: z.number().int().min(1).max(MAX_ENTITY_PER_PAGE).optional().describe(`既定 ${DEFAULT_PER_PAGE}、最大 ${MAX_ENTITY_PER_PAGE}`),
       }),
       annotations: { readOnlyHint: true },
     },
@@ -330,7 +334,7 @@ function registerReadTools(server: McpServer, { user, baseUrl }: ToolContext) {
         // total と称すると、AI が「これで全部」と誤認する)
         const items = await searchEntities(
           q.trim(),
-          type as EntityType | undefined,
+          type,
           limit,
           user.clearance
         );
@@ -343,7 +347,7 @@ function registerReadTools(server: McpServer, { user, baseUrl }: ToolContext) {
       }
 
       const result = await listEntities(
-        type as EntityType | undefined,
+        type,
         page ?? 1,
         limit,
         user.clearance
@@ -398,14 +402,14 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
         "エンティティは名前で指定でき、既存に一致したものだけが紐づく " +
         "(一致しない名前は unresolvedEntities として返る)。",
       inputSchema: z.object({
-        kind: z.enum(ASSET_KINDS).describe("アセット種別。Discord のテキスト投稿なら text"),
+        kind: z.enum($Enums.AssetKind).describe("アセット種別。Discord のテキスト投稿なら text"),
         title: z.string().describe("タイトル。一覧で識別できる短い日本語"),
         description: z.string().optional(),
         bodyText: z.string().optional().describe("本文。AssetText(body) として保存される"),
         canonicalDate: DATE_ONLY.optional().describe("公開日・放送日 (JST)。投稿日ではなく内容の日付"),
-        trustLevel: z.enum(TRUST_LEVELS).optional().describe("既定は unverified"),
+        trustLevel: z.enum($Enums.TrustLevel).optional().describe("既定は unverified"),
         sourceType: z
-          .enum(SOURCE_TYPES)
+          .enum($Enums.SourceType)
           .optional()
           .describe(
             "省略時は discord 情報があれば discord、無ければ manual。" +
@@ -424,7 +428,7 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
               "表記ゆれで重複タグが増えるので、既存に無いと確認できたときだけ使う"
           ),
         classification: z
-          .enum(CLEARANCE_LEVELS)
+          .enum($Enums.ClearanceLevel)
           .optional()
           .describe("機密レベル。既定は internal。自分のクリアランスより上は指定できない"),
         discordGuildId: z.string().optional(),
@@ -438,14 +442,9 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
     },
     async (args) => {
-      const classification = (args.classification ?? "internal") as ClearanceLevel;
-      try {
-        assertClearance(user.clearance, classification);
-      } catch {
-        return fail(
-          `クリアランス (${user.clearance}) を超える classification (${classification}) は指定できません。`
-        );
-      }
+      const classification = (args.classification ?? "internal");
+      const above = rejectAboveClearance(user, classification);
+      if (above) return above;
 
       const resolution = args.entityNames?.length
         ? await resolveEntityNames(args.entityNames, {
@@ -457,7 +456,7 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
       const hasDiscord = Boolean(
         args.discordMessageId || args.discordMessageUrl || args.discordChannelId
       );
-      const sourceType = (args.sourceType ?? (hasDiscord ? "discord" : "manual")) as SourceType;
+      const sourceType = (args.sourceType ?? (hasDiscord ? "discord" : "manual"));
 
       let discordPostedAt: Date | null = null;
       if (args.discordPostedAt) {
@@ -473,13 +472,13 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
       try {
         const asset = await intakeAsset(
           {
-            kind: args.kind as AssetKind,
+            kind: args.kind,
             classification,
             title: args.title,
             description: args.description,
             // MCP 経由の作成は必ず仕分け待ちに入れる
             status: "inbox",
-            trustLevel: args.trustLevel as TrustLevel | undefined,
+            trustLevel: args.trustLevel,
             canonicalDate: args.canonicalDate ? parseDateOnly(args.canonicalDate) : null,
             sourceType,
             discordGuildId: args.discordGuildId ?? null,
@@ -490,7 +489,7 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
             discordAuthorName: args.discordAuthorName ?? null,
             discordPostedAt,
             texts: args.bodyText?.trim()
-              ? [{ textType: "body" as TextType, content: args.bodyText.trim() }]
+              ? [{ textType: "body", content: args.bodyText.trim() }]
               : undefined,
             entities: resolution?.resolved.map((e) => ({ entityId: e.id })),
             sourceRecords: args.sourceUrl
@@ -543,13 +542,13 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
         title: z.string().optional(),
         description: z.string().optional(),
         status: z
-          .enum(ASSET_STATUSES)
+          .enum($Enums.AssetStatus)
           .optional()
-          .describe("inbox=仕分け待ち / triaging=仕分け中 / organized=整理済み / archived=保管"),
-        trustLevel: z.enum(TRUST_LEVELS).optional(),
+          .describe(describeEnum(ASSET_STATUS_LABELS)),
+        trustLevel: z.enum($Enums.TrustLevel).optional(),
         canonicalDate: DATE_ONLY.optional().describe("公開日・放送日 (JST)"),
         classification: z
-          .enum(CLEARANCE_LEVELS)
+          .enum($Enums.ClearanceLevel)
           .optional()
           .describe(
             "機密レベル。**引き上げのみ可能**で、現在より低い値を指定するとエラーになる " +
@@ -558,7 +557,7 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
         upsertTexts: z
           .array(
             z.object({
-              textType: z.enum(TEXT_TYPES),
+              textType: z.enum($Enums.TextType),
               content: z.string(),
               language: z.string().optional(),
             })
@@ -572,13 +571,8 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
     },
     async (args) => {
       if (args.classification) {
-        try {
-          assertClearance(user.clearance, args.classification as ClearanceLevel);
-        } catch {
-          return fail(
-            `クリアランス (${user.clearance}) を超える classification (${args.classification}) は指定できません。`
-          );
-        }
+        const above = rejectAboveClearance(user, args.classification);
+      if (above) return above;
       }
 
       // 存在チェックだけなので本文まで引かない。直後に updateAsset が
@@ -610,12 +604,12 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
           {
             title: args.title,
             description: args.description,
-            status: args.status as AssetStatus | undefined,
-            trustLevel: args.trustLevel as TrustLevel | undefined,
+            status: args.status,
+            trustLevel: args.trustLevel,
             canonicalDate: args.canonicalDate ? parseDateOnly(args.canonicalDate) : undefined,
-            classification: args.classification as ClearanceLevel | undefined,
+            classification: args.classification,
             upsertTexts: args.upsertTexts?.map((t) => ({
-              textType: t.textType as TextType,
+              textType: t.textType,
               content: t.content,
               language: t.language,
             })),
@@ -677,21 +671,16 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
         description: z.string().optional().describe("何の聖地かの説明 (出演回・エピソード等)"),
         aliases: z.array(z.string()).optional().describe("別名・通称"),
         classification: z
-          .enum(CLEARANCE_LEVELS)
+          .enum($Enums.ClearanceLevel)
           .optional()
           .describe("既定は internal。自分のクリアランスより上は指定できない"),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
     },
     async (args) => {
-      const classification = (args.classification ?? "internal") as ClearanceLevel;
-      try {
-        assertClearance(user.clearance, classification);
-      } catch {
-        return fail(
-          `クリアランス (${user.clearance}) を超える classification (${classification}) は指定できません。`
-        );
-      }
+      const classification = (args.classification ?? "internal");
+      const above = rejectAboveClearance(user, classification);
+      if (above) return above;
 
       let latitude = args.latitude;
       let longitude = args.longitude;
@@ -784,7 +773,7 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
         address: z.string().optional(),
         description: z.string().optional(),
         classification: z
-          .enum(CLEARANCE_LEVELS)
+          .enum($Enums.ClearanceLevel)
           .optional()
           .describe(
             "機密レベル。**引き上げのみ可能**で、現在より低い値を指定するとエラーになる " +
@@ -795,13 +784,8 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
     },
     async (args) => {
       if (args.classification) {
-        try {
-          assertClearance(user.clearance, args.classification as ClearanceLevel);
-        } catch {
-          return fail(
-            `クリアランス (${user.clearance}) を超える classification (${args.classification}) は指定できません。`
-          );
-        }
+        const above = rejectAboveClearance(user, args.classification);
+      if (above) return above;
       }
 
       const existing = await getPlaceById(args.id, user.clearance);
@@ -843,7 +827,7 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
             googleMapsUrl,
             address: args.address,
             description: args.description,
-            classification: args.classification as ClearanceLevel | undefined,
+            classification: args.classification,
           },
           user.clearance
         );
