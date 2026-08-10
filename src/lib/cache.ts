@@ -18,6 +18,21 @@ export function invalidateAssets() {
   revalidateTag(CACHE_TAGS.stats, "max");
 }
 
+/**
+ * 一覧系だけを飛ばす。統計 (stats) は据え置く。
+ *
+ * stats タグの getCachedDashboardStats / getCachedNinaStatsRecent はどちらも
+ * revalidate 60 秒なので放っておいても 1 分で更新される。一方 getDashboardStats は
+ * Asset 12 万件に対する 16 本のサブクエリなので、外部 bot が 1 件ずつ POST する
+ * たびに飛ばすと、次にダッシュボードを開いた人が毎回その再計算を待つことになる。
+ *
+ * 人間が画面から操作したとき (actions.ts / quick-create) は即座に反映されてほしいので
+ * invalidateAssets を使う。外部からの取り込みはこちら。
+ */
+export function invalidateAssetList() {
+  revalidateTag(CACHE_TAGS.assets, "max");
+}
+
 export function invalidateEntities() {
   revalidateTag(CACHE_TAGS.entities, "max");
 }

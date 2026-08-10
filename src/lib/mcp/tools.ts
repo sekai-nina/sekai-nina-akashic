@@ -14,7 +14,7 @@ import { withClearance } from "@/lib/db";
 import { assertClearance, isClassificationDowngrade } from "@/lib/classification";
 import { invalidateAssets, invalidatePlaces } from "@/lib/cache";
 import { parseDateOnly } from "@/lib/domain/coverage";
-import { getAsset, updateAsset } from "@/lib/domain/assets";
+import { getAsset, getAssetClassification, updateAsset } from "@/lib/domain/assets";
 import { intakeAsset } from "@/lib/domain/asset-intake";
 import { listEntities, searchEntities } from "@/lib/domain/entities";
 import { createPlace, getPlaceById, listPlaces, updatePlace } from "@/lib/domain/places";
@@ -62,7 +62,9 @@ const DATE_ONLY = z
 /** ツール結果 (成功) — JSON をテキストとして返す */
 function ok(payload: unknown) {
   return {
-    content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
+    // インデントは付けない。AI 向け出力に整形は不要で、実測でトークンが 36% 増える
+    // (同じ検索結果が pretty 27,575 文字 / compact 20,201 文字)
+    content: [{ type: "text" as const, text: JSON.stringify(payload) }],
   };
 }
 
@@ -579,7 +581,9 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
         }
       }
 
-      const existing = await getAsset(args.id, user.clearance);
+      // 存在チェックだけなので本文まで引かない。直後に updateAsset が
+      // リレーション込みで取り直すため、フル取得だと本文を 2 回転送することになる
+      const existing = await getAssetClassification(args.id, user.clearance);
       if (!existing) {
         return fail(
           "アセットが見つかりません。ID が誤っているか、クリアランスが足りず参照できません。",
