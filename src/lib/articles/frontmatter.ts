@@ -1,3 +1,4 @@
+import { ArticleType } from "@prisma/client";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 /**
@@ -42,8 +43,9 @@ export const INTENTIONAL_NORMALIZATIONS = [
   "url / label / ref がすべて空の source エントリは捨てる (下書きの空テンプレート)",
   "type: fact / state → attribute (Astro 側の transform に合わせる)",
   "false の draft / unlisted / ongoing と空の tags / source はキーごと省く (Astro の既定値と同じ)",
-  "キーの順序は KNOWN_FRONTMATTER_KEYS 順 + frontmatterExtra の順に揃える",
+  "キーの順序は KNOWN_FRONTMATTER_KEYS 順が先、frontmatterExtra 由来のキーが後 (extra 内の順序は jsonb なので保存されない)",
   "本文先頭の空行は 1 行に揃える (Markdown の描画には影響しない)",
+  "文字列値は前後の空白を落とす",
 ] as const;
 
 export type ArticleSourceEntry = {
@@ -94,6 +96,13 @@ const str = (v: unknown): string | undefined => {
   return s === "" ? undefined : s;
 };
 
+/** `Number(v) || undefined` だと 0 や "0" を落とすので、有限かどうかで見る */
+const num = (v: unknown): number | undefined => {
+  if (v == null || v === "") return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+};
+
 /**
  * source[] を正規化する。
  * - `lable` は `label` の誤記 (attribute/好奇心がある.md に実在する) なので吸収する
@@ -113,7 +122,7 @@ function normalizeSources(value: unknown): ArticleSourceEntry[] {
     if (item == null || typeof item !== "object") continue;
     const raw = item as Record<string, unknown>;
     const entry: ArticleSourceEntry = {
-      id: typeof raw.id === "number" ? raw.id : Number(raw.id) || undefined,
+      id: num(raw.id),
       url: str(raw.url),
       label: str(raw.label) ?? str(raw.lable),
       date: str(raw.date),
@@ -146,7 +155,10 @@ export function parseArticle(raw: string): ParsedArticle {
     frontmatter,
     extra,
     sources: normalizeSources(frontmatter.source),
-    body: body.replace(/^\r?\n/, ""),
+    // serializeArticle は先頭の改行を全部落として `---\n\n` を付け直すので、
+    // ここも全部落として対称にする。1 個だけ剥がすと本文が `\n` 始まりの
+    // まま DB に入り、ファイルと永久に食い違う (実記事 332 本中 50 本が該当)
+    body: body.replace(/^(\r?\n)+/, ""),
   };
 }
 
@@ -164,27 +176,41 @@ const DATE_ONLY = /^(\d{4})-(\d{1,2})-(\d{1,2})$/;
  *
  * ゼロ埋めを自前で補うのは、`new Date("2026-01-8")` が **ローカルタイム**
  * 解釈になり、同じズレを踏むため。
+ *
+ * **暦日として存在しない日付は `null` にする。** `new Date("2026-02-30")` は
+ * Invalid にならず 3/2 に繰り上がるので、そのまま通すと打ち間違いが別の
+ * もっともらしい日付として DB に入り、push で原本を書き換えてしまう
+ * (`src/lib/mcp/tools.ts` の日付検証と同じ往復チェック)。
  */
 export function parseFrontmatterDate(value: unknown): Date | null {
   if (value == null || value === "") return null;
-  if (value instanceof Date) return value;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : new Date(value.getTime());
+  }
   const s = String(value).trim();
   const m = DATE_ONLY.exec(s);
   if (m) {
     const [, y, mo, d] = m;
-    return new Date(`${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}T00:00:00.000Z`);
+    const iso = `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
+    const parsed = new Date(`${iso}T00:00:00.000Z`);
+    if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== iso) return null;
+    return parsed;
   }
-  const d = new Date(s);
-  return Number.isNaN(d.getTime()) ? null : d;
+  const parsed = new Date(s);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 /**
  * DateTime を frontmatter の日付表記に戻す。
  *
  * 取り込み時、日付のみの表記は **UTC 深夜** として保存している
- * (src/cli/import-articles.ts の `toDate`)。したがって UTC 深夜ちょうどなら
- * 元も日付のみだったとみなして `YYYY-MM-DD` に戻す。そうでなければ時刻成分が
- * 書かれていたということなので (`updated_at` に 59 件実在する) ISO のまま返す。
+ * (`parseFrontmatterDate`)。したがって UTC 深夜ちょうどなら元も日付のみだった
+ * とみなして `YYYY-MM-DD` に戻し、そうでなければ時刻成分が書かれていたと
+ * みなして ISO のまま返す。
+ *
+ * 実記事の `date` / `published_at` / `updated_at` は現状すべて日付のみなので
+ * 後者は保険。`dossier.updated_at` のような入れ子の日時は `frontmatterExtra` に
+ * JSON のまま入るので、この関数を通らない。
  */
 export function formatFrontmatterDate(value: Date | string | null | undefined): string | undefined {
   const d = parseFrontmatterDate(value);
@@ -193,11 +219,82 @@ export function formatFrontmatterDate(value: Date | string | null | undefined): 
   return iso.endsWith("T00:00:00.000Z") ? iso.slice(0, 10) : iso;
 }
 
+const ARTICLE_TYPES = new Set<string>(Object.values(ArticleType));
+
+/** frontmatter の型を Article.type に落とす。Astro 側の transform に合わせる */
+function toType(v: unknown): ArticleType | null {
+  if (v == null) return null;
+  let s = String(v).trim();
+  if (s === "fact" || s === "state") s = "attribute";
+  return ARTICLE_TYPES.has(s) ? (s as ArticleType) : null;
+}
+
+function toBool(v: unknown): boolean {
+  return v === true || v === "true";
+}
+
+function toNum(v: unknown): number | null {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * `toArticleColumns` の戻り。`Article` の frontmatter 由来カラムと本文。
+ *
+ * そのまま `prisma.article.upsert` に渡せるよう、`type` は enum に絞る
+ * (`ArticleFrontmatterInput` 側は書き出し専用なので string も許している)。
+ */
+export interface ArticleColumns extends ArticleFrontmatterInput {
+  path: string;
+  slug: string | null;
+  body: string;
+  type: ArticleType | null;
+  title: string;
+  tags: unknown[];
+  frontmatterExtra: Record<string, unknown>;
+  sources: ArticleSourceEntry[];
+}
+
+/**
+ * パース結果を Article のカラムに落とす。**取り込みと往復テストの両方がこれを使う。**
+ *
+ * `buildFrontmatter` のちょうど逆向き。片方だけ直すと往復が崩れるので、
+ * この 2 つは必ず同じファイルに置いて一緒に直す。CLI 側にコピーを持つと
+ * 「テストは通るが本番の取り込みは別の規則で動く」状態になる。
+ */
+export function toArticleColumns(parsed: ParsedArticle, path: string): ArticleColumns {
+  const { frontmatter: fm, extra, sources, body } = parsed;
+  return {
+    shortId: fm.short_id == null ? "" : String(fm.short_id).trim(),
+    path,
+    // 空文字はキーが無いのと同じ (buildFrontmatter も Astro も同一視する)。
+    // ここで揃えないと "" のまま DB に入り、往復で null になって差分が出る
+    slug: str(fm.slug) ?? null,
+    title: fm.title == null ? "" : String(fm.title),
+    type: toType(fm.type),
+    tags: Array.isArray(fm.tags) ? fm.tags : [],
+    body,
+    date: parseFrontmatterDate(fm.date),
+    dateDisplay: str(fm.date_display) ?? null,
+    dateMode: str(fm.date_mode) ?? null,
+    publishedAt: parseFrontmatterDate(fm.published_at),
+    articleUpdatedAt: parseFrontmatterDate(fm.updated_at),
+    draft: toBool(fm.draft),
+    unlisted: toBool(fm.unlisted),
+    ongoing: toBool(fm.ongoing),
+    lat: toNum(fm.lat),
+    lng: toNum(fm.lng),
+    frontmatterExtra: extra,
+    sources,
+  };
+}
+
 /** `buildFrontmatter` の入力。Article の行と、それに紐づく出典 */
 export interface ArticleFrontmatterInput {
   shortId: string;
   title?: string | null;
-  type?: string | null;
+  type?: ArticleType | string | null;
   tags?: unknown;
   date?: Date | string | null;
   dateDisplay?: string | null;

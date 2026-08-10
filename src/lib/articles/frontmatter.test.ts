@@ -9,6 +9,7 @@ import {
   splitFrontmatter,
   type ArticleFrontmatterInput,
 } from "./frontmatter";
+import { roundtrip } from "./roundtrip";
 
 /**
  * 記事の frontmatter は push 時に DB のカラムから組み立て直される。
@@ -19,42 +20,6 @@ import {
  * を通しても frontmatter の値が変わらないこと。バイト単位の一致は保証しない
  * (意図的な正規化は frontmatter.ts の INTENTIONAL_NORMALIZATIONS を参照)。
  */
-
-/** parseArticle の結果を Article のカラム相当に分解する (import-articles.ts と同じ規則) */
-function toColumns(raw: string): ArticleFrontmatterInput & { body: string } {
-  const { frontmatter: fm, extra, sources, body } = parseArticle(raw);
-  const toDate = parseFrontmatterDate;
-  const toType = (v: unknown): string | null => {
-    if (v == null) return null;
-    const s = String(v).trim();
-    return s === "fact" || s === "state" ? "attribute" : s;
-  };
-  return {
-    shortId: String(fm.short_id ?? ""),
-    title: fm.title == null ? "" : String(fm.title),
-    type: toType(fm.type),
-    tags: Array.isArray(fm.tags) ? fm.tags : [],
-    date: toDate(fm.date),
-    dateDisplay: fm.date_display == null ? null : String(fm.date_display),
-    dateMode: fm.date_mode == null ? null : String(fm.date_mode),
-    publishedAt: toDate(fm.published_at),
-    articleUpdatedAt: toDate(fm.updated_at),
-    draft: fm.draft === true || fm.draft === "true",
-    unlisted: fm.unlisted === true || fm.unlisted === "true",
-    ongoing: fm.ongoing === true || fm.ongoing === "true",
-    lat: fm.lat == null ? null : Number(fm.lat),
-    lng: fm.lng == null ? null : Number(fm.lng),
-    frontmatterExtra: extra,
-    sources,
-    body,
-  };
-}
-
-/** ファイル 1 本を DB 経由で往復させる */
-export function roundtrip(raw: string): string {
-  const cols = toColumns(raw);
-  return serializeArticle(buildFrontmatter(cols), cols.body);
-}
 
 describe("splitFrontmatter", () => {
   it("frontmatter と本文を分ける", () => {
@@ -111,6 +76,12 @@ describe("parseArticle の source 正規化", () => {
     expect(sources).toEqual([]);
   });
 
+  it("id が 0 や文字列でも落とさない", () => {
+    // `Number(v) || undefined` だと 0 / "0" が undefined になる
+    const { sources } = parseArticle('---\nsource:\n  - id: 0\n    label: a\n  - id: "2"\n    label: b\n---\n\nx\n');
+    expect(sources.map((s) => s.id)).toEqual([0, 2]);
+  });
+
   it("source が配列でなければ空", () => {
     const { sources } = parseArticle("---\nsource:\n  id: 1\n  label: x\n---\n\nx\n");
     expect(sources).toEqual([]);
@@ -138,6 +109,29 @@ describe("parseFrontmatterDate", () => {
     expect(parseFrontmatterDate("")).toBeNull();
     expect(parseFrontmatterDate("これは日付ではない")).toBeNull();
   });
+
+  it("暦日として存在しない日付は null", () => {
+    // new Date("2026-02-30") は Invalid にならず 3/2 に繰り上がる。
+    // 素通しすると打ち間違いが別の日付として DB に入り、push で原本を書き換える
+    expect(parseFrontmatterDate("2026-02-30")).toBeNull();
+    expect(parseFrontmatterDate("2026-06-31")).toBeNull();
+    expect(parseFrontmatterDate("2026-13-01")).toBeNull();
+    expect(parseFrontmatterDate("2026-00-15")).toBeNull();
+    expect(parseFrontmatterDate("2026-1-99")).toBeNull();
+  });
+
+  it("Invalid Date を渡しても漏らさない", () => {
+    // 漏らすと formatFrontmatterDate が RangeError を投げて push が落ちる
+    expect(parseFrontmatterDate(new Date("nope"))).toBeNull();
+    expect(formatFrontmatterDate("2026-13-01")).toBeUndefined();
+    expect(formatFrontmatterDate(new Date("nope"))).toBeUndefined();
+  });
+
+  it("渡された Date を複製して返す", () => {
+    const input = new Date("2026-03-14T00:00:00.000Z");
+    expect(parseFrontmatterDate(input)).not.toBe(input);
+    expect(parseFrontmatterDate(input)?.toISOString()).toBe(input.toISOString());
+  });
 });
 
 describe("formatFrontmatterDate", () => {
@@ -146,7 +140,6 @@ describe("formatFrontmatterDate", () => {
   });
 
   it("時刻成分があれば ISO のまま返す", () => {
-    // updated_at に 59 件実在する
     expect(formatFrontmatterDate(new Date("2026-07-06T18:46:37.874Z"))).toBe("2026-07-06T18:46:37.874Z");
   });
 
