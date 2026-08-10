@@ -34,6 +34,21 @@ export const FAIL_REASON_LABELS: Record<FailReason, string> = {
 
 export type PickResult = { id: string | null; reason?: FailReason; candidates?: number };
 
+export interface PickOptions {
+  /**
+   * 日付の不一致を「別物」の根拠として使うか。
+   *
+   * `label` 照合は手がかりが弱いので **true**。同一ラベルで日付だけ違う
+   * エントリ (attribute/癖.md の `^[2]` `^[3]` が 3/7 と 3/20) が同じ Asset に
+   * 吸い込まれるのを防ぐ。`--create-missing` の再照合ループでもこれが効く。
+   *
+   * `url` 照合は完全一致なので **false**。日付は候補が複数のときの絞り込みに
+   * だけ使う。frontmatter の日付が放送日、Asset が配信日、のように正当に
+   * ずれることがあり、拒否権にすると正しい紐づけを永久に落とす。
+   */
+  strictDate?: boolean;
+}
+
 /** 候補マップに 1 件足す (同じ Asset は重複させない) */
 export function addCandidate(map: Map<string, Candidate[]>, key: string, c: Candidate): void {
   const list = map.get(key);
@@ -52,20 +67,27 @@ export function addCandidate(map: Map<string, Candidate[]>, key: string, c: Cand
  * 日付だけ違うエントリ (attribute/癖.md の `^[2]` `^[3]` が 3/7 と 3/20) が
  * 同じ Asset に吸い込まれるのを防ぐため。
  */
-export function pickCandidate(cands: Candidate[] | undefined, entryDate: Date | null): PickResult {
+export function pickCandidate(
+  cands: Candidate[] | undefined,
+  entryDate: Date | null,
+  opts: PickOptions = {},
+): PickResult {
   if (!cands || cands.length === 0) return { id: null, reason: "not_found" };
 
   if (entryDate) {
-    const dated = cands.filter((c) => c.date != null);
-    if (dated.length) {
-      const day = jstDayString(entryDate);
-      const matched = dated.filter((c) => jstDayString(c.date!) === day);
-      // 日付を持たない候補は日付で否定できないので残す
-      const pool = [...matched, ...cands.filter((c) => c.date == null)];
-      if (pool.length === 0) return { id: null, reason: "date_mismatch", candidates: cands.length };
-      if (pool.length === 1) return { id: pool[0].id };
-      return { id: null, reason: "ambiguous", candidates: pool.length };
-    }
+    const day = jstDayString(entryDate);
+    // 日付が一致する候補があるなら最優先で採る
+    const matched = cands.filter((c) => c.date != null && jstDayString(c.date) === day);
+    if (matched.length === 1) return { id: matched[0].id };
+    if (matched.length > 1) return { id: null, reason: "ambiguous", candidates: matched.length };
+
+    // 日付を持たない候補は日付で否定できない
+    const undated = cands.filter((c) => c.date == null);
+    if (undated.length === 1) return { id: undated[0].id };
+    if (undated.length > 1) return { id: null, reason: "ambiguous", candidates: undated.length };
+
+    // 候補はすべて日付つきで、どれとも一致しない
+    if (opts.strictDate) return { id: null, reason: "date_mismatch", candidates: cands.length };
   }
 
   if (cands.length === 1) return { id: cands[0].id };

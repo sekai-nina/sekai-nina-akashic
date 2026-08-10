@@ -52,14 +52,31 @@ describe("pickCandidate", () => {
     expect(pickCandidate(cands, articleDate("2025-12-25"))).toEqual({ id: "a" });
   });
 
-  it("日付を持つ候補しか無く、どれとも一致しなければ date_mismatch", () => {
-    // 同じラベルでも別の日の出来事なら、その Asset は正しい出典ではない
+  it("strictDate なら、日付が食い違う唯一の候補を否認する", () => {
+    // label 照合は手がかりが弱いので、同じラベルでも別の日の出来事なら別物とみなす。
+    // --create-missing の再照合ループでもこれが効き、癖.md の ^[2] ^[3] のような
+    // 「同一ラベル・日付違い」が同じ Asset に吸い込まれるのを防ぐ
     const cands = [{ id: "a", date: assetDate("2026-03-04") }];
-    expect(pickCandidate(cands, articleDate("2026-03-14"))).toEqual({
+    expect(pickCandidate(cands, articleDate("2026-03-14"), { strictDate: true })).toEqual({
       id: null,
       reason: "date_mismatch",
       candidates: 1,
     });
+  });
+
+  it("strictDate でなければ、日付が食い違っても唯一の候補を採る", () => {
+    // url 照合は完全一致なので、日付を拒否権にすると正しい紐づけを永久に落とす
+    // (frontmatter が放送日、Asset が配信日、のように正当にずれる実例がある)
+    const cands = [{ id: "a", date: assetDate("2026-04-27") }];
+    expect(pickCandidate(cands, articleDate("2026-05-24"))).toEqual({ id: "a" });
+  });
+
+  it("日付が一致する候補があれば、日付なし候補より優先する", () => {
+    const cands = [
+      { id: "undated", date: null },
+      { id: "matched", date: assetDate("2026-03-14") },
+    ];
+    expect(pickCandidate(cands, articleDate("2026-03-14"))).toEqual({ id: "matched" });
   });
 
   it("日付で 1 件に絞れなければ ambiguous", () => {

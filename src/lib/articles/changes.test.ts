@@ -135,6 +135,34 @@ describe("hasChanged", () => {
     expect(hasChanged(prev, next, sourcesOf(cols))).toBe(true);
   });
 
+  it("frontmatterExtra のキー順の違いは変更とみなさない", () => {
+    // jsonb は Postgres がキーを並べ替えて保存するので、素の JSON.stringify で
+    // 比べると内容が同じでも毎回「変わった」になり、差分スキップが効かない
+    // (実測で 332 件中 72 件が該当していた)
+    const { prev, cols } = baseline();
+    prev.frontmatterExtra = { related: ["x"], author: "a", author_icon: "i" };
+    const { sources: _s, ...next } = cols;
+    next.frontmatterExtra = { author: "a", author_icon: "i", related: ["x"] };
+    expect(hasChanged(prev, next, sourcesOf(cols))).toBe(false);
+  });
+
+  it("入れ子のキー順も無視する", () => {
+    const { prev, cols } = baseline();
+    prev.frontmatterExtra = { dossier: { id: "x", updated_at: "t" } };
+    const { sources: _s, ...next } = cols;
+    next.frontmatterExtra = { dossier: { updated_at: "t", id: "x" } };
+    expect(hasChanged(prev, next, sourcesOf(cols))).toBe(false);
+  });
+
+  it("配列の順序は変更とみなす", () => {
+    // tags や source[] は順序に意味がある
+    const { prev, cols } = baseline();
+    prev.frontmatterExtra = { related: ["a", "b"] };
+    const { sources: _s, ...next } = cols;
+    next.frontmatterExtra = { related: ["b", "a"] };
+    expect(hasChanged(prev, next, sourcesOf(cols))).toBe(true);
+  });
+
   it("解決先だけが変わった場合も検出する", () => {
     // 多重ヒットを unresolved に落とす変更で、カラムは同じでも
     // assetId / status が変わる。ここを見落とすと修正が反映されない

@@ -123,9 +123,14 @@ export async function listArticlesForPicker() {
  * 全件引いて構わない (リンクは 1 記事に複数あり、都度引くと N+1 になる)。
  */
 export async function getArticleTitleIndex(): Promise<Map<string, string>> {
-  const rows = await prisma.article.findMany({ select: { shortId: true, title: true } });
+  // orderBy が無いと Postgres の返す行順が不定になり、同名タイトルのとき
+  // リクエストごとに飛び先が変わる (実データに 1 組あり、実際にリンクされている)
+  const rows = await prisma.article.findMany({
+    select: { shortId: true, title: true },
+    orderBy: { shortId: "asc" },
+  });
   const map = new Map<string, string>();
-  // 同名タイトルは先勝ち (曖昧なので、どちらに飛ぶかは決め打ちでよい)
+  // 同名タイトルは先勝ち。どちらに飛ぶかは曖昧だが、決め打ちで安定させる
   for (const r of rows) if (r.title && !map.has(r.title)) map.set(r.title, r.shortId);
   return map;
 }

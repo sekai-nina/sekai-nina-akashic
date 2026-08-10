@@ -146,3 +146,19 @@ describe("記事間リンク", () => {
     expect(r.brokenLinks).toEqual(["ない記事"]);
   });
 });
+
+describe("Obsidian のエスケープされたパイプ", () => {
+  const links = new Map([["ハリー・ポッターが好き", "abc1234"]]);
+
+  it("テーブル内の [[題\\|表示]] を解決する", () => {
+    // Obsidian は Markdown テーブル内で | を \| にエスケープする。
+    // 宛先の末尾に \ が残ると実在する記事に解決できず、偽の broken 警告になる
+    const segs = parseBodySegments("| [[ハリー・ポッターが好き\\|ハリー・ポッター]] |", new Set(), links);
+    expect(segs).toContainEqual({ kind: "link", label: "ハリー・ポッター", shortId: "abc1234" });
+  });
+
+  it("エスケープされていても broken 扱いにしない", () => {
+    const r = auditFootnotes("[[ハリー・ポッターが好き\\|ハリー・ポッター]]", [], new Set(["ハリー・ポッターが好き"]));
+    expect(r.brokenLinks).toEqual([]);
+  });
+});

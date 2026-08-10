@@ -49,6 +49,27 @@ export interface ComparableArticle {
 
 const time = (d: Date | null | undefined) => (d == null ? null : d.getTime());
 
+/**
+ * オブジェクトのキーを再帰的に並べ替える。
+ *
+ * `frontmatterExtra` は **jsonb** なので、Postgres がキーを (長さ, バイト順) で
+ * 並べ替えて保存する。素の `JSON.stringify` で比べると、内容が同じでも
+ * 記述順と保存順が違うだけで「変わった」と言い続け、差分スキップが効かない
+ * (実測で 332 件中 72 件がキー順の差だけで毎回書き込まれていた)。
+ * 配列は順序に意味があるのでそのまま。
+ */
+function canonicalJson(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(canonicalJson);
+  if (v && typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    return Object.fromEntries(Object.keys(o).sort().map((k) => [k, canonicalJson(o[k])]));
+  }
+  return v;
+}
+
+const sameJson = (a: unknown, b: unknown) =>
+  JSON.stringify(canonicalJson(a)) === JSON.stringify(canonicalJson(b));
+
 export function hasChanged(
   prev: ComparableArticle,
   next: Omit<ArticleColumns, "sources">,
@@ -70,8 +91,9 @@ export function hasChanged(
     time(prev.date) !== time(next.date as Date | null) ||
     time(prev.publishedAt) !== time(next.publishedAt as Date | null) ||
     time(prev.articleUpdatedAt) !== time(next.articleUpdatedAt as Date | null) ||
+    // tags は配列で順序に意味があるので素の比較
     JSON.stringify(prev.tags) !== JSON.stringify(next.tags) ||
-    JSON.stringify(prev.frontmatterExtra) !== JSON.stringify(next.frontmatterExtra)
+    !sameJson(prev.frontmatterExtra, next.frontmatterExtra)
   ) {
     return true;
   }

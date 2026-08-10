@@ -104,15 +104,15 @@ async function main() {
   const warnings: string[] = [];
 
   for (const f of files) {
-    const raw = await readFile(f, "utf8");
-    const cols = toArticleColumns(parseArticle(raw), relative(DIR, f));
+    const parsedArticle = parseArticle(await readFile(f, "utf8"));
+    const cols = toArticleColumns(parsedArticle, relative(DIR, f));
     if (cols.shortId === "") {
       skipped.push(cols.path);
       continue;
     }
     // type が enum 外だと null になり、KNOWN キーなので frontmatterExtra にも
     // 退避されない = push でキーごと消える。黙って捨てずに知らせる
-    const rawType = parseArticle(raw).frontmatter.type;
+    const rawType = parsedArticle.frontmatter.type;
     if (rawType != null && cols.type == null) {
       warnings.push(`${cols.path}: type: ${String(rawType)} は ArticleType に無いので取り込まれない`);
     }
@@ -193,13 +193,17 @@ async function main() {
     const date = parseFrontmatterDate(e.date);
 
     if (e.url) {
+      // url は完全一致なので日付を拒否権にしない (放送日と配信日のように
+      // 正当にずれることがあり、落とすと永久に unresolved になる)
       const { id, reason, candidates } = pickCandidate(urlMap.get(e.url), date);
       if (id) return applied(id);
       // 候補が複数ある/日付が食い違う場合に新しく作ると、同じものを二重に増やす
       return failed(reason!, reason === "not_found", candidates);
     }
     if (e.label) {
-      const { id, reason, candidates } = pickCandidate(titleMap.get(e.label), date);
+      const { id, reason, candidates } = pickCandidate(titleMap.get(e.label), date, {
+        strictDate: true,
+      });
       if (id) return applied(id);
       return failed(reason!, reason === "not_found", candidates);
     }
@@ -213,6 +217,7 @@ async function main() {
       body: true, date: true, dateDisplay: true, dateMode: true, publishedAt: true,
       articleUpdatedAt: true, draft: true, unlisted: true, ongoing: true, lat: true, lng: true,
       frontmatterExtra: true,
+      dirty: true, lastSyncedAt: true,
       sources: {
         where: { status: { not: ArticleSourceStatus.pending } },
         orderBy: { sortOrder: "asc" },
@@ -322,7 +327,7 @@ async function main() {
       const again = e.url
         ? pickCandidate(urlMap.get(e.url), date)
         : e.label
-          ? pickCandidate(titleMap.get(e.label), date)
+          ? pickCandidate(titleMap.get(e.label), date, { strictDate: true })
           : { id: null };
       if (again.id) {
         r.assetId = again.id;
@@ -375,6 +380,16 @@ async function main() {
     // 70GB 超過の事故がある)
     const prev = existingByShortId.get(file.shortId);
     if (prev && !hasChanged(prev, cols, wanted)) {
+      // 内容は同じでも「取り込んだ」事実は残す。dirty / lastSyncedAt は
+      // frontmatter 由来ではないので hasChanged の比較対象に入っておらず、
+      // ここで更新しないと push 済みの記事が dirty のまま残り、
+      // 一覧の「未 push N 本」が恒久的に嘘をつく
+      if (prev.dirty || prev.lastSyncedAt == null) {
+        await prisma.article.update({
+          where: { id: prev.id },
+          data: { dirty: false, lastSyncedAt: new Date() },
+        });
+      }
       stats.skipped++;
       done++;
       continue;

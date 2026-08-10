@@ -12,6 +12,15 @@
 const FOOTNOTE_RE = /\^\[(\d+)\]/g;
 /** `[[タイトル]]` / `[[タイトル|表示名]]` */
 const WIKILINK_RE = /\[\[([^\]|]+)(?:\|([^\]]*))?\]\]/g;
+
+/**
+ * wikilink の宛先を正規化する。
+ *
+ * Obsidian は Markdown テーブル内の wikilink で `|` を `\|` にエスケープするので、
+ * 宛先の末尾に `\` が残る (実データで 1 記事 4 箇所)。落とさないと実在する
+ * 記事に解決できず、偽の「宛先の無い記事リンク」警告になる。
+ */
+const normalizeTarget = (raw: string) => raw.replace(/\\+$/, "").trim();
 /** 本文の記法をまとめて拾う (位置順に処理するため 1 本にする) */
 const MARKUP_RE = new RegExp(`${FOOTNOTE_RE.source}|${WIKILINK_RE.source}`, "g");
 
@@ -33,7 +42,7 @@ export function wikiLinkTargetsInBody(body: string): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const m of body.matchAll(WIKILINK_RE)) {
-    const t = m[1].trim();
+    const t = normalizeTarget(m[1]);
     if (t === "" || seen.has(t)) continue;
     seen.add(t);
     out.push(t);
@@ -73,7 +82,7 @@ export function parseBodySegments(
       out.push({ kind: "footnote", num, known: knownFootnotes.has(num) });
       continue;
     }
-    const target = (wikiTarget ?? "").trim();
+    const target = normalizeTarget(wikiTarget ?? "");
     const label = (wikiLabel ?? "").trim() || target;
     const shortId = shortIdByTitle.get(target);
     out.push(shortId ? { kind: "link", label, shortId } : { kind: "deadLink", label, target });
