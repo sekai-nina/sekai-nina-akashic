@@ -14,6 +14,7 @@ import { normalizeText } from "@/lib/utils";
 import { logAudit } from "./audit";
 import { backupAssetToDrive } from "@/lib/drive";
 import { assertClearance } from "@/lib/classification";
+import { entityClearanceWhere } from "./entities";
 
 export interface CreateAssetData {
   kind: AssetKind;
@@ -169,7 +170,10 @@ export async function createAsset(data: CreateAssetData, userId: string | null, 
       },
       include: {
         texts: true,
-        entities: { include: { entity: true } },
+        entities: {
+          where: { entity: entityClearanceWhere(clearance) },
+          include: { entity: true },
+        },
         sourceRecords: true,
         annotations: true,
         dossierItems: true,
@@ -289,7 +293,10 @@ export async function updateAsset(
       where: { id },
       include: {
         texts: true,
-        entities: { include: { entity: true } },
+        entities: {
+          where: { entity: entityClearanceWhere(clearance) },
+          include: { entity: true },
+        },
         sourceRecords: true,
         annotations: true,
         dossierItems: true,
@@ -323,7 +330,10 @@ export async function getAsset(id: string, clearance: string) {
       where: { id },
       include: {
         texts: true,
-        entities: { include: { entity: true } },
+        entities: {
+          where: { entity: entityClearanceWhere(clearance) },
+          include: { entity: true },
+        },
         sourceRecords: true,
         annotations: true,
         dossierItems: true,
@@ -351,7 +361,14 @@ export async function listAssets(filters: ListAssetsFilters = {}, clearance: str
       ? {
           ...(include.includes("sourceRecords") ? { sourceRecords: true } : {}),
           ...(include.includes("texts") ? { texts: true } : {}),
-          ...(include.includes("entities") ? { entities: { include: { entity: true } } } : {}),
+          ...(include.includes("entities")
+            ? {
+                entities: {
+                  where: { entity: entityClearanceWhere(clearance) },
+                  include: { entity: true },
+                },
+              }
+            : {}),
         }
       : undefined;
 

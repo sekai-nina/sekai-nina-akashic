@@ -219,7 +219,9 @@ function registerReadTools(server: McpServer, { user, baseUrl }: ToolContext) {
       let hint: string | undefined;
 
       if (args.entityNames && args.entityNames.length > 0) {
-        const resolution = await resolveEntityNames(args.entityNames);
+        const resolution = await resolveEntityNames(args.entityNames, {
+          clearance: user.clearance,
+        });
         hint = entityResolutionHint(resolution);
         entityIds = resolution.resolved.map((e) => e.id);
 
@@ -446,6 +448,7 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
       const resolution = args.entityNames?.length
         ? await resolveEntityNames(args.entityNames, {
             createMissing: args.createMissingEntities,
+            clearance: user.clearance,
           })
         : null;
 
@@ -593,6 +596,7 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
       const resolution = args.entityNames?.length
         ? await resolveEntityNames(args.entityNames, {
             createMissing: args.createMissingEntities,
+            clearance: user.clearance,
           })
         : null;
 

@@ -77,7 +77,7 @@ withSession({ id, clearance }, tx => …)    // 上記 + app.user_id — Dossier
 
 `Entity` は CLI のバックアップを含め 30 箇所以上から素の `prisma` で触られており、DB 側のポリシーを締めると `app.clearance` 未設定の経路が無言で 0 行になる（= バックアップから聖地が欠落する）。加えて索引も効かなくなる。そのため**アプリ層で塞いでいる** → `src/lib/domain/entities.ts` の `entityClearanceWhere()`。
 
-ユーザーに Entity を返す経路（`listEntities` / `searchEntities` / `getEntityById` / `src/lib/cache.ts` の `getCachedEntity*`）はすべてこれを通す。`entityClearanceWhere` は **`withClearance` の中でしか使えない**（素の `prisma` から使うと `Place` の RLS で全 place エンティティが消える）。
+ユーザーに Entity を返す経路（`listEntities` / `searchEntities` / `getEntityById` / `src/lib/cache.ts` の `getCachedEntity*`）はすべてこれを通す。**アセットに紐づくエンティティの include も同様**（`AssetEntity` の RLS は親 Asset の classification にしか依存しないので、`internal` のアセットに `confidential` の聖地が紐づいていると名前が漏れる）→ `entities: { where: { entity: entityClearanceWhere(clearance) }, … }`。CLI のバックアップ（`src/cli/backup.ts` / `src/lib/drive/`）は**絞ってはいけない**。`entityClearanceWhere` は **`withClearance` の中でしか使えない**（素の `prisma` から使うと `Place` の RLS で全 place エンティティが消える）。
 
 ### 保護テーブル
 
