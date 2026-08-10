@@ -43,7 +43,10 @@ export default async function EntityDetailPage({
   // Default to excluding linked assets (opt-out with excludeLinked=0)
   const isExcludeLinked = excludeLinked !== "0";
   const session = await auth();
-  const userClearance = session!.user.clearance as ClearanceLevel;
+  // middleware がログインへ飛ばすが、レンダリングはそれと競合して走る。
+  // ガードしないと未認証リクエストのたびにサーバー側で例外になる
+  if (!session?.user) notFound();
+  const userClearance = session.user.clearance as ClearanceLevel;
 
   const entity = await getCachedEntityById(id, userClearance);
 
@@ -52,7 +55,7 @@ export default async function EntityDetailPage({
   const aliases = (entity.aliases as string[]) || [];
 
   // Load linked assets (filtered by RLS)
-  const linkedAssets = await withClearance(session!.user.clearance, (tx) =>
+  const linkedAssets = await withClearance(session.user.clearance, (tx) =>
     tx.assetEntity.findMany({
       where: { entityId: id },
       include: {

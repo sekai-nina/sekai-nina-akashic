@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import { withClearance } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { ASSET_KIND_LABELS, ASSET_STATUS_LABELS, TRUST_LEVEL_LABELS, formatDate } from "@/lib/utils";
@@ -39,13 +40,16 @@ export default async function AssetsPage({
   const statusFilter = params.status as AssetStatus | undefined;
   const kindFilter = params.kind as AssetKind | undefined;
   const session = await auth();
+  // middleware がログインへ飛ばすが、レンダリングはそれと競合して走る。
+  // ガードしないと未認証リクエストのたびにサーバー側で例外になる
+  if (!session?.user) notFound();
 
   const where = {
     ...(statusFilter ? { status: statusFilter } : {}),
     ...(kindFilter ? { kind: kindFilter } : {}),
   };
 
-  const [assets, total] = await withClearance(session!.user.clearance, async (tx) => {
+  const [assets, total] = await withClearance(session.user.clearance, async (tx) => {
     const [a, c] = await Promise.all([
       tx.asset.findMany({
         where,

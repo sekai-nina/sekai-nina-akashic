@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import { withClearance } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { listEditableDossiers } from "@/lib/domain/dossiers";
@@ -10,9 +11,12 @@ const NINA_ENTITY_ID = "cmmtp8vrg0004mo381neyztvn";
 
 export default async function GalleryPage() {
   const session = await auth();
+  // middleware がログインへ飛ばすが、レンダリングはそれと競合して走る。
+  // ガードしないと未認証リクエストのたびにサーバー側で例外になる
+  if (!session?.user) notFound();
 
   const [assets, entities] = await Promise.all([
-    withClearance(session!.user.clearance, (tx) =>
+    withClearance(session.user.clearance, (tx) =>
       tx.asset.findMany({
         where: {
           kind: { in: ["image", "video"] },
@@ -36,7 +40,7 @@ export default async function GalleryPage() {
         },
       })
     ),
-    getCachedEntityList(session!.user.clearance as ClearanceLevel),
+    getCachedEntityList(session.user.clearance as ClearanceLevel),
   ]);
 
   const blogEntity = entities.find(
@@ -54,7 +58,7 @@ export default async function GalleryPage() {
   }));
   const nextCursor = hasMore ? items[items.length - 1].id : null;
 
-  const editableDossiers = (await listEditableDossiers(session!.user)).map((d) => ({
+  const editableDossiers = (await listEditableDossiers(session.user)).map((d) => ({
     id: d.id,
     title: d.title,
   }));

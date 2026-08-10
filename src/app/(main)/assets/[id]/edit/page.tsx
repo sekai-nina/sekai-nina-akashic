@@ -55,8 +55,11 @@ export default async function AssetEditPage({
 }) {
   const { id } = await params;
   const session = await auth();
+  // middleware がログインへ飛ばすが、レンダリングはそれと競合して走る。
+  // ガードしないと未認証リクエストのたびにサーバー側で例外になる
+  if (!session?.user) notFound();
 
-  const asset = await withClearance(session!.user.clearance, (tx) =>
+  const asset = await withClearance(session.user.clearance, (tx) =>
     tx.asset.findUnique({
       where: { id },
       include: {
