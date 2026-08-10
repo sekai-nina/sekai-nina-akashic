@@ -1,5 +1,6 @@
 import { prisma, withClearance } from "@/lib/db";
 import { Prisma } from "@prisma/client";
+import { normalizeText } from "@/lib/utils";
 
 export interface MentionResult {
   assetId: string;
@@ -42,8 +43,13 @@ export async function searchMentions(
 
   return withClearance(clearance, async (tx) => {
     // Build OR conditions for each alias
+    // ILIKE ではなく PGroonga の &@ を使う。ILIKE (texticlike) は leakproof でないため
+    // RLS 下では索引が効かず AssetText を毎回 Seq Scan していた。
+    // 索引は normalizedContent 側に張ってあるので検索語も normalizeText を通す。
+    // (ブロック分割と一致語の判定は下流の JS 側が素の content に対して行うので、
+    //  ここは絞り込みだけの役割)
     const conditions = searchTerms.map(
-      (term) => Prisma.sql`t."content" ILIKE ${"%" + term + "%"}`
+      (term) => Prisma.sql`t."normalizedContent" &@ ${normalizeText(term)}`
     );
 
     // Optionally exclude assets already linked to this entity
