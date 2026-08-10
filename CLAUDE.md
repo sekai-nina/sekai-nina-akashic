@@ -69,7 +69,12 @@ withSession({ id, clearance }, tx => …)    // 上記 + app.user_id — Dossier
 
 - トランザクションの既定タイムアウトは **15,000ms**（Prisma 既定 5s だと重い集約が P2028 になるため引き上げ済み）
 - RLS は読みを守るが、**自分より上のクリアランスを付けて書く操作はアプリ層で止める** → `src/lib/classification.ts` の `assertClearance`
-- 生 SQL は `classificationFilterSql` を通す
+- 生 SQL・重い集計は **`prismaInternal` + `classificationFilter` / `classificationFilterSql`** の明示フィルタで絞る
+  - 素の `prisma` は `app.clearance` 未設定で **RLS が全行を落とす**（明示フィルタを足しても無駄。RLS は別に効く）
+  - `withClearance` で包むとインタラクティブトランザクションの **15,000ms 上限**に当たる（`/analysis` の集計は実測 21 秒で P2028）
+  - つまり「RLS に任せる」か「RLS をバイパスして明示フィルタ」の二択で、中間は無い
+- **バックアップ・リストア・全体統計は `prismaInternal`（CLI なら `DIRECT_URL` を明示）。** 素の `prisma` だと無言の 0 行で「バックアップしたつもり」になる
+  - `new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL } } })` は **`DIRECT_URL` 未設定でも型エラーにならず `DATABASE_URL` に無言でフォールバックする**ので、スクリプト冒頭で存在チェックして `process.exit(1)` する
 
 #### `Entity` の place だけはクリアランスで絞る
 

@@ -1,4 +1,5 @@
-import { prisma } from "@/lib/db";
+import { prismaInternal } from "@/lib/db";
+import { classificationFilter } from "@/lib/classification";
 import kuromoji from "kuromoji";
 import path from "path";
 
@@ -142,15 +143,24 @@ function extractWords(text: string, tokenizer: kuromoji.Tokenizer<kuromoji.Ipadi
  * 坂井新奈のブログテキストからワードクラウドデータを生成する。
  * TF-IDF スコアリング: 新奈のブログに特徴的な語を上位に。
  */
-export async function getWordFrequencies(limit = 100, since?: Date): Promise<WordFrequency[]> {
+export async function getWordFrequencies(
+  limit = 100,
+  since?: Date,
+  clearance: string = "public"
+): Promise<WordFrequency[]> {
   const tokenizer = await getTokenizer();
 
   // 坂井新奈のブログ本文を取得
   const dateFilter = since ? { canonicalDate: { gte: since } } : {};
-  const texts = await prisma.assetText.findMany({
+  // prismaInternal (RLS バイパス) + classificationFilter の明示フィルタで絞る。
+  // - 素の prisma だと app.clearance 未設定で無言の 0 件になり、空配列が 200 で返る
+  // - withClearance だと本文全走査がインタラクティブトランザクションの 15 秒上限に
+  //   近づく (実測 3.6 秒)。text-analysis.ts と同じ方針に揃える。
+  const texts = await prismaInternal.assetText.findMany({
     where: {
       textType: { in: ["body", "message_body"] },
       asset: {
+        ...classificationFilter(clearance),
         sourceType: "web",
         kind: "text",
         entities: { some: { entityId: NINA_ENTITY_ID } },

@@ -26,6 +26,6 @@ export async function GET(request: Request) {
     }
   }
 
-  const words = await getWordFrequencies(limit, since);
+  const words = await getWordFrequencies(limit, since, auth.clearance);
   return NextResponse.json({ words });
 }

@@ -237,7 +237,9 @@ export async function addEntityToAsset(assetId: string, formData: FormData) {
   );
 
   await logAudit({ actorId: user.id, action: "entity.add_to_asset", targetType: "AssetEntity", targetId: `${assetId}:${entity.id}` });
-  backupAssetToDrive(assetId).catch(() => {});
+  backupAssetToDrive(assetId).catch((err) =>
+    console.error("Asset backup to Drive failed:", err)
+  );
   revalidatePath(`/assets/${assetId}`);
 }
 
@@ -247,7 +249,9 @@ export async function removeEntityFromAsset(assetId: string, entityId: string) {
   await withClearance(user.clearance, (tx) =>
     tx.assetEntity.deleteMany({ where: { assetId, entityId } })
   );
-  backupAssetToDrive(assetId).catch(() => {});
+  backupAssetToDrive(assetId).catch((err) =>
+    console.error("Asset backup to Drive failed:", err)
+  );
   revalidatePath(`/assets/${assetId}`);
 }
 
@@ -290,7 +294,9 @@ export async function updateAssetText(id: string, formData: FormData) {
     })
   );
   if (text) {
-    backupAssetToDrive(text.assetId).catch(() => {});
+    backupAssetToDrive(text.assetId).catch((err) =>
+      console.error("Asset backup to Drive failed:", err)
+    );
     revalidatePath(`/assets/${text.assetId}`);
   }
 }
@@ -305,7 +311,9 @@ export async function deleteAssetText(id: string) {
     tx.assetText.delete({ where: { id } })
   );
   if (text) {
-    backupAssetToDrive(text.assetId).catch(() => {});
+    backupAssetToDrive(text.assetId).catch((err) =>
+      console.error("Asset backup to Drive failed:", err)
+    );
     revalidatePath(`/assets/${text.assetId}`);
   }
 }
@@ -329,7 +337,9 @@ export async function addSourceRecord(assetId: string, formData: FormData) {
       },
     })
   );
-  backupAssetToDrive(assetId).catch(() => {});
+  backupAssetToDrive(assetId).catch((err) =>
+    console.error("Asset backup to Drive failed:", err)
+  );
   revalidatePath(`/assets/${assetId}`);
 }
 
@@ -343,7 +353,9 @@ export async function deleteSourceRecord(id: string) {
     tx.sourceRecord.delete({ where: { id } })
   );
   if (src) {
-    backupAssetToDrive(src.assetId).catch(() => {});
+    backupAssetToDrive(src.assetId).catch((err) =>
+      console.error("Asset backup to Drive failed:", err)
+    );
     revalidatePath(`/assets/${src.assetId}`);
   }
 }
@@ -363,7 +375,9 @@ export async function addAnnotation(assetId: string, formData: FormData) {
       },
     })
   );
-  backupAssetToDrive(assetId).catch(() => {});
+  backupAssetToDrive(assetId).catch((err) =>
+    console.error("Asset backup to Drive failed:", err)
+  );
   revalidatePath(`/assets/${assetId}`);
 }
 
@@ -377,7 +391,9 @@ export async function deleteAnnotation(id: string) {
     tx.annotation.delete({ where: { id } })
   );
   if (ann) {
-    backupAssetToDrive(ann.assetId).catch(() => {});
+    backupAssetToDrive(ann.assetId).catch((err) =>
+      console.error("Asset backup to Drive failed:", err)
+    );
     revalidatePath(`/assets/${ann.assetId}`);
   }
 }
