@@ -15,6 +15,23 @@ export function normalizeText(text: string): string {
     .trim();
 }
 
+/**
+ * 日時を **JST 壁時計の "YYYY-MM-DD"** にする。
+ *
+ * このプロダクトの日付ドメインは日本時間。ところが DB には 2 つの規約が
+ * 混在していて、素の UTC 日付で突き合わせると 1 日ずれる:
+ *
+ * | 列 | 日付のみの値の格納 |
+ * |---|---|
+ * | `Asset.canonicalDate` | JST 深夜 (= 15:00 UTC 前日) |
+ * | `Article.date` / `ArticleSource.date` | UTC 深夜 |
+ *
+ * 日付どうしを比較するときは必ずこれを通す。
+ */
+export function jstDayString(date: Date): string {
+  return new Date(date.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
 export function truncate(text: string, length: number): string {
   if (text.length <= length) return text;
   return text.slice(0, length) + "…";

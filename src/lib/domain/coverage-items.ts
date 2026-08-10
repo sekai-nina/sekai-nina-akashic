@@ -23,6 +23,7 @@
 import { ItemRule, Prisma } from "@prisma/client";
 import { unstable_cache } from "next/cache";
 import { withClearance, withSession, type TransactionClient } from "@/lib/db";
+import { jstDayString } from "@/lib/utils";
 import {
   getDerivedItems,
   itemRuleIsUrl,
@@ -643,11 +644,6 @@ function matchesLikeOr(value: string | null | undefined, pattern: string | null)
   if (parts.length === 0) return true;
   const v = value ?? "";
   return parts.some((p) => likeToRegex(p).test(v));
-}
-
-/** canonicalDate（UTC naive 格納）→ JST 壁時計の "YYYY-MM-DD"（deriveItems の talk_date と同じ規約）。 */
-function jstDayString(d: Date): string {
-  return new Date(d.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10);
 }
 
 /**

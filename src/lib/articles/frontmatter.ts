@@ -18,6 +18,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 export const KNOWN_FRONTMATTER_KEYS = [
   "title",
   "short_id",
+  "slug",
   "type",
   "tags",
   "date",
@@ -293,6 +294,7 @@ export function toArticleColumns(parsed: ParsedArticle, path: string): ArticleCo
 /** `buildFrontmatter` の入力。Article の行と、それに紐づく出典 */
 export interface ArticleFrontmatterInput {
   shortId: string;
+  slug?: string | null;
   title?: string | null;
   type?: ArticleType | string | null;
   tags?: unknown;
@@ -338,6 +340,9 @@ export function buildFrontmatter(input: ArticleFrontmatterInput): Record<string,
   if (title) fm.title = title;
 
   fm.short_id = input.shortId;
+
+  const slug = str(input.slug);
+  if (slug) fm.slug = slug;
 
   const type = str(input.type);
   if (type) fm.type = type;
