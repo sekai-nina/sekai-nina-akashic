@@ -32,7 +32,11 @@ import {
 } from "@prisma/client";
 import "dotenv/config";
 
-import { parseArticle, type ArticleSourceEntry } from "@/lib/articles/frontmatter";
+import {
+  parseArticle,
+  parseFrontmatterDate as toDate,
+  type ArticleSourceEntry,
+} from "@/lib/articles/frontmatter";
 
 const prisma = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -59,24 +63,6 @@ async function walk(dir: string, root: string, out: string[] = []): Promise<stri
     else if (name.endsWith(".md") && !NON_ARTICLE.has(relative(root, p))) out.push(p);
   }
   return out;
-}
-
-/**
- * frontmatter の日付は文字列でも Date でも来る。
- *
- * 日付のみの表記は **UTC 深夜** として保存する。既存の取り込み
- * (src/lib/domain/coverage.ts の `T00:00:00.000Z`) と揃えるため。
- * JST 深夜 (+09:00) にすると UTC では前日 15:00 になり、`formatDate` が
- * timeZone 未指定でサーバ TZ に従うせいで、Vercel (UTC) 上だけ日付が
- * 1 日前にズレる (ローカルの Mac は JST なので気づけない)。
- */
-function toDate(v: unknown): Date | null {
-  if (v == null || v === "") return null;
-  if (v instanceof Date) return v;
-  const s = String(v).trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(`${s}T00:00:00.000Z`);
-  const d = new Date(s);
-  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 function toBool(v: unknown): boolean {
