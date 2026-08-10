@@ -107,3 +107,30 @@ export function toTextType(v: unknown): TextType | undefined {
   if (typeof v !== "string") return undefined;
   return (Object.values(TextType) as string[]).includes(v) ? (v as TextType) : undefined;
 }
+
+// ============================================================
+// JST の暦日境界
+// ============================================================
+
+/** 日本には DST が無いので固定オフセットでよい */
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * 「YYYY-MM-DD」を UTC 00:00 として解釈した Date を、**JST のその暦日が始まる実時刻**に直す。
+ *
+ * 画面や API から来る日付は `new Date("2026-03-24")` = 2026-03-24T00:00:00Z で、
+ * これをそのまま比較すると JST 0〜9 時のデータが隣の日に落ちる
+ * (実測で全体の 5% 前後がずれる。`src/lib/domain/coverage.ts` のコメント参照)。
+ *
+ * 列側を `AT TIME ZONE` で変換する手もあるが、それだと索引が効かなくなるので
+ * **境界値のほうをずらす**。比較は生の列に対して行う。
+ */
+export function jstDayStart(dateOnlyUtc: Date): Date {
+  return new Date(dateOnlyUtc.getTime() - JST_OFFSET_MS);
+}
+
+/** 同上。JST のその暦日の**翌日 0 時**（= 排他的上限）を返す。 */
+export function jstDayEndExclusive(dateOnlyUtc: Date): Date {
+  return new Date(dateOnlyUtc.getTime() + DAY_MS - JST_OFFSET_MS);
+}
