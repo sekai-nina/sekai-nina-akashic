@@ -1,4 +1,5 @@
 import { prisma, withClearance } from "@/lib/db";
+import { invalidateEntities } from "@/lib/cache";
 import { entityClearanceWhere } from "@/lib/domain/entities";
 import { normalizeText } from "@/lib/utils";
 
@@ -103,6 +104,14 @@ export async function resolveEntityNames(
     }
 
     result.unresolved.push(inputName);
+  }
+
+  // 新規タグを作ったらエンティティ一覧のキャッシュを飛ばす。
+  // getCachedEntityList は revalidate 300 秒なので、飛ばさないと最大 5 分
+  // 検索フィルタに出てこない (createPlace 経由は invalidatePlaces が
+  // entities タグも飛ばしていて、ここだけ抜けていた)
+  if (result.created.length > 0) {
+    invalidateEntities();
   }
 
   return result;

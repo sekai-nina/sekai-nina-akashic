@@ -3,7 +3,7 @@ import { $Enums } from "@prisma/client";
 import { after } from "next/server";
 import { createAsset, type CreateAssetData } from "./assets";
 import { extractTestimonials } from "./testimonials";
-import { invalidateAssets } from "@/lib/cache";
+import { invalidateAssetList } from "@/lib/cache";
 
 /** 坂井新奈のentityId（口コミ抽出対象） */
 export const NINA_ENTITY_ID = "cmmtp8vrg0004mo381neyztvn";
@@ -148,7 +148,7 @@ export type AssetIntakeData = Omit<CreateAssetData, "classification"> & {
  * createAsset との違いは付帯処理の有無:
  * - classification の既定値 (internal) を埋める
  * - web(ブログ)由来なら口コミ抽出をバックグラウンドで走らせる
- * - 一覧・統計のキャッシュを飛ばす
+ * - 一覧のキャッシュを飛ばす (統計は 60 秒 TTL に任せる)
  *
  * クリアランス超過の書き込みは createAsset 内の assertClearance が投げる。
  * リクエストスコープ外 (CLI 等) からは after() が使えないので呼ばないこと。
@@ -180,7 +180,9 @@ export async function intakeAsset(
     });
   }
 
-  invalidateAssets();
+  // 一覧だけ飛ばす。stats は 60 秒 TTL があるので、外部 bot の連続 POST で
+  // 毎回 getDashboardStats (12 万件に対する 16 本の集計) を落とす必要はない。
+  invalidateAssetList();
 
   return asset;
 }
