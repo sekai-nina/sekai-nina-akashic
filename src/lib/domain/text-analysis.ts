@@ -1,5 +1,6 @@
 import { prismaInternal } from "@/lib/db";
 import { classificationFilterSql } from "@/lib/classification";
+import { jstDayStart, jstDayEndExclusive } from "@/lib/utils";
 import { Prisma } from "@prisma/client";
 
 export interface AnalysisFilters {
@@ -38,15 +39,17 @@ function buildConditions(filters: AnalysisFilters, clearance: string): Prisma.Sq
     );
   }
 
+  // JST の暦日境界に直してから比較する。旧実装は UTC 0 時の値をそのまま使っており、
+  // dateFrom 当日の JST 0〜9 時が落ち、dateTo は `<=` だったため**当日が丸ごと落ちていた**
   if (filters.dateFrom) {
     conditions.push(
-      Prisma.sql`COALESCE(a."canonicalDate", a."createdAt") >= ${new Date(filters.dateFrom)}`
+      Prisma.sql`COALESCE(a."canonicalDate", a."createdAt") >= ${jstDayStart(new Date(filters.dateFrom))}`
     );
   }
 
   if (filters.dateTo) {
     conditions.push(
-      Prisma.sql`COALESCE(a."canonicalDate", a."createdAt") <= ${new Date(filters.dateTo)}`
+      Prisma.sql`COALESCE(a."canonicalDate", a."createdAt") < ${jstDayEndExclusive(new Date(filters.dateTo))}`
     );
   }
 

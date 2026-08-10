@@ -1,5 +1,5 @@
 import { withClearance } from "@/lib/db";
-import { normalizeText } from "@/lib/utils";
+import { normalizeText, jstDayStart, jstDayEndExclusive } from "@/lib/utils";
 import { Prisma, AssetKind, AssetStatus, TrustLevel, SourceType } from "@prisma/client";
 
 export interface SearchQuery {
@@ -351,12 +351,17 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
   if (query.status) assetWhereConditions.push(Prisma.sql`a."status" = ${query.status}::"AssetStatus"`);
   if (query.trustLevel) assetWhereConditions.push(Prisma.sql`a."trustLevel" = ${query.trustLevel}::"TrustLevel"`);
   if (query.sourceType) assetWhereConditions.push(Prisma.sql`a."sourceType" = ${query.sourceType}::"SourceType"`);
-  if (query.dateFrom) assetWhereConditions.push(Prisma.sql`COALESCE(a."canonicalDate", a."createdAt") >= ${query.dateFrom}`);
+  // dateFrom / dateTo は「YYYY-MM-DD を UTC 00:00 で解釈した Date」で渡ってくるので、
+  // JST の暦日境界に直してから比較する (そのまま比べると JST 0〜9 時が隣の日に落ちる)
+  if (query.dateFrom) {
+    assetWhereConditions.push(
+      Prisma.sql`COALESCE(a."canonicalDate", a."createdAt") >= ${jstDayStart(query.dateFrom)}`
+    );
+  }
   if (query.dateTo) {
-    // dateTo is a date without time — include the entire day
-    const endOfDay = new Date(query.dateTo);
-    endOfDay.setDate(endOfDay.getDate() + 1);
-    assetWhereConditions.push(Prisma.sql`COALESCE(a."canonicalDate", a."createdAt") < ${endOfDay}`);
+    assetWhereConditions.push(
+      Prisma.sql`COALESCE(a."canonicalDate", a."createdAt") < ${jstDayEndExclusive(query.dateTo)}`
+    );
   }
 
   const baseFilter = assetWhereConditions.length > 0
