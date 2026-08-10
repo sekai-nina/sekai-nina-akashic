@@ -6,8 +6,8 @@
 
 ## 最重要の 3 つ
 
-1. **保護テーブルへのアクセスは必ず `withClearance` / `withSession` を通す。** 素の `prisma` で触ると **エラーではなく無言で 0 行**が返る。テストが無いので本番まで気づけない
-2. **`pnpm typecheck` が唯一の静的ゲート。** lint 設定もテストも無く、`next.config.ts` は `typescript.ignoreBuildErrors: true`。**ビルドが通っても型は壊れうる**
+1. **保護テーブルへのアクセスは必ず `withClearance` / `withSession` を通す。** 素の `prisma` で触ると **エラーではなく無言で 0 行**が返る。認可まわりのテストは無いので本番まで気づけない
+2. **静的ゲートは `pnpm typecheck` と `pnpm test` の 2 つ。** lint 設定は無く、`next.config.ts` は `typescript.ignoreBuildErrors: true`。**ビルドが通っても型は壊れうる**。テストは記事の frontmatter 往復 (`src/lib/articles/`) しか無いので、それ以外は依然として実 DB で確かめるしかない
 3. **`pnpm db:migrate` は必ず失敗する。** マイグレーションは `/db-migration` スキルの手順で行う
 
 ## 開発フロー
@@ -39,11 +39,21 @@ pnpm build            # prisma generate && next build
 pnpm db:generate      # Prisma Client 再生成（schema 変更後に必須）
 pnpm db:studio        # Prisma Studio
 pnpm db:seed
+pnpm test             # vitest。変更後は typecheck とあわせて実行
 ```
 
 `pnpm cli:*` は運用スクリプト群（`import` / `backup` / `restore` / `thumbnails` / `keygen` 等）。`src/cli/` 参照。
 
-**lint / test スクリプトは存在しない。** 検証は `pnpm typecheck` + 実 DB への手動確認（`npx tsx -e '...'` で実データを叩く）。
+**lint スクリプトは存在しない。** 検証は `pnpm typecheck` + `pnpm test` + 実 DB への手動確認（`npx tsx -e '...'` で実データを叩く）。
+
+テストは **vitest**（`vitest.config.mts`）。現状の対象は記事の frontmatter 往復のみ:
+
+```bash
+pnpm test                                                    # 合成ケースのみ
+ARTICLES_DIR=<sekai-nina-public のパス> pnpm test              # 実記事 332 件も検証
+```
+
+記事の実体は別リポジトリなので、`ARTICLES_DIR` が未設定なら実記事のテストは skip される（CI はこの状態で回る）。**記事の push（#46）を触る前には `ARTICLES_DIR` 付きで緑にしておく。**
 
 ## 認可モデル（このリポジトリの肝）
 
