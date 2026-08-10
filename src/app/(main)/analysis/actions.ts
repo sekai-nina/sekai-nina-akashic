@@ -19,8 +19,8 @@ export async function analyzeWords(
   const limited = groups.slice(0, 8);
 
   const [frequency, rate] = await Promise.all([
-    getWordFrequencyOverTime(limited, filters),
-    getWordAppearanceRate(limited, filters),
+    getWordFrequencyOverTime(limited, filters, session.user.clearance),
+    getWordAppearanceRate(limited, filters, session.user.clearance),
   ]);
 
   return { frequency, rate };
@@ -30,5 +30,5 @@ export async function analyzeVolume(filters: AnalysisFilters) {
   const session = await auth();
   if (!session?.user) throw new Error("Unauthorized");
 
-  return getVolumeOverTime(filters);
+  return getVolumeOverTime(filters, session.user.clearance);
 }

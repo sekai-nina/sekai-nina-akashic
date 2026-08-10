@@ -1,5 +1,5 @@
 import { unstable_cache, revalidateTag } from "next/cache";
-import { prisma, prismaInternal, withClearance } from "@/lib/db";
+import { prismaInternal, withClearance } from "@/lib/db";
 import { getDashboardStats } from "@/lib/domain/stats";
 import { entityClearanceWhere } from "@/lib/domain/entities";
 import { ClearanceLevel } from "@prisma/client";
@@ -178,7 +178,9 @@ export const getCachedNinaStatsRecent = unstable_cache(
           entity: { type: "tag", canonicalName: { in: ["日向坂で会いましょう", "まだまだ！日向坂で会いましょう", "日向坂になりましょう", "日向坂ちゃんねる", "日向坂46公式チャンネル", "雑誌"] } },
         },
       }),
-      prisma.assetEntity.count({
+      // 他の 3 本と同じく prismaInternal を使う (全体統計なので RLS バイパスが正)。
+      // 素の prisma だと app.clearance 未設定で無言の 0 件になる
+      prismaInternal.assetEntity.count({
         where: {
           asset: { canonicalDate: { gte: since } },
           entity: { type: "tag", canonicalName: "ライブ" },
