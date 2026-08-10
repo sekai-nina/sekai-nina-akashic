@@ -37,11 +37,22 @@ export function truncate(text: string, length: number): string {
   return text.slice(0, length) + "…";
 }
 
+/**
+ * 日時を JST の壁時計で表示する。
+ *
+ * **timeZone を必ず指定する。** 省略するとサーバの TZ に従うため、
+ * ローカル (Mac / JST) と Vercel (UTC) で違う日付が出る。とくに
+ * `Asset.canonicalDate` は日付のみの値を JST 深夜 (= 15:00 UTC 前日) で
+ * 持つので、UTC で描画すると **1 日前** になる (実測で 2642 件が該当)。
+ * ローカルでは正しく見えるので気づけない。
+ */
 export function formatDate(date: Date | string | null, includeTime = false): string {
   if (!date) return "";
   const d = typeof date === "string" ? new Date(date) : date;
+  if (Number.isNaN(d.getTime())) return "";
   if (includeTime) {
     return d.toLocaleString("ja-JP", {
+      timeZone: "Asia/Tokyo",
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -50,6 +61,7 @@ export function formatDate(date: Date | string | null, includeTime = false): str
     });
   }
   return d.toLocaleDateString("ja-JP", {
+    timeZone: "Asia/Tokyo",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
