@@ -179,7 +179,7 @@ src/
 | `docs/mcp.md` | MCP サーバー（`/api/mcp`）の仕様と設計判断 |
 | `docs/coverage-design.md` | 収集カバレッジ設計書 |
 | `docs/security.md` / `docs/security-admin.md` | 非エンジニア / 管理者向け |
-| ~~`docs/architecture.md`~~ | **陳腐化**（Next.js 15 / NextAuth / Collection の記述）。参照しない |
+| `docs/architecture.md` | 設計の「なぜ」（RLS を中心に据えた理由、Asset/AssetText の分離、PGroonga 採用の理由） |
 
 機能追加時は `docs/api.md` と該当設計書を **同じ PR で更新する**のが慣習。
 
