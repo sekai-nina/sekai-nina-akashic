@@ -133,6 +133,13 @@ async function main() {
       skipped.push(relative(DIR, f));
       continue;
     }
+    // shortId は /articles/<shortId> の URL と wikilink の href に入るので文字種を縛る。
+    // 検証しないと frontmatter 経由でパス区切りやクエリを差し込める
+    if (!/^[A-Za-z0-9_-]+$/.test(shortId)) {
+      console.error(`  ✗ short_id に使えない文字が含まれています: ${JSON.stringify(shortId)} (${relative(DIR, f)})`);
+      skipped.push(relative(DIR, f));
+      continue;
+    }
     parsed.push({ path: relative(DIR, f), shortId, fm: frontmatter, extra, sources, body });
   }
   if (skipped.length) {
