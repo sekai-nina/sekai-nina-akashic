@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { search, splitQueryTerms } from "@/lib/search";
 import { auth } from "@/lib/auth";
@@ -310,9 +311,12 @@ export default async function SearchPage({
   searchParams: Promise<{ [key: string]: string | undefined }>;
 }) {
   const session = await auth();
-  const userClearance = session!.user.clearance as ClearanceLevel;
+  // middleware がログインへ飛ばすが、レンダリングはそれと競合して走る。
+  // ガードしないと未認証リクエストのたびにサーバー側で例外になる
+  if (!session?.user) notFound();
+  const userClearance = session.user.clearance as ClearanceLevel;
   const entities = await getCachedEntityList(userClearance);
-  const editableDossiers = (await listEditableDossiers(session!.user)).map((d) => ({ id: d.id, title: d.title }));
+  const editableDossiers = (await listEditableDossiers(session.user)).map((d) => ({ id: d.id, title: d.title }));
 
   const params = await searchParams;
   const q = params.q ?? "";

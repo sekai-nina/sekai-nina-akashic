@@ -52,7 +52,9 @@ export async function listArticles(opts: ListArticlesOptions) {
     const [items, total] = await Promise.all([
       tx.article.findMany({
         where,
-        orderBy: [{ publishedAt: "desc" }, { title: "asc" }],
+        // Postgres の DESC は NULL を **先頭** に置く。素の desc だと日付の無い
+        // 下書きやクイズが一覧の先頭を占め、新しい記事が見えなくなる
+        orderBy: [{ publishedAt: { sort: "desc", nulls: "last" } }, { title: "asc" }],
         skip: (page - 1) * perPage,
         take: perPage,
         select: {
@@ -112,6 +114,25 @@ export async function listArticlesForPicker() {
     orderBy: [{ title: "asc" }],
     select: { id: true, title: true, type: true },
   });
+}
+
+/**
+ * 記事タイトル → shortId。本文の `[[記事タイトル]]` を解決するのに使う。
+ *
+ * Article は非保護テーブルなので withClearance は不要。332 行 × 2 列なので
+ * 全件引いて構わない (リンクは 1 記事に複数あり、都度引くと N+1 になる)。
+ */
+export async function getArticleTitleIndex(): Promise<Map<string, string>> {
+  // orderBy が無いと Postgres の返す行順が不定になり、同名タイトルのとき
+  // リクエストごとに飛び先が変わる (実データに 1 組あり、実際にリンクされている)
+  const rows = await prisma.article.findMany({
+    select: { shortId: true, title: true },
+    orderBy: { shortId: "asc" },
+  });
+  const map = new Map<string, string>();
+  // 同名タイトルは先勝ち。どちらに飛ぶかは曖昧だが、決め打ちで安定させる
+  for (const r of rows) if (r.title && !map.has(r.title)) map.set(r.title, r.shortId);
+  return map;
 }
 
 export interface AddAssetToArticleInput {

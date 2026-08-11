@@ -185,6 +185,14 @@ describe("buildFrontmatter", () => {
     expect(Object.keys(fm)).toEqual(["title", "short_id", "type", "tags", "published_at", "featured"]);
   });
 
+  it("slug は専用カラムから書き出す (extra に逃がさない)", () => {
+    // KNOWN キーに入れる前は Article.slug カラムと frontmatterExtra の
+    // 二重管理になっていて、カラムを編集しても push に反映されなかった
+    const fm = buildFrontmatter({ ...base, slug: "my-slug" });
+    expect(fm.slug).toBe("my-slug");
+    expect(Object.keys(fm)).toEqual(["short_id", "slug"]);
+  });
+
   it("既定値と同じ boolean / 空配列はキーごと省く", () => {
     const fm = buildFrontmatter({ ...base, draft: false, unlisted: false, ongoing: false, tags: [], sources: [] });
     expect(Object.keys(fm)).toEqual(["short_id"]);
@@ -287,6 +295,14 @@ describe("値レベルの往復", () => {
     const raw = '---\nshort_id: abc1234\nupdated_at: "2026-07-06T18:46:37.874Z"\n---\n\n本文\n';
     const { frontmatter } = expectStable(raw);
     expect(frontmatter.updated_at).toBe("2026-07-06T18:46:37.874Z");
+  });
+
+  it("slug が往復する", () => {
+    const raw = "---\nshort_id: abc1234\nslug: fukasawa-temple\n---\n\n本文\n";
+    const { frontmatter, extra } = expectStable(raw);
+    expect(frontmatter.slug).toBe("fukasawa-temple");
+    // 専用カラムに入るので extra には残らない
+    expect(extra.slug).toBeUndefined();
   });
 
   it("モデル化されていないキーが往復する", () => {

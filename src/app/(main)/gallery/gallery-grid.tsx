@@ -5,6 +5,7 @@ import { useSwipeable } from "react-swipeable";
 import { Loader2, X, ChevronLeft, ChevronRight, Download, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { AddToDossier } from "@/components/add-to-dossier";
+import { formatDate } from "@/lib/utils";
 
 interface GalleryItem {
   id: string;
@@ -322,7 +323,7 @@ export function GalleryGrid({
               {items[lightbox].title || "(無題)"}
             </p>
             <p className="text-white/60 text-xs mt-0.5">
-              {new Date(items[lightbox].canonicalDate ?? items[lightbox].createdAt).toLocaleDateString("ja-JP")}
+              {formatDate(items[lightbox].canonicalDate ?? items[lightbox].createdAt)}
             </p>
             <div className="flex items-center gap-2 mt-3">
               <Link

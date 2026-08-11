@@ -113,7 +113,10 @@ export default async function AssetDetailPage({
   // 言及ハイライト（カバレッジのアイテム一覧からの遷移で ?hl=nina が付く）
   const hlNina = sp.hl === "nina";
   const session = await auth();
-  const userClearance = session!.user.clearance as ClearanceLevel;
+  // middleware がログインへ飛ばすが、レンダリングはそれと競合して走る。
+  // ガードしないと未認証リクエストのたびにサーバー側で例外になる
+  if (!session?.user) notFound();
+  const userClearance = session.user.clearance as ClearanceLevel;
 
   // Single withClearance call for all read queries (avoids repeated transaction overhead)
   const pageData = await withClearance(userClearance, async (tx) => {
@@ -209,7 +212,7 @@ export default async function AssetDetailPage({
 
   // カバレッジパネル（v2.4）: このアセットが属するカバレッジアイテムの逆引き＋アクティブ観点
   // ハイライト語彙（?hl=nina 時のみ）も並列で取得
-  const canEditCoverage = ["admin", "member"].includes(session!.user.role);
+  const canEditCoverage = ["admin", "member"].includes(session.user.role);
   const [coverageItems, activeLenses, ninaTerms] = await Promise.all([
     findItemsForAsset(id, userClearance),
     listLenses(userClearance, false), // active のみ
@@ -223,9 +226,9 @@ export default async function AssetDetailPage({
     : 0;
 
   // Editable dossiers + which of them already contain this asset
-  const editableDossiers = await listEditableDossiers(session!.user);
+  const editableDossiers = await listEditableDossiers(session.user);
   const dossiersContainingAsset = editableDossiers.length
-    ? await withSession(session!.user, (tx) =>
+    ? await withSession(session.user, (tx) =>
         tx.dossierItem.findMany({
           where: { assetId: id, dossierId: { in: editableDossiers.map((d) => d.id) } },
           select: { dossierId: true },

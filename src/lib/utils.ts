@@ -15,16 +15,44 @@ export function normalizeText(text: string): string {
     .trim();
 }
 
+/**
+ * 日時を **JST 壁時計の "YYYY-MM-DD"** にする。
+ *
+ * このプロダクトの日付ドメインは日本時間。ところが DB には 2 つの規約が
+ * 混在していて、素の UTC 日付で突き合わせると 1 日ずれる:
+ *
+ * | 列 | 日付のみの値の格納 |
+ * |---|---|
+ * | `Asset.canonicalDate` | JST 深夜 (= 15:00 UTC 前日) |
+ * | `Article.date` / `ArticleSource.date` | UTC 深夜 |
+ *
+ * 日付どうしを比較するときは必ずこれを通す。
+ */
+export function jstDayString(date: Date): string {
+  return new Date(date.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
 export function truncate(text: string, length: number): string {
   if (text.length <= length) return text;
   return text.slice(0, length) + "…";
 }
 
+/**
+ * 日時を JST の壁時計で表示する。
+ *
+ * **timeZone を必ず指定する。** 省略するとサーバの TZ に従うため、
+ * ローカル (Mac / JST) と Vercel (UTC) で違う日付が出る。とくに
+ * `Asset.canonicalDate` は日付のみの値を JST 深夜 (= 15:00 UTC 前日) で
+ * 持つので、UTC で描画すると **1 日前** になる (実測で 2642 件が該当)。
+ * ローカルでは正しく見えるので気づけない。
+ */
 export function formatDate(date: Date | string | null, includeTime = false): string {
   if (!date) return "";
   const d = typeof date === "string" ? new Date(date) : date;
+  if (Number.isNaN(d.getTime())) return "";
   if (includeTime) {
     return d.toLocaleString("ja-JP", {
+      timeZone: "Asia/Tokyo",
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -33,6 +61,7 @@ export function formatDate(date: Date | string | null, includeTime = false): str
     });
   }
   return d.toLocaleDateString("ja-JP", {
+    timeZone: "Asia/Tokyo",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",

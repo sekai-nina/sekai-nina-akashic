@@ -24,6 +24,7 @@ import { join, relative } from "node:path";
 import {
   PrismaClient,
   ArticleSourceStatus,
+  ArticleType,
   AssetKind,
   AssetStatus,
   SourceKind,
@@ -38,6 +39,15 @@ import {
   type ArticleColumns,
   type ArticleSourceEntry,
 } from "@/lib/articles/frontmatter";
+import { hasChanged } from "@/lib/articles/changes";
+import {
+  addCandidate,
+  pickCandidate,
+  FAIL_REASON_LABELS,
+  type Candidate,
+  type FailReason,
+} from "@/lib/articles/matching";
+import { jstDayString } from "@/lib/utils";
 
 const prisma = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -73,7 +83,11 @@ type Resolution = {
   status: ArticleSourceStatus;
   /** --create-missing で新規作成する対象か */
   needsCreate: boolean;
+  reason?: FailReason;
+  /** ambiguous のときの候補数 (ログ用) */
+  candidates?: number;
 };
+
 
 async function main() {
   if (!DIR) {
@@ -87,17 +101,43 @@ async function main() {
   // --- 1. 全ファイルをパースする -------------------------------------------
   const parsed: ParsedFile[] = [];
   const skipped: string[] = [];
+  /** 取り込みを止めるほどではないが人が見るべき警告 */
+  const warnings: string[] = [];
+
   for (const f of files) {
-    const cols = toArticleColumns(parseArticle(await readFile(f, "utf8")), relative(DIR, f));
+    const parsedArticle = parseArticle(await readFile(f, "utf8"));
+    const cols = toArticleColumns(parsedArticle, relative(DIR, f));
     if (cols.shortId === "") {
       skipped.push(cols.path);
       continue;
+    }
+    // type が enum 外だと null になり、KNOWN キーなので frontmatterExtra にも
+    // 退避されない = push でキーごと消える。黙って捨てずに知らせる
+    const rawType = parsedArticle.frontmatter.type;
+    if (rawType != null && cols.type == null) {
+      warnings.push(`${cols.path}: type: ${String(rawType)} は ArticleType に無いので取り込まれない`);
     }
     parsed.push(cols);
   }
   if (skipped.length) {
     console.log(`short_id が無いためスキップ: ${skipped.length} 件`);
     for (const s of skipped) console.log(`  - ${s}`);
+  }
+
+  // 同じ short_id を持つファイルは後勝ちで上書きされ、片方が黙って消える
+  const byShortId = new Map<string, string[]>();
+  for (const p of parsed) {
+    const list = byShortId.get(p.shortId);
+    if (list) list.push(p.path);
+    else byShortId.set(p.shortId, [p.path]);
+  }
+  const dupShortIds = [...byShortId].filter(([, v]) => v.length > 1);
+  if (dupShortIds.length) {
+    console.error(`\n**short_id が重複しています (${dupShortIds.length} 組)**`);
+    for (const [id, paths] of dupShortIds) console.error(`  ${id}: ${paths.join(" / ")}`);
+    console.error("後勝ちで片方が消えるため中断します。short_id を振り直してください");
+    process.exitCode = 1;
+    return;
   }
 
   // --- 2. 照合対象を一括で引く ---------------------------------------------
@@ -110,36 +150,110 @@ async function main() {
     prisma.asset.findMany({ where: { id: { in: refs } }, select: { id: true } }),
     prisma.sourceRecord.findMany({
       where: { url: { in: urls } },
-      select: { url: true, assetId: true },
+      select: { url: true, assetId: true, asset: { select: { canonicalDate: true } } },
     }),
-    prisma.asset.findMany({ where: { title: { in: labels } }, select: { id: true, title: true } }),
+    prisma.asset.findMany({
+      where: { title: { in: labels } },
+      select: { id: true, title: true, canonicalDate: true },
+    }),
   ]);
 
   const refSet = new Set(assetsByRef.map((a) => a.id));
-  const urlMap = new Map(srcByUrl.filter((s) => s.url).map((s) => [s.url!, s.assetId]));
-  const titleMap = new Map(assetsByTitle.map((a) => [a.title, a.id]));
+
+  // **候補は配列で持つ。** Asset.title にも SourceRecord.url にも一意制約が無いので、
+  // 後勝ちの Map にすると無関係な Asset に applied として紐づく
+  const urlMap = new Map<string, Candidate[]>();
+  for (const s of srcByUrl) {
+    if (s.url) addCandidate(urlMap, s.url, { id: s.assetId, date: s.asset?.canonicalDate ?? null });
+  }
+  const titleMap = new Map<string, Candidate[]>();
+  for (const a of assetsByTitle) addCandidate(titleMap, a.title, { id: a.id, date: a.canonicalDate });
 
   // --- 3. 解決する -----------------------------------------------------------
+
   const resolve = (e: ArticleSourceEntry): Resolution => {
+    const applied = (assetId: string): Resolution => ({
+      entry: e,
+      assetId,
+      status: ArticleSourceStatus.applied,
+      needsCreate: false,
+    });
+    const failed = (reason: FailReason, needsCreate = false, candidates?: number): Resolution => ({
+      entry: e,
+      assetId: null,
+      status: ArticleSourceStatus.unresolved,
+      needsCreate,
+      reason,
+      candidates,
+    });
+
     if (e.ref) {
-      return refSet.has(e.ref)
-        ? { entry: e, assetId: e.ref, status: ArticleSourceStatus.applied, needsCreate: false }
-        : { entry: e, assetId: null, status: ArticleSourceStatus.unresolved, needsCreate: false };
+      return refSet.has(e.ref) ? applied(e.ref) : failed("dangling");
     }
+
+    const date = parseFrontmatterDate(e.date);
+
     if (e.url) {
-      const hit = urlMap.get(e.url);
-      if (hit) return { entry: e, assetId: hit, status: ArticleSourceStatus.applied, needsCreate: false };
-      return { entry: e, assetId: null, status: ArticleSourceStatus.unresolved, needsCreate: true };
+      // url は完全一致なので日付を拒否権にしない (放送日と配信日のように
+      // 正当にずれることがあり、落とすと永久に unresolved になる)
+      const { id, reason, candidates } = pickCandidate(urlMap.get(e.url), date);
+      if (id) return applied(id);
+      // 候補が複数ある/日付が食い違う場合に新しく作ると、同じものを二重に増やす
+      return failed(reason!, reason === "not_found", candidates);
     }
     if (e.label) {
-      const hit = titleMap.get(e.label);
-      if (hit) return { entry: e, assetId: hit, status: ArticleSourceStatus.applied, needsCreate: false };
-      return { entry: e, assetId: null, status: ArticleSourceStatus.unresolved, needsCreate: true };
+      const { id, reason, candidates } = pickCandidate(titleMap.get(e.label), date, {
+        strictDate: true,
+      });
+      if (id) return applied(id);
+      return failed(reason!, reason === "not_found", candidates);
     }
-    return { entry: e, assetId: null, status: ArticleSourceStatus.unresolved, needsCreate: false };
+    return failed("no_clue");
   };
 
-  const stats = { applied: 0, unresolved: 0, dangling: 0, created: 0 };
+  // 既存の記事。path の衝突検出・削除検出・差分スキップに使う
+  const existing = await prisma.article.findMany({
+    select: {
+      id: true, shortId: true, path: true, slug: true, title: true, type: true, tags: true,
+      body: true, date: true, dateDisplay: true, dateMode: true, publishedAt: true,
+      articleUpdatedAt: true, draft: true, unlisted: true, ongoing: true, lat: true, lng: true,
+      frontmatterExtra: true,
+      dirty: true, lastSyncedAt: true,
+      sources: {
+        where: { status: { not: ArticleSourceStatus.pending } },
+        orderBy: { sortOrder: "asc" },
+        select: {
+          assetId: true, status: true, sourceNo: true, label: true, url: true,
+          date: true, originalRef: true, sortOrder: true,
+        },
+      },
+    },
+  });
+  const existingByShortId = new Map(existing.map((a) => [a.shortId, a]));
+
+  // path は @@unique。別の short_id が同じ path を持つと upsert が P2002 で落ち、
+  // 途中まで書き込んだ中途半端な状態で止まる
+  const pathOwner = new Map(existing.map((a) => [a.path, a.shortId]));
+  const pathConflicts = parsed.filter((p) => {
+    const owner = pathOwner.get(p.path);
+    return owner != null && owner !== p.shortId;
+  });
+  if (pathConflicts.length) {
+    console.error(`\n**path が既存の別記事と衝突しています (${pathConflicts.length} 件)**`);
+    for (const p of pathConflicts) {
+      console.error(`  ${p.path}: 既存 short_id=${pathOwner.get(p.path)} / 今回 short_id=${p.shortId}`);
+    }
+    console.error("upsert が P2002 で中断するため先に止めます");
+    process.exitCode = 1;
+    return;
+  }
+
+  // リポジトリから消えた記事。ArticleSource は全置換なのに記事だけ追記のみだと
+  // 非対称なので、少なくとも検出して知らせる
+  const seenShortIds = new Set(parsed.map((p) => p.shortId));
+  const gone = existing.filter((a) => !seenShortIds.has(a.shortId));
+
+  const stats = { applied: 0, unresolved: 0, dangling: 0, created: 0, skipped: 0 };
   const plan = parsed.map((p) => {
     const resolutions = p.sources.map(resolve);
     for (const r of resolutions) {
@@ -156,8 +270,72 @@ async function main() {
   console.log(`記事              ${parsed.length}`);
   console.log(`source エントリ   ${allSources.length}`);
   console.log(`  applied         ${stats.applied}`);
-  console.log(`  unresolved      ${stats.unresolved} (うち dangling ref ${stats.dangling})`);
+  console.log(`  unresolved      ${stats.unresolved}`);
+  const byReason = new Map<FailReason, { r: Resolution; path: string }[]>();
+  for (const { file, resolutions } of plan) {
+    for (const r of resolutions) {
+      if (!r.reason) continue;
+      const list = byReason.get(r.reason);
+      if (list) list.push({ r, path: file.path });
+      else byReason.set(r.reason, [{ r, path: file.path }]);
+    }
+  }
+  for (const [reason, list] of byReason) {
+    console.log(`    ${FAIL_REASON_LABELS[reason].padEnd(28)} ${list.length}`);
+  }
   console.log(`  新規作成候補    ${plan.flatMap((p) => p.resolutions).filter((r) => r.needsCreate).length}`);
+
+  // 誤って別の Asset に紐づくのを防いだぶんは、人が直せるように必ず列挙する
+  for (const reason of ["ambiguous", "date_mismatch"] as const) {
+    const list = byReason.get(reason) ?? [];
+    if (!list.length) continue;
+    console.log(`\n--- ${FAIL_REASON_LABELS[reason]} (${list.length} 件) ---`);
+    for (const { r, path } of list) {
+      const clue = r.entry.url ?? r.entry.label ?? "";
+      const extra = r.candidates ? ` [候補 ${r.candidates} 件]` : "";
+      console.log(`  ${path}  ^[${r.entry.id ?? "-"}] ${clue.slice(0, 60)}${extra}`);
+    }
+  }
+
+  // 同じ Asset に日付違いのエントリが集まっていないか。
+  // 候補の canonicalDate が null だと照合では否定できないため、ここで拾う。
+  // 番組の前後編のように正当な場合もあるので **状態は変えず報告だけする**
+  const dateClashes: string[] = [];
+  for (const { file, resolutions } of plan) {
+    const byAsset = new Map<string, { no?: number; day: string }[]>();
+    for (const r of resolutions) {
+      if (!r.assetId) continue;
+      const d = parseFrontmatterDate(r.entry.date);
+      if (!d) continue;
+      const list = byAsset.get(r.assetId);
+      const item = { no: r.entry.id, day: jstDayString(d) };
+      if (list) list.push(item);
+      else byAsset.set(r.assetId, [item]);
+    }
+    for (const [assetId, list] of byAsset) {
+      if (list.length < 2) continue;
+      if (new Set(list.map((x) => x.day)).size < 2) continue;
+      dateClashes.push(
+        `${file.path}  ${list.map((x) => `^[${x.no ?? "-"}]=${x.day}`).join(" ")}  asset=${assetId}`,
+      );
+    }
+  }
+  if (dateClashes.length) {
+    console.log(`\n--- 同一 Asset に日付違いで紐づいている (${dateClashes.length} 件) ---`);
+    for (const c of dateClashes) console.log(`  ${c}`);
+    console.log("  番組の前後編なら正常。別の収録なら Asset を分ける必要がある");
+  }
+
+  if (warnings.length) {
+    console.log(`\n--- 警告 (${warnings.length} 件) ---`);
+    for (const w of warnings) console.log(`  ${w}`);
+  }
+
+  if (gone.length) {
+    console.log(`\n--- リポジトリから消えた記事 (${gone.length} 件) ---`);
+    for (const a of gone) console.log(`  ${a.path} (short_id=${a.shortId})`);
+    console.log("  自動削除はしない。不要なら Prisma Studio で消すか、移動なら path を合わせる");
+  }
 
   if (!APPLY) {
     console.log("\ndry-run のため書き込みはしていません。--apply を付けると反映します");
@@ -175,10 +353,16 @@ async function main() {
 
       // 照合マップは走査開始前に作るので、同じ run 内で同一 url/label が 2 度出ると
       // 重複 Asset を作ってしまう。作成のたびにマップを更新して再照合する。
-      const hit = e.url ? urlMap.get(e.url) : e.label ? titleMap.get(e.label) : undefined;
-      if (hit) {
-        r.assetId = hit;
+      const date = parseFrontmatterDate(e.date);
+      const again = e.url
+        ? pickCandidate(urlMap.get(e.url), date)
+        : e.label
+          ? pickCandidate(titleMap.get(e.label), date, { strictDate: true })
+          : { id: null };
+      if (again.id) {
+        r.assetId = again.id;
         r.status = ArticleSourceStatus.applied;
+        r.reason = undefined;
         continue;
       }
 
@@ -188,7 +372,7 @@ async function main() {
           title: e.label ?? e.url ?? "",
           status: AssetStatus.inbox,
           sourceType: SourceType.import,
-          canonicalDate: parseFrontmatterDate(e.date),
+          canonicalDate: date,
           ...(e.url
             ? {
                 sourceRecords: {
@@ -199,14 +383,48 @@ async function main() {
         },
         select: { id: true },
       });
-      if (e.url) urlMap.set(e.url, asset.id);
-      if (e.label) titleMap.set(e.label, asset.id);
+      if (e.url) addCandidate(urlMap, e.url, { id: asset.id, date });
+      if (e.label) addCandidate(titleMap, e.label, { id: asset.id, date });
       r.assetId = asset.id;
       r.status = ArticleSourceStatus.applied;
       stats.created++;
     }
 
     const { sources: _sources, ...cols } = file;
+
+    // frontmatter 由来の出典。DB に入れる形に揃える (差分判定にも使う)
+    const wanted = resolutions.map((r, i) => ({
+      assetId: r.assetId,
+      status: r.status,
+      sourceNo: r.entry.id ?? null,
+      label: r.entry.label ?? "",
+      url: r.entry.url ?? null,
+      date: parseFrontmatterDate(r.entry.date),
+      originalRef: r.status === ArticleSourceStatus.unresolved ? (r.entry.ref ?? null) : null,
+      sortOrder: i,
+    }));
+
+    // **変わっていない記事は触らない。**
+    // 332 件ぶんの upsert + ArticleSource 全置換を毎回流すと、Supabase の
+    // egress と接続時間を無駄に食う (過去に走りっぱなしのスクリプトで
+    // 70GB 超過の事故がある)
+    const prev = existingByShortId.get(file.shortId);
+    if (prev && !hasChanged(prev, cols, wanted)) {
+      // 内容は同じでも「取り込んだ」事実は残す。dirty / lastSyncedAt は
+      // frontmatter 由来ではないので hasChanged の比較対象に入っておらず、
+      // ここで更新しないと push 済みの記事が dirty のまま残り、
+      // 一覧の「未 push N 本」が恒久的に嘘をつく
+      if (prev.dirty || prev.lastSyncedAt == null) {
+        await prisma.article.update({
+          where: { id: prev.id },
+          data: { dirty: false, lastSyncedAt: new Date() },
+        });
+      }
+      stats.skipped++;
+      done++;
+      continue;
+    }
+
     const data = {
       ...cols,
       tags: cols.tags as object,
@@ -231,17 +449,7 @@ async function main() {
     //
     // 削除と再作成は 1 トランザクションにまとめる。途中で落ちると
     // 出典が消えたまま残るため。
-    const replaced = resolutions.map((r, i) => ({
-      articleId: article.id,
-      assetId: r.assetId,
-      status: r.status,
-      sourceNo: r.entry.id ?? null,
-      label: r.entry.label ?? "",
-      url: r.entry.url ?? null,
-      date: parseFrontmatterDate(r.entry.date),
-      originalRef: r.status === ArticleSourceStatus.unresolved ? (r.entry.ref ?? null) : null,
-      sortOrder: i,
-    }));
+    const replaced = wanted.map((w) => ({ ...w, articleId: article.id }));
     await prisma.$transaction([
       prisma.articleSource.deleteMany({
         where: { articleId: article.id, status: { not: ArticleSourceStatus.pending } },
@@ -253,7 +461,9 @@ async function main() {
     if (done % 50 === 0) console.log(`  ${done}/${plan.length}`);
   }
 
-  console.log(`\n完了: 記事 ${done} 件 / Asset 新規作成 ${stats.created} 件`);
+  console.log(
+    `\n完了: 記事 ${done} 件 (うち変更なしでスキップ ${stats.skipped} 件) / Asset 新規作成 ${stats.created} 件`,
+  );
 }
 
 main()
