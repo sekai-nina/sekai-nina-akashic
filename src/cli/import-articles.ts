@@ -23,7 +23,6 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
 import {
   PrismaClient,
-  ArticleType,
   ArticleSourceStatus,
   AssetKind,
   AssetStatus,
@@ -32,7 +31,13 @@ import {
 } from "@prisma/client";
 import "dotenv/config";
 
-import { parseArticle, type ArticleSourceEntry } from "@/lib/articles/frontmatter";
+import {
+  parseArticle,
+  parseFrontmatterDate,
+  toArticleColumns,
+  type ArticleColumns,
+  type ArticleSourceEntry,
+} from "@/lib/articles/frontmatter";
 
 const prisma = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -49,8 +54,6 @@ const DIR = (() => {
 /** 記事ではない Markdown (リポジトリ直下の README 等) */
 const NON_ARTICLE = new Set(["README.md"]);
 
-const ARTICLE_TYPES = new Set<string>(Object.values(ArticleType));
-
 async function walk(dir: string, root: string, out: string[] = []): Promise<string[]> {
   for (const name of await readdir(dir)) {
     if (name.startsWith(".") || name === "_templates") continue;
@@ -61,50 +64,8 @@ async function walk(dir: string, root: string, out: string[] = []): Promise<stri
   return out;
 }
 
-/**
- * frontmatter の日付は文字列でも Date でも来る。
- *
- * 日付のみの表記は **UTC 深夜** として保存する。既存の取り込み
- * (src/lib/domain/coverage.ts の `T00:00:00.000Z`) と揃えるため。
- * JST 深夜 (+09:00) にすると UTC では前日 15:00 になり、`formatDate` が
- * timeZone 未指定でサーバ TZ に従うせいで、Vercel (UTC) 上だけ日付が
- * 1 日前にズレる (ローカルの Mac は JST なので気づけない)。
- */
-function toDate(v: unknown): Date | null {
-  if (v == null || v === "") return null;
-  if (v instanceof Date) return v;
-  const s = String(v).trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(`${s}T00:00:00.000Z`);
-  const d = new Date(s);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-function toBool(v: unknown): boolean {
-  return v === true || v === "true";
-}
-
-function toNum(v: unknown): number | null {
-  if (v == null || v === "") return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-function toType(v: unknown): ArticleType | null {
-  if (v == null) return null;
-  let s = String(v).trim();
-  // Astro 側の transform に合わせる (fact / state は attribute に寄せる)
-  if (s === "fact" || s === "state") s = "attribute";
-  return ARTICLE_TYPES.has(s) ? (s as ArticleType) : null;
-}
-
-type ParsedFile = {
-  path: string;
-  shortId: string;
-  fm: Record<string, unknown>;
-  extra: Record<string, unknown>;
-  sources: ArticleSourceEntry[];
-  body: string;
-};
+/** カラムに落とした 1 記事。sources は必ず入る (toArticleColumns が詰める) */
+type ParsedFile = ArticleColumns;
 
 type Resolution = {
   entry: ArticleSourceEntry;
@@ -127,13 +88,12 @@ async function main() {
   const parsed: ParsedFile[] = [];
   const skipped: string[] = [];
   for (const f of files) {
-    const { frontmatter, extra, sources, body } = parseArticle(await readFile(f, "utf8"));
-    const shortId = frontmatter.short_id == null ? "" : String(frontmatter.short_id).trim();
-    if (shortId === "") {
-      skipped.push(relative(DIR, f));
+    const cols = toArticleColumns(parseArticle(await readFile(f, "utf8")), relative(DIR, f));
+    if (cols.shortId === "") {
+      skipped.push(cols.path);
       continue;
     }
-    parsed.push({ path: relative(DIR, f), shortId, fm: frontmatter, extra, sources, body });
+    parsed.push(cols);
   }
   if (skipped.length) {
     console.log(`short_id が無いためスキップ: ${skipped.length} 件`);
@@ -228,7 +188,7 @@ async function main() {
           title: e.label ?? e.url ?? "",
           status: AssetStatus.inbox,
           sourceType: SourceType.import,
-          canonicalDate: toDate(e.date),
+          canonicalDate: parseFrontmatterDate(e.date),
           ...(e.url
             ? {
                 sourceRecords: {
@@ -246,26 +206,11 @@ async function main() {
       stats.created++;
     }
 
-    const fm = file.fm;
+    const { sources: _sources, ...cols } = file;
     const data = {
-      shortId: file.shortId,
-      path: file.path,
-      slug: fm.slug == null ? null : String(fm.slug),
-      title: fm.title == null ? "" : String(fm.title),
-      type: toType(fm.type),
-      tags: Array.isArray(fm.tags) ? fm.tags : [],
-      body: file.body,
-      date: toDate(fm.date),
-      dateDisplay: fm.date_display == null ? null : String(fm.date_display),
-      dateMode: fm.date_mode == null ? null : String(fm.date_mode),
-      publishedAt: toDate(fm.published_at),
-      articleUpdatedAt: toDate(fm.updated_at),
-      draft: toBool(fm.draft),
-      unlisted: toBool(fm.unlisted),
-      ongoing: toBool(fm.ongoing),
-      lat: toNum(fm.lat),
-      lng: toNum(fm.lng),
-      frontmatterExtra: file.extra as object,
+      ...cols,
+      tags: cols.tags as object,
+      frontmatterExtra: cols.frontmatterExtra as object,
       dirty: false,
       lastSyncedAt: new Date(),
     };
@@ -293,7 +238,7 @@ async function main() {
       sourceNo: r.entry.id ?? null,
       label: r.entry.label ?? "",
       url: r.entry.url ?? null,
-      date: toDate(r.entry.date),
+      date: parseFrontmatterDate(r.entry.date),
       originalRef: r.status === ArticleSourceStatus.unresolved ? (r.entry.ref ?? null) : null,
       sortOrder: i,
     }));

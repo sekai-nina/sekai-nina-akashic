@@ -13,6 +13,7 @@
     "db:studio": "prisma studio",
     "db:generate": "prisma generate",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "cli:keygen": "tsx src/cli/generate-api-key.ts",
     "cli:mcp-check": "tsx src/cli/mcp-check.ts",
     "cli:import": "tsx src/cli/import-assets.ts",
@@ -72,7 +73,8 @@
     "@types/react-dom": "^19.2.3",
     "eslint": "^10.0.3",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
