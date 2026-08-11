@@ -38,9 +38,16 @@ export interface PickOptions {
   /**
    * 日付の不一致を「別物」の根拠として使うか。
    *
-   * `label` 照合は手がかりが弱いので **true**。同一ラベルで日付だけ違う
-   * エントリ (attribute/癖.md の `^[2]` `^[3]` が 3/7 と 3/20) が同じ Asset に
-   * 吸い込まれるのを防ぐ。`--create-missing` の再照合ループでもこれが効く。
+   * `label` 照合は手がかりが弱いので **true**。同名の Asset が複数あるとき、
+   * 日付の合わないものを別物として落とす。`--create-missing` の再照合ループ
+   * でもこれが効き、同じ run で日付違いのエントリに別々の Asset を作れる。
+   *
+   * **候補の `canonicalDate` が null だと日付では否定できない。** 日付を持たない
+   * Asset は「その日ではない」と言えないため、日付違いのエントリが同じ Asset に
+   * 集まる (attribute/癖.md の `^[2]` `^[3]` が 3/7 と 3/20 で 1 つの動画に
+   * 紐づくのがこれ)。この形は照合の段階では検出できないので、記事単位で
+   * 突き合わせて報告する (`import-articles.ts` の「同一 Asset に日付違いで
+   * 紐づいている」)。
    *
    * `url` 照合は完全一致なので **false**。日付は候補が複数のときの絞り込みに
    * だけ使う。frontmatter の日付が放送日、Asset が配信日、のように正当に
@@ -63,9 +70,9 @@ export function addCandidate(map: Map<string, Candidate[]>, key: string, c: Cand
  * (= 15:00 UTC 前日) で持つのに対し、frontmatter 由来の日付は UTC 深夜なので、
  * 素の UTC 日付で突き合わせると常に 1 日ずれる (実測で 2642 件の Asset が該当)。
  *
- * 記事側に日付があるとき、日付を持つ候補には一致を要求する。同一ラベルで
- * 日付だけ違うエントリ (attribute/癖.md の `^[2]` `^[3]` が 3/7 と 3/20) が
- * 同じ Asset に吸い込まれるのを防ぐため。
+ * 記事側に日付があるとき、日付が一致する候補を最優先で採る。`strictDate` なら
+ * 日付の合わない候補は別物として落とす (候補が `canonicalDate` を持つ場合のみ。
+ * `PickOptions` の注記を参照)。
  */
 export function pickCandidate(
   cands: Candidate[] | undefined,

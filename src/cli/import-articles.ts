@@ -47,6 +47,7 @@ import {
   type Candidate,
   type FailReason,
 } from "@/lib/articles/matching";
+import { jstDayString } from "@/lib/utils";
 
 const prisma = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -294,6 +295,35 @@ async function main() {
       const extra = r.candidates ? ` [候補 ${r.candidates} 件]` : "";
       console.log(`  ${path}  ^[${r.entry.id ?? "-"}] ${clue.slice(0, 60)}${extra}`);
     }
+  }
+
+  // 同じ Asset に日付違いのエントリが集まっていないか。
+  // 候補の canonicalDate が null だと照合では否定できないため、ここで拾う。
+  // 番組の前後編のように正当な場合もあるので **状態は変えず報告だけする**
+  const dateClashes: string[] = [];
+  for (const { file, resolutions } of plan) {
+    const byAsset = new Map<string, { no?: number; day: string }[]>();
+    for (const r of resolutions) {
+      if (!r.assetId) continue;
+      const d = parseFrontmatterDate(r.entry.date);
+      if (!d) continue;
+      const list = byAsset.get(r.assetId);
+      const item = { no: r.entry.id, day: jstDayString(d) };
+      if (list) list.push(item);
+      else byAsset.set(r.assetId, [item]);
+    }
+    for (const [assetId, list] of byAsset) {
+      if (list.length < 2) continue;
+      if (new Set(list.map((x) => x.day)).size < 2) continue;
+      dateClashes.push(
+        `${file.path}  ${list.map((x) => `^[${x.no ?? "-"}]=${x.day}`).join(" ")}  asset=${assetId}`,
+      );
+    }
+  }
+  if (dateClashes.length) {
+    console.log(`\n--- 同一 Asset に日付違いで紐づいている (${dateClashes.length} 件) ---`);
+    for (const c of dateClashes) console.log(`  ${c}`);
+    console.log("  番組の前後編なら正常。別の収録なら Asset を分ける必要がある");
   }
 
   if (warnings.length) {
