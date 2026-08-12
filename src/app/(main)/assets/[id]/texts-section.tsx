@@ -71,11 +71,13 @@ export function TextsSection({
     if (editableDossiers.length === 0 && articles.length === 0) return;
 
     function handleUp(e: MouseEvent) {
-      // Ignore clicks originating inside the floater itself (popover, buttons),
-      // otherwise focus changes can collapse the text selection and unmount us
-      // mid-action.
+      // フローター自身（およびそこから開くピッカー）の中のクリックは無視する。
+      // 無視しないと、フォーカス移動で選択が collapse され、操作の途中で
+      // フローターごとアンマウントされてしまう。
+      // ピッカーのパネルは createPortal で body 直下に出ているため、DOM 上は
+      // フローターの子孫にならない。data-picker-panel を別途見る必要がある。
       const target = e.target as Element | null;
-      if (target && target.closest("[data-excerpt-floater]")) return;
+      if (isInsideFloater(target)) return;
       const sel = window.getSelection();
       if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
         setActiveSelection(null);
@@ -116,7 +118,7 @@ export function TextsSection({
     function handleDown(e: MouseEvent) {
       // Dismiss when clicking outside the floater
       const target = e.target as Element | null;
-      if (target && target.closest("[data-excerpt-floater]")) return;
+      if (isInsideFloater(target)) return;
       // Wait for the mouseup event to recompute selection
     }
 
@@ -176,6 +178,14 @@ export function TextsSection({
       )}
     </div>
   );
+}
+
+/**
+ * フローター本体、またはそこから開いたピッカーのパネル内か。
+ * パネルは createPortal で body 直下に出るので closest だけでは辿れない。
+ */
+function isInsideFloater(target: Element | null): boolean {
+  return !!target?.closest("[data-excerpt-floater], [data-picker-panel]");
 }
 
 function nearestPanel(node: Node): HTMLLIElement | null {
