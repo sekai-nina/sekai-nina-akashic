@@ -195,9 +195,12 @@ export function AddToDossier({
 
   // ポータルに出す理由: 親の overflow / stacking context に切り取られないようにするため。
   // position: fixed なので、位置が確定するまでは描画しない。
+  // data-picker-panel: ポータル先では DOM 上の親子関係が切れるため、呼び出し元
+  // （アセット本文の引用フローター等）が「自分の中のクリック」と判定できるようにする。
   const panel = open && position && (
     <div
       ref={panelRef}
+      data-picker-panel
       style={{
         top: position.top,
         left: position.left,
