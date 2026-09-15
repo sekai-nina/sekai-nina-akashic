@@ -1,5 +1,11 @@
 import { withClearance, prisma } from "@/lib/db";
 import { assertClearance } from "@/lib/classification";
+import {
+  diffArticleEdit,
+  toArticleEditValues,
+  type ArticleEditField,
+  type ArticleEditValues,
+} from "@/lib/articles/edit";
 import { renderArticleMarkdown } from "@/lib/articles/frontmatter";
 import { buildCommitMessage, planPush, type PushPlan, type RenderedArticle } from "@/lib/articles/push";
 import { gitBlobSha } from "@/lib/github/blob";
@@ -238,6 +244,100 @@ export async function getArticleStats(clearance: string) {
 }
 
 /**
+ * タグ入力の候補。全記事の tags を件数の多い順に並べる (同数は名前順)。
+ *
+ * Article は非保護テーブルなので素の prisma でよい。335 行 × Json 1 列なので全件引く
+ * (タグは 158 種で、表記揺れを防ぐには既存の並びをそのまま候補にするのが確実)。
+ */
+export async function listArticleTags(): Promise<string[]> {
+  const rows = await prisma.article.findMany({ select: { tags: true } });
+  const counts = new Map<string, number>();
+  for (const r of rows) {
+    if (!Array.isArray(r.tags)) continue;
+    for (const t of r.tags as unknown[]) {
+      const tag = String(t);
+      counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ja"))
+    .map(([tag]) => tag);
+}
+
+export type UpdateArticleResult =
+  | { ok: true; changed: ArticleEditField[]; previousTitle: string }
+  | { ok: false; reason: "not_found" | "conflict" };
+
+/**
+ * 記事の編集を保存する (`/articles/[shortId]/edit`)。
+ *
+ * - **楽観ロック**: フォームが読み込んだ時点の `updatedAt` を持ち、`updateMany` の where に
+ *   入れて 0 行なら `conflict`。別の保存か取り込みが先に入った場合で、呼び出し側は入力を
+ *   保ったままエラーを見せる。push は素の SQL で `updatedAt` を動かさないので、push を
+ *   挟んでも保存できる (編集後の内容は次の push に載る)
+ * - **変わっていなければ書かない**: `dirty` / `editedAt` を立てるのは push の出力が変わる
+ *   ときだけ。何もせず保存しても push 画面に出ない
+ * - 書く内容は変更カラム + `dirty = true` + `editedAt = now` (`docs/security-dev.md` の規約。
+ *   `editedAt` は「未 push の akashic 編集がある」の印で、取り込みの preserved ガードが見る)
+ *
+ * Article は非保護テーブルなので素の prisma。呼び出し側 (Server Action) が役割を確認する。
+ */
+export async function updateArticle(
+  shortId: string,
+  expectedUpdatedAt: Date,
+  values: ArticleEditValues,
+): Promise<UpdateArticleResult> {
+  const current = await prisma.article.findUnique({
+    where: { shortId },
+    select: {
+      title: true,
+      type: true,
+      tags: true,
+      body: true,
+      date: true,
+      dateDisplay: true,
+      dateMode: true,
+      publishedAt: true,
+      articleUpdatedAt: true,
+      draft: true,
+      unlisted: true,
+      ongoing: true,
+      updatedAt: true,
+    },
+  });
+  if (!current) return { ok: false, reason: "not_found" };
+  if (current.updatedAt.getTime() !== expectedUpdatedAt.getTime()) return { ok: false, reason: "conflict" };
+
+  const changed = diffArticleEdit(toArticleEditValues(current), values);
+  if (!changed.length) return { ok: true, changed, previousTitle: current.title };
+
+  // 読んでから書くまでに別の保存が入ると、上の比較だけでは検出できない。where にも入れる
+  const { count } = await prisma.article.updateMany({
+    where: { shortId, updatedAt: expectedUpdatedAt },
+    data: { ...values, dirty: true, editedAt: new Date() },
+  });
+  if (count === 0) return { ok: false, reason: "conflict" };
+  return { ok: true, changed, previousTitle: current.title };
+}
+
+/**
+ * タイトルを `[[title]]` / `[[title|表示]]` で参照している他の記事数。
+ *
+ * タイトルを変えた直後の警告に使う (宛先を失うリンクの数)。`remarkWikilinks` の解決は
+ * タイトルの完全一致なので、ここも大文字小文字を区別する素の contains でよい。
+ * Article は非保護テーブルなので素の prisma。
+ */
+export async function countArticlesLinkingTo(title: string, excludeShortId: string): Promise<number> {
+  if (!title) return 0;
+  return prisma.article.count({
+    where: {
+      shortId: { not: excludeShortId },
+      OR: [{ body: { contains: `[[${title}]]` } }, { body: { contains: `[[${title}|` } }],
+    },
+  });
+}
+
+/**
  * push (GitHub への書き出し) で記事を読むときのクリアランス。**public 固定。**
  *
  * 操作者の clearance で読むと、RLS は高クリアランスほど多く返すので
@@ -436,6 +536,9 @@ type PushedItem = { id: string; updatedAt: Date; blobSha: string };
  *   編集の有無に依らず全件 (GitHub 側の blob はどちらにせよ新しい方になった)
  * - `unchanged` (GitHub 側と同じだった): dirty だけ落とす。`githubSha` は一致しているので触らない
  *
+ * `editedAt` (未 push の akashic 編集がある印) は **dirty を落とす行と同時に null に戻す**。
+ * commit 中に編集された行は dirty と一緒に残す (その編集はまだ GitHub に無い)。
+ *
  * Article は非保護テーブルなので素の prisma でよい。2 文は 1 トランザクションにまとめる。
  */
 async function markPushed(pushed: PushedItem[], unchanged: PushedItem[]): Promise<void> {
@@ -446,14 +549,17 @@ async function markPushed(pushed: PushedItem[], unchanged: PushedItem[]): Promis
   if (pushed.length) {
     statements.push(prisma.$executeRaw`
       UPDATE "Article" AS a
-      SET "githubSha" = v.sha, "lastPushedAt" = ${now}, "dirty" = (a."updatedAt" <> v."updatedAt")
+      SET "githubSha" = v.sha,
+          "lastPushedAt" = ${now},
+          "dirty" = (a."updatedAt" <> v."updatedAt"),
+          "editedAt" = CASE WHEN a."updatedAt" <> v."updatedAt" THEN a."editedAt" ELSE NULL END
       FROM (VALUES ${values(pushed)}) AS v(id, "updatedAt", sha)
       WHERE a.id = v.id`);
   }
   if (unchanged.length) {
     statements.push(prisma.$executeRaw`
       UPDATE "Article" AS a
-      SET "dirty" = false
+      SET "dirty" = false, "editedAt" = NULL
       FROM (VALUES ${values(unchanged)}) AS v(id, "updatedAt", sha)
       WHERE a.id = v.id AND a."updatedAt" = v."updatedAt"`);
   }
@@ -466,8 +572,8 @@ async function markPushed(pushed: PushedItem[], unchanged: PushedItem[]): Promis
  * 1. GitHub の HEAD と tree を読み、dirty な記事を組み立て直して計画を作る (衝突・非 public は除外)
  * 2. 1 コミットで書く (ref 更新は non-force。1 の後にブランチが進んでいれば 422 で失敗する)
  * 3. push した記事の `githubSha` を新しい blob SHA に、`lastPushedAt` を今にする。
- *    `dirty = false` は 1 の時点から `updatedAt` が変わっていない行だけ (`markPushed`)。
- *    GitHub 側と同じ内容だった記事 (`unchanged`) もここで dirty を落とす
+ *    `dirty = false` (と `editedAt = null`) は 1 の時点から `updatedAt` が変わっていない行だけ
+ *    (`markPushed`)。GitHub 側と同じ内容だった記事 (`unchanged`) もここで dirty を落とす
  *
  * DB の更新は commit の **後** にまとめる (commit が 422 で失敗したら DB は何も変わらない)。
  * 2 が成功して 3 が失敗した場合は例外にせず `dbError` で返す。GitHub には載っているので、

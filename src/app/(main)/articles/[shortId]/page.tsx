@@ -1,15 +1,19 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { getArticleByShortId, getArticleTitleIndex } from "@/lib/domain/articles";
+import { countArticlesLinkingTo, getArticleByShortId, getArticleTitleIndex } from "@/lib/domain/articles";
 import {
+  ARTICLE_FLAG_LABELS,
   ARTICLE_TYPE_LABELS,
   ARTICLE_SOURCE_STATUS_LABELS,
   ASSET_KIND_LABELS,
   formatDate,
 } from "@/lib/utils";
+import { frontmatterExtraKeys } from "@/lib/articles/edit";
 import { auditFootnotes } from "@/lib/articles/footnotes";
+import { FootnoteAuditWarnings } from "./footnote-audit-warnings";
 import { RemoveSource } from "./remove-source";
+import { UnpushedBadge } from "./unpushed-badge";
 import { renderArticleBody } from "@/lib/articles/render";
 import "../article-content.css";
 import "katex/dist/katex.min.css";
@@ -22,32 +26,36 @@ const STATUS_STYLE: Record<string, string> = {
 
 export default async function ArticleDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ shortId: string }>;
+  searchParams: Promise<{ renamedFrom?: string | string[] }>;
 }) {
   const session = await auth();
   if (!session?.user) notFound();
 
   const { shortId } = await params;
-  const [article, titleIndex] = await Promise.all([
+  // 編集でタイトルを変えた直後だけ付く。旧タイトルを [[ ]] で参照している記事を数えて警告する。
+  // 同じキーが複数付くと配列で来るので、文字列のときだけ扱う
+  const sp = await searchParams;
+  const renamedFrom = typeof sp.renamedFrom === "string" ? sp.renamedFrom : undefined;
+  const [article, titleIndex, inboundLinks] = await Promise.all([
     getArticleByShortId(shortId, session.user.clearance),
     getArticleTitleIndex(),
+    renamedFrom ? countArticlesLinkingTo(renamedFrom, shortId) : Promise.resolve(0),
   ]);
   if (!article) notFound();
+  const canEdit = ["admin", "member"].includes(session.user.role);
 
   const tags = Array.isArray(article.tags) ? (article.tags as unknown[]).map(String) : [];
-  const extraKeys = Object.keys((article.frontmatterExtra ?? {}) as object);
+  const extraKeys = frontmatterExtraKeys(article);
   const unresolvedCount = article.sources.filter((s) => s.status === "unresolved").length;
   const bodyHtml = await renderArticleBody(article.body, { wikilinks: titleIndex });
   const hasTweets = bodyHtml.includes('class="twitter-tweet"');
 
   // 本文の ^[n] と出典の対応。描画側でリンクにするのとは別に、対応の壊れを出す
   const sourceNumbers = article.sources.map((s) => s.sourceNo);
-  const { missingSources, unreferenced, numericWikiLinks, brokenLinks } = auditFootnotes(
-    article.body,
-    sourceNumbers,
-    new Set(titleIndex.keys()),
-  );
+  const audit = auditFootnotes(article.body, sourceNumbers, new Set(titleIndex.keys()));
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -64,10 +72,18 @@ export default async function ArticleDetailPage({
             </span>
           )}
           {article.draft && (
-            <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">下書き</span>
+            <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">
+              {ARTICLE_FLAG_LABELS.draft}
+            </span>
           )}
-          {article.dirty && (
-            <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">未 push</span>
+          {article.dirty && <UnpushedBadge editedAt={article.editedAt} />}
+          {canEdit && (
+            <Link
+              href={`/articles/${article.shortId}/edit`}
+              className="ml-auto border border-slate-300 text-slate-700 px-3 py-1.5 rounded text-sm hover:bg-slate-50 transition-colors"
+            >
+              編集
+            </Link>
           )}
         </div>
         <p className="text-slate-500 text-sm mt-1">
@@ -75,6 +91,16 @@ export default async function ArticleDetailPage({
           {article.publishedAt && <> ・ 公開 {formatDate(article.publishedAt)}</>}
           {article.articleUpdatedAt && <> ・ 更新 {formatDate(article.articleUpdatedAt)}</>}
         </p>
+        {renamedFrom && inboundLinks > 0 && (
+          <div className="mt-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            {inboundLinks} 本の記事が旧タイトル [[{renamedFrom}]] でこの記事にリンクしています。
+            そのままだと宛先を失うので、参照元の本文を書き換えてください（
+            <Link href={`/articles?q=${encodeURIComponent(`[[${renamedFrom}`)}`} className="underline">
+              参照元を検索
+            </Link>
+            ）
+          </div>
+        )}
         {tags.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-2">
             {tags.map((t) => (
@@ -165,28 +191,7 @@ export default async function ArticleDetailPage({
           中身は自リポジトリの記事 Markdown なので入力は信頼できる。 */}
       <section>
         <h2 className="text-sm font-semibold text-slate-700 mb-2">本文</h2>
-        {(missingSources.length > 0 ||
-          unreferenced.length > 0 ||
-          numericWikiLinks.length > 0 ||
-          brokenLinks.length > 0) && (
-          <div className="mb-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 space-y-0.5">
-            {missingSources.length > 0 && (
-              <p>本文が指している出典がありません: {missingSources.map((n) => `^[${n}]`).join(" ")}</p>
-            )}
-            {unreferenced.length > 0 && (
-              <p>本文から参照されていない出典があります: {unreferenced.map((n) => `[${n}]`).join(" ")}</p>
-            )}
-            {numericWikiLinks.length > 0 && (
-              <p>
-                脚注が {numericWikiLinks.map((n) => `[[${n}]]`).join(" ")} と書かれています（
-                {numericWikiLinks.map((n) => `^[${n}]`).join(" ")} の誤りと思われます）
-              </p>
-            )}
-            {brokenLinks.length > 0 && (
-              <p>宛先の無い記事リンク: {brokenLinks.map((t) => `[[${t}]]`).join(" ")}</p>
-            )}
-          </div>
-        )}
+        <FootnoteAuditWarnings audit={audit} className="mb-2" />
         <div className="bg-white border border-slate-200 rounded-lg p-5">
           <div className="article-content" dangerouslySetInnerHTML={{ __html: bodyHtml }} />
         </div>

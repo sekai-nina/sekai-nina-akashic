@@ -124,6 +124,20 @@ export const ARTICLE_SOURCE_STATUS_LABELS: Record<string, string> = {
   unresolved: "未解決",
 };
 
+/** frontmatter の date_mode。公開サイト (src/content/config.ts) の enum と同じ値。
+ *  取りうる値の唯一の定義で、編集フォームの検証 (src/lib/articles/edit.ts) もここから導く */
+export const ARTICLE_DATE_MODE_LABELS: Record<string, string> = {
+  single: "単日",
+  range: "期間",
+};
+
+/** 記事の真偽フラグ (frontmatter の draft / unlisted / ongoing) */
+export const ARTICLE_FLAG_LABELS = {
+  draft: "下書き",
+  unlisted: "限定公開",
+  ongoing: "進行中",
+} as const;
+
 /**
  * 未検証の文字列を TextType に絞り込む。
  *
@@ -161,4 +175,27 @@ export function jstDayStart(dateOnlyUtc: Date): Date {
 /** 同上。JST のその暦日の**翌日 0 時**（= 排他的上限）を返す。 */
 export function jstDayEndExclusive(dateOnlyUtc: Date): Date {
   return new Date(dateOnlyUtc.getTime() + DAY_MS - JST_OFFSET_MS);
+}
+
+/**
+ * 実時刻を JST の「YYYY-MM-DD」で返す。
+ *
+ * `canonicalDate` のような「YYYY-MM-DD の UTC 00:00」格納規約の列は UTC で切るのが正しいが、
+ * `SourceRecord.publishedAt` のような実時刻を UTC で切ると JST 0〜9 時のデータが前日に落ちる。
+ * `toISOString().slice(0, 10)` も同じ理由で使わない (Vercel は UTC)。
+ */
+export function toJstDateOnly(d: Date | null | undefined): string | null {
+  if (!d) return null;
+  // en-CA ロケールは YYYY-MM-DD 形式を返す
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+/** JST の今日を「YYYY-MM-DD」で返す (記事編集の「今日にする」) */
+export function todayJst(): string {
+  return toJstDateOnly(new Date())!;
 }
