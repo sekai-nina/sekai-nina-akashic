@@ -114,9 +114,27 @@ RLS があるので読み取り時は不要ですが、**書き込み時のク�
 
 RLS はここでは「public 行が返ってくる」方向にも頼っているので、restricted 側で記事ごとの `pending` 以外の総数も数え、**public で見えた行数 + `blocked` = 総数** でなければバッチ全体を止めます（`app.clearance` が効いていない等で行が落ちると、脚注を全部失った記事を 1 コミットで公開してしまう）。
 
-したがって `pending` を `applied` に遷移させる処理は、classification を明示的に `public` に下げる「公開を決める」操作として実装してください。その際、`ArticleSource` の RLS は行単位なので **`excerpt` / `note`（機密アセットからの抜粋・内部メモ）も public クリアランスから見えるようになる**ことに注意。frontmatter には載りませんが akashic 内の可視範囲が変わるので、遷移時に抜粋を空にするか、見えてよい内容に限る運用にするかを決めてから実装すること。
+したがって `pending` を `applied` に遷移させる処理は、classification を明示的に `public` に下げる「公開を決める」操作です → `applyArticleSource`（次節）。
 
 DB から生成した Markdown と実ファイルの突き合わせは `pnpm cli:verify-article-push --dir <articles>` で行えます。
+
+### 紐づけの反映（pending → applied、`applyArticleSource`）
+
+`src/lib/domain/articles.ts` の `applyArticleSource` が唯一の経路。REST（`POST /api/v1/articles/:shortId/sources/:sourceId/apply`）/ MCP（`akashic_apply_article_source`）/ 画面（記事詳細の「反映済みにする」）がすべてこれを呼ぶ。
+
+- **公開を決める操作。** `status = applied` と同時に `classification = public` にする。次の push でその行の `label` / `ref` が公開リポジトリの frontmatter に載る
+- **API キー経路は `internal` 以下の出典しか反映できない**（`API_APPLY_MAX_CLASSIFICATION`、`src/lib/articles/apply.ts`）。`docs/api.md` / `docs/mcp.md` の「API キーからの引き下げは不可」の例外で、機械が公開を決めてよい範囲を internal までに限る。`confidential` / `restricted` は画面から人間が押す（画面経路は `maxClassification` を渡さない）。加えて全経路で `assertClearance` を通す（RLS で見えている行でも規約どおりアプリ層で止める）
+- **ガードは出典行の `classification` と Asset の現在の `classification` の両方に掛ける。** 行の値は紐づけ時のスナップショットで、後から `updateAsset` でアセットを上げても伝播しない。Asset が RLS で見えない（関係が null なのに `assetId` はある）ときも `not_found` で止める
+- **`excerpt` / `note` は残す。** apply = 抜粋ごと公開判断。public 行になるので akashic 内では誰でも読める。したがって **public 行の `excerpt` は公開してよい内容に限る**（機密アセットの抜粋を機械的に public にする経路は無い。人間が画面で confidential 以上を apply するときは抜粋の内容を見て判断する）
+- **API キー経路の応答（`src/lib/domain/article-api.ts`）は `internal` より上の `pending` 行を返さない。** `Article.body` の書き込みには classification のガードが無いので、apply できない抜粋を AI に見せると「本文に貼る」だけで公開経路になる。見せなければ貼れない
+- 脚注番号は `nextSourceNo`（既存の非 pending 行の `sourceNo` と本文の `^[n]` の最大 + 1。本文側も見るのは、宛先の無い脚注に新しい出典が黙って結びつくのを防ぐため）、並びは `nextSortOrder`（非 pending 行の末尾。`buildFrontmatter` は `sortOrder` → `sourceNo` で並べる）。`label` が空なら Asset のタイトル、`url` / `date` は捏造しない
+- Article に `dirty = true` / `editedAt = now` を立てる（下の規約）。`updateMany` の where に呼び出し側が読んだ `updatedAt` を入れ、0 行なら**トランザクションごと巻き戻して `conflict`**。apply 自身が `updatedAt` を進めるので、別の apply が割り込んで番号がズレる競合もこれで検出される。呼び出し側は apply → 本文に `^[n]` の順で書く（逆だと途中で止まったとき宛先の無い脚注が残る）
+- 監査ログは `article.source.apply`（API は metadata に `apiKeyId`、MCP はさらに `mcp.apply_article_source`）
+
+**再取り込みは applied 行を frontmatter から作り直す**（全置換）ので、そのままだと 2 つが消える。取り込みは既存の非 pending 行を `assetId + sourceNo` で突き合わせ（`reconcileSources`、`src/lib/articles/reconcile.ts`）、
+
+1. 対応した行の `excerpt` / `note` を新しい行に写す。`sourceNo` の無い行はそのアセットが双方 1 行だけのときに限る（取り違えて別の脚注に別の抜粋を付けるより、消える方がまし）
+2. 対応が無く、**akashic で applied にしたが上流に無い行**（`applied && originalRef IS NULL && assetId あり` = apply したが未 push のまま上流が変わった）は削除せず **pending に戻す**（`demotableSources`。`sourceNo` を外し、classification を Asset の現在値に）。PR3 より前は同じ行が pending として生き残っていたので、その挙動を保つ。本文の `^[n]` はファイルで上書きされて消えているので、取り込みの出力に一覧を出して反映し直させる
 
 ### 一括 push の仕組み（`/articles/push`）
 
@@ -138,14 +156,17 @@ akashic が記事の真実になると、古い checkout から取り込むと D
 - **ファイルの blob SHA == DB の `githubSha` かつ path も同じ かつ `editedAt` が非 null の記事はスキップ**（上流が変わっていない = DB の編集の方が新しい）。SHA が違えば上流が新しいのでファイルで上書きし、akashic の編集を捨てた記事（`editedAt` が非 null だったもの）は最後に一覧で知らせる。`dirty` ではなく `editedAt` で見るのは、正規化だけの dirty まで守ると `--create-missing` や照合のやり直しが push まで効かなくなるため。path も見るのは、内容そのままのリネームをスキップすると DB が旧 path のまま残って push が `deleted_upstream` で衝突し続けるため。スキップしなかった記事は `editedAt` を null に戻す（値がファイルと同じで書き込みを省いた経路も同様）
 - **`--apply` は checkout の HEAD が origin/main と一致しない・`--dir` がリポジトリのトップレベルでないと止まる**（`compareCheckoutWithRemote`）。承知の上なら `--allow-stale`。dry-run でも同じ検査を警告として出す。未コミットの変更があるファイルは警告だけ（取り込むと push で衝突扱いになる）
 
-**push の出力に影響する書き込みは必ず `Article.dirty = true` と `editedAt = now` を立てること**（本文・frontmatter カラム・`ArticleSource` の `applied` / `public` への遷移）。`dirty` を立て忘れると push 画面に出ず、GitHub と DB が食い違ったまま気づけません。`editedAt` を立て忘れると、次の取り込みがその編集をファイルで黙って上書きします。
+**push の出力に影響する書き込みは必ず `Article.dirty = true` と `editedAt = now` を立てること**（本文・frontmatter カラム・`ArticleSource` の `applied` / `public` への遷移）。`dirty` を立て忘れると push 画面に出ず、GitHub と DB が食い違ったまま気づけません。`editedAt` を立て忘れると、次の取り込みがその編集をファイルで黙って上書きします。現状この書き込みをするのは `updateArticle` / `patchArticle`（編集 UI と API の保存）と `applyArticleSource` の 3 つで、いずれも `src/lib/domain/articles.ts`。
 
-### 記事の編集 UI（`/articles/[shortId]/edit`）
+### 記事の編集 UI（`/articles/[shortId]/edit`）と API（`/api/v1/articles`）
 
-- admin / member のみ（viewer は詳細へ redirect）。触れるのは本文とモデル化済みの frontmatter（title / type / tags / 日付系 / draft / unlisted / ongoing）。`frontmatterExtra` と `ArticleSource` はここでは触らない
+- UI は admin / member のみ（viewer は詳細へ redirect）。触れるのは本文とモデル化済みの frontmatter（title / type / tags / 日付系 / draft / unlisted / ongoing）。`frontmatterExtra` と `ArticleSource` はここでは触らない
 - 保存（`updateArticle`）は **変わっていなければ書かない**（`diffArticleEdit`。dirty / editedAt を無駄に立てない）。書くときは変更カラム + `dirty = true` + `editedAt = now`。プレビュー（`previewArticleAction`）も保存と同じ役割に絞る（remark + KaTeX を誰でも回せる経路にしない。本文の上限 `BODY_MAX_LENGTH` も共通）
 - **楽観ロック**: フォームが読み込んだ時点の `updatedAt` を `updateMany` の where に入れ、0 行なら衝突として入力を残したまま拒否する。push は `updatedAt` を動かさないので push を挟んでも保存できる
 - フォーム値の変換は `src/lib/articles/edit.ts` の純粋関数（vitest あり）。本文は `\r\n → \n` と先頭空行の除去だけ正規化し（`parseArticle` と同じ）、末尾は触らない。日付は `<input type="date">` の date-only を `parseFrontmatterDate` で UTC 深夜にする（取り込みと同じ規則。ここを変えると編集しただけで push に差分が出る）
+- **API（REST `PATCH` / MCP `akashic_update_article`）は同じ経路に合流する。** `ArticleEditPatchSchema`（`src/lib/articles/patch.ts`、zod。未知キーは除去）で検証した部分更新を現在値に重ねてフォームの形にし（`mergeArticleEditPatch`）、UI と同じ `parseArticleEditForm` → `updateArticleFrom` を通す（`patchArticle`）。`updatedAt` は API では body で必須（`UpdatedAtSchema`）。API は権限（`write`）だけを見て role は見ない（既存の REST と同じ）
+- 監査ログ（`article.update` / `article.source.apply`）は domain が `ArticleActor`（`id` + API キーなら `apiKeyId`）から書く。REST / MCP / 画面の 3 経路で書き分けない。MCP はさらに `mcp.<tool>` を 1 本足す
+- `Article` は非保護テーブルなので、API から本文を書くこと自体には classification のガードが無い。保護アセットの抜粋が公開記事に入る経路のガードは apply 側（上の「紐づけの反映」）で、AI は抜粋を **apply できた出典だけ** 本文に書く前提
 
 ## DB 接続の構成
 
