@@ -53,7 +53,7 @@ pnpm test                                                    # 合成ケース�
 ARTICLES_DIR=<sekai-nina-public のパス> pnpm test              # 実記事 332 件も検証
 ```
 
-記事の実体は別リポジトリなので、`ARTICLES_DIR` が未設定なら実記事のテストは skip される（CI はこの状態で回る）。**記事の push（#46）を触る前には `ARTICLES_DIR` 付きで緑にしておく。**
+記事の実体は別リポジトリなので、`ARTICLES_DIR` が未設定なら実記事のテストは skip される（CI はこの状態で回る）。**記事の push（#46）を触る前には `ARTICLES_DIR` 付きで緑にし、`pnpm cli:verify-article-push --dir <path>` で DB から生成した Markdown が実ファイルと食い違っていないことも確認する**（frontmatter に載るのは `pending` 以外かつ `public` の `ArticleSource` だけ。詳細は `docs/security-dev.md`）。
 
 ## 認可モデル（このリポジトリの肝）
 
@@ -96,7 +96,7 @@ withSession({ id, clearance }, tx => …)    // 上記 + app.user_id — Dossier
 
 ### 保護テーブル
 
-`Asset`, `AssetText`, `AssetEntity`, `AssetRelation`, `SourceRecord`, `Annotation`, `Testimonial`, `Dossier`, `Place`, `RepoCollection`, `Lens`, `DataSource`, `Coverage`, `LensItemCheck`
+`Asset`, `AssetText`, `AssetEntity`, `AssetRelation`, `SourceRecord`, `Annotation`, `Testimonial`, `Dossier`, `DossierItem`, `DossierPlaceCandidate`, `Place`, `RepoCollection`, `RepoTweet`, `RepoTweetMedia`, `Lens`, `DataSource`, `Coverage`, `LensItemCheck`, `ArticleSource`
 
 RLS は `clearance_rank(classification::text) <= clearance_rank(current_setting('app.clearance', true))`。`clearance_rank()` は未知/未設定を `-1` にして **fail-closed**。全テーブル `ENABLE` + `FORCE ROW LEVEL SECURITY`。
 

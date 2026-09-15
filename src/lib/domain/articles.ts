@@ -1,7 +1,9 @@
 import { withClearance, prisma } from "@/lib/db";
 import { assertClearance } from "@/lib/classification";
+import { buildFrontmatter, serializeArticle } from "@/lib/articles/frontmatter";
 import {
   ArticleSourceStatus,
+  ClearanceLevel,
   type ArticleType,
   type Prisma,
   type TextType,
@@ -53,7 +55,7 @@ export async function listArticles(opts: ListArticlesOptions) {
       tx.article.findMany({
         where,
         // Postgres の DESC は NULL を **先頭** に置く。素の desc だと日付の無い
-        // 下書きやクイズが一覧の先頭を占め、新しい記事が見えなくなる
+        // 下書きが一覧の先頭を占め、新しい記事が見えなくなる
         orderBy: [{ publishedAt: { sort: "desc", nulls: "last" } }, { title: "asc" }],
         skip: (page - 1) * perPage,
         take: perPage,
@@ -221,4 +223,111 @@ export async function getArticleStats(clearance: string) {
     ]);
     return { byType, total, unresolved, dirty };
   });
+}
+
+/**
+ * push (GitHub への書き出し) で記事を読むときのクリアランス。**public 固定。**
+ *
+ * 操作者の clearance で読むと、RLS は高クリアランスほど多く返すので
+ * 「restricted の担当者が push したときだけ機密アセットの label が公開リポジトリに
+ * 出る」経路になる。誰が押しても同じ出力になるよう、読み出しは固定の最低
+ * クリアランスで行い、`buildFrontmatter` の絞り込み (pending 以外かつ public) と
+ * 二重にする。
+ */
+export const PUSH_CLEARANCE = ClearanceLevel.public;
+
+interface RenderedArticleBase {
+  id: string;
+  shortId: string;
+  /** リポジトリ内のパス。push 先のファイル名 */
+  path: string;
+  dirty: boolean;
+  githubSha: string | null;
+}
+
+/**
+ * `renderArticleForPush` の戻り。`ok: false` のときは Markdown を組み立てない
+ * (呼び出し側が確認を忘れても脚注の欠けた記事を push できないように)。
+ */
+export type RenderedArticle =
+  | (RenderedArticleBase & {
+      ok: true;
+      /** 公開リポジトリに書き出す Markdown (frontmatter + 本文) */
+      markdown: string;
+    })
+  | (RenderedArticleBase & {
+      ok: false;
+      /**
+       * applied / unresolved なのに public でない行の脚注番号 (無ければ null)。
+       * 本文が ^[n] で参照しているのに脚注が消える矛盾状態なので、push を拒否する
+       */
+      blockedSourceNos: (number | null)[];
+    });
+
+/**
+ * 記事 1 本を push 用の Markdown に組み立てる。
+ *
+ * `PUSH_CLEARANCE` で読むので、RLS が非 public の ArticleSource を落とす。
+ * それだけだと「applied なのに internal」の矛盾行が黙って消えて脚注が壊れた記事が
+ * 公開されるため、矛盾の検出は **最高クリアランス (restricted) で脚注番号だけ**を
+ * 引いて行う。`prismaInternal` で数えない理由: `DIRECT_URL` 未設定だと
+ * `DATABASE_URL` に無言でフォールバックし、RLS で常に 0 件 = 「矛盾なし」に
+ * なる (fail-open)。`withClearance` なら環境変数に依らず全行が見える。
+ *
+ * 読み出しと矛盾検出は別トランザクションなので、同時に `addAssetToArticle` が
+ * 走ると別時点のスナップショットになる。push は人手の低頻度操作なので許容する
+ * (#46 で commit 直前に再確認する)。
+ */
+export async function renderArticleForPush(shortId: string): Promise<RenderedArticle | null> {
+  const article = await withClearance(PUSH_CLEARANCE, (tx) =>
+    tx.article.findUnique({
+      where: { shortId },
+      include: {
+        sources: {
+          orderBy: [{ sortOrder: "asc" }],
+          select: {
+            assetId: true,
+            status: true,
+            classification: true,
+            sourceNo: true,
+            label: true,
+            url: true,
+            date: true,
+            originalRef: true,
+            sortOrder: true,
+          },
+        },
+      },
+    }),
+  );
+  if (!article) return null;
+
+  const base: RenderedArticleBase = {
+    id: article.id,
+    shortId: article.shortId,
+    path: article.path,
+    dirty: article.dirty,
+    githubSha: article.githubSha,
+  };
+
+  const blocked = await withClearance(ClearanceLevel.restricted, (tx) =>
+    tx.articleSource.findMany({
+      where: {
+        articleId: article.id,
+        status: { not: ArticleSourceStatus.pending },
+        classification: { not: ClearanceLevel.public },
+      },
+      orderBy: [{ sortOrder: "asc" }],
+      select: { sourceNo: true },
+    }),
+  );
+  if (blocked.length) return { ...base, ok: false, blockedSourceNos: blocked.map((b) => b.sourceNo) };
+
+  const built = buildFrontmatter(article);
+  // PUSH_CLEARANCE が public なら RLS が先に落とすので、ここに非 public 行が
+  // 残っているのは RLS が効いていない証拠。黙って進めない
+  if (built.blocked.length) {
+    throw new Error(`RLS を通過した非 public の ArticleSource があります (${article.path})`);
+  }
+  return { ...base, ok: true, markdown: serializeArticle(built.frontmatter, article.body) };
 }

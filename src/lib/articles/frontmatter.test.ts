@@ -1,15 +1,21 @@
+import { ArticleSourceStatus, ClearanceLevel } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import {
-  buildFrontmatter,
+  buildFrontmatter as buildFrontmatterFull,
   formatFrontmatterDate,
   parseArticle,
   parseFrontmatterDate,
   serializeArticle,
   splitFrontmatter,
+  toArticleSourceRow,
   type ArticleFrontmatterInput,
+  type ArticleSourceRow,
 } from "./frontmatter";
-import { roundtrip } from "./roundtrip";
+import { resolveOffline, roundtrip } from "./roundtrip";
+
+/** frontmatter 本体だけ見るテスト用。除外の内訳は「書き出し対象の絞り込み」で見る */
+const buildFrontmatter = (input: ArticleFrontmatterInput) => buildFrontmatterFull(input).frontmatter;
 
 /**
  * 記事の frontmatter は push 時に DB のカラムから組み立て直される。
@@ -206,9 +212,15 @@ describe("buildFrontmatter", () => {
   it("source のキー順を id / url / label / date / ref に揃える", () => {
     const fm = buildFrontmatter({
       ...base,
-      sources: [{ ref: "cuid1", date: "2025-12-28", label: "ラベル", url: "https://example.com", id: 1 }],
+      sources: resolveOffline([{ ref: "cuid1", date: "2025-12-28", label: "ラベル", url: "https://example.com", id: 1 }]),
     });
     expect(Object.keys((fm.source as Record<string, unknown>[])[0])).toEqual(["id", "url", "label", "date", "ref"]);
+  });
+
+  it("source は sortOrder 順に並べる (渡した順に依存しない)", () => {
+    const rows = resolveOffline([{ id: 1, label: "a" }, { id: 2, label: "b" }]);
+    const fm = buildFrontmatter({ ...base, sources: [rows[1], rows[0]] });
+    expect((fm.source as { id: number }[]).map((s) => s.id)).toEqual([1, 2]);
   });
 
   it("frontmatterExtra が専用カラムと衝突してもカラム側を優先する", () => {
@@ -219,6 +231,100 @@ describe("buildFrontmatter", () => {
   it("lat / lng は 0 でも書き出す", () => {
     const fm = buildFrontmatter({ ...base, lat: 0, lng: 0 });
     expect(fm).toMatchObject({ lat: 0, lng: 0 });
+  });
+});
+
+describe("書き出し対象の絞り込み (公開リポジトリに出るもの)", () => {
+  const base: ArticleFrontmatterInput = { shortId: "abc1234" };
+  const row = (over: Partial<ArticleSourceRow>): ArticleSourceRow => ({
+    ...toArticleSourceRow({ id: 1, label: "ラベル" }, { assetId: "cuid1", status: ArticleSourceStatus.applied }, 0),
+    ...over,
+  });
+
+  it("取り込みが作る行は public", () => {
+    expect(row({}).classification).toBe(ClearanceLevel.public);
+  });
+
+  it("pending は載せず、件数だけ返す", () => {
+    // akashic 側で紐づけただけの行。本文に反映されるまで frontmatter には出ない
+    const built = buildFrontmatterFull({
+      ...base,
+      sources: [row({}), row({ status: ArticleSourceStatus.pending, sortOrder: 1, sourceNo: null })],
+    });
+    expect((built.frontmatter.source as unknown[]).length).toBe(1);
+    expect(built.pending).toBe(1);
+    expect(built.blocked).toEqual([]);
+  });
+
+  it("applied / unresolved なのに public でない行は載せず blocked で返す", () => {
+    // 押した人の clearance で公開リポジトリに出る内容が変わる経路を塞ぐ。
+    // 本文は ^[n] で参照しているので、黙って落とすと脚注が壊れた記事が公開される
+    const internal = row({ classification: ClearanceLevel.internal, sortOrder: 1, sourceNo: 2 });
+    const confidential = row({
+      status: ArticleSourceStatus.unresolved,
+      assetId: null,
+      originalRef: "cuid-gone",
+      classification: ClearanceLevel.confidential,
+      sortOrder: 2,
+      sourceNo: 3,
+    });
+    const built = buildFrontmatterFull({ ...base, sources: [row({}), internal, confidential] });
+    expect((built.frontmatter.source as { id: number }[]).map((s) => s.id)).toEqual([1]);
+    expect(built.pending).toBe(0);
+    expect(built.blocked).toEqual([internal, confidential]);
+  });
+
+  it("pending は classification に依らず pending 扱い (blocked に混ぜない)", () => {
+    const built = buildFrontmatterFull({
+      ...base,
+      sources: [row({ status: ArticleSourceStatus.pending, classification: ClearanceLevel.restricted })],
+    });
+    expect(built.frontmatter.source).toBeUndefined();
+    expect(built.pending).toBe(1);
+    expect(built.blocked).toEqual([]);
+  });
+
+  it("source が全部落ちたら source キーごと省く", () => {
+    const built = buildFrontmatterFull({ ...base, sources: [row({ status: ArticleSourceStatus.pending })] });
+    expect(Object.keys(built.frontmatter)).toEqual(["short_id"]);
+  });
+});
+
+describe("ref の決め方 (assetId ?? originalRef)", () => {
+  const base: ArticleFrontmatterInput = { shortId: "abc1234" };
+  const first = (input: ArticleFrontmatterInput) =>
+    (buildFrontmatterFull(input).frontmatter.source as Record<string, unknown>[])[0];
+
+  it("applied は照合済みの assetId を ref に書く", () => {
+    const rows = [toArticleSourceRow({ id: 1, label: "x", ref: "cuid-file" }, { assetId: "cuid-file", status: ArticleSourceStatus.applied }, 0)];
+    expect(first({ ...base, sources: rows }).ref).toBe("cuid-file");
+  });
+
+  it("元ファイルに ref が無くても照合で applied になれば ref が生える", () => {
+    // url / label で照合した 61 件。write-refs.ts がやっていた補完と同じで、
+    // 初回 push で ref: が足される (合意済み: #74)
+    const rows = [toArticleSourceRow({ id: 1, label: "x" }, { assetId: "cuid-matched", status: ArticleSourceStatus.applied }, 0)];
+    const src = first({ ...base, sources: rows });
+    expect(src.ref).toBe("cuid-matched");
+    expect(rows[0].originalRef).toBeNull();
+  });
+
+  it("dangling (unresolved) は元ファイルの ref をそのまま書き戻す", () => {
+    const rows = [toArticleSourceRow({ id: 1, label: "x", ref: "cuid-gone" }, { assetId: null, status: ArticleSourceStatus.unresolved }, 0)];
+    expect(first({ ...base, sources: rows }).ref).toBe("cuid-gone");
+  });
+
+  it("applied でも originalRef を保持し、Asset が消えて assetId が null になっても ref が残る", () => {
+    // onDelete: SetNull で assetId だけ落ちた状態。originalRef を applied で捨てていると
+    // ここで ref が黙って消える
+    const row = toArticleSourceRow({ id: 1, label: "x", ref: "cuid-file" }, { assetId: "cuid-file", status: ArticleSourceStatus.applied }, 0);
+    expect(row.originalRef).toBe("cuid-file");
+    expect(first({ ...base, sources: [{ ...row, assetId: null }] }).ref).toBe("cuid-file");
+  });
+
+  it("どちらも無ければ ref を書かない", () => {
+    const rows = [toArticleSourceRow({ id: 1, label: "x" }, { assetId: null, status: ArticleSourceStatus.unresolved }, 0)];
+    expect(first({ ...base, sources: rows })).not.toHaveProperty("ref");
   });
 });
 

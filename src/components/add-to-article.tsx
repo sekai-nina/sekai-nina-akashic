@@ -3,6 +3,7 @@
 import { useState, useTransition, useRef, useCallback, useLayoutEffect, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { FileText, Check, Loader2 } from "lucide-react";
+import type { ArticleType } from "@prisma/client";
 import { addAssetToArticleAction } from "@/app/(main)/articles/actions";
 import { ARTICLE_TYPE_LABELS } from "@/lib/utils";
 
@@ -20,7 +21,7 @@ const EXCERPT_PREVIEW = 60;
 export interface PickerArticle {
   id: string;
   title: string;
-  type: string | null;
+  type: ArticleType | null;
 }
 
 interface AddToArticleProps {
@@ -230,7 +231,7 @@ export function AddToArticle({
                     <span className="truncate flex-1">{a.title}</span>
                     {a.type && (
                       <span className="text-[10px] text-slate-400 shrink-0">
-                        {ARTICLE_TYPE_LABELS[a.type] ?? a.type}
+                        {ARTICLE_TYPE_LABELS[a.type]}
                       </span>
                     )}
                   </button>

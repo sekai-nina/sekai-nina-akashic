@@ -1,8 +1,9 @@
-import { ArticleSourceStatus, ArticleType } from "@prisma/client";
+import { ArticleSourceStatus, ArticleType, ClearanceLevel } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
-import { hasChanged, type ComparableArticle, type ComparableSource } from "./changes";
-import { parseArticle, toArticleColumns } from "./frontmatter";
+import { canonicalJson, hasChanged, type ComparableArticle } from "./changes";
+import { parseArticle, toArticleColumns, type ArticleSourceRow } from "./frontmatter";
+import { resolveOffline } from "./roundtrip";
 
 /**
  * 差分スキップの判定。**誤って「変わっていない」と言うと変更が反映されない**
@@ -61,17 +62,8 @@ function baseline(): { prev: ComparableArticle; cols: ReturnType<typeof toArticl
   return { prev, cols };
 }
 
-function sourcesOf(cols: ReturnType<typeof toArticleColumns>): ComparableSource[] {
-  return cols.sources.map((s, i) => ({
-    assetId: s.ref ?? null,
-    status: ArticleSourceStatus.applied,
-    sourceNo: s.id ?? null,
-    label: s.label ?? "",
-    url: s.url ?? null,
-    date: s.date ? new Date(`${s.date}T00:00:00.000Z`) : null,
-    originalRef: null,
-    sortOrder: i,
-  }));
+function sourcesOf(cols: ReturnType<typeof toArticleColumns>): ArticleSourceRow[] {
+  return resolveOffline(cols.sources);
 }
 
 describe("hasChanged", () => {
@@ -110,7 +102,7 @@ describe("hasChanged", () => {
   });
 
   // ArticleSource のフィールドを 1 つずつ動かす
-  const sourceCases: [string, (s: ComparableSource) => void][] = [
+  const sourceCases: [string, (s: ArticleSourceRow) => void][] = [
     ["assetId", (s) => (s.assetId = "cuid-other")],
     ["status", (s) => (s.status = ArticleSourceStatus.unresolved)],
     ["sourceNo", (s) => (s.sourceNo = 99)],
@@ -119,6 +111,8 @@ describe("hasChanged", () => {
     ["date", (s) => (s.date = new Date("2026-03-02T00:00:00.000Z"))],
     ["originalRef", (s) => (s.originalRef = "cuid-old")],
     ["sortOrder", (s) => (s.sortOrder = 5)],
+    // internal → public の規則変更を再取り込みで反映させるため
+    ["classification", (s) => (s.classification = ClearanceLevel.internal)],
   ];
 
   it.each(sourceCases)("source の %s が変わったら検出する", (_name, mutate) => {
@@ -175,5 +169,19 @@ describe("hasChanged", () => {
     }));
     const { sources: _s, ...cols2 } = cols;
     expect(hasChanged(prev, cols2, next)).toBe(true);
+  });
+});
+
+describe("canonicalJson", () => {
+  it("キーを再帰的に並べ替え、配列の順序は保つ", () => {
+    expect(canonicalJson({ b: 1, a: { d: [2, 1], c: 0 } })).toEqual({ a: { c: 0, d: [2, 1] }, b: 1 });
+  });
+
+  it("Date は ISO 文字列にする ({} に潰さない)", () => {
+    // Object.keys(date) は空なので、素通しするとどんな日付も {} になり差分が消える
+    expect(canonicalJson(new Date("2026-03-14T00:00:00.000Z"))).toBe("2026-03-14T00:00:00.000Z");
+    expect(JSON.stringify(canonicalJson(new Date("2026-03-14T00:00:00.000Z")))).not.toBe(
+      JSON.stringify(canonicalJson(new Date("2026-03-15T00:00:00.000Z"))),
+    );
   });
 });

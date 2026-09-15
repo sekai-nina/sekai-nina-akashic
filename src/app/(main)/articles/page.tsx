@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import type { ArticleType } from "@prisma/client";
+import { ArticleType } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { listArticles, getArticleStats, ARTICLE_PAGE_SIZE } from "@/lib/domain/articles";
 import { ARTICLE_TYPE_LABELS, formatDate } from "@/lib/utils";
 
-const TYPES = ["attribute", "event", "quote", "column", "item", "quiz"] as const;
+// enum から引く。手で並べると schema 側の増減に追従できず、無い値で
+// 絞り込んで Prisma が落ちる
+const TYPES = Object.values(ArticleType);
 
 export default async function ArticlesPage({
   searchParams,
@@ -17,9 +19,7 @@ export default async function ArticlesPage({
 
   const params = await searchParams;
   const page = Math.max(1, parseInt(params.page ?? "1"));
-  const type = TYPES.includes(params.type as (typeof TYPES)[number])
-    ? (params.type as ArticleType)
-    : undefined;
+  const type = TYPES.includes(params.type as ArticleType) ? (params.type as ArticleType) : undefined;
   const q = params.q ?? "";
   const onlyUnresolved = params.unresolved === "1";
 

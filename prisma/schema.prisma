@@ -683,13 +683,15 @@ model LensItemCheck {
 // push 時に丸ごと生成する。
 // ---------------------------------------------------------------------------
 
+/// sekai-nina-site の src/content/config.ts の enum と揃える (fact / state は
+/// Astro 側の transform で attribute に畳まれるので持たない)。ここに無い値を
+/// push すると Astro のビルドが落ちるため、足すときは両側を同時に変える。
 enum ArticleType {
   attribute
   event
   quote
   column
   item
-  quiz
 }
 
 /// ArticleSource が記事本文に反映済みか。
@@ -762,7 +764,8 @@ model ArticleSource {
   articleId String
   article   Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
 
-  /// unresolved のときは null (元の ref は originalRef に残す)
+  /// unresolved のときは null。Asset が後から消されても SetNull で null になる
+  /// (元ファイルに ref があった行は originalRef に残るので、push でその ref は消えない)
   assetId String?
   asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: SetNull)
 
@@ -773,7 +776,10 @@ model ArticleSource {
   label       String    @default("")
   url         String?
   date        DateTime?
-  /// dangling だった場合の元 ref。復旧調査の手がかりとして残す
+  /// 元ファイルの source[].ref をそのまま保持する (status に依らず)。
+  /// push 時の ref は `assetId ?? originalRef` で決める。applied でも持っておくと、
+  /// Asset が消されて assetId が SetNull されたときに元の ref を書き戻せる。
+  /// akashic 側で付けた紐づけ (pending 由来) は元ファイルに無いので null
   originalRef String?
 
   // 抜粋 (AssetText からの範囲選択)。DossierItem と同形
@@ -784,6 +790,10 @@ model ArticleSource {
 
   note           String         @default("")
   sortOrder      Int            @default(0)
+  /// frontmatter 由来 (applied / unresolved) は公開リポジトリに載っているので public。
+  /// akashic 側で付けた紐づけは元アセットの classification を継承する。
+  /// **push で frontmatter に載るのは public の行だけ** (src/lib/articles/frontmatter.ts)。
+  /// 既定値は書き忘れた経路が fail-open にならないよう internal のまま
   classification ClearanceLevel @default(internal)
 
   createdAt DateTime @default(now())

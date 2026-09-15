@@ -5,10 +5,13 @@
  * (frontmatter の source[] が正なので、差分マージより全置換の方が単純で壊れにくい)。
  *
  * source[] の解決規則:
- *   1. ref あり → Asset が実在すれば applied、実在しなければ unresolved (元 ref を originalRef に保持)
+ *   1. ref あり → Asset が実在すれば applied、実在しなければ unresolved
  *   2. ref なし・url あり → SourceRecord.url 一致で applied、無ければ unresolved
  *   3. ref なし・label のみ → Asset.title 完全一致で applied、無ければ unresolved
  *   --create-missing を付けると 2/3 の未解決分について Asset を新規作成して applied にする。
+ *   元ファイルの ref は status に依らず originalRef に保持する (push 時の ref は assetId ?? originalRef)。
+ *   frontmatter 由来の行は公開リポジトリに載っている内容なので classification は public
+ *   (src/lib/articles/frontmatter.ts の toArticleSourceRow)。
  *
  * 書き込みは DIRECT_URL (postgres ロール / RLS バイパス)。
  * 既定は dry-run。実際に書き込むには --apply が要る。
@@ -19,8 +22,8 @@
  *   pnpm cli:import-articles --dir <articles-dir> --apply --create-missing
  */
 
-import { readdir, readFile, stat } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { readFile } from "node:fs/promises";
+import { relative } from "node:path";
 import {
   PrismaClient,
   ArticleSourceStatus,
@@ -36,10 +39,12 @@ import {
   parseArticle,
   parseFrontmatterDate,
   toArticleColumns,
+  toArticleSourceRow,
   type ArticleColumns,
   type ArticleSourceEntry,
 } from "@/lib/articles/frontmatter";
 import { hasChanged } from "@/lib/articles/changes";
+import { articlesDirFromArgs, listArticleFiles } from "@/lib/articles/files";
 import {
   addCandidate,
   pickCandidate,
@@ -56,23 +61,7 @@ const prisma = new PrismaClient({
 const args = process.argv.slice(2);
 const APPLY = args.includes("--apply");
 const CREATE_MISSING = args.includes("--create-missing");
-const DIR = (() => {
-  const i = args.indexOf("--dir");
-  return i !== -1 ? args[i + 1] : process.env.ARTICLES_DIR;
-})();
-
-/** 記事ではない Markdown (リポジトリ直下の README 等) */
-const NON_ARTICLE = new Set(["README.md"]);
-
-async function walk(dir: string, root: string, out: string[] = []): Promise<string[]> {
-  for (const name of await readdir(dir)) {
-    if (name.startsWith(".") || name === "_templates") continue;
-    const p = join(dir, name);
-    if ((await stat(p)).isDirectory()) await walk(p, root, out);
-    else if (name.endsWith(".md") && !NON_ARTICLE.has(relative(root, p))) out.push(p);
-  }
-  return out;
-}
+const DIR = articlesDirFromArgs(args);
 
 /** カラムに落とした 1 記事。sources は必ず入る (toArticleColumns が詰める) */
 type ParsedFile = ArticleColumns;
@@ -95,7 +84,7 @@ async function main() {
     process.exit(1);
   }
 
-  const files = await walk(DIR, DIR);
+  const files = await listArticleFiles(DIR);
   console.log(`Markdown ${files.length} 件を検出 (${DIR})`);
 
   // --- 1. 全ファイルをパースする -------------------------------------------
@@ -230,8 +219,8 @@ async function main() {
         where: { status: { not: ArticleSourceStatus.pending } },
         orderBy: { sortOrder: "asc" },
         select: {
-          assetId: true, status: true, sourceNo: true, label: true, url: true,
-          date: true, originalRef: true, sortOrder: true,
+          assetId: true, status: true, classification: true, sourceNo: true, label: true,
+          url: true, date: true, originalRef: true, sortOrder: true,
         },
       },
     },
@@ -399,17 +388,9 @@ async function main() {
 
     const { sources: _sources, ...cols } = file;
 
-    // frontmatter 由来の出典。DB に入れる形に揃える (差分判定にも使う)
-    const wanted = resolutions.map((r, i) => ({
-      assetId: r.assetId,
-      status: r.status,
-      sourceNo: r.entry.id ?? null,
-      label: r.entry.label ?? "",
-      url: r.entry.url ?? null,
-      date: parseFrontmatterDate(r.entry.date),
-      originalRef: r.status === ArticleSourceStatus.unresolved ? (r.entry.ref ?? null) : null,
-      sortOrder: i,
-    }));
+    // frontmatter 由来の出典。DB に入れる形に揃える (差分判定にも使う)。
+    // 形は往復テストと共有する (取り込みだけ別の規則で動くのを防ぐ)
+    const wanted = resolutions.map((r, i) => toArticleSourceRow(r.entry, r, i));
 
     // **変わっていない記事は触らない。**
     // 332 件ぶんの upsert + ArticleSource 全置換を毎回流すと、Supabase の

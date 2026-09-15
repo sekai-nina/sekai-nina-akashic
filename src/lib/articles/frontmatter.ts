@@ -1,4 +1,4 @@
-import { ArticleType } from "@prisma/client";
+import { ArticleSourceStatus, ArticleType, ClearanceLevel } from "@prisma/client";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 /**
@@ -12,6 +12,12 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
  * 「保存したものを戻す」のではなく `buildFrontmatter` で組み立て直す作業になる。
  * したがって保証できるのは **値レベルの往復** であって、バイト単位の一致ではない。
  * 意図的に正規化される項目は `INTENTIONAL_NORMALIZATIONS` に列挙してある。
+ *
+ * **`buildFrontmatter` の出力は公開リポジトリに出る。** ArticleSource には
+ * akashic 側で付けた紐づけ (pending / 元アセットの classification を継承) も
+ * 混ざるので、frontmatter に載せるのは「pending 以外 かつ public」の行だけに
+ * 絞る (`isPublishableSource`)。押した人の clearance で出力が変わる経路を
+ * 作らないため、この絞り込みはここで行い、呼び出し側には任せない。
  */
 
 /** Article モデルが専用カラムとして持つ frontmatter のキー。書き出し順もこの順 */
@@ -49,6 +55,7 @@ export const INTENTIONAL_NORMALIZATIONS = [
   "文字列値は前後の空白を落とす",
 ] as const;
 
+/** frontmatter の source[] の 1 要素 (ファイル側の形。`parseArticle` の出力) */
 export type ArticleSourceEntry = {
   /** 記事内の脚注番号。本文の ^[n] と対応する */
   id?: number;
@@ -58,6 +65,61 @@ export type ArticleSourceEntry = {
   /** akashic の Asset ID (cuid) */
   ref?: string;
 };
+
+/**
+ * DB の ArticleSource 行のうち、frontmatter の組み立てと差分判定に要る列。
+ *
+ * `buildFrontmatter` はこの形しか受け付けない。status / classification を
+ * 型で必須にしておくことで、呼び出し側が「status / classification を持たない形に
+ * 詰め替えて絞り込みを迂回する」ことをコンパイル時に防ぐ (絞り込み自体は
+ * `buildFrontmatter` がやるので、呼び出し側は全行そのまま渡してよい)。
+ * 取り込み (`toArticleSourceRow`) も同じ形を書く。
+ */
+export interface ArticleSourceRow {
+  assetId: string | null;
+  status: ArticleSourceStatus;
+  classification: ClearanceLevel;
+  sourceNo: number | null;
+  label: string;
+  url: string | null;
+  date: Date | null;
+  /** 元ファイルに書かれていた ref (status に依らず保持)。akashic 側で付けた行は null */
+  originalRef: string | null;
+  sortOrder: number;
+}
+
+/** `toArticleSourceRow` に渡す照合結果。取り込み CLI の resolve が決める */
+export interface SourceResolution {
+  assetId: string | null;
+  status: ArticleSourceStatus;
+}
+
+/**
+ * frontmatter の source エントリを DB の行に落とす。**取り込みと往復テストの両方がこれを使う。**
+ *
+ * - `originalRef` は元ファイルの ref をそのまま保持する。applied でも持っておくと、
+ *   Asset が消されて `assetId` が SetNull されたときに元の ref を書き戻せる
+ * - `classification` は **public 固定**。frontmatter 由来 = 既に公開リポジトリに
+ *   載っている内容なので。ここを internal にすると `buildFrontmatter` の
+ *   絞り込みで全 source が消える (silent data loss)
+ */
+export function toArticleSourceRow(
+  entry: ArticleSourceEntry,
+  resolved: SourceResolution,
+  sortOrder: number,
+): ArticleSourceRow {
+  return {
+    assetId: resolved.assetId,
+    status: resolved.status,
+    classification: ClearanceLevel.public,
+    sourceNo: entry.id ?? null,
+    label: entry.label ?? "",
+    url: entry.url ?? null,
+    date: parseFrontmatterDate(entry.date),
+    originalRef: entry.ref ?? null,
+    sortOrder,
+  };
+}
 
 export type ParsedArticle = {
   frontmatter: Record<string, unknown>;
@@ -245,8 +307,9 @@ function toNum(v: unknown): number | null {
  *
  * そのまま `prisma.article.upsert` に渡せるよう、`type` は enum に絞る
  * (`ArticleFrontmatterInput` 側は書き出し専用なので string も許している)。
+ * `sources` はまだファイル側の形 (照合前)。DB の行にするのは `toArticleSourceRow`
  */
-export interface ArticleColumns extends ArticleFrontmatterInput {
+export interface ArticleColumns extends Omit<ArticleFrontmatterInput, "sources"> {
   path: string;
   slug: string | null;
   body: string;
@@ -310,30 +373,66 @@ export interface ArticleFrontmatterInput {
   lng?: number | null;
   /** Article モデルで持たない frontmatter の退避先 */
   frontmatterExtra?: unknown;
-  sources?: ArticleSourceEntry[];
+  /** ArticleSource の行。絞り込みは `buildFrontmatter` が行うので全行渡してよい */
+  sources?: ArticleSourceRow[];
 }
 
-/** source エントリを frontmatter に載る形へ。キー順は id / url / label / date / ref */
-function sourceToYaml(e: ArticleSourceEntry): Record<string, unknown> {
+/**
+ * frontmatter に載せてよい行か。**pending 以外 かつ public** だけ。
+ *
+ * - pending は akashic 側で紐づけただけで本文に反映されていない (載せない)
+ * - public でない行は、公開リポジトリに出してはいけない。frontmatter 由来の行は
+ *   取り込みが public を付けるので、ここで落ちるのは akashic 側で付けた行だけのはず
+ */
+export function isPublishableSource(row: Pick<ArticleSourceRow, "status" | "classification">): boolean {
+  return row.status !== ArticleSourceStatus.pending && row.classification === ClearanceLevel.public;
+}
+
+/**
+ * DB の行を frontmatter に載る形へ。キー順は id / url / label / date / ref。
+ *
+ * `ref` は **`assetId ?? originalRef`**。applied なら照合済みの Asset を指し、
+ * unresolved (dangling) なら元ファイルの ref をそのまま書き戻す。元ファイルに
+ * ref が無く url / label の照合で applied になった行には、ここで初めて ref が
+ * 生える (sekai-nina-site の write-refs.ts がやっていた補完と同じ)。
+ */
+function sourceToYaml(row: ArticleSourceRow): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  if (e.id != null) out.id = e.id;
-  if (e.url) out.url = e.url;
-  if (e.label) out.label = e.label;
-  const date = formatFrontmatterDate(e.date);
+  if (row.sourceNo != null) out.id = row.sourceNo;
+  if (row.url) out.url = row.url;
+  if (row.label) out.label = row.label;
+  const date = formatFrontmatterDate(row.date);
   if (date) out.date = date;
-  if (e.ref) out.ref = e.ref;
+  const ref = row.assetId ?? row.originalRef;
+  if (ref) out.ref = ref;
   return out;
+}
+
+/** `buildFrontmatter` の戻り。frontmatter 本体と、載せなかった行の内訳 */
+export interface BuiltFrontmatter {
+  frontmatter: Record<string, unknown>;
+  /** 未反映 (pending) のため載せなかった行数。黙って除外してよい */
+  pending: number;
+  /**
+   * applied / unresolved なのに public でない行。本文が ^[n] で参照しているのに
+   * 脚注だけ消える矛盾状態なので、**1 件でもあれば push はその記事を拒否する**
+   */
+  blocked: ArticleSourceRow[];
 }
 
 /**
  * DB のカラム群から frontmatter オブジェクトを組み立てる。
+ *
+ * **この関数の出力は公開リポジトリ sekai-nina/sekai-nina-public に出る。**
+ * source は `isPublishableSource` (pending 以外 かつ public) で絞り、落とした行は
+ * 戻り値で報告する。呼び出し側は `blocked` が空でないときに push してはいけない。
  *
  * **値が既定と同じキーは省く。** Article の draft / unlisted / ongoing は
  * `@default(false)`、tags は `@default("[]")` なので「元ファイルにキーが無かった」と
  * 「false / 空配列と書いてあった」を DB からは区別できない。Astro 側が
  * `.transform((v) => v ?? false)` で同じ既定を当てているので、省いても値は変わらない。
  */
-export function buildFrontmatter(input: ArticleFrontmatterInput): Record<string, unknown> {
+export function buildFrontmatter(input: ArticleFrontmatterInput): BuiltFrontmatter {
   const fm: Record<string, unknown> = {};
 
   const title = str(input.title);
@@ -372,7 +471,21 @@ export function buildFrontmatter(input: ArticleFrontmatterInput): Record<string,
   if (input.lat != null) fm.lat = input.lat;
   if (input.lng != null) fm.lng = input.lng;
 
-  const sources = (input.sources ?? []).map(sourceToYaml).filter((s) => Object.keys(s).length > 0);
+  let pending = 0;
+  const blocked: ArticleSourceRow[] = [];
+  const publishable: ArticleSourceRow[] = [];
+  for (const row of input.sources ?? []) {
+    if (isPublishableSource(row)) publishable.push(row);
+    else if (row.status === ArticleSourceStatus.pending) pending++;
+    else blocked.push(row);
+  }
+  // 呼び出し側の並び順に依存しない (DB から引くときの orderBy 忘れで脚注番号と順序がズレる)。
+  // sortOrder は取り込みが 0.. を振り直す一方 addAssetToArticle は max+1 を使うので、
+  // pending → applied を経た行と衝突しうる。同値は脚注番号で安定させる
+  publishable.sort(
+    (a, b) => a.sortOrder - b.sortOrder || (a.sourceNo ?? Infinity) - (b.sourceNo ?? Infinity),
+  );
+  const sources = publishable.map(sourceToYaml).filter((s) => Object.keys(s).length > 0);
   if (sources.length) fm.source = sources;
 
   // モデル化されていないキー (featured_quotes / locations / dossier 等) を復元する。
@@ -386,7 +499,7 @@ export function buildFrontmatter(input: ArticleFrontmatterInput): Record<string,
     }
   }
 
-  return fm;
+  return { frontmatter: fm, pending, blocked };
 }
 
 /**

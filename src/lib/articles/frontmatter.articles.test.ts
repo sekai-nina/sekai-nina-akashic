@@ -1,8 +1,9 @@
-import { readdir, readFile, stat } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { readFile, stat } from "node:fs/promises";
+import { relative } from "node:path";
 
 import { beforeAll, describe, expect, it } from "vitest";
 
+import { listArticleFiles } from "./files";
 import { parseArticle, toArticleColumns, type ArticleColumns } from "./frontmatter";
 import { roundtrip } from "./roundtrip";
 
@@ -19,17 +20,6 @@ import { roundtrip } from "./roundtrip";
 
 const ARTICLES_DIR = process.env.ARTICLES_DIR;
 
-async function walk(dir: string, out: string[] = []): Promise<string[]> {
-  for (const name of await readdir(dir)) {
-    // _templates は Templater 式 (<%* … %>) を含み取り込み対象外
-    if (name.startsWith(".") || name === "_templates") continue;
-    const p = join(dir, name);
-    if ((await stat(p)).isDirectory()) await walk(p, out);
-    else if (name.endsWith(".md") && name !== "README.md") out.push(p);
-  }
-  return out;
-}
-
 // ARTICLES_DIR が未設定なら skip。**設定されているのに開けないなら失敗させる**
 // (タイポで全部 skip されて緑に見えるのが一番まずい)
 if (ARTICLES_DIR) {
@@ -44,7 +34,7 @@ let articles: Article[] = [];
 
 describe.skipIf(!ARTICLES_DIR)("実記事の往復 (ARTICLES_DIR)", () => {
   beforeAll(async () => {
-    const files = await walk(ARTICLES_DIR!);
+    const files = await listArticleFiles(ARTICLES_DIR!);
     articles = await Promise.all(
       files.map(async (f) => ({ rel: relative(ARTICLES_DIR!, f), raw: await readFile(f, "utf8") })),
     );
