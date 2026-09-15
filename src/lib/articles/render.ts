@@ -5,6 +5,7 @@ import remarkMath from "remark-math";
 import remarkBreaks from "remark-breaks";
 import remarkRehype from "remark-rehype";
 import rehypeRaw from "rehype-raw";
+import rehypeSanitize from "rehype-sanitize";
 import rehypeKatex from "rehype-katex";
 import rehypeStringify from "rehype-stringify";
 
@@ -17,6 +18,7 @@ import { remarkTweets } from "./remark/tweets";
 import { remarkWikilinks } from "./remark/wikilinks";
 import { remarkTableWrapper } from "./remark/table-wrapper";
 import { rehypeDropEmptyParagraphs } from "./remark/drop-empty-paragraphs";
+import { articleSanitizeSchema } from "./sanitize-schema";
 
 /**
  * 記事本文の Markdown を HTML にする。
@@ -51,6 +53,9 @@ function buildProcessor(resolveWikilink: (title: string) => string | undefined) 
     // allowDangerousHtml: 自作プラグインの生 HTML ノードを hast まで運ぶ
     .use(remarkRehype, { allowDangerousHtml: true })
     .use(rehypeRaw)
+    // rehypeRaw の直後・rehypeKatex の前に置く。記事本文中の生 HTML はここで落とし、
+    // KaTeX の生成物 (class が動的で追いきれない) はサニタイズ後に作らせる
+    .use(rehypeSanitize, articleSanitizeSchema)
     .use(rehypeKatex)
     // blockquote が段落を割ってできる空段落を落とす
     .use(rehypeDropEmptyParagraphs)
