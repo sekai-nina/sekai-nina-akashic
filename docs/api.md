@@ -61,6 +61,10 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 | PUT | `/coverage/checks` | write | アイテムチェックのトグル |
 | POST | `/coverage/checks/bulk` | write | 範囲一括チェック |
 | GET | `/coverage/summary` | read | 公開サイト用の要約 |
+| GET | `/articles` | read | 記事一覧（`hasPending=true` で未反映の紐づけがある記事） |
+| GET | `/articles/:shortId` | read | 記事詳細（本文・frontmatter・出典） |
+| PATCH | `/articles/:shortId` | write | 記事の部分更新（`updatedAt` 必須の楽観ロック） |
+| POST | `/articles/:shortId/sources/:sourceId/apply` | write | 紐づけを反映済みにする（公開判断。internal 以下のみ） |
 
 ---
 
@@ -69,6 +73,8 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 API キーからは **引き上げしかできない。** `PATCH /assets/:id` と `PATCH /places/:id` に現在より低い `classification` を渡すと `403 {"error":"Cannot lower classification (<現在> -> <指定>) via API key"}` を返す。
 
 `assertClearance` は「自分のクリアランスより上を付ける」操作しか止めず、引き下げ (例: `restricted` → `public`) は素通りするため。API キーは MCP（LLM がツールを呼ぶ経路）と共通なので、アプリ層で塞いでいる。引き下げは画面から人間が行う。
+
+**例外は `POST /articles/:shortId/sources/:sourceId/apply`。** 記事の紐づけを反映済みにする操作は、その出典を公開リポジトリの frontmatter に載せる = `ArticleSource` の classification を `public` に下げる操作そのもので、これが API の目的なので許している。ただし **`internal` 以下の出典に限る**（`confidential` / `restricted` は 403。画面から人間が行う）。
 
 ## Assets
 
@@ -614,6 +620,194 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 
 ---
 
+## 記事 (Articles)
+
+公開サイト（世界新奈、`sekai-nina/sekai-nina-public`）の記事。akashic の DB が編集バッファで、書き込みは `dirty` になり、`/articles/push`（画面。admin のみ）で GitHub にまとめて push されるまで公開サイトには出ない。
+
+想定する使い方は **「未反映の紐づけ（pending）を見て、抜粋を本文に反映し、applied にする」**:
+
+1. `GET /articles?hasPending=true` で対象の記事を探す
+2. `GET /articles/:shortId` で本文と `sources`（`status: "pending"` の行の `excerpt` が根拠の抜粋）を読む
+3. `POST /articles/:shortId/sources/:sourceId/apply` で先に脚注番号 `sourceNo` を採る（公開判断）
+4. 返った `sourceNo` で本文に `^[n]` を書き、`PATCH /articles/:shortId` に `body` と（apply が返した）`updatedAt` を渡して保存する
+
+3 → 4 の順なのは、途中で止まっても「本文から参照されていない出典」（quote 記事では普通の状態）になるだけで、本文に宛先の無い `^[n]` が残らないため。
+
+書き込み系（PATCH / apply）は **`updatedAt` による楽観ロックが必須**。GET が返した `updatedAt`（ISO 8601）をそのまま渡し、その間に別の保存・取り込み・apply が入っていれば `409 {"reason": "conflict", "updatedAt": "<現在>"}` が返る（読み直して作り直す）。push は `updatedAt` を動かさないので、push を挟んでも通る。
+
+エラー応答の `reason` は機械可読な区別用（409 が衝突以外にも使われる apply で見る）。`conflict` 以外の 409 は再試行しても解消しない。
+
+### GET /articles
+
+**クエリパラメータ:**
+
+| パラメータ | 説明 |
+|---|---|
+| `q` | タイトル・本文の部分一致 |
+| `type` | `attribute` / `event` / `quote` / `column` / `item` |
+| `hasPending` | `true` で未反映の紐づけがある記事だけ |
+| `dirty` | `true` で未 push の記事だけ |
+| `includeDraft` | 既定 `true`。`false` で下書きを除く |
+| `page` / `perPage` | ページング（`perPage` は最大 100、既定 20） |
+
+**レスポンス:**
+
+```json
+{
+  "items": [
+    {
+      "shortId": "ygoez7r",
+      "path": "attribute/draft_呼ばれ方.md",
+      "title": "呼ばれ方",
+      "type": "attribute",
+      "tags": ["呼び名"],
+      "publishedAt": "2026-03-14",
+      "articleUpdatedAt": "2026-03-14",
+      "draft": true,
+      "unlisted": false,
+      "dirty": false,
+      "editedAt": null,
+      "updatedAt": "2026-09-15T16:11:34.995Z",
+      "sourceCount": 3,
+      "pendingCount": 1
+    }
+  ],
+  "total": 1, "page": 1, "perPage": 20
+}
+```
+
+`sourceCount` はキーの持ち主のクリアランスで見える行の数（`ArticleSource` は RLS 対象）。`pendingCount` と `hasPending` は **API から apply できる pending 行（`internal` 以下）だけ**を数える（下記）。
+
+### GET /articles/:shortId
+
+```json
+{
+  "shortId": "ygoez7r",
+  "path": "attribute/draft_呼ばれ方.md",
+  "slug": null,
+  "title": "呼ばれ方",
+  "type": "attribute",
+  "tags": ["呼び名"],
+  "body": "## 本人が提案した呼び名\n\n- 「にぃたん」^[1]\n…",
+  "date": "2025-04-10",
+  "dateDisplay": "2025年4月10日〜2025年4月28日",
+  "dateMode": null,
+  "publishedAt": "2026-03-14",
+  "articleUpdatedAt": "2026-03-14",
+  "draft": true, "unlisted": false, "ongoing": false,
+  "frontmatterExtraKeys": [],
+  "dirty": false, "editedAt": null, "lastPushedAt": null,
+  "updatedAt": "2026-09-15T16:11:34.995Z",
+  "sources": [
+    {
+      "id": "cmu2bckbt000cd597c70p1isv",
+      "status": "applied",
+      "sourceNo": 1,
+      "label": "坂井新奈ブログ「一生一度の 坂井新奈」",
+      "url": "https://www.hinatazaka46.com/s/official/diary/detail/59569",
+      "date": "2025-04-10",
+      "classification": "public",
+      "excerpt": "", "excerptType": null, "excerptStart": null, "excerptEnd": null, "note": "",
+      "sortOrder": 0,
+      "originalRef": "cmn3m8pho000qmoww7achsc61",
+      "asset": {"id": "cmn3m8pho000qmoww7achsc61", "title": "…", "kind": "text", "canonicalDate": "2025-04-10T00:00:00.000Z", "classification": "internal"}
+    },
+    {
+      "id": "cmu34rssz0001d5a54vg9h6op",
+      "status": "pending",
+      "sourceNo": null,
+      "label": "",
+      "url": null, "date": null,
+      "classification": "internal",
+      "excerpt": "本文から選んだ抜粋…", "excerptType": "body", "excerptStart": 120, "excerptEnd": 180, "note": "",
+      "sortOrder": 2,
+      "originalRef": null,
+      "asset": {"id": "cmu2uyds80001jv048dzpukm7", "title": "おいしいよ〜😋", "kind": "text", "canonicalDate": null, "classification": "internal"}
+    }
+  ]
+}
+```
+
+- `status`: `applied` = 本文の `^[n]` から参照される出典（frontmatter に載る）/ `pending` = akashic 側で紐づけただけで未反映 / `unresolved` = frontmatter にあるが Asset に解決できていない
+- 日付の frontmatter 列（`date` / `publishedAt` / `articleUpdatedAt` / `sources[].date`）は `YYYY-MM-DD`（編集 UI と同じく暦日に丸める）。PATCH の入力と同じ形
+- `frontmatterExtraKeys` はモデル化していない frontmatter のキー名（`featured_quotes` 等）。API からは触れない（push 時にそのまま復元される）
+- クリアランスを超える出典は返らない（RLS）。加えて **`classification` が `internal` より上の `pending` 行は API では返さない**（API からは apply できないので、抜粋だけ見せて本文に貼らせる経路を作らない。画面には出る）
+- `sources[].asset` は Asset が削除済み（`assetId` が null）か、Asset の classification がキーのクリアランスを超えるとき `null`
+
+### PATCH /articles/:shortId
+
+編集 UI と同じ 12 項目を部分更新する。渡した項目だけ変わる。`updatedAt` は必須。
+
+```json
+{
+  "updatedAt": "2026-09-15T16:11:34.995Z",
+  "body": "## 本人が提案した呼び名\n\n- 「にぃたん」^[1]\n- 「にな」^[3]\n",
+  "articleUpdatedAt": "2026-09-16"
+}
+```
+
+| フィールド | 型 | 備考 |
+|---|---|---|
+| `title` | string | 空も可（下書き） |
+| `type` | `attribute` / `event` / `quote` / `column` / `item` / null | |
+| `tags` | string[] | 全置換。この並びで公開サイトに出る。trim と重複除去あり |
+| `body` | string | frontmatter を除いた Markdown。`\r\n` は `\n` に、先頭の空行は落とす（UI と同じ正規化） |
+| `date` / `publishedAt` / `articleUpdatedAt` | `YYYY-MM-DD` / `""` / null | 暦に無い日付は 400 |
+| `dateDisplay` | string / null | |
+| `dateMode` | `single` / `range` / null | |
+| `draft` / `unlisted` / `ongoing` | boolean | |
+
+- `null` で消せるのは `type` / 日付 3 列 / `dateDisplay` / `dateMode` だけ。`title` / `body` / `tags` / 真偽値に `null` は 400（`tags` を空にするなら `[]`）
+- `body` の上限は 200,000 文字（編集 UI と同じ `BODY_MAX_LENGTH`）
+- 未知のキーは無視する。`path` / `shortId` / `slug` / `frontmatterExtra` / 出典は変えられない
+- **変わっていなければ書かない**（`changed` が空で返り、`dirty` / `editedAt` も立たない）
+- 書いたら `dirty = true` / `editedAt = now` になり、次の push に載る
+
+**レスポンス:**
+
+```json
+{"shortId": "ygoez7r", "changed": ["body", "articleUpdatedAt"], "updatedAt": "2026-09-15T20:35:45.692Z"}
+```
+
+| ステータス | 意味 |
+|---|---|
+| 400 | JSON / 型の誤り、`updatedAt` 欠落、更新項目なし、`dateMode` 不正、暦に無い日付・本文の長さ超過（`fieldErrors` 付き） |
+| 404 | 記事が無い |
+| 409 | `updatedAt` が現在と違う。`{"error": …, "reason": "conflict", "updatedAt": "<現在>"}` |
+
+### POST /articles/:shortId/sources/:sourceId/apply
+
+`pending` の紐づけを `applied` にし、脚注番号を採番して返す。**公開を決める操作**: `ArticleSource` の classification が `public` になり、次の push でこの出典の `label` / `ref`（Asset ID）が公開リポジトリの frontmatter に載る。
+
+```json
+{"updatedAt": "2026-09-15T16:11:34.995Z"}
+```
+
+- `sourceNo` は `max(既存の脚注番号 ∪ 本文の ^[n]) + 1`。`sortOrder` は既存の出典の末尾
+- `label` が空なら Asset のタイトルで埋める。`url` / `date` は付けない
+- `excerpt` / `note` は残る（public 行になるので akashic 内では誰でも読める = 抜粋ごと公開判断）
+- Article に `dirty = true` / `editedAt = now` が立つ
+- 403 の判定は **出典行の `classification`（紐づけ時のアセットの値）と Asset の現在の `classification` の両方**に掛ける。紐づけ後にアセットが confidential に上げられていれば反映できない
+
+**レスポンス:**
+
+```json
+{"shortId": "ygoez7r", "sourceId": "cmu34rssz0001d5a54vg9h6op", "sourceNo": 3, "updatedAt": "2026-09-15T20:35:15.234Z"}
+```
+
+| ステータス | `reason` | 意味 |
+|---|---|---|
+| 400 | | `updatedAt` 欠落・不正 |
+| 403 | `above_limit` | 出典（またはその Asset）の classification が `internal` より上（画面から人間が行う） |
+| 404 | `not_found` | 記事か紐づけが無い / クリアランスが足りず見えない（Asset が見えない場合を含む）/ 別の記事の紐づけ |
+| 409 | `not_pending` | 既に反映済みか取り込み由来の出典。再試行しない |
+| 409 | `asset_missing` | 紐づけ先の Asset が削除済み。再試行しない |
+| 409 | `conflict` | `updatedAt` が現在と違う。`updatedAt` に現在の値が付くので、それで再試行するか読み直す |
+
+記事の新規作成 API は無い（path / shortId の採番規則が未定。別 Issue）。
+
+---
+
 ## 典型的な利用パターン
 
 ### Discord Botからブログ更新を自動登録
@@ -668,6 +862,31 @@ with open("photo.jpg", "rb") as f:
 requests.patch(f"{API}/assets/{upload['id']}", json={
     "status": "organized",
     "trustLevel": "high"
+}, headers=HEADERS)
+```
+
+### AI エージェントが記事の未反映の紐づけを本文に反映する
+
+```python
+# 1. 未反映の紐づけがある記事を探す
+articles = requests.get(f"{API}/articles", params={"hasPending": "true"}, headers=HEADERS).json()["items"]
+
+# 2. 本文と pending の抜粋を読む
+article = requests.get(f"{API}/articles/{articles[0]['shortId']}", headers=HEADERS).json()
+pending = next(s for s in article["sources"] if s["status"] == "pending")
+
+# 3. 先に脚注番号を採る (公開判断。updatedAt は 2 で読んだ値)
+applied = requests.post(
+    f"{API}/articles/{article['shortId']}/sources/{pending['id']}/apply",
+    json={"updatedAt": article["updatedAt"]}, headers=HEADERS,
+).json()   # {"sourceNo": 3, "updatedAt": "<新しい値>", ...}
+
+# 4. 本文に ^[n] を書いて保存 (updatedAt は 3 が返した値)
+body = article["body"] + f"\n- {pending['excerpt']}^[{applied['sourceNo']}]\n"
+requests.patch(f"{API}/articles/{article['shortId']}", json={
+    "updatedAt": applied["updatedAt"],
+    "body": body,
+    "articleUpdatedAt": "2026-09-16",
 }, headers=HEADERS)
 ```
 
