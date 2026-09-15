@@ -1,0 +1,21 @@
+-- Article に editedAt を足す (#89 / #46 PR2)
+--
+-- PR1 (#90) で `dirty` の意味を「DB から組み立てた Markdown ≠ GitHub 側のファイル」に
+-- 統一したため、取り込み直後の正規化差分でも dirty になり、「akashic で編集した」ことを
+-- dirty から区別できなくなった。取り込みの preserved ガード (dirty かつファイル未変更なら
+-- スキップ) が正規化だけの記事にも効き、--create-missing が push まで効かない副作用がある。
+--
+-- editedAt は **非 null ⇔ 未 push の akashic 編集がある** を不変条件にする:
+--   - 編集 UI (と PR3 で足す REST API) の保存が now を書く (dirty = true と一緒に)
+--   - push で dirty を落とす行は null に戻す (commit 中に編集された行は dirty ごと残す)
+--   - 取り込みは preserved でスキップした記事以外を null に戻す
+-- 取り込みのガードと「上書きした一覧」は dirty ではなくこれで絞る。
+--
+-- Article は非保護テーブル (RLS 対象外) なのでポリシーの追記は無い。
+-- 取り込みは全件引くので index も張らない。
+-- 手動 GRANT は不要 (新しいテーブルは無く、列の権限はテーブル単位で付いている)。
+-- 本番は SQL を先に当ててからデプロイする (nullable 列なので旧コードは影響を受けないが、
+-- 新コードは列が無いと記事詳細と取り込みが落ちる)。
+
+-- AlterTable
+ALTER TABLE "Article" ADD COLUMN     "editedAt" TIMESTAMP(3);
