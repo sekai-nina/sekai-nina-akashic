@@ -33,6 +33,7 @@ import { SubGraph } from "./sub-graph";
 import { TextsSection } from "./texts-section";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { entityClearanceWhere } from "@/lib/domain/entities";
 
 
 function RichTextContent({
@@ -112,7 +113,10 @@ export default async function AssetDetailPage({
   // 言及ハイライト（カバレッジのアイテム一覧からの遷移で ?hl=nina が付く）
   const hlNina = sp.hl === "nina";
   const session = await auth();
-  const userClearance = session!.user.clearance as ClearanceLevel;
+  // middleware がログインへ飛ばすが、レンダリングはそれと競合して走る。
+  // ガードしないと未認証リクエストのたびにサーバー側で例外になる
+  if (!session?.user) notFound();
+  const userClearance = session.user.clearance as ClearanceLevel;
 
   // Single withClearance call for all read queries (avoids repeated transaction overhead)
   const pageData = await withClearance(userClearance, async (tx) => {
@@ -122,6 +126,7 @@ export default async function AssetDetailPage({
         include: {
           texts: { orderBy: { createdAt: "asc" } },
           entities: {
+            where: { entity: entityClearanceWhere(userClearance) },
             include: { entity: true },
             orderBy: { createdAt: "asc" },
           },
@@ -207,7 +212,7 @@ export default async function AssetDetailPage({
 
   // カバレッジパネル（v2.4）: このアセットが属するカバレッジアイテムの逆引き＋アクティブ観点
   // ハイライト語彙（?hl=nina 時のみ）も並列で取得
-  const canEditCoverage = ["admin", "member"].includes(session!.user.role);
+  const canEditCoverage = ["admin", "member"].includes(session.user.role);
   const [coverageItems, activeLenses, ninaTerms] = await Promise.all([
     findItemsForAsset(id, userClearance),
     listLenses(userClearance, false), // active のみ
@@ -221,9 +226,9 @@ export default async function AssetDetailPage({
     : 0;
 
   // Editable dossiers + which of them already contain this asset
-  const editableDossiers = await listEditableDossiers(session!.user);
+  const editableDossiers = await listEditableDossiers(session.user);
   const dossiersContainingAsset = editableDossiers.length
-    ? await withSession(session!.user, (tx) =>
+    ? await withSession(session.user, (tx) =>
         tx.dossierItem.findMany({
           where: { assetId: id, dossierId: { in: editableDossiers.map((d) => d.id) } },
           select: { dossierId: true },
@@ -677,7 +682,9 @@ export default async function AssetDetailPage({
               <form action={addEntityToAsset.bind(null, id)} className="mt-2 space-y-2">
                 <div className="flex gap-2">
                   <select name="entityType" className="border border-slate-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    {Object.entries(ENTITY_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    {Object.entries(ENTITY_TYPE_LABELS)
+                      .filter(([v]) => v !== "place")
+                      .map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                   </select>
                   <input type="text" name="canonicalName" required className="flex-1 min-w-0 border border-slate-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="正規名" />
                 </div>

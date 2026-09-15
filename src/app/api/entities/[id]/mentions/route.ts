@@ -1,6 +1,6 @@
 import { auth } from "@/lib/auth";
 import { searchMentions } from "@/lib/domain/mentions";
-import { prisma } from "@/lib/db";
+import { getEntityById } from "@/lib/domain/entities";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(
@@ -15,7 +15,8 @@ export async function GET(
   const { id } = await params;
   const excludeLinked = request.nextUrl.searchParams.get("excludeLinked") !== "0";
 
-  const entity = await prisma.entity.findUnique({ where: { id } });
+  // クリアランスで参照できないエンティティは 404。CSV のファイル名に名前が出るため
+  const entity = await getEntityById(id, session.user?.clearance ?? "public");
   if (!entity) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }

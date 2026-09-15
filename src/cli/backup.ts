@@ -20,7 +20,17 @@ import {
   listDriveFiles,
 } from "../lib/drive/index.js";
 
-const prisma = new PrismaClient();
+// datasources.url は undefined でも型エラーにならず、schema の env("DATABASE_URL") に
+// 無言でフォールバックする。それだと RLS で 0 行になるので、ここで止める。
+if (!process.env.DIRECT_URL) {
+  console.error("DIRECT_URL が未設定です (このスクリプトは RLS バイパス接続が必須)");
+  process.exit(1);
+}
+
+// バックアップは全行見える必要があるため DIRECT_URL (RLS バイパス) を使う。
+// 既定の DATABASE_URL (app_runtime) だと app.clearance 未設定で 0 行になり、
+// 「バックアップしたつもり」で空のバックアップが出来上がる。
+const prisma = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL } } });
 
 async function main() {
   const rootFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID;

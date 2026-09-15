@@ -1,4 +1,6 @@
-import { prisma } from "@/lib/db";
+import { prisma, withClearance } from "@/lib/db";
+import { invalidateEntities } from "@/lib/cache";
+import { entityClearanceWhere } from "@/lib/domain/entities";
 import { normalizeText } from "@/lib/utils";
 
 /**
@@ -28,8 +30,9 @@ export interface EntityResolution {
 
 export async function resolveEntityNames(
   names: string[],
-  options: { createMissing?: boolean } = {}
+  options: { createMissing?: boolean; clearance?: string } = {}
 ): Promise<EntityResolution> {
+  const clearance = options.clearance ?? "public";
   const result: EntityResolution = {
     resolved: [],
     unresolved: [],
@@ -51,10 +54,16 @@ export async function resolveEntityNames(
   if (targets.length === 0) return result;
 
   const normalized = targets.map((n) => normalizeText(n));
-  const candidates = await prisma.entity.findMany({
-    where: { normalizedName: { in: normalized } },
-    select: { id: true, type: true, canonicalName: true, normalizedName: true },
-  });
+  // クリアランスで参照できない聖地エンティティは解決対象にしない
+  // (見えないはずの聖地を entityNames から紐づけられてしまう)
+  const candidates = await withClearance(clearance, (tx) =>
+    tx.entity.findMany({
+      where: {
+        AND: [entityClearanceWhere(clearance), { normalizedName: { in: normalized } }],
+      },
+      select: { id: true, type: true, canonicalName: true, normalizedName: true },
+    })
+  );
 
   for (const inputName of targets) {
     const key = normalizeText(inputName);
@@ -95,6 +104,14 @@ export async function resolveEntityNames(
     }
 
     result.unresolved.push(inputName);
+  }
+
+  // 新規タグを作ったらエンティティ一覧のキャッシュを飛ばす。
+  // getCachedEntityList は revalidate 300 秒なので、飛ばさないと最大 5 分
+  // 検索フィルタに出てこない (createPlace 経由は invalidatePlaces が
+  // entities タグも飛ばしていて、ここだけ抜けていた)
+  if (result.created.length > 0) {
+    invalidateEntities();
   }
 
   return result;

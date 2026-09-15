@@ -74,9 +74,12 @@ export async function backupAssetToDrive(assetId: string): Promise<void> {
   if (!isDriveEnabled()) return;
 
   // 動的インポートでPrismaの循環依存を回避
-  const { prisma } = await import("@/lib/db");
+  // バックアップは全行見える必要があるので prismaInternal (RLS バイパス) を使う。
+  // 素の prisma だと app.clearance 未設定で Asset が無言で 0 行になり、
+  // 例外にもならないまま「バックアップしたつもり」で終わる。
+  const { prismaInternal } = await import("@/lib/db");
 
-  const asset = await prisma.asset.findUnique({
+  const asset = await prismaInternal.asset.findUnique({
     where: { id: assetId },
     include: {
       texts: true,
@@ -86,17 +89,29 @@ export async function backupAssetToDrive(assetId: string): Promise<void> {
       dossierItems: true,
     },
   });
-  if (!asset) return;
+  if (!asset) {
+    console.error(`[drive] バックアップ対象のアセットが見つかりません: ${assetId}`);
+    return;
+  }
 
   const rootFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
-  if (!rootFolderId) return;
+  if (!rootFolderId) {
+    console.error("[drive] GOOGLE_DRIVE_FOLDER_ID が未設定です");
+    return;
+  }
 
   const backupFolderId = await getOrCreateDriveFolder(rootFolderId, "akashic-backup");
-  if (!backupFolderId) return;
+  if (!backupFolderId) {
+    console.error("[drive] akashic-backup フォルダを作成/取得できません");
+    return;
+  }
 
   // 既存ファイルがあれば削除
   const auth = getAuth();
-  if (!auth) return;
+  if (!auth) {
+    console.error("[drive] 認証情報を取得できません");
+    return;
+  }
   const drive = google.drive({ version: "v3", auth: auth as Parameters<typeof google.drive>[0]["auth"] });
   const filename = `${assetId}.json`;
   const existing = await drive.files.list({

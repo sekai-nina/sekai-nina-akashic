@@ -1,13 +1,14 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { getArticleByShortId, getWikilinkMap } from "@/lib/domain/articles";
+import { getArticleByShortId, getArticleTitleIndex } from "@/lib/domain/articles";
 import {
   ARTICLE_TYPE_LABELS,
   ARTICLE_SOURCE_STATUS_LABELS,
   ASSET_KIND_LABELS,
   formatDate,
 } from "@/lib/utils";
+import { auditFootnotes } from "@/lib/articles/footnotes";
 import { RemoveSource } from "./remove-source";
 import { renderArticleBody } from "@/lib/articles/render";
 import "../article-content.css";
@@ -28,15 +29,25 @@ export default async function ArticleDetailPage({
   if (!session?.user) notFound();
 
   const { shortId } = await params;
-  const article = await getArticleByShortId(shortId, session.user.clearance);
+  const [article, titleIndex] = await Promise.all([
+    getArticleByShortId(shortId, session.user.clearance),
+    getArticleTitleIndex(),
+  ]);
   if (!article) notFound();
 
   const tags = Array.isArray(article.tags) ? (article.tags as unknown[]).map(String) : [];
   const extraKeys = Object.keys((article.frontmatterExtra ?? {}) as object);
   const unresolvedCount = article.sources.filter((s) => s.status === "unresolved").length;
-  const wikilinks = await getWikilinkMap();
-  const bodyHtml = await renderArticleBody(article.body, { wikilinks });
+  const bodyHtml = await renderArticleBody(article.body, { wikilinks: titleIndex });
   const hasTweets = bodyHtml.includes('class="twitter-tweet"');
+
+  // 本文の ^[n] と出典の対応。描画側でリンクにするのとは別に、対応の壊れを出す
+  const sourceNumbers = article.sources.map((s) => s.sourceNo);
+  const { missingSources, unreferenced, numericWikiLinks, brokenLinks } = auditFootnotes(
+    article.body,
+    sourceNumbers,
+    new Set(titleIndex.keys()),
+  );
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -88,7 +99,11 @@ export default async function ArticleDetailPage({
             <p className="px-4 py-6 text-center text-slate-400 text-sm">出典なし</p>
           )}
           {article.sources.map((s) => (
-            <div key={s.id} id={s.sourceNo != null ? `source-${s.sourceNo}` : undefined} className="px-4 py-3 scroll-mt-4">
+            <div
+              key={s.id}
+              id={s.sourceNo != null ? `src-${s.sourceNo}` : undefined}
+              className="px-4 py-3 target:bg-amber-50 scroll-mt-4"
+            >
               <div className="flex items-baseline gap-2 flex-wrap">
                 {s.sourceNo != null && (
                   <span className="text-xs text-slate-400 font-mono">[{s.sourceNo}]</span>
@@ -150,6 +165,28 @@ export default async function ArticleDetailPage({
           中身は自リポジトリの記事 Markdown なので入力は信頼できる。 */}
       <section>
         <h2 className="text-sm font-semibold text-slate-700 mb-2">本文</h2>
+        {(missingSources.length > 0 ||
+          unreferenced.length > 0 ||
+          numericWikiLinks.length > 0 ||
+          brokenLinks.length > 0) && (
+          <div className="mb-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 space-y-0.5">
+            {missingSources.length > 0 && (
+              <p>本文が指している出典がありません: {missingSources.map((n) => `^[${n}]`).join(" ")}</p>
+            )}
+            {unreferenced.length > 0 && (
+              <p>本文から参照されていない出典があります: {unreferenced.map((n) => `[${n}]`).join(" ")}</p>
+            )}
+            {numericWikiLinks.length > 0 && (
+              <p>
+                脚注が {numericWikiLinks.map((n) => `[[${n}]]`).join(" ")} と書かれています（
+                {numericWikiLinks.map((n) => `^[${n}]`).join(" ")} の誤りと思われます）
+              </p>
+            )}
+            {brokenLinks.length > 0 && (
+              <p>宛先の無い記事リンク: {brokenLinks.map((t) => `[[${t}]]`).join(" ")}</p>
+            )}
+          </div>
+        )}
         <div className="bg-white border border-slate-200 rounded-lg p-5">
           <div className="article-content" dangerouslySetInnerHTML={{ __html: bodyHtml }} />
         </div>

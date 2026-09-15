@@ -2,6 +2,7 @@ import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { getCachedEntityList } from "@/lib/cache";
 import { AnalysisClient } from "./analysis-client";
+import type { ClearanceLevel } from "@prisma/client";
 
 export default async function AnalysisPage({
   searchParams,
@@ -13,7 +14,9 @@ export default async function AnalysisPage({
 
   const params = await searchParams;
 
-  const allEntities = await getCachedEntityList();
+  const allEntities = await getCachedEntityList(
+    session.user.clearance as ClearanceLevel
+  );
   const entities = allEntities.map((e) => ({
     id: e.id,
     type: e.type,

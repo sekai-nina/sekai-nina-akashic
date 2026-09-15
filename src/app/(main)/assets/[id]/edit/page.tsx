@@ -19,6 +19,7 @@ import { SubmitButton } from "@/components/submit-button";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
+import { entityClearanceWhere } from "@/lib/domain/entities";
 
 
 const TEXT_TYPE_LABELS: Record<string, string> = {
@@ -54,13 +55,17 @@ export default async function AssetEditPage({
 }) {
   const { id } = await params;
   const session = await auth();
+  // middleware がログインへ飛ばすが、レンダリングはそれと競合して走る。
+  // ガードしないと未認証リクエストのたびにサーバー側で例外になる
+  if (!session?.user) notFound();
 
-  const asset = await withClearance(session!.user.clearance, (tx) =>
+  const asset = await withClearance(session.user.clearance, (tx) =>
     tx.asset.findUnique({
       where: { id },
       include: {
         texts: { orderBy: { createdAt: "asc" } },
         entities: {
+          where: { entity: entityClearanceWhere(session!.user.clearance) },
           include: { entity: true },
           orderBy: { createdAt: "asc" },
         },

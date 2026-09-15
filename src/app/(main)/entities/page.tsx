@@ -1,9 +1,14 @@
 import { getCachedEntities } from "@/lib/cache";
+import { auth } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import type { ClearanceLevel } from "@prisma/client";
 import { ENTITY_TYPE_LABELS } from "@/lib/utils";
 import Link from "next/link";
 
 export default async function EntitiesPage() {
-  const entities = await getCachedEntities();
+  const session = await auth();
+  if (!session?.user) redirect("/login");
+  const entities = await getCachedEntities(session.user.clearance as ClearanceLevel);
 
   const entityTypes = [...new Set(entities.map((e) => e.type))];
   const entitiesByType = Object.fromEntries(

@@ -16,13 +16,13 @@ export async function GET(request: Request) {
   const type = (url.searchParams.get("type") as EntityType) || undefined;
 
   if (q) {
-    const entities = await searchEntities(q, type);
+    const entities = await searchEntities(q, type, 20, auth.clearance);
     return NextResponse.json({ items: entities });
   }
 
   const page = Number(url.searchParams.get("page")) || 1;
   const perPage = Math.min(Number(url.searchParams.get("perPage")) || 20, 100);
-  const result = await listEntities(type, page, perPage);
+  const result = await listEntities(type, page, perPage, auth.clearance);
   return NextResponse.json(result);
 }
 
@@ -34,6 +34,15 @@ export async function POST(request: Request) {
   if (!body.type || !body.canonicalName) {
     return NextResponse.json(
       { error: "type and canonicalName are required" },
+      { status: 400 }
+    );
+  }
+
+  // 聖地は Place と対で作る必要があるので、このエンドポイントからは作らせない
+  // (孤児の place エンティティはクリアランス絞りから恒久的に消えてしまう)
+  if (body.type === "place") {
+    return NextResponse.json(
+      { error: "place entities must be created via POST /places" },
       { status: 400 }
     );
   }

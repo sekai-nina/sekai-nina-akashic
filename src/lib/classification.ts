@@ -59,3 +59,21 @@ export function assertClearance(
     throw new Error("Access denied: insufficient clearance");
   }
 }
+
+/**
+ * 機密レベルの引き下げ (例: restricted -> public) にあたるかを返す。
+ *
+ * `assertClearance` は「自分のクリアランスより上を付ける」操作しか止めない。
+ * 引き下げは常に自分のクリアランス以下なので素通りし、RLS も USING / WITH CHECK の
+ * 両方が通るため止まらない。機械 (MCP 経由の AI) からの再分類を防ぐのに使う。
+ */
+export function isClassificationDowngrade(
+  current: ClearanceLevel | string,
+  requested: ClearanceLevel | string
+): boolean {
+  const currentLevel = LEVEL_ORDER[current as ClearanceLevel];
+  const requestedLevel = LEVEL_ORDER[requested as ClearanceLevel];
+  // 未知の値は fail-closed で「引き下げ」扱いにして止める
+  if (currentLevel === undefined || requestedLevel === undefined) return true;
+  return requestedLevel < currentLevel;
+}

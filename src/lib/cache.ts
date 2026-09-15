@@ -1,6 +1,7 @@
 import { unstable_cache, revalidateTag } from "next/cache";
-import { prisma, prismaInternal, withClearance } from "@/lib/db";
+import { prismaInternal, withClearance } from "@/lib/db";
 import { getDashboardStats } from "@/lib/domain/stats";
+import { entityClearanceWhere } from "@/lib/domain/entities";
 import { ClearanceLevel } from "@prisma/client";
 
 // ========== Cache Tags ==========
@@ -15,6 +16,21 @@ export const CACHE_TAGS = {
 export function invalidateAssets() {
   revalidateTag(CACHE_TAGS.assets, "max");
   revalidateTag(CACHE_TAGS.stats, "max");
+}
+
+/**
+ * 一覧系だけを飛ばす。統計 (stats) は据え置く。
+ *
+ * stats タグの getCachedDashboardStats / getCachedNinaStatsRecent はどちらも
+ * revalidate 60 秒なので放っておいても 1 分で更新される。一方 getDashboardStats は
+ * Asset 12 万件に対する 16 本のサブクエリなので、外部 bot が 1 件ずつ POST する
+ * たびに飛ばすと、次にダッシュボードを開いた人が毎回その再計算を待つことになる。
+ *
+ * 人間が画面から操作したとき (actions.ts / quick-create) は即座に反映されてほしいので
+ * invalidateAssets を使う。外部からの取り込みはこちら。
+ */
+export function invalidateAssetList() {
+  revalidateTag(CACHE_TAGS.assets, "max");
 }
 
 export function invalidateEntities() {
@@ -89,43 +105,57 @@ export const getCachedInboxCount = (clearance: ClearanceLevel) =>
     { tags: [CACHE_TAGS.assets], revalidate: 30 }
   )();
 
-export const getCachedEntities = unstable_cache(
-  () =>
-    prisma.entity.findMany({
-      include: { _count: { select: { assets: true } } },
-      orderBy: [{ type: "asc" }, { canonicalName: "asc" }],
-    }),
-  ["entities-list"],
-  { tags: [CACHE_TAGS.entities], revalidate: 60 }
-);
+// Entity には実質的な RLS が無いため、クリアランスで見えない聖地エンティティを
+// アプリ層で落とす (詳細は entityClearanceWhere の JSDoc)。キャッシュキーは
+// クリアランス別にする — getCachedPlaces と同じ方式。
+export const getCachedEntities = (clearance: ClearanceLevel) =>
+  unstable_cache(
+    () =>
+      withClearance(clearance, (tx) =>
+        tx.entity.findMany({
+          where: entityClearanceWhere(clearance),
+          include: { _count: { select: { assets: true } } },
+          orderBy: [{ type: "asc" }, { canonicalName: "asc" }],
+        })
+      ),
+    [`entities-list-${clearance}`],
+    { tags: [CACHE_TAGS.entities], revalidate: 60 }
+  )();
 
 /** Lightweight entity list (no _count) for search/filter forms */
-export const getCachedEntityList = unstable_cache(
-  () =>
-    prisma.entity.findMany({
-      select: {
-        id: true,
-        type: true,
-        canonicalName: true,
-        normalizedName: true,
-        generation: true,
-        reading: true,
-      },
-      orderBy: [{ type: "asc" }, { canonicalName: "asc" }],
-    }),
-  ["entities-list-light"],
-  { tags: [CACHE_TAGS.entities], revalidate: 300 }
-);
+export const getCachedEntityList = (clearance: ClearanceLevel) =>
+  unstable_cache(
+    () =>
+      withClearance(clearance, (tx) =>
+        tx.entity.findMany({
+          where: entityClearanceWhere(clearance),
+          select: {
+            id: true,
+            type: true,
+            canonicalName: true,
+            normalizedName: true,
+            generation: true,
+            reading: true,
+          },
+          orderBy: [{ type: "asc" }, { canonicalName: "asc" }],
+        })
+      ),
+    [`entities-list-light-${clearance}`],
+    { tags: [CACHE_TAGS.entities], revalidate: 300 }
+  )();
 
-export const getCachedEntityById = unstable_cache(
-  (id: string) =>
-    prisma.entity.findUnique({
-      where: { id },
-      include: { _count: { select: { assets: true } } },
-    }),
-  ["entity-detail"],
-  { tags: [CACHE_TAGS.entities], revalidate: 60 }
-);
+export const getCachedEntityById = (id: string, clearance: ClearanceLevel) =>
+  unstable_cache(
+    () =>
+      withClearance(clearance, (tx) =>
+        tx.entity.findFirst({
+          where: { AND: [{ id }, entityClearanceWhere(clearance)] },
+          include: { _count: { select: { assets: true } } },
+        })
+      ),
+    [`entity-detail-${clearance}-${id}`],
+    { tags: [CACHE_TAGS.entities], revalidate: 60 }
+  )();
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -163,7 +193,9 @@ export const getCachedNinaStatsRecent = unstable_cache(
           entity: { type: "tag", canonicalName: { in: ["日向坂で会いましょう", "まだまだ！日向坂で会いましょう", "日向坂になりましょう", "日向坂ちゃんねる", "日向坂46公式チャンネル", "雑誌"] } },
         },
       }),
-      prisma.assetEntity.count({
+      // 他の 3 本と同じく prismaInternal を使う (全体統計なので RLS バイパスが正)。
+      // 素の prisma だと app.clearance 未設定で無言の 0 件になる
+      prismaInternal.assetEntity.count({
         where: {
           asset: { canonicalDate: { gte: since } },
           entity: { type: "tag", canonicalName: "ライブ" },

@@ -15,7 +15,7 @@ import { replaceOutsideTags } from "./html-text";
 const REF = /\^\[(\d+)\]/g;
 
 const toAnchor = (n: string) =>
-  `<sup class="footnote-ref"><a href="#source-${n}" data-source-no="${n}">${n}</a></sup>`;
+  `<sup class="footnote-ref"><a href="#src-${n}" data-source-no="${n}">${n}</a></sup>`;
 
 export function remarkFootnoteRefs() {
   return (tree: Root) => {

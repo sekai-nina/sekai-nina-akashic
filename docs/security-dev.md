@@ -55,6 +55,7 @@ const clearance = auth.clearance;
 | CLI ツール・Bot（内部処理） | `prismaInternal` |
 | 統計集計（全体カウント等） | `prismaInternal` |
 | User / Entity / Collection の操作 | `prisma`（保護対象外テーブル） |
+| Entity を一覧・検索でユーザーに返す | `listEntities` / `searchEntities` / `getEntityById`（`entityClearanceWhere` を通す） |
 
 ## 保護テーブル一覧
 
