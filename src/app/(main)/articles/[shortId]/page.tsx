@@ -10,8 +10,9 @@ import {
   formatDate,
 } from "@/lib/utils";
 import { frontmatterExtraKeys } from "@/lib/articles/edit";
-import { auditFootnotes } from "@/lib/articles/footnotes";
+import { auditFootnotes, footnoteRefsInBody } from "@/lib/articles/footnotes";
 import { FootnoteAuditWarnings } from "./footnote-audit-warnings";
+import { ApplySource } from "./apply-source";
 import { RemoveSource } from "./remove-source";
 import { UnpushedBadge } from "./unpushed-badge";
 import { renderArticleBody } from "@/lib/articles/render";
@@ -29,7 +30,7 @@ export default async function ArticleDetailPage({
   searchParams,
 }: {
   params: Promise<{ shortId: string }>;
-  searchParams: Promise<{ renamedFrom?: string | string[] }>;
+  searchParams: Promise<{ renamedFrom?: string | string[]; applied?: string | string[] }>;
 }) {
   const session = await auth();
   if (!session?.user) notFound();
@@ -39,6 +40,8 @@ export default async function ArticleDetailPage({
   // 同じキーが複数付くと配列で来るので、文字列のときだけ扱う
   const sp = await searchParams;
   const renamedFrom = typeof sp.renamedFrom === "string" ? sp.renamedFrom : undefined;
+  // 「反映済みにする」の直後だけ付く。採番した脚注番号を本文に書くよう促す
+  const appliedParam = typeof sp.applied === "string" && /^\d+$/.test(sp.applied) ? Number(sp.applied) : undefined;
   const [article, titleIndex, inboundLinks] = await Promise.all([
     getArticleByShortId(shortId, session.user.clearance),
     getArticleTitleIndex(),
@@ -56,6 +59,14 @@ export default async function ArticleDetailPage({
   // 本文の ^[n] と出典の対応。描画側でリンクにするのとは別に、対応の壊れを出す
   const sourceNumbers = article.sources.map((s) => s.sourceNo);
   const audit = auditFootnotes(article.body, sourceNumbers, new Set(titleIndex.keys()));
+  // バナーは URL に残るので、実データで gate する (renamedFrom と同じ): その番号の出典が
+  // まだあり、本文がまだ参照していないときだけ出す
+  const applied =
+    appliedParam != null &&
+    sourceNumbers.includes(appliedParam) &&
+    !footnoteRefsInBody(article.body).includes(appliedParam)
+      ? appliedParam
+      : undefined;
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -97,6 +108,15 @@ export default async function ArticleDetailPage({
             そのままだと宛先を失うので、参照元の本文を書き換えてください（
             <Link href={`/articles?q=${encodeURIComponent(`[[${renamedFrom}`)}`} className="underline">
               参照元を検索
+            </Link>
+            ）
+          </div>
+        )}
+        {applied != null && (
+          <div className="mt-3 text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+            出典 [{applied}] を{ARTICLE_SOURCE_STATUS_LABELS.applied}にしました（次の push で公開されます）。本文の該当箇所に ^[{applied}] を書いてください（
+            <Link href={`/articles/${article.shortId}/edit`} className="underline">
+              編集
             </Link>
             ）
           </div>
@@ -154,9 +174,15 @@ export default async function ArticleDetailPage({
                     {ASSET_KIND_LABELS[s.asset.kind] ?? s.asset.kind}
                   </span>
                 )}
-                {/* 解除できるのは akashic 側で付けた未反映の紐づけだけ。
-                    取り込み由来の applied を消すと記事の出典が壊れる。 */}
-                {s.status === "pending" && <RemoveSource id={s.id} shortId={article.shortId} />}
+                {/* 解除・反映できるのは akashic 側で付けた未反映の紐づけだけ。
+                    取り込み由来の applied を消すと記事の出典が壊れる。
+                    反映は公開を決める操作なので、確認を挟む (ApplySource) */}
+                {canEdit && s.status === "pending" && (
+                  <>
+                    <ApplySource id={s.id} shortId={article.shortId} updatedAt={article.updatedAt.toISOString()} />
+                    <RemoveSource id={s.id} shortId={article.shortId} />
+                  </>
+                )}
               </div>
 
               {s.excerpt && (
