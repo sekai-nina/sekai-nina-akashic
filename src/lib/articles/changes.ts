@@ -1,6 +1,6 @@
-import type { ArticleSourceStatus, ArticleType } from "@prisma/client";
+import type { ArticleType } from "@prisma/client";
 
-import type { ArticleColumns } from "./frontmatter";
+import type { ArticleColumns, ArticleSourceRow } from "./frontmatter";
 
 /**
  * 取り込み結果が DB の内容と変わっているか。
@@ -13,17 +13,6 @@ import type { ArticleColumns } from "./frontmatter";
  * 比較対象は Article のカラムと ArticleSource の全フィールドを網羅する。
  */
 
-/** 差分判定に必要な ArticleSource の形 (frontmatter 由来の行だけを渡す) */
-export interface ComparableSource {
-  assetId: string | null;
-  status: ArticleSourceStatus;
-  sourceNo: number | null;
-  label: string;
-  url: string | null;
-  date: Date | null;
-  originalRef: string | null;
-  sortOrder: number;
-}
 
 /** 差分判定に必要な Article の形 */
 export interface ComparableArticle {
@@ -44,7 +33,12 @@ export interface ComparableArticle {
   lat: number | null;
   lng: number | null;
   frontmatterExtra: unknown;
-  sources: ComparableSource[];
+  /**
+   * frontmatter 由来の行だけを渡す (pending は含めない)。
+   * 取り込みが書く行 (`toArticleSourceRow`) と同じ形。**列を足したら下の比較にも足すこと**
+   * (型に増やしても `hasChanged` は列を手で列挙しているので自動では比較されない)
+   */
+  sources: ArticleSourceRow[];
 }
 
 const time = (d: Date | null | undefined) => (d == null ? null : d.getTime());
@@ -57,8 +51,13 @@ const time = (d: Date | null | undefined) => (d == null ? null : d.getTime());
  * 記述順と保存順が違うだけで「変わった」と言い続け、差分スキップが効かない
  * (実測で 332 件中 72 件がキー順の差だけで毎回書き込まれていた)。
  * 配列は順序に意味があるのでそのまま。
+ *
+ * `Date` は ISO 文字列にする。`Object.keys(date)` は空なので、素通しすると
+ * どんな日付も `{}` になり、日付のズレが比較から消える (verify.ts が Date 入りの
+ * カラムを渡す)。jsonb 経路には Date は来ないので挙動は変わらない。
  */
-function canonicalJson(v: unknown): unknown {
+export function canonicalJson(v: unknown): unknown {
+  if (v instanceof Date) return v.toISOString();
   if (Array.isArray(v)) return v.map(canonicalJson);
   if (v && typeof v === "object") {
     const o = v as Record<string, unknown>;
@@ -73,7 +72,7 @@ const sameJson = (a: unknown, b: unknown) =>
 export function hasChanged(
   prev: ComparableArticle,
   next: Omit<ArticleColumns, "sources">,
-  nextSources: ComparableSource[],
+  nextSources: ArticleSourceRow[],
 ): boolean {
   if (
     prev.path !== next.path ||
@@ -109,7 +108,9 @@ export function hasChanged(
       a.url !== b.url ||
       time(a.date) !== time(b.date) ||
       a.originalRef !== b.originalRef ||
-      a.sortOrder !== b.sortOrder
+      a.sortOrder !== b.sortOrder ||
+      // 取り込みの規則が変わったとき (internal → public) に再取り込みで書き換わるように
+      a.classification !== b.classification
     );
   });
 }
