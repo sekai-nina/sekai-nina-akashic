@@ -13,6 +13,7 @@ import { createPlace, getPlaceById, listPlaces, updatePlace } from "@/lib/domain
 import { search, type SearchQuery } from "@/lib/search";
 import {
   normalizeText,
+  describeEnum,
   ASSET_STATUS_LABELS,
   ENTITY_TYPE_LABELS,
 } from "@/lib/utils";
@@ -20,22 +21,21 @@ import { resolveGoogleMapsUrl } from "@/lib/places/resolve-google-maps-url";
 import { logMcpToolCall } from "./audit";
 import { entityResolutionHint, resolveEntityNames } from "./entity-resolution";
 import { toAssetDetail, toEntitySummary, toPlaceSummary, toSearchItem } from "./format";
+import { fail, ok, toToolError } from "./result";
+import { registerArticleReadTools, registerArticleWriteTools } from "./tools-articles";
 
 // ============================================================
 // 共通ヘルパー
 // ============================================================
 
-
-// 形式だけでなく暦日として存在するかも見る。new Date("2026-02-30") は例外にならず
-// 3/2 にロールオーバーするので、正規表現だけだと無言のデータ破損になる。
 const DEFAULT_PER_PAGE = 20;
 /** 検索は 1 件あたりのスニペットが大きいので上限を低めにする */
 const MAX_SEARCH_PER_PAGE = 50;
 /** エンティティは 1 件が小さいので多めに返せる */
 const MAX_ENTITY_PER_PAGE = 100;
-/** 未知エラーの詳細をツール結果に載せる最大長 */
-const ERROR_DETAIL_MAX_LENGTH = 200;
 
+// 形式だけでなく暦日として存在するかも見る。new Date("2026-02-30") は例外にならず
+// 3/2 にロールオーバーするので、正規表現だけだと無言のデータ破損になる。
 const DATE_ONLY = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "YYYY-MM-DD 形式で指定してください")
@@ -43,35 +43,6 @@ const DATE_ONLY = z
     const d = new Date(`${s}T00:00:00.000Z`);
     return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
   }, "存在しない日付です");
-
-/** ツール結果 (成功) — JSON をテキストとして返す */
-function ok(payload: unknown) {
-  return {
-    // インデントは付けない。AI 向け出力に整形は不要で、実測でトークンが 36% 増える
-    // (同じ検索結果が pretty 27,575 文字 / compact 20,201 文字)
-    content: [{ type: "text" as const, text: JSON.stringify(payload) }],
-  };
-}
-
-/** ツール結果 (失敗) — isError を立てて AI にリトライさせる */
-function fail(message: string, detail?: Record<string, unknown>) {
-  return {
-    isError: true,
-    content: [
-      {
-        type: "text" as const,
-        text: JSON.stringify({ error: message, ...(detail ?? {}) }, null, 2),
-      },
-    ],
-  };
-}
-
-/** enum の説明文を `*_LABELS` から生成する。直書きすると画面表示とズレる */
-function describeEnum(labels: Record<string, string>): string {
-  return Object.entries(labels)
-    .map(([k, v]) => `${k}=${v}`)
-    .join(" / ");
-}
 
 /** classification がキーのクリアランスを超えていれば失敗結果を返す。問題なければ null。 */
 function rejectAboveClearance(user: ApiKeyUser, classification: $Enums.ClearanceLevel) {
@@ -126,27 +97,6 @@ function failResolveUrl(
   );
 }
 
-/**
- * domain 層が投げた例外を AI に読める形へ落とす。
- * Prisma のエラーはスタックにサーバーのパスやクエリが載るので、そのままは返さない。
- */
-function toToolError(err: unknown, fallback: string) {
-  const message = err instanceof Error ? err.message : String(err);
-
-  if (message.includes("Access denied")) {
-    return fail("クリアランスが足りないため、この操作は実行できません。");
-  }
-  if (message.includes("Unique constraint failed")) {
-    return fail("同じものが既に登録されています。一覧で確認してから更新ツールを使ってください。");
-  }
-  if (message.includes("not found") || message.includes("No record was found")) {
-    return fail("対象が見つかりません。ID を確認してください。");
-  }
-
-  // 未知のエラーは 1 行目だけ返す（スタックとクエリは落とす）
-  return fail(fallback, { detail: message.split("\n")[0].slice(0, ERROR_DETAIL_MAX_LENGTH) });
-}
-
 function hasWrite(user: ApiKeyUser): boolean {
   return user.permissions.includes("write");
 }
@@ -169,8 +119,10 @@ export interface ToolContext {
  */
 export function registerAkashicTools(server: McpServer, ctx: ToolContext) {
   registerReadTools(server, ctx);
+  registerArticleReadTools(server, ctx);
   if (hasWrite(ctx.user)) {
     registerWriteTools(server, ctx);
+    registerArticleWriteTools(server, ctx);
   }
 }
 
