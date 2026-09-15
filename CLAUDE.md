@@ -53,7 +53,11 @@ pnpm test                                                    # 合成ケース�
 ARTICLES_DIR=<sekai-nina-public のパス> pnpm test              # 実記事 332 件も検証
 ```
 
-記事の実体は別リポジトリなので、`ARTICLES_DIR` が未設定なら実記事のテストは skip される（CI はこの状態で回る）。**記事の push（#46）を触る前には `ARTICLES_DIR` 付きで緑にし、`pnpm cli:verify-article-push --dir <path>` で DB から生成した Markdown が実ファイルと食い違っていないことも確認する**（frontmatter に載るのは `pending` 以外かつ `public` の `ArticleSource` だけ。詳細は `docs/security-dev.md`）。
+記事の実体は別リポジトリなので、`ARTICLES_DIR` が未設定なら実記事のテストは skip される（CI はこの状態で回る）。**記事の push まわり（`src/lib/articles/`、`src/lib/domain/articles.ts`、`src/cli/import-articles.ts`）を触ったら `ARTICLES_DIR` 付きで緑にし、`pnpm cli:verify-article-push --dir <path>` で DB から生成した Markdown が実ファイルと食い違っていないことも確認する**（frontmatter に載るのは `pending` 以外かつ `public` の `ArticleSource` だけ。詳細は `docs/security-dev.md`）。
+
+- **push の出力に影響する書き込みは `Article.dirty = true` を立てる。** `dirty` は「DB の出力 ≠ GitHub」の意味で、`/articles/push` はこれしか見ない
+- **`Article.githubSha` は取り込みが埋める git blob SHA。** push の衝突検出に使う。`pnpm cli:import-articles --apply` は checkout が origin/main と一致しないと止まる（pull し忘れで DB が巻き戻るのを防ぐ）
+- GitHub への書き込みは `ARTICLES_GITHUB_TOKEN`（fine-grained PAT）。`src/lib/github/` は素の `fetch`。1 push = 1 コミット
 
 ## 認可モデル（このリポジトリの肝）
 

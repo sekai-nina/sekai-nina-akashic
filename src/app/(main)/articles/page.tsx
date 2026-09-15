@@ -59,7 +59,18 @@ export default async function ArticlesPage({
               </Link>
             </>
           )}
-          {stats.dirty > 0 && <> {" / "}未 push {stats.dirty} 本</>}
+          {stats.dirty > 0 && (
+            <>
+              {" / "}
+              {session.user.role === "admin" ? (
+                <Link href="/articles/push" className="text-blue-700 hover:underline">
+                  未 push {stats.dirty} 本
+                </Link>
+              ) : (
+                <>未 push {stats.dirty} 本</>
+              )}
+            </>
+          )}
         </p>
       </div>
 

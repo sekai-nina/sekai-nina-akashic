@@ -1,5 +1,12 @@
 import { canonicalJson } from "./changes";
-import { parseArticle, parseFrontmatterDate, toArticleColumns } from "./frontmatter";
+import {
+  parseArticle,
+  parseFrontmatterDate,
+  renderArticleMarkdown,
+  toArticleColumns,
+  type ArticleColumns,
+  type ArticleSourceRow,
+} from "./frontmatter";
 
 /**
  * DB から組み立てた記事 Markdown と、リポジトリの実ファイルの突き合わせ。
@@ -98,6 +105,45 @@ export function compareArticle(fileRaw: string, generated: string, path: string)
   if (notes.length > (refsAdded ? 1 : 0)) return { verdict: "changed", notes };
   if (refsAdded) return { verdict: "ref_added", notes };
   return { verdict: "normalized", notes: [] };
+}
+
+export interface ImportDirtyDecision {
+  /** `Article.dirty` に書く値 */
+  dirty: boolean;
+  verdict: Verdict;
+  notes: string[];
+}
+
+/**
+ * 取り込み直後の `dirty` を決める。
+ *
+ * `dirty` は「DB から組み立てた Markdown が GitHub 側のファイルと食い違っている
+ * (= push すると差分が出る)」の意味。取り込みは DB をファイルに合わせる操作だが、
+ * push は frontmatter を丸ごと生成し直すので、値が同じでも引用符やキー順が違えば
+ * 差分になる。ここで先に判定して dirty を立てておけば、初回の全件正規化も
+ * 通常の push 画面から出せる。
+ *
+ * - identical → false
+ * - normalized / ref_added → true (合意済みの差分。push してよい)
+ * - changed → **false**。取りこぼしの疑いがあり、push すると値が消えるので
+ *   dirty にせず呼び出し側が警告する (#42 の浮動小数点のような既知の 1 件を含む)
+ *
+ * `rows` は取り込みが書く行 (`toArticleSourceRow`) なので全て public / 非 pending。
+ * push (`renderArticlesForPush`) が public クリアランスで読む行と同じ集合になる。
+ */
+export function dirtyAfterImport(
+  fileRaw: string,
+  cols: Omit<ArticleColumns, "sources">,
+  rows: ArticleSourceRow[],
+): ImportDirtyDecision {
+  const { markdown, blocked } = renderArticleMarkdown({ ...cols, sources: rows });
+  if (blocked.length) {
+    // 取り込みの行は public 固定なのでここには来ないはず。来たら取り込み側の規則が壊れている
+    // (黙って dirty=false にすると、push 時に blocked で止まる記事を「同期済み」と表示してしまう)
+    throw new Error(`取り込みの行に非 public の出典があります (${cols.path})`);
+  }
+  const { verdict, notes } = compareArticle(fileRaw, markdown, cols.path);
+  return { dirty: verdict === "normalized" || verdict === "ref_added", verdict, notes };
 }
 
 /**
