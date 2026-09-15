@@ -168,8 +168,11 @@ export function AddToArticle({
       {open &&
         position &&
         createPortal(
+          // data-picker-panel: ポータル先では DOM 上の親子関係が切れるため、
+          // 呼び出し元が「自分の中のクリック」と判定できるようにする
           <div
             ref={panelRef}
+            data-picker-panel
             style={{
               position: "fixed",
               top: position.top,

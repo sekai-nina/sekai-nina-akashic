@@ -12,6 +12,9 @@ import { generateAndUploadThumbnails } from "@/lib/thumbnails";
  * Web UI からはそのまま使える（drive-image プロキシと同じ理屈）。bot 等は ApiKey(read) でも可。
  * clearance に応じた RLS で引くため、権限のないアセットのサムネイルは 404。
  * R2 の thumbnailUrl があればそこへ、gdrive はプロキシ (/api/drive-image) へ。
+ * 動画は R2 サムネイルが生成済み (thumbnailUrl あり) のときだけ 302 で、未生成なら 404。
+ * gdrive プロキシへのフォールバックは image のみ — 動画の storageKey は mp4 本体の
+ * fileId で、プロキシが video/mp4 を返すため <img> では表示できないため。
  */
 export async function GET(
   request: Request,

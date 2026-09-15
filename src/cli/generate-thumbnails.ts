@@ -41,14 +41,27 @@ const s3 = new S3Client({
   },
 });
 
+/**
+ * Drive クライアントはスクリプト全体で使い回す。
+ *
+ * 呼び出しのたびに OAuth2Client を new するとトークンキャッシュを持たないため、
+ * files.get のたびに refresh_token からアクセストークンを取り直し、
+ * oauth2.googleapis.com/token への往復が 1 件につき 1 回余分に走る。
+ * downloadFromDrive (画像) と fetchDriveThumbnail (動画) の双方から呼ばれるので、
+ * 資産数ぶんそのまま効いてくる。
+ */
+let driveClient: ReturnType<typeof google.drive> | null = null;
+
 function getDriveClient() {
+  if (driveClient) return driveClient;
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
   const refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
   if (!clientId || !clientSecret || !refreshToken) throw new Error("Google Drive not configured");
   const oauth2Client = new google.auth.OAuth2(clientId, clientSecret);
   oauth2Client.setCredentials({ refresh_token: refreshToken });
-  return google.drive({ version: "v3", auth: oauth2Client });
+  driveClient = google.drive({ version: "v3", auth: oauth2Client });
+  return driveClient;
 }
 
 async function downloadFromDrive(fileId: string): Promise<Buffer> {

@@ -64,6 +64,12 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 
 ---
 
+### 機密レベル (`classification`) の変更制限
+
+API キーからは **引き上げしかできない。** `PATCH /assets/:id` と `PATCH /places/:id` に現在より低い `classification` を渡すと `403 {"error":"Cannot lower classification (<現在> -> <指定>) via API key"}` を返す。
+
+`assertClearance` は「自分のクリアランスより上を付ける」操作しか止めず、引き下げ (例: `restricted` → `public`) は素通りするため。API キーは MCP（LLM がツールを呼ぶ経路）と共通なので、アプリ層で塞いでいる。引き下げは画面から人間が行う。
+
 ## Assets
 
 ### GET /assets
@@ -114,6 +120,10 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 ### POST /assets
 
 アセットをメタデータから作成する。ファイルアップロードを伴う場合は `POST /upload` を使う。
+
+リクエストボディは zod で検証される。**未知のキーは除去される**（拒否ではない）ので、`id` などを指定しても無視される。`classification` の空文字は未指定扱い、日付は `YYYY-MM-DD` と ISO 8601 の両方を受け付ける。型が合わないキーがあると `400 {"error":"<field>: <理由>"}` を返す。
+
+作成に成功すると一覧・統計のキャッシュが無効化される。
 
 **リクエストボディ (JSON):**
 
@@ -340,6 +350,10 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 
 ### GET /entities
 
+聖地エンティティ（`type: "place"`）は、紐づく `Place` の `classification` がキーのクリアランスを超える場合に除外される。`GET /entities/:id` も同条件で `404` を返す。
+
+アセットに紐づくエンティティ（`GET /assets/:id` と `GET /assets?include=entities` の `entities`）も同条件で除外される。
+
 **クエリパラメータ:**
 
 | パラメータ | 型 | デフォルト | 説明 |
@@ -376,6 +390,8 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 ```
 
 ### POST /entities
+
+`type: "place"` は受け付けない（`400`）。聖地は `Place` と対で作る必要があるため `POST /places` を使う。
 
 エンティティを作成する。同じ `type` + `canonicalName` が既に存在する場合は、既存のものがそのまま返る（upsert）。
 

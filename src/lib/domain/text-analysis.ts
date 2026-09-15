@@ -1,4 +1,6 @@
-import { prisma } from "@/lib/db";
+import { prismaInternal } from "@/lib/db";
+import { classificationFilterSql } from "@/lib/classification";
+import { jstDayStart, jstDayEndExclusive } from "@/lib/utils";
 import { Prisma } from "@prisma/client";
 
 export interface AnalysisFilters {
@@ -16,8 +18,12 @@ export interface WordGroup {
   variants: string[];
 }
 
-function buildConditions(filters: AnalysisFilters): Prisma.Sql {
-  const conditions: Prisma.Sql[] = [];
+function buildConditions(filters: AnalysisFilters, clearance: string): Prisma.Sql {
+  // 生 SQL は prismaInternal (RLS バイパス) + classificationFilterSql の明示フィルタで絞る。
+  // - 素の prisma だと app.clearance 未設定で RLS が全行を落とし、無言の 0 件になる
+  // - withClearance で包むとインタラクティブトランザクションの 15 秒上限に当たる (実測 21 秒で P2028)
+  // 集計が重いので、この組み合わせが正しい (CLAUDE.md の「生 SQL は classificationFilterSql を通す」)。
+  const conditions: Prisma.Sql[] = [classificationFilterSql(clearance, "a")];
 
   if (filters.sourceType) {
     conditions.push(Prisma.sql`a."sourceType" = ${filters.sourceType}`);
@@ -33,15 +39,17 @@ function buildConditions(filters: AnalysisFilters): Prisma.Sql {
     );
   }
 
+  // JST の暦日境界に直してから比較する。旧実装は UTC 0 時の値をそのまま使っており、
+  // dateFrom 当日の JST 0〜9 時が落ち、dateTo は `<=` だったため**当日が丸ごと落ちていた**
   if (filters.dateFrom) {
     conditions.push(
-      Prisma.sql`COALESCE(a."canonicalDate", a."createdAt") >= ${new Date(filters.dateFrom)}`
+      Prisma.sql`COALESCE(a."canonicalDate", a."createdAt") >= ${jstDayStart(new Date(filters.dateFrom))}`
     );
   }
 
   if (filters.dateTo) {
     conditions.push(
-      Prisma.sql`COALESCE(a."canonicalDate", a."createdAt") <= ${new Date(filters.dateTo)}`
+      Prisma.sql`COALESCE(a."canonicalDate", a."createdAt") < ${jstDayEndExclusive(new Date(filters.dateTo))}`
     );
   }
 
@@ -89,17 +97,18 @@ function buildVariantMatchExpr(variants: string[]): Prisma.Sql {
 
 export async function getWordFrequencyOverTime(
   groups: WordGroup[],
-  filters: AnalysisFilters
+  filters: AnalysisFilters,
+  clearance: string
 ): Promise<{ points: Record<string, string | number>[]; labels: string[] }> {
   if (groups.length === 0) return { points: [], labels: [] };
 
-  const where = buildConditions(filters);
+  const where = buildConditions(filters, clearance);
   const trunc = filters.granularity === "week" ? "week" : "month";
 
   const results = await Promise.all(
     groups.map(async (group) => {
       const countExpr = buildVariantCountExpr(group.variants);
-      const rows = await prisma.$queryRaw<
+      const rows = await prismaInternal.$queryRaw<
         Array<{ bucket: Date; count: bigint }>
       >`
         SELECT
@@ -140,17 +149,18 @@ export async function getWordFrequencyOverTime(
 
 export async function getWordAppearanceRate(
   groups: WordGroup[],
-  filters: AnalysisFilters
+  filters: AnalysisFilters,
+  clearance: string
 ): Promise<{ points: Record<string, string | number>[]; labels: string[] }> {
   if (groups.length === 0) return { points: [], labels: [] };
 
-  const where = buildConditions(filters);
+  const where = buildConditions(filters, clearance);
   const trunc = filters.granularity === "week" ? "week" : "month";
 
   const results = await Promise.all(
     groups.map(async (group) => {
       const matchExpr = buildVariantMatchExpr(group.variants);
-      const rows = await prisma.$queryRaw<
+      const rows = await prismaInternal.$queryRaw<
         Array<{
           bucket: Date;
           posts_with_word: bigint;
@@ -202,7 +212,8 @@ export async function getWordAppearanceRate(
 }
 
 export async function getVolumeOverTime(
-  filters: AnalysisFilters
+  filters: AnalysisFilters,
+  clearance: string
 ): Promise<
   Array<{
     bucket: string;
@@ -211,10 +222,10 @@ export async function getVolumeOverTime(
     avgLength: number;
   }>
 > {
-  const where = buildConditions(filters);
+  const where = buildConditions(filters, clearance);
   const trunc = filters.granularity === "week" ? "week" : "month";
 
-  const rows = await prisma.$queryRaw<
+  const rows = await prismaInternal.$queryRaw<
     Array<{
       bucket: Date;
       post_count: bigint;

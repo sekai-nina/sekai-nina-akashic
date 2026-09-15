@@ -15,16 +15,44 @@ export function normalizeText(text: string): string {
     .trim();
 }
 
+/**
+ * 日時を **JST 壁時計の "YYYY-MM-DD"** にする。
+ *
+ * このプロダクトの日付ドメインは日本時間。ところが DB には 2 つの規約が
+ * 混在していて、素の UTC 日付で突き合わせると 1 日ずれる:
+ *
+ * | 列 | 日付のみの値の格納 |
+ * |---|---|
+ * | `Asset.canonicalDate` | JST 深夜 (= 15:00 UTC 前日) |
+ * | `Article.date` / `ArticleSource.date` | UTC 深夜 |
+ *
+ * 日付どうしを比較するときは必ずこれを通す。
+ */
+export function jstDayString(date: Date): string {
+  return new Date(date.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
 export function truncate(text: string, length: number): string {
   if (text.length <= length) return text;
   return text.slice(0, length) + "…";
 }
 
+/**
+ * 日時を JST の壁時計で表示する。
+ *
+ * **timeZone を必ず指定する。** 省略するとサーバの TZ に従うため、
+ * ローカル (Mac / JST) と Vercel (UTC) で違う日付が出る。とくに
+ * `Asset.canonicalDate` は日付のみの値を JST 深夜 (= 15:00 UTC 前日) で
+ * 持つので、UTC で描画すると **1 日前** になる (実測で 2642 件が該当)。
+ * ローカルでは正しく見えるので気づけない。
+ */
 export function formatDate(date: Date | string | null, includeTime = false): string {
   if (!date) return "";
   const d = typeof date === "string" ? new Date(date) : date;
+  if (Number.isNaN(d.getTime())) return "";
   if (includeTime) {
     return d.toLocaleString("ja-JP", {
+      timeZone: "Asia/Tokyo",
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -33,6 +61,7 @@ export function formatDate(date: Date | string | null, includeTime = false): str
     });
   }
   return d.toLocaleDateString("ja-JP", {
+    timeZone: "Asia/Tokyo",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -106,4 +135,31 @@ export const ARTICLE_SOURCE_STATUS_LABELS: Record<string, string> = {
 export function toTextType(v: unknown): TextType | undefined {
   if (typeof v !== "string") return undefined;
   return (Object.values(TextType) as string[]).includes(v) ? (v as TextType) : undefined;
+}
+
+// ============================================================
+// JST の暦日境界
+// ============================================================
+
+/** 日本には DST が無いので固定オフセットでよい */
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * 「YYYY-MM-DD」を UTC 00:00 として解釈した Date を、**JST のその暦日が始まる実時刻**に直す。
+ *
+ * 画面や API から来る日付は `new Date("2026-03-24")` = 2026-03-24T00:00:00Z で、
+ * これをそのまま比較すると JST 0〜9 時のデータが隣の日に落ちる
+ * (実測で全体の 5% 前後がずれる。`src/lib/domain/coverage.ts` のコメント参照)。
+ *
+ * 列側を `AT TIME ZONE` で変換する手もあるが、それだと索引が効かなくなるので
+ * **境界値のほうをずらす**。比較は生の列に対して行う。
+ */
+export function jstDayStart(dateOnlyUtc: Date): Date {
+  return new Date(dateOnlyUtc.getTime() - JST_OFFSET_MS);
+}
+
+/** 同上。JST のその暦日の**翌日 0 時**（= 排他的上限）を返す。 */
+export function jstDayEndExclusive(dateOnlyUtc: Date): Date {
+  return new Date(dateOnlyUtc.getTime() + DAY_MS - JST_OFFSET_MS);
 }

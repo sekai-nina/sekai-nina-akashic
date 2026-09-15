@@ -76,6 +76,8 @@ export async function POST(request: Request) {
     try {
       const entities = JSON.parse(entitiesRaw) as Array<{ type: string; canonicalName: string }>;
       for (const e of entities) {
+        // 聖地は createPlace の管轄。ここで作ると Place を持たない孤児になる
+        if (e.type === "place") continue;
         const entity = await findOrCreateEntity(e.type as "tag", e.canonicalName);
         await addEntityToAsset(asset.id, entity.id, session.user.clearance);
       }

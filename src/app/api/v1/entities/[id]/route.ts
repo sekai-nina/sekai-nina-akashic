@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
-import { prisma } from "@/lib/db";
+import { getEntityById } from "@/lib/domain/entities";
 
 export async function GET(
   request: Request,
@@ -11,12 +11,8 @@ export async function GET(
 
   const { id } = await params;
 
-  const entity = await prisma.entity.findUnique({
-    where: { id },
-    include: {
-      _count: { select: { assets: true } },
-    },
-  });
+  // クリアランスで参照できない聖地エンティティは 404 にする
+  const entity = await getEntityById(id, auth.clearance);
 
   if (!entity) {
     return NextResponse.json({ error: "Entity not found" }, { status: 404 });

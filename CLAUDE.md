@@ -6,8 +6,8 @@
 
 ## 最重要の 3 つ
 
-1. **保護テーブルへのアクセスは必ず `withClearance` / `withSession` を通す。** 素の `prisma` で触ると **エラーではなく無言で 0 行**が返る。テストが無いので本番まで気づけない
-2. **`pnpm typecheck` が唯一の静的ゲート。** lint 設定もテストも無く、`next.config.ts` は `typescript.ignoreBuildErrors: true`。**ビルドが通っても型は壊れうる**
+1. **保護テーブルへのアクセスは必ず `withClearance` / `withSession` を通す。** 素の `prisma` で触ると **エラーではなく無言で 0 行**が返る。認可まわりのテストは無いので本番まで気づけない
+2. **静的ゲートは `pnpm typecheck` と `pnpm test` の 2 つ。** lint 設定は無く、`next.config.ts` は `typescript.ignoreBuildErrors: true`。**ビルドが通っても型は壊れうる**。テストは記事の frontmatter 往復 (`src/lib/articles/`) しか無いので、それ以外は依然として実 DB で確かめるしかない
 3. **`pnpm db:migrate` は必ず失敗する。** マイグレーションは `/db-migration` スキルの手順で行う
 
 ## 開発フロー
@@ -39,11 +39,21 @@ pnpm build            # prisma generate && next build
 pnpm db:generate      # Prisma Client 再生成（schema 変更後に必須）
 pnpm db:studio        # Prisma Studio
 pnpm db:seed
+pnpm test             # vitest。変更後は typecheck とあわせて実行
 ```
 
 `pnpm cli:*` は運用スクリプト群（`import` / `backup` / `restore` / `thumbnails` / `keygen` 等）。`src/cli/` 参照。
 
-**lint / test スクリプトは存在しない。** 検証は `pnpm typecheck` + 実 DB への手動確認（`npx tsx -e '...'` で実データを叩く）。
+**lint スクリプトは存在しない。** 検証は `pnpm typecheck` + `pnpm test` + 実 DB への手動確認（`npx tsx -e '...'` で実データを叩く）。
+
+テストは **vitest**（`vitest.config.mts`）。現状の対象は記事の frontmatter 往復のみ:
+
+```bash
+pnpm test                                                    # 合成ケースのみ
+ARTICLES_DIR=<sekai-nina-public のパス> pnpm test              # 実記事 332 件も検証
+```
+
+記事の実体は別リポジトリなので、`ARTICLES_DIR` が未設定なら実記事のテストは skip される（CI はこの状態で回る）。**記事の push（#46）を触る前には `ARTICLES_DIR` 付きで緑にしておく。**
 
 ## 認可モデル（このリポジトリの肝）
 
@@ -65,10 +75,24 @@ withSession({ id, clearance }, tx => …)    // 上記 + app.user_id — Dossier
 | Dossier 系（所有者判定が要る） | `withSession` |
 | CLI・全体統計 | `prismaInternal` |
 | `User` / `Entity` など非保護テーブル | 素の `prisma` |
+| `Entity` を**一覧・検索で返す**とき | `listEntities` / `searchEntities` / `getEntityById`（後述） |
 
 - トランザクションの既定タイムアウトは **15,000ms**（Prisma 既定 5s だと重い集約が P2028 になるため引き上げ済み）
 - RLS は読みを守るが、**自分より上のクリアランスを付けて書く操作はアプリ層で止める** → `src/lib/classification.ts` の `assertClearance`
-- 生 SQL は `classificationFilterSql` を通す
+- 生 SQL・重い集計は **`prismaInternal` + `classificationFilter` / `classificationFilterSql`** の明示フィルタで絞る
+  - 素の `prisma` は `app.clearance` 未設定で **RLS が全行を落とす**（明示フィルタを足しても無駄。RLS は別に効く）
+  - `withClearance` で包むとインタラクティブトランザクションの **15,000ms 上限**に当たる（`/analysis` の集計は実測 21 秒で P2028）
+  - つまり「RLS に任せる」か「RLS をバイパスして明示フィルタ」の二択で、中間は無い
+- **バックアップ・リストア・全体統計は `prismaInternal`（CLI なら `DIRECT_URL` を明示）。** 素の `prisma` だと無言の 0 行で「バックアップしたつもり」になる
+  - `new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL } } })` は **`DIRECT_URL` 未設定でも型エラーにならず `DATABASE_URL` に無言でフォールバックする**ので、スクリプト冒頭で存在チェックして `process.exit(1)` する
+
+#### `Entity` の place だけはクリアランスで絞る
+
+`Entity` の RLS ポリシーは `USING (true)` の素通しなので、`type: "place"` のエンティティは**紐づく `Place` が上位機密でも名前と説明が誰にでも列挙できる**（`Place` 側の RLS は Place 行しか守らない）。
+
+`Entity` は CLI のバックアップを含め 30 箇所以上から素の `prisma` で触られており、DB 側のポリシーを締めると `app.clearance` 未設定の経路が無言で 0 行になる（= バックアップから聖地が欠落する）。加えて索引も効かなくなる。そのため**アプリ層で塞いでいる** → `src/lib/domain/entities.ts` の `entityClearanceWhere()`。
+
+ユーザーに Entity を返す経路（`listEntities` / `searchEntities` / `getEntityById` / `src/lib/cache.ts` の `getCachedEntity*`）はすべてこれを通す。**アセットに紐づくエンティティの include も同様**（`AssetEntity` の RLS は親 Asset の classification にしか依存しないので、`internal` のアセットに `confidential` の聖地が紐づいていると名前が漏れる）→ `entities: { where: { entity: entityClearanceWhere(clearance) }, … }`。CLI のバックアップ（`src/cli/backup.ts` / `src/lib/drive/`）は**絞ってはいけない**。`entityClearanceWhere` は **`withClearance` の中でしか使えない**（素の `prisma` から使うと `Place` の RLS で全 place エンティティが消える）。
 
 ### 保護テーブル
 
@@ -165,7 +189,7 @@ src/
 | `docs/mcp.md` | MCP サーバー（`/api/mcp`）の仕様と設計判断 |
 | `docs/coverage-design.md` | 収集カバレッジ設計書 |
 | `docs/security.md` / `docs/security-admin.md` | 非エンジニア / 管理者向け |
-| ~~`docs/architecture.md`~~ | **陳腐化**（Next.js 15 / NextAuth / Collection の記述）。参照しない |
+| `docs/architecture.md` | 設計の「なぜ」（RLS を中心に据えた理由、Asset/AssetText の分離、PGroonga 採用の理由） |
 
 機能追加時は `docs/api.md` と該当設計書を **同じ PR で更新する**のが慣習。
 

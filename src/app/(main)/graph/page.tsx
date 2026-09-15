@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import { withClearance } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { FullGraph } from "./full-graph";
@@ -75,7 +76,10 @@ async function getFullGraphData(clearance: string) {
 
 export default async function GraphPage() {
   const session = await auth();
-  const userClearance = session!.user.clearance;
+  // middleware がログインへ飛ばすが、レンダリングはそれと競合して走る。
+  // ガードしないと未認証リクエストのたびにサーバー側で例外になる
+  if (!session?.user) notFound();
+  const userClearance = session.user.clearance;
   const { nodes, edges } = await getFullGraphData(userClearance);
 
   return (

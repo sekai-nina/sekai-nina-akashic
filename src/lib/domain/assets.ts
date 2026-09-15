@@ -14,6 +14,7 @@ import { normalizeText } from "@/lib/utils";
 import { logAudit } from "./audit";
 import { backupAssetToDrive } from "@/lib/drive";
 import { assertClearance } from "@/lib/classification";
+import { entityClearanceWhere } from "./entities";
 
 export interface CreateAssetData {
   kind: AssetKind;
@@ -169,7 +170,10 @@ export async function createAsset(data: CreateAssetData, userId: string | null, 
       },
       include: {
         texts: true,
-        entities: { include: { entity: true } },
+        entities: {
+          where: { entity: entityClearanceWhere(clearance) },
+          include: { entity: true },
+        },
         sourceRecords: true,
         annotations: true,
         dossierItems: true,
@@ -253,18 +257,39 @@ export async function updateAsset(
     }
 
     // entities: upsert（既存は roleLabel を更新、新規は追加）
-    if (entities) {
-      for (const e of entities) {
-        await tx.assetEntity.upsert({
-          where: {
-            assetId_entityId: { assetId: id, entityId: e.entityId },
-          },
-          update: { roleLabel: e.roleLabel ?? null },
-          create: {
+    // 1 件ずつ upsert するとトランザクション内で N 往復になるので、
+    // 既存を 1 回引いてから「更新分」と「新規分」に分けて撃つ (最大 3 往復)
+    if (entities && entities.length > 0) {
+      const entityIds = entities.map((e) => e.entityId);
+      const existing = await tx.assetEntity.findMany({
+        where: { assetId: id, entityId: { in: entityIds } },
+        select: { entityId: true },
+      });
+      const existingIds = new Set(existing.map((x) => x.entityId));
+
+      const toCreate = entities.filter((e) => !existingIds.has(e.entityId));
+      if (toCreate.length > 0) {
+        await tx.assetEntity.createMany({
+          data: toCreate.map((e) => ({
             assetId: id,
             entityId: e.entityId,
             roleLabel: e.roleLabel ?? null,
-          },
+          })),
+          skipDuplicates: true,
+        });
+      }
+
+      // roleLabel の更新が要るものだけ。値ごとにまとめて updateMany で撃つ
+      const toUpdate = entities.filter((e) => existingIds.has(e.entityId));
+      const byRole = new Map<string | null, string[]>();
+      for (const e of toUpdate) {
+        const key = e.roleLabel ?? null;
+        byRole.set(key, [...(byRole.get(key) ?? []), e.entityId]);
+      }
+      for (const [roleLabel, ids] of byRole) {
+        await tx.assetEntity.updateMany({
+          where: { assetId: id, entityId: { in: ids } },
+          data: { roleLabel },
         });
       }
     }
@@ -289,7 +314,10 @@ export async function updateAsset(
       where: { id },
       include: {
         texts: true,
-        entities: { include: { entity: true } },
+        entities: {
+          where: { entity: entityClearanceWhere(clearance) },
+          include: { entity: true },
+        },
         sourceRecords: true,
         annotations: true,
         dossierItems: true,
@@ -323,13 +351,28 @@ export async function getAsset(id: string, clearance: string) {
       where: { id },
       include: {
         texts: true,
-        entities: { include: { entity: true } },
+        entities: {
+          where: { entity: entityClearanceWhere(clearance) },
+          include: { entity: true },
+        },
         sourceRecords: true,
         annotations: true,
         dossierItems: true,
       },
     });
   });
+}
+
+/**
+ * 存在確認と classification だけを引く軽量版。
+ *
+ * getAsset は texts / entities / sourceRecords / annotations / dossierItems を
+ * 全部 include するので、更新前の存在チェックに使うと本文を 2 回転送することになる。
+ */
+export async function getAssetClassification(id: string, clearance: string) {
+  return withClearance(clearance, (tx) =>
+    tx.asset.findUnique({ where: { id }, select: { id: true, classification: true } })
+  );
 }
 
 export async function listAssets(filters: ListAssetsFilters = {}, clearance: string) {
@@ -351,7 +394,14 @@ export async function listAssets(filters: ListAssetsFilters = {}, clearance: str
       ? {
           ...(include.includes("sourceRecords") ? { sourceRecords: true } : {}),
           ...(include.includes("texts") ? { texts: true } : {}),
-          ...(include.includes("entities") ? { entities: { include: { entity: true } } } : {}),
+          ...(include.includes("entities")
+            ? {
+                entities: {
+                  where: { entity: entityClearanceWhere(clearance) },
+                  include: { entity: true },
+                },
+              }
+            : {}),
         }
       : undefined;
 

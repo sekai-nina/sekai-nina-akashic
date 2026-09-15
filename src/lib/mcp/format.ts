@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { toDateOnlyString } from "@/lib/domain/coverage";
 import type { SearchResultItem } from "@/lib/search";
 
@@ -78,6 +79,24 @@ function truncateText(content: string): string {
   return `${content.slice(0, TEXT_MAX_LENGTH)}…(全 ${content.length} 文字中 ${TEXT_MAX_LENGTH} 文字まで)`;
 }
 
+
+/**
+ * 射影の入力型。domain 側の include と揃えるため Prisma の生成型から導く。
+ * 手書きすると enum 列が string に緩み、リレーションの付け忘れにも気づけない。
+ * (`PlaceWithEntity` という名前は src/lib/domain/places.ts が別物で使っているので避ける)
+ */
+type AssetDetailInput = Prisma.AssetGetPayload<{
+  include: {
+    texts: true;
+    entities: { include: { entity: true } };
+    sourceRecords: true;
+  };
+}>;
+
+type PlaceSummaryInput = Prisma.PlaceGetPayload<{
+  include: { entity: { include: { _count: { select: { assets: true } } } } };
+}>;
+
 export function toSearchItem(item: SearchResultItem, baseUrl: string) {
   return {
     id: item.assetId,
@@ -95,33 +114,8 @@ export function toSearchItem(item: SearchResultItem, baseUrl: string) {
   };
 }
 
-type AssetWithRelations = {
-  id: string;
-  kind: string;
-  status: string;
-  title: string;
-  description: string;
-  classification: string;
-  trustLevel: string;
-  canonicalDate: Date | null;
-  sourceType: string;
-  storageUrl: string | null;
-  discordMessageUrl: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-  texts?: Array<{ id: string; textType: string; content: string; language: string | null }>;
-  entities?: Array<{ roleLabel: string | null; entity: { id: string; type: string; canonicalName: string } }>;
-  sourceRecords?: Array<{
-    id: string;
-    sourceKind: string;
-    title: string;
-    url: string | null;
-    publisher: string | null;
-    publishedAt: Date | null;
-  }>;
-};
 
-export function toAssetDetail(asset: AssetWithRelations, baseUrl: string) {
+export function toAssetDetail(asset: AssetDetailInput, baseUrl: string) {
   return {
     id: asset.id,
     kind: asset.kind,
@@ -180,23 +174,8 @@ export function toEntitySummary(entity: {
   };
 }
 
-type PlaceWithEntity = {
-  id: string;
-  entityId: string;
-  latitude: number;
-  longitude: number;
-  googleMapsUrl: string | null;
-  address: string | null;
-  classification: string;
-  status: string;
-  entity: {
-    canonicalName: string;
-    description: string;
-    _count?: { assets: number };
-  };
-};
 
-export function toPlaceSummary(place: PlaceWithEntity, baseUrl: string) {
+export function toPlaceSummary(place: PlaceSummaryInput, baseUrl: string) {
   return {
     id: place.id,
     entityId: place.entityId,

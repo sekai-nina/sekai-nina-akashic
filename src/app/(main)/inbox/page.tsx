@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import { withClearance } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { QuickUploadForm } from "@/components/quick-upload-form";
@@ -14,10 +15,13 @@ export default async function InboxPage({
   const params = await searchParams;
   const page = Math.max(1, parseInt(params.page ?? "1"));
   const session = await auth();
+  // middleware がログインへ飛ばすが、レンダリングはそれと競合して走る。
+  // ガードしないと未認証リクエストのたびにサーバー側で例外になる
+  if (!session?.user) notFound();
 
   const where = { status: "inbox" as const };
 
-  const [assets, total] = await withClearance(session!.user.clearance, async (tx) => {
+  const [assets, total] = await withClearance(session.user.clearance, async (tx) => {
     const [a, c] = await Promise.all([
       tx.asset.findMany({
         where,
