@@ -8,8 +8,11 @@ import {
   ASSET_KIND_LABELS,
   formatDate,
 } from "@/lib/utils";
-import { auditFootnotes, parseBodySegments } from "@/lib/articles/footnotes";
+import { auditFootnotes } from "@/lib/articles/footnotes";
 import { RemoveSource } from "./remove-source";
+import { renderArticleBody } from "@/lib/articles/render";
+import "../article-content.css";
+import "katex/dist/katex.min.css";
 
 const STATUS_STYLE: Record<string, string> = {
   applied: "bg-emerald-100 text-emerald-700",
@@ -35,13 +38,11 @@ export default async function ArticleDetailPage({
   const tags = Array.isArray(article.tags) ? (article.tags as unknown[]).map(String) : [];
   const extraKeys = Object.keys((article.frontmatterExtra ?? {}) as object);
   const unresolvedCount = article.sources.filter((s) => s.status === "unresolved").length;
+  const bodyHtml = await renderArticleBody(article.body, { wikilinks: titleIndex });
+  const hasTweets = bodyHtml.includes('class="twitter-tweet"');
 
-  // 本文の ^[n] と出典の対応。記事を読むときは「この記述の出典はどれか」を
-  // 辿るのが中心なので、リンクにしたうえで対応の壊れも出す
+  // 本文の ^[n] と出典の対応。描画側でリンクにするのとは別に、対応の壊れを出す
   const sourceNumbers = article.sources.map((s) => s.sourceNo);
-  const knownNumbers = new Set(sourceNumbers.filter((n): n is number => n != null));
-  // 末尾の空行は描画では落とす (実データで 69 記事に 3 行以上ある)
-  const bodySegments = parseBodySegments(article.body.trimEnd(), knownNumbers, titleIndex);
   const { missingSources, unreferenced, numericWikiLinks, brokenLinks } = auditFootnotes(
     article.body,
     sourceNumbers,
@@ -159,7 +160,9 @@ export default async function ArticleDetailPage({
         </div>
       </section>
 
-      {/* 本文 */}
+      {/* 本文 — sekai-nina-site と同じ remark/rehype パイプラインで HTML 化する。
+          プラグインが生 HTML ノードを吐くので dangerouslySetInnerHTML で出す。
+          中身は自リポジトリの記事 Markdown なので入力は信頼できる。 */}
       <section>
         <h2 className="text-sm font-semibold text-slate-700 mb-2">本文</h2>
         {(missingSources.length > 0 ||
@@ -184,47 +187,16 @@ export default async function ArticleDetailPage({
             )}
           </div>
         )}
-        <pre className="bg-white border border-slate-200 rounded-lg p-4 text-sm text-slate-800 whitespace-pre-wrap break-words font-sans">
-          {bodySegments.map((seg, i) => {
-            if (seg.kind === "text") return seg.text;
-            if (seg.kind === "link") {
-              return (
-                <Link
-                  key={i}
-                  href={`/articles/${seg.shortId}`}
-                  className="text-sky-700 hover:underline"
-                >
-                  {seg.label}
-                </Link>
-              );
-            }
-            if (seg.kind === "deadLink") {
-              return (
-                <span key={i} className="text-amber-700" title="この題の記事がありません">
-                  [[{seg.label}]]
-                </span>
-              );
-            }
-            return seg.known ? (
-              <a
-                key={i}
-                href={`#src-${seg.num}`}
-                className="text-emerald-700 hover:underline font-mono text-xs align-super"
-                title={`出典 [${seg.num}] へ`}
-              >
-                [{seg.num}]
-              </a>
-            ) : (
-              <span
-                key={i}
-                className="text-amber-700 font-mono text-xs align-super"
-                title={`出典 [${seg.num}] が見つかりません`}
-              >
-                [{seg.num}]
-              </span>
-            );
-          })}
-        </pre>
+        <div className="bg-white border border-slate-200 rounded-lg p-5">
+          <div className="article-content" dangerouslySetInnerHTML={{ __html: bodyHtml }} />
+        </div>
+        {/* X の埋め込みは remarkTweets が blockquote.twitter-tweet を出しておき、
+            widgets.js がそれを見つけて描画する。クライアント部品を挟まないのは、
+            dangerouslySetInnerHTML の div がハイドレーション対象にならず
+            useEffect が走らなかったため。 */}
+        {hasTweets && (
+          <script async src="https://platform.twitter.com/widgets.js" charSet="utf-8" />
+        )}
       </section>
 
       {extraKeys.length > 0 && (

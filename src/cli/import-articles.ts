@@ -111,6 +111,13 @@ async function main() {
       skipped.push(cols.path);
       continue;
     }
+    // shortId は /articles/<shortId> の URL と wikilink の href に入るので文字種を縛る。
+    // 検証しないと frontmatter 経由でパス区切りやクエリを差し込める
+    if (!/^[A-Za-z0-9_-]+$/.test(cols.shortId)) {
+      console.error(`  ✗ short_id に使えない文字が含まれています: ${JSON.stringify(cols.shortId)} (${cols.path})`);
+      skipped.push(cols.path);
+      continue;
+    }
     // type が enum 外だと null になり、KNOWN キーなので frontmatterExtra にも
     // 退避されない = push でキーごと消える。黙って捨てずに知らせる
     const rawType = parsedArticle.frontmatter.type;
