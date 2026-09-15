@@ -1,6 +1,8 @@
 import type { Prisma } from "@prisma/client";
 import { toDateOnlyString } from "@/lib/domain/coverage";
 import type { SearchResultItem } from "@/lib/search";
+// `canonicalDate` (UTC 00:00 規約) は toDateOnlyString、`publishedAt` (実時刻) は toJstDateOnly で切る
+import { toJstDateOnly } from "@/lib/utils";
 
 /**
  * MCP のツール結果に載せる射影。
@@ -41,22 +43,6 @@ export function placeUrl(baseUrl: string, placeId: string): string {
   return baseUrl ? `${baseUrl}/places?place=${placeId}` : "";
 }
 
-/**
- * 実時刻 (publishedAt 等) を JST の "YYYY-MM-DD" で返す。
- *
- * `canonicalDate` は「YYYY-MM-DD の UTC 00:00」格納規約なので toDateOnlyString (UTC 切り) が正しいが、
- * `SourceRecord.publishedAt` は実時刻なので UTC で切ると JST 0〜9 時のデータが前日に落ちる。
- */
-export function toJstDateOnly(d: Date | null | undefined): string | null {
-  if (!d) return null;
-  // en-CA ロケールは YYYY-MM-DD 形式を返す
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Tokyo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(d);
-}
 
 /** 実時刻 (createdAt 等) を JST の "YYYY-MM-DD HH:mm" で返す。 */
 export function formatJstDateTime(d: Date | null | undefined): string | null {

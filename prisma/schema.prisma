@@ -740,8 +740,12 @@ model Article {
 
   /// 取り込み元 blob の SHA。push 時の衝突検出に使う
   githubSha    String?
-  /// DB 側に未 push の変更があるか
+  /// DB から組み立てた Markdown ≠ GitHub 側のファイル (取り込み直後の正規化差分でも立つ)
   dirty        Boolean   @default(false)
+  /// akashic 側で編集した日時。**非 null ⇔ 未 push の akashic 編集がある** (#89)。
+  /// 編集の保存が now を書き、push で dirty を落とすときと取り込みで上書きしたときに null に戻す。
+  /// 取り込みはこれが非 null の記事 (ファイル未変更のもの) をスキップして編集を守る
+  editedAt     DateTime?
   lastSyncedAt DateTime?
   lastPushedAt DateTime?
 

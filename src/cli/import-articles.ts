@@ -19,9 +19,12 @@
  *   - `dirty` は「DB から組み立てた Markdown ≠ ファイル」で立てる (dirtyAfterImport)。
  *     値は同じでも引用符やキー順が違えば push で差分が出るので、取り込み直後に
  *     dirty になる記事がある (初回は全件)。値の差分 (取りこぼしの疑い) は dirty にせず警告する
- *   - **dirty かつファイルが前回から変わっていない (blob SHA と path が同じ) 記事はスキップする**
- *     (DB 側の未 push 編集をファイルで上書きしない)。ファイルが変わっていれば上流が新しいので
- *     上書きし、上書きした記事は最後に一覧で知らせる
+ *   - **akashic で編集済み (`editedAt` が非 null) かつファイルが前回から変わっていない
+ *     (blob SHA と path が同じ) 記事はスキップする** (DB 側の未 push 編集をファイルで上書きしない)。
+ *     `dirty` ではなく `editedAt` で見るのは、正規化だけの dirty (取り込み直後) まで守ると
+ *     --create-missing や照合のやり直しが push まで効かなくなるため (#89)。ファイルが変わって
+ *     いれば上流が新しいので上書きし、akashic の編集を捨てた記事は最後に一覧で知らせる。
+ *     スキップしなかった記事は `editedAt` を null に戻す (上書き後は akashic 側の編集が無い)
  *   - `--apply` は checkout が origin/main と一致しない・--dir がトップレベルでないと止まる
  *     (pull し忘れで DB が巻き戻る事故の防止)。承知の上で進めるなら --allow-stale
  *
@@ -247,7 +250,7 @@ async function main() {
       body: true, date: true, dateDisplay: true, dateMode: true, publishedAt: true,
       articleUpdatedAt: true, draft: true, unlisted: true, ongoing: true, lat: true, lng: true,
       frontmatterExtra: true,
-      dirty: true, lastSyncedAt: true, githubSha: true,
+      dirty: true, lastSyncedAt: true, githubSha: true, editedAt: true,
       sources: {
         where: { status: { not: ArticleSourceStatus.pending } },
         orderBy: { sortOrder: "asc" },
@@ -285,18 +288,19 @@ async function main() {
   const stats = { applied: 0, unresolved: 0, dangling: 0, created: 0, skipped: 0, preserved: 0, dirty: 0 };
   /** 値の差分 (取りこぼしの疑い) があり dirty にしなかった記事 */
   const lossy: string[] = [];
-  /** 未 push の編集があったのに、上流が変わっていたのでファイルで上書きした記事 */
+  /** akashic で編集済み (未 push) だったのに、上流が変わっていたのでファイルで上書きした記事 */
   const overwritten: string[] = [];
 
   /**
-   * DB に未 push の編集があり、ファイルは取り込んだ時点から変わっていない
-   * (blob SHA が同じ、path も同じ) → 上流に新しい情報は無い。ファイルで上書きすると
-   * akashic 側の編集が消えるので残す。path も見るのは、内容そのままのリネームを
-   * スキップすると DB が旧 path のまま残り、push が deleted_upstream で衝突し続けるため
+   * DB に akashic の未 push 編集があり (`editedAt` が非 null)、ファイルは取り込んだ時点から
+   * 変わっていない (blob SHA が同じ、path も同じ) → 上流に新しい情報は無い。ファイルで
+   * 上書きすると akashic 側の編集が消えるので残す。path も見るのは、内容そのままのリネームを
+   * スキップすると DB が旧 path のまま残り、push が deleted_upstream で衝突し続けるため。
+   * `dirty` は見ない: 正規化だけの dirty はファイルで上書きしても何も失わない
    */
   const preserve = (file: ParsedFile) => {
     const prev = existingByShortId.get(file.shortId);
-    return prev != null && prev.dirty && prev.githubSha === file.blobSha && prev.path === file.path;
+    return prev != null && prev.editedAt != null && prev.githubSha === file.blobSha && prev.path === file.path;
   };
 
   /**
@@ -441,7 +445,7 @@ async function main() {
       if (decision.dirty) willDirty++;
       else if (decision.verdict === "changed") willLossy.push(`${file.path}  ${decision.notes.join(" / ")}`);
     }
-    console.log(`\n取り込み後に push 待ち (dirty) になる記事: ${willDirty} 件 / 未 push の編集を残してスキップ: ${willPreserve} 件`);
+    console.log(`\n取り込み後に push 待ち (dirty) になる記事: ${willDirty} 件 / akashic の未 push 編集を残してスキップ: ${willPreserve} 件`);
     if (willLossy.length) {
       console.log(`--- 値の差分があり dirty にしない (${willLossy.length} 件) — push すると値が消えるので原因を確認する ---`);
       for (const l of willLossy) console.log(`  ${l}`);
@@ -524,11 +528,18 @@ async function main() {
       // ここで更新しないと push 済みの記事が dirty のまま残り、
       // 一覧の「未 push N 本」が恒久的に嘘をつく。
       // githubSha は、値が同じでもファイルのバイト列が変わっていれば (Obsidian の
-      // 再保存など) 新しい blob に差し替える
-      if (prev.dirty !== decision.dirty || prev.githubSha !== blobSha || prev.lastSyncedAt == null) {
+      // 再保存など) 新しい blob に差し替える。
+      // editedAt も落とす: 値がファイルと同じ = akashic の編集は既に上流にある
+      // (push 後の DB 更新に失敗した記事を再取り込みで直す経路がここ)
+      if (
+        prev.dirty !== decision.dirty ||
+        prev.githubSha !== blobSha ||
+        prev.lastSyncedAt == null ||
+        prev.editedAt != null
+      ) {
         await prisma.article.update({
           where: { id: prev.id },
-          data: { dirty: decision.dirty, githubSha: blobSha, lastSyncedAt: new Date() },
+          data: { dirty: decision.dirty, githubSha: blobSha, lastSyncedAt: new Date(), editedAt: null },
         });
       }
       stats.skipped++;
@@ -536,9 +547,10 @@ async function main() {
       continue;
     }
 
-    // ここに来た dirty な記事は「上流が変わった」ので、DB の未 push の編集はファイルで
-    // 上書きされる (合意済みの解消手順)。黙って消さず、最後に一覧で知らせる
-    if (prev?.dirty) overwritten.push(file.path);
+    // ここに来た akashic 編集済みの記事は「上流が変わった」ので、DB の未 push の編集は
+    // ファイルで上書きされる (合意済みの解消手順)。黙って消さず、最後に一覧で知らせる。
+    // 正規化だけの dirty は何も失わないので載せない
+    if (prev?.editedAt != null) overwritten.push(file.path);
 
     const data = {
       ...cols,
@@ -547,6 +559,8 @@ async function main() {
       dirty: decision.dirty,
       githubSha: blobSha,
       lastSyncedAt: new Date(),
+      // ファイルの内容に置き換えたので、akashic 側の編集はもう無い
+      editedAt: null,
     };
 
     const article = await prisma.article.upsert({
@@ -578,11 +592,11 @@ async function main() {
   }
 
   console.log(
-    `\n完了: 記事 ${done} 件 (うち変更なしでスキップ ${stats.skipped} 件、未 push の編集を残してスキップ ${stats.preserved} 件) / Asset 新規作成 ${stats.created} 件`,
+    `\n完了: 記事 ${done} 件 (うち変更なしでスキップ ${stats.skipped} 件、akashic の未 push 編集を残してスキップ ${stats.preserved} 件) / Asset 新規作成 ${stats.created} 件`,
   );
   console.log(`push 待ち (dirty) にした記事: ${stats.dirty} 件 → /articles/push から GitHub に書き出せます`);
   if (overwritten.length) {
-    console.log(`\n--- 未 push の編集があったが上流が変わっていたので上書きした (${overwritten.length} 件) ---`);
+    console.log(`\n--- akashic の未 push 編集があったが上流が変わっていたので上書きした (${overwritten.length} 件) ---`);
     for (const o of overwritten) console.log(`  ${o}`);
   }
   if (lossy.length) {

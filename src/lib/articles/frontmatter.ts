@@ -282,7 +282,8 @@ export function formatFrontmatterDate(value: Date | string | null | undefined): 
   return iso.endsWith("T00:00:00.000Z") ? iso.slice(0, 10) : iso;
 }
 
-const ARTICLE_TYPES = new Set<string>(Object.values(ArticleType));
+/** Article.type に入れてよい値。取り込みと編集フォームの検証で共有する */
+export const ARTICLE_TYPES: ReadonlySet<string> = new Set<string>(Object.values(ArticleType));
 
 /** frontmatter の型を Article.type に落とす。Astro 側の transform に合わせる */
 function toType(v: unknown): ArticleType | null {

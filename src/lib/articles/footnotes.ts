@@ -102,6 +102,16 @@ export interface FootnoteAudit {
   brokenLinks: string[];
 }
 
+/** 1 件でも指摘があるか。警告ブロックを出すかどうかの判定を 1 箇所にする */
+export function hasFootnoteIssues(audit: FootnoteAudit): boolean {
+  return (
+    audit.missingSources.length > 0 ||
+    audit.unreferenced.length > 0 ||
+    audit.numericWikiLinks.length > 0 ||
+    audit.brokenLinks.length > 0
+  );
+}
+
 /**
  * 本文と出典・記事間リンクの対応を突き合わせる。
  *

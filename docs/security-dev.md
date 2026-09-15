@@ -123,9 +123,10 @@ DB から生成した Markdown と実ファイルの突き合わせは `pnpm cli
 - **admin のみ。** 公開リポジトリへの書き込みなので、他の書き込み系（admin / member）より狭い
 - 認証は fine-grained PAT（`ARTICLES_GITHUB_TOKEN`、sekai-nina-public だけに Contents: Read and write）。クライアントは `src/lib/github/client.ts` の素の `fetch`。**1 回の push = 1 コミット**（Git Data API）。Contents API で記事ごとにコミットすると、push のたびに GitHub Actions が Cloudflare Pages を再ビルドするので記事数ぶんデプロイが走る
 - **`dirty` の意味は「DB から組み立てた Markdown ≠ GitHub 側のファイル」。** akashic での編集だけでなく、取り込み直後にも立つ（値が同じでも引用符・キー順が違えば push で差分が出るため。`dirtyAfterImport`）。初回の全件正規化もこの画面から出す
+- **`editedAt` の意味は「akashic 側に未 push の編集がある」（非 null ⇔ ある）。** `dirty` だけでは正規化差分と編集を区別できないので分けている（#89）。編集の保存（`updateArticle`）が `dirty = true` と一緒に now を書き、push で `dirty` を落とす行は同時に null に戻す。取り込みは下記のとおり preserved 以外を null に戻す
 - **衝突検出は `Article.githubSha`（取り込み時にファイルから計算した git blob SHA）と main の tree の突き合わせ**（`planPush`）。tree にある path の SHA が違えば「取り込み後に上流が変わった」、`githubSha` が null なら「blob SHA を埋める取り込みをしていない」で、どちらも衝突として除外する。衝突と `blocked` の記事だけ外して残りを 1 コミットにする（全体は止めない）。解消は DB でマージせず、pull した checkout から再取り込みして DB 側を作り直す
 - ref の更新は non-force。tree を読んでから commit するまでにブランチが進んでいれば 422 で失敗する（同時 push の検出）。ref 更新のレスポンスだけ取りこぼした場合は先頭を読み直し、作ったコミットになっていれば成功扱い
-- push 後は `githubSha` を新しい blob SHA に、`lastPushedAt` を今にする。`dirty = false` は **組み立てた時点から `updatedAt` が変わっていない行だけ** に落とす（commit 中に編集された記事は dirty のまま残す）。更新は素の SQL 1 文（`UPDATE … FROM (VALUES …)`）で、`@updatedAt` は動かさない = push は編集ではない
+- push 後は `githubSha` を新しい blob SHA に、`lastPushedAt` を今にする。`dirty = false`（と `editedAt = null`）は **組み立てた時点から `updatedAt` が変わっていない行だけ** に落とす（commit 中に編集された記事は dirty のまま残す）。更新は素の SQL 1 文（`UPDATE … FROM (VALUES …)`）で、`@updatedAt` は動かさない = push は編集ではない
 - DB の更新は commit の **後** にまとめる。commit が失敗したら DB は何も変わらない。commit 成功後に DB 更新が失敗した場合は例外にせず `dbError` で返し、画面はコミット URL と一緒に見せる。次回は `githubSha`（古い）≠ tree で衝突扱いになり二重には書かない（再取り込みで解消）
 - 表示用の計画（`previewArticlePush`）は実行時に使い回さず、`pushDirtyArticles` が commit 直前に組み立て直す
 - push は `AuditLog` に `article.push` として残す（コミット SHA と件数）
@@ -134,10 +135,17 @@ DB から生成した Markdown と実ファイルの突き合わせは `pnpm cli
 
 akashic が記事の真実になると、古い checkout から取り込むと DB の未 push 編集がファイルで巻き戻ります。取り込みは次の 2 つで守っています。
 
-- **ファイルの blob SHA == DB の `githubSha` かつ path も同じ かつ `dirty` の記事はスキップ**（上流が変わっていない = DB の編集の方が新しい）。SHA が違えば上流が新しいのでファイルで上書きし、上書きした記事は最後に一覧で知らせる。path も見るのは、内容そのままのリネームをスキップすると DB が旧 path のまま残って push が `deleted_upstream` で衝突し続けるため
+- **ファイルの blob SHA == DB の `githubSha` かつ path も同じ かつ `editedAt` が非 null の記事はスキップ**（上流が変わっていない = DB の編集の方が新しい）。SHA が違えば上流が新しいのでファイルで上書きし、akashic の編集を捨てた記事（`editedAt` が非 null だったもの）は最後に一覧で知らせる。`dirty` ではなく `editedAt` で見るのは、正規化だけの dirty まで守ると `--create-missing` や照合のやり直しが push まで効かなくなるため。path も見るのは、内容そのままのリネームをスキップすると DB が旧 path のまま残って push が `deleted_upstream` で衝突し続けるため。スキップしなかった記事は `editedAt` を null に戻す（値がファイルと同じで書き込みを省いた経路も同様）
 - **`--apply` は checkout の HEAD が origin/main と一致しない・`--dir` がリポジトリのトップレベルでないと止まる**（`compareCheckoutWithRemote`）。承知の上なら `--allow-stale`。dry-run でも同じ検査を警告として出す。未コミットの変更があるファイルは警告だけ（取り込むと push で衝突扱いになる）
 
-**push の出力に影響する書き込みは必ず `Article.dirty = true` を立てること**（本文・frontmatter カラム・`ArticleSource` の `applied` / `public` への遷移）。立て忘れると push 画面に出ず、GitHub と DB が食い違ったまま気づけません。
+**push の出力に影響する書き込みは必ず `Article.dirty = true` と `editedAt = now` を立てること**（本文・frontmatter カラム・`ArticleSource` の `applied` / `public` への遷移）。`dirty` を立て忘れると push 画面に出ず、GitHub と DB が食い違ったまま気づけません。`editedAt` を立て忘れると、次の取り込みがその編集をファイルで黙って上書きします。
+
+### 記事の編集 UI（`/articles/[shortId]/edit`）
+
+- admin / member のみ（viewer は詳細へ redirect）。触れるのは本文とモデル化済みの frontmatter（title / type / tags / 日付系 / draft / unlisted / ongoing）。`frontmatterExtra` と `ArticleSource` はここでは触らない
+- 保存（`updateArticle`）は **変わっていなければ書かない**（`diffArticleEdit`。dirty / editedAt を無駄に立てない）。書くときは変更カラム + `dirty = true` + `editedAt = now`。プレビュー（`previewArticleAction`）も保存と同じ役割に絞る（remark + KaTeX を誰でも回せる経路にしない。本文の上限 `BODY_MAX_LENGTH` も共通）
+- **楽観ロック**: フォームが読み込んだ時点の `updatedAt` を `updateMany` の where に入れ、0 行なら衝突として入力を残したまま拒否する。push は `updatedAt` を動かさないので push を挟んでも保存できる
+- フォーム値の変換は `src/lib/articles/edit.ts` の純粋関数（vitest あり）。本文は `\r\n → \n` と先頭空行の除去だけ正規化し（`parseArticle` と同じ）、末尾は触らない。日付は `<input type="date">` の date-only を `parseFrontmatterDate` で UTC 深夜にする（取り込みと同じ規則。ここを変えると編集しただけで push に差分が出る）
 
 ## DB 接続の構成
 
