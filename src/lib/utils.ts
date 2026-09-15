@@ -118,6 +118,16 @@ export const ARTICLE_TYPE_LABELS: Record<ArticleType, string> = {
   item: "物",
 };
 
+/**
+ * enum の説明文を `*_LABELS` から生成する (`attribute=属性 / event=出来事 …`)。
+ * API / MCP のスキーマの describe に使う。直書きすると画面表示とズレる
+ */
+export function describeEnum(labels: Record<string, string>): string {
+  return Object.entries(labels)
+    .map(([k, v]) => `${k}=${v}`)
+    .join(" / ");
+}
+
 export const ARTICLE_SOURCE_STATUS_LABELS: Record<string, string> = {
   applied: "反映済み",
   pending: "未反映",

@@ -1,11 +1,15 @@
 import { withClearance, prisma } from "@/lib/db";
-import { assertClearance } from "@/lib/classification";
+import { accessibleClassifications, assertClearance, isAboveClearance } from "@/lib/classification";
+import { logAudit } from "@/lib/domain/audit";
+import { nextSortOrder, nextSourceNo } from "@/lib/articles/apply";
 import {
   diffArticleEdit,
+  parseArticleEditForm,
   toArticleEditValues,
   type ArticleEditField,
   type ArticleEditValues,
 } from "@/lib/articles/edit";
+import { mergeArticleEditPatch, type ArticleEditPatch } from "@/lib/articles/patch";
 import { renderArticleMarkdown } from "@/lib/articles/frontmatter";
 import { buildCommitMessage, planPush, type PushPlan, type RenderedArticle } from "@/lib/articles/push";
 import { gitBlobSha } from "@/lib/github/blob";
@@ -37,6 +41,25 @@ import {
 
 export const ARTICLE_PAGE_SIZE = 30;
 
+/**
+ * 書き込みの主体。監査ログ (`article.update` / `article.source.apply`) は domain がここから書く
+ * (他の domain 書き込みと同じ規約。呼び出し側が経路ごとに書くと 3 経路で重複する)。
+ * API キー経路は `apiKeyId` を添える (人間の操作と区別するため)。
+ */
+export interface ArticleActor {
+  id: string;
+  apiKeyId?: string;
+}
+
+/** 監査ログの失敗で本体の書き込みを「失敗」にしない (既にコミット済み)。ログに残して先へ進む */
+async function auditArticle(actor: ArticleActor, params: Omit<Parameters<typeof logAudit>[0], "actorId">) {
+  await logAudit({
+    actorId: actor.id,
+    ...params,
+    metadata: { ...(params.metadata ?? {}), ...(actor.apiKeyId ? { apiKeyId: actor.apiKeyId } : {}) },
+  }).catch((e: unknown) => console.error(`${params.action} の監査ログに失敗:`, e));
+}
+
 export interface ListArticlesOptions {
   clearance: string;
   page?: number;
@@ -48,6 +71,16 @@ export interface ListArticlesOptions {
   includeDraft?: boolean;
   /** unresolved な紐づけを持つ記事だけに絞る */
   onlyUnresolved?: boolean;
+  /** pending (未反映) の紐づけを持つ記事だけに絞る。API の「反映待ちを探す」用 */
+  onlyPending?: boolean;
+  /**
+   * pending として数える (`pendingCount` / `onlyPending`) classification の上限。API キー経路は
+   * `API_APPLY_MAX_CLASSIFICATION` を渡す — それより上の行は API からは apply できず、詳細でも
+   * 返さないので、一覧でも「作業がある」と見せない。画面は undefined (= RLS で見える行すべて)
+   */
+  pendingMaxClassification?: ClearanceLevel;
+  /** 未 push (dirty) の記事だけに絞る */
+  onlyDirty?: boolean;
 }
 
 export async function listArticles(opts: ListArticlesOptions) {
@@ -64,9 +97,24 @@ export async function listArticles(opts: ListArticlesOptions) {
       { body: { contains: q, mode: "insensitive" } },
     ];
   }
-  if (opts.onlyUnresolved) {
-    where.sources = { some: { status: ArticleSourceStatus.unresolved } };
-  }
+  // pending の絞り込みと件数で同じ条件を使う
+  const pendingWhere: Prisma.ArticleSourceWhereInput = {
+    status: ArticleSourceStatus.pending,
+    ...(opts.pendingMaxClassification
+      ? { classification: { in: accessibleClassifications(opts.pendingMaxClassification) } }
+      : {}),
+  };
+  const isPending = (s: { status: ArticleSourceStatus; classification: ClearanceLevel }) =>
+    s.status === ArticleSourceStatus.pending &&
+    (!opts.pendingMaxClassification || !isAboveClearance(s.classification, opts.pendingMaxClassification));
+
+  // 両方指定されたら AND (片方が黙って消えないように)。RLS 下で評価されるので、
+  // 見えない pending 行しか無い記事は「pending なし」になる (意図どおり)
+  const sourceFilters: Prisma.ArticleWhereInput[] = [];
+  if (opts.onlyUnresolved) sourceFilters.push({ sources: { some: { status: ArticleSourceStatus.unresolved } } });
+  if (opts.onlyPending) sourceFilters.push({ sources: { some: pendingWhere } });
+  if (sourceFilters.length) where.AND = sourceFilters;
+  if (opts.onlyDirty) where.dirty = true;
 
   return withClearance(opts.clearance, async (tx) => {
     const [items, total] = await Promise.all([
@@ -89,12 +137,26 @@ export async function listArticles(opts: ListArticlesOptions) {
           draft: true,
           unlisted: true,
           dirty: true,
-          _count: { select: { sources: true } },
+          editedAt: true,
+          updatedAt: true,
+          // 件数だけ要るが `_count` は relation ごとに 1 条件しか持てない (総数と pending 数を
+          // 同時に取れない)。1 記事 3 行程度なので status だけ引いて数える
+          sources: { select: { status: true, classification: true } },
         },
       }),
       tx.article.count({ where }),
     ]);
-    return { items, total, page, perPage };
+    return {
+      items: items.map(({ sources, ...a }) => ({
+        ...a,
+        sourceCount: sources.length,
+        // 反映待ちの件数。API の一覧で「どの記事に作業が残っているか」を見せる
+        pendingCount: sources.filter(isPending).length,
+      })),
+      total,
+      page,
+      perPage,
+    };
   });
 }
 
@@ -104,7 +166,9 @@ export async function getArticleByShortId(shortId: string, clearance: string) {
       where: { shortId },
       include: {
         sources: {
-          orderBy: [{ sortOrder: "asc" }],
+          // pending 行の sortOrder は apply 後の行と同値になりうる (nextSortOrder は非 pending だけで
+          // 採る)。同値の並びが不定にならないよう紐づけた順で安定させる
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
           include: {
             asset: {
               select: {
@@ -113,6 +177,7 @@ export async function getArticleByShortId(shortId: string, clearance: string) {
                 kind: true,
                 canonicalDate: true,
                 thumbnailUrl: true,
+                classification: true,
               },
             },
           },
@@ -230,6 +295,172 @@ export async function removeArticleSource(id: string, clearance: string) {
   if (count === 0) throw new Error("削除できる紐づけが見つかりません (pending のみ削除可)");
 }
 
+export interface ApplyArticleSourceInput {
+  shortId: string;
+  sourceId: string;
+  /** 楽観ロック。呼び出し側が記事を読んだ時点の `Article.updatedAt` */
+  expectedUpdatedAt: Date;
+  /**
+   * public に下げてよい classification の上限。API キー経路 (REST / MCP) は
+   * `API_APPLY_MAX_CLASSIFICATION` (internal) を渡す。画面 (人間) は undefined = 上限なし
+   * (RLS と `assertClearance` だけ)
+   */
+  maxClassification?: ClearanceLevel;
+  actor: ArticleActor;
+}
+
+type ApplyFailure =
+  | { reason: "not_found" | "not_pending" | "asset_missing" | "above_limit" }
+  /** 呼び出し側が読み直さずに再試行できるよう、衝突時は現在の `updatedAt` を添える */
+  | { reason: "conflict"; currentUpdatedAt: Date };
+
+export type ApplyArticleSourceResult =
+  | { ok: true; sourceNo: number; updatedAt: Date; previousClassification: ClearanceLevel }
+  | ({ ok: false } & ApplyFailure);
+
+/** `applyArticleSource` のトランザクションを巻き戻すための印。外に出さず結果に変換する */
+class ApplyAbort extends Error {
+  constructor(readonly failure: ApplyFailure) {
+    super(failure.reason);
+  }
+}
+
+/**
+ * 紐づけ (pending) を「本文に反映済み」(applied) にする。REST / MCP / 画面の 3 経路がこれを呼ぶ。
+ *
+ * **これは公開を決める操作。** frontmatter に載るのは「pending 以外 かつ public」の行だけ
+ * (`buildFrontmatter`) なので、applied にすると同時に classification を **public に下げる**。
+ * 次の push でこの行の label / ref が公開リポジトリに出る。`excerpt` / `note` はそのまま残す
+ * (どの箇所を根拠にした脚注かを後から辿るため。public 行になるので akashic 内では誰でも
+ * 読める = 抜粋ごと公開判断、が規約。`docs/security-dev.md`)。
+ *
+ * - RLS 下で引くので、クリアランスを超える行は見えない (= `not_found`)。加えて `assertClearance`
+ *   で「自分より上を public に下げる」操作をアプリ層でも止める (このリポジトリの規約)
+ * - **ガードは行の classification と元アセットの現在の classification の両方に掛ける。**
+ *   行の値は紐づけ時のスナップショットで、後からアセットを confidential に上げても伝播しない
+ *   (`updateAsset` は ArticleSource を触らない)。アセットが RLS で見えない (関係が null なのに
+ *   `assetId` はある) ときも `not_found`
+ * - `maxClassification` を超える行 (またはアセット) は `above_limit`。API キーからは internal 以下しか
+ *   公開化できない (`docs/api.md` の「引き下げ不可」の例外。confidential 以上は画面から人間が押す)
+ * - 脚注番号は `nextSourceNo` (既存の番号と本文の `^[n]` の最大 + 1)、並びは `nextSortOrder`
+ *   (非 pending 行の末尾)。`label` が空なら asset のタイトルで埋める (旧 sync-sources.ts と同じ)。
+ *   `url` / `date` は捏造しない
+ * - 出典が frontmatter に載るようになる = push の出力が変わるので、Article に `dirty = true` と
+ *   `editedAt = now` を立てる (規約)。`updateMany` の where に `expectedUpdatedAt` を入れ、0 行なら
+ *   **トランザクションごと巻き戻して `conflict`**。apply 自身が `updatedAt` を進めるので、
+ *   別の apply や保存が割り込んで番号がズレる競合はこれで検出できる
+ * - 呼び出し側は返った `sourceNo` で本文に `^[n]` を書く (apply → 本文の順。逆だと途中で
+ *   止まったとき本文に宛先の無い脚注が残る)
+ * - 監査ログ `article.source.apply` はここで書く (3 経路共通)
+ */
+export async function applyArticleSource(
+  input: ApplyArticleSourceInput,
+  clearance: string,
+): Promise<ApplyArticleSourceResult> {
+  const result = await applyArticleSourceTx(input, clearance);
+  if (result.ok) {
+    await auditArticle(input.actor, {
+      action: "article.source.apply",
+      targetType: "ArticleSource",
+      targetId: input.sourceId,
+      metadata: {
+        shortId: input.shortId,
+        sourceNo: result.sourceNo,
+        previousClassification: result.previousClassification,
+      },
+    });
+  }
+  return result;
+}
+
+async function applyArticleSourceTx(
+  input: ApplyArticleSourceInput,
+  clearance: string,
+): Promise<ApplyArticleSourceResult> {
+  try {
+    return await withClearance(clearance, async (tx) => {
+      const article = await tx.article.findUnique({
+        where: { shortId: input.shortId },
+        select: {
+          id: true,
+          body: true,
+          updatedAt: true,
+          sources: {
+            where: { status: { not: ArticleSourceStatus.pending } },
+            select: { sourceNo: true, sortOrder: true },
+          },
+        },
+      });
+      if (!article) throw new ApplyAbort({ reason: "not_found" });
+      // 衝突なら出典の行を触る前に返す (書くときにも where で二重に見る)
+      if (article.updatedAt.getTime() !== input.expectedUpdatedAt.getTime()) {
+        throw new ApplyAbort({ reason: "conflict", currentUpdatedAt: article.updatedAt });
+      }
+
+      const source = await tx.articleSource.findUnique({
+        where: { id: input.sourceId },
+        select: {
+          articleId: true,
+          status: true,
+          classification: true,
+          label: true,
+          assetId: true,
+          asset: { select: { title: true, classification: true } },
+        },
+      });
+      if (!source || source.articleId !== article.id) throw new ApplyAbort({ reason: "not_found" });
+      if (source.status !== ArticleSourceStatus.pending) throw new ApplyAbort({ reason: "not_pending" });
+      // 紐づけた後に Asset が消されて SetNull された行。ref の無い出典を公開しても意味がない
+      if (!source.assetId) throw new ApplyAbort({ reason: "asset_missing" });
+      // FK があるので「assetId はあるのに関係が null」= RLS で見えていない。見えないものは公開しない
+      if (!source.asset) throw new ApplyAbort({ reason: "not_found" });
+      for (const classification of [source.classification, source.asset.classification]) {
+        assertClearance(clearance, classification);
+        if (input.maxClassification && isAboveClearance(classification, input.maxClassification)) {
+          throw new ApplyAbort({ reason: "above_limit" });
+        }
+      }
+
+      const sourceNo = nextSourceNo(
+        article.sources.map((s) => s.sourceNo),
+        article.body,
+      );
+      const sortOrder = nextSortOrder(article.sources.map((s) => s.sortOrder));
+
+      await tx.articleSource.update({
+        where: { id: input.sourceId },
+        data: {
+          status: ArticleSourceStatus.applied,
+          classification: ClearanceLevel.public,
+          sourceNo,
+          sortOrder,
+          label: source.label || source.asset?.title || "",
+        },
+      });
+      // 更新後の updatedAt は呼び出し側が次の書き込み (本文の PATCH) に使う。
+      // 0 行 = 読んでから書くまでに別の保存が入った (巻き戻して衝突)
+      const [after] = await tx.article.updateManyAndReturn({
+        where: { id: article.id, updatedAt: input.expectedUpdatedAt },
+        data: { dirty: true, editedAt: new Date() },
+        select: { updatedAt: true },
+      });
+      if (!after) {
+        const current = await tx.article.findUniqueOrThrow({ where: { id: article.id }, select: { updatedAt: true } });
+        throw new ApplyAbort({ reason: "conflict", currentUpdatedAt: current.updatedAt });
+      }
+      return {
+        ok: true as const,
+        sourceNo,
+        updatedAt: after.updatedAt,
+        previousClassification: source.classification,
+      };
+    });
+  } catch (e) {
+    if (e instanceof ApplyAbort) return { ok: false, ...e.failure };
+    throw e;
+  }
+}
+
 /** 記事一覧の上部に出すサマリー (種別ごとの件数と未解決の総数) */
 export async function getArticleStats(clearance: string) {
   return withClearance(clearance, async (tx) => {
@@ -265,8 +496,29 @@ export async function listArticleTags(): Promise<string[]> {
 }
 
 export type UpdateArticleResult =
-  | { ok: true; changed: ArticleEditField[]; previousTitle: string }
-  | { ok: false; reason: "not_found" | "conflict" };
+  | { ok: true; changed: ArticleEditField[]; previousTitle: string; updatedAt: Date }
+  | { ok: false; reason: "not_found" }
+  /** 呼び出し側が読み直さずに再試行できるよう、衝突時は現在の `updatedAt` を添える */
+  | { ok: false; reason: "conflict"; currentUpdatedAt: Date };
+
+/** 編集で読む列。`ArticleEditValues` に落とすのに要るもの + 楽観ロックの `updatedAt` */
+const ARTICLE_EDIT_SELECT = {
+  title: true,
+  type: true,
+  tags: true,
+  body: true,
+  date: true,
+  dateDisplay: true,
+  dateMode: true,
+  publishedAt: true,
+  articleUpdatedAt: true,
+  draft: true,
+  unlisted: true,
+  ongoing: true,
+  updatedAt: true,
+} satisfies Prisma.ArticleSelect;
+
+type ArticleEditRow = Prisma.ArticleGetPayload<{ select: typeof ARTICLE_EDIT_SELECT }>;
 
 /**
  * 記事の編集を保存する (`/articles/[shortId]/edit`)。
@@ -281,43 +533,81 @@ export type UpdateArticleResult =
  *   `editedAt` は「未 push の akashic 編集がある」の印で、取り込みの preserved ガードが見る)
  *
  * Article は非保護テーブルなので素の prisma。呼び出し側 (Server Action) が役割を確認する。
+ * API の部分更新 (`patchArticle`) も現在値を読んだ後はここに合流する。監査ログ `article.update`
+ * は変更があったときにここで書く (3 経路共通)。
  */
 export async function updateArticle(
   shortId: string,
   expectedUpdatedAt: Date,
   values: ArticleEditValues,
+  actor: ArticleActor,
 ): Promise<UpdateArticleResult> {
-  const current = await prisma.article.findUnique({
-    where: { shortId },
-    select: {
-      title: true,
-      type: true,
-      tags: true,
-      body: true,
-      date: true,
-      dateDisplay: true,
-      dateMode: true,
-      publishedAt: true,
-      articleUpdatedAt: true,
-      draft: true,
-      unlisted: true,
-      ongoing: true,
-      updatedAt: true,
-    },
-  });
+  const current = await prisma.article.findUnique({ where: { shortId }, select: ARTICLE_EDIT_SELECT });
   if (!current) return { ok: false, reason: "not_found" };
-  if (current.updatedAt.getTime() !== expectedUpdatedAt.getTime()) return { ok: false, reason: "conflict" };
+  return updateArticleFrom(shortId, current, expectedUpdatedAt, values, actor);
+}
+
+async function updateArticleFrom(
+  shortId: string,
+  current: ArticleEditRow,
+  expectedUpdatedAt: Date,
+  values: ArticleEditValues,
+  actor: ArticleActor,
+): Promise<UpdateArticleResult> {
+  if (current.updatedAt.getTime() !== expectedUpdatedAt.getTime()) {
+    return { ok: false, reason: "conflict", currentUpdatedAt: current.updatedAt };
+  }
 
   const changed = diffArticleEdit(toArticleEditValues(current), values);
-  if (!changed.length) return { ok: true, changed, previousTitle: current.title };
+  if (!changed.length) return { ok: true, changed, previousTitle: current.title, updatedAt: current.updatedAt };
 
-  // 読んでから書くまでに別の保存が入ると、上の比較だけでは検出できない。where にも入れる
-  const { count } = await prisma.article.updateMany({
+  // 読んでから書くまでに別の保存が入ると、上の比較だけでは検出できない。where にも入れる。
+  // 更新後の updatedAt は API の呼び出し側が続けて書くときに使う
+  const [after] = await prisma.article.updateManyAndReturn({
     where: { shortId, updatedAt: expectedUpdatedAt },
     data: { ...values, dirty: true, editedAt: new Date() },
+    select: { updatedAt: true },
   });
-  if (count === 0) return { ok: false, reason: "conflict" };
-  return { ok: true, changed, previousTitle: current.title };
+  if (!after) {
+    const now = await prisma.article.findUniqueOrThrow({ where: { shortId }, select: { updatedAt: true } });
+    return { ok: false, reason: "conflict", currentUpdatedAt: now.updatedAt };
+  }
+  await auditArticle(actor, {
+    action: "article.update",
+    targetType: "Article",
+    targetId: shortId,
+    metadata: { changed },
+  });
+  return { ok: true, changed, previousTitle: current.title, updatedAt: after.updatedAt };
+}
+
+export type PatchArticleResult =
+  | UpdateArticleResult
+  | { ok: false; reason: "invalid"; errors: Partial<Record<ArticleEditField, string>> };
+
+/**
+ * 外部 (REST / MCP) からの部分更新。
+ *
+ * 現在値に `patch` を重ねてフォームの形にし (`mergeArticleEditPatch`)、UI と同じ
+ * `parseArticleEditForm` → `updateArticleFrom` を通す。正規化・検証・変更検出・dirty / editedAt の
+ * 立て方が UI と同じになる。`updatedAt` の楽観ロックも同じ (API は body で必須)。
+ * 衝突は入力の検証より先に返す (古い値の上に組み立てた入力を検証しても意味がない)。
+ */
+export async function patchArticle(
+  shortId: string,
+  expectedUpdatedAt: Date,
+  patch: ArticleEditPatch,
+  actor: ArticleActor,
+): Promise<PatchArticleResult> {
+  const current = await prisma.article.findUnique({ where: { shortId }, select: ARTICLE_EDIT_SELECT });
+  if (!current) return { ok: false, reason: "not_found" };
+  if (current.updatedAt.getTime() !== expectedUpdatedAt.getTime()) {
+    return { ok: false, reason: "conflict", currentUpdatedAt: current.updatedAt };
+  }
+
+  const parsed = parseArticleEditForm(mergeArticleEditPatch(toArticleEditValues(current), patch));
+  if (!parsed.ok) return { ok: false, reason: "invalid", errors: parsed.errors };
+  return updateArticleFrom(shortId, current, expectedUpdatedAt, parsed.values, actor);
 }
 
 /**
