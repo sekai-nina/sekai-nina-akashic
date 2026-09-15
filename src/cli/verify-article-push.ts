@@ -4,7 +4,7 @@
  * push (#46) は DB のカラムから frontmatter を丸ごと生成し直すので、取り込み →
  * 書き出しのどこかで値が落ちると **本番の記事 332 本を壊す**。往復テスト
  * (frontmatter.articles.test.ts) は parse → build の変換だけを見るが、ここは
- * 取り込み済みの DB を経由した本物の経路 (`renderArticleForPush`) で確かめる。
+ * 取り込み済みの DB を経由した本物の経路 (`renderArticlesForPush`) で確かめる。
  *
  * 結果は 4 種に分けて報告する (判定は src/lib/articles/verify.ts):
  *   [一致]        バイト単位で同じ。push しても差分が出ない
@@ -19,8 +19,9 @@
  * リポジトリにあって DB に無い記事 (未取り込み) も列挙する。
  * 値の差分・push 拒否・ファイル無しのいずれかがあれば exit 1。
  *
- * 接続は `renderArticleForPush` と同じ DATABASE_URL (app_runtime、RLS 越し)。
+ * 接続は `renderArticlesForPush` と同じ DATABASE_URL (app_runtime、RLS 越し)。
  * `Article` は非保護なので一覧も素の prisma で引ける。DIRECT_URL は使わない。
+ * 組み立ては push 画面と同じバッチ版 (`renderArticlesForPush({})`) を通す。
  *
  * Usage:
  *   pnpm cli:verify-article-push --dir <articles-dir>
@@ -35,7 +36,7 @@ import { articlesDirFromArgs, listArticleFiles } from "@/lib/articles/files";
 import { parseArticle, toArticleColumns } from "@/lib/articles/frontmatter";
 import { compareArticle, lineDiff, VERDICT_LABELS, type Verdict } from "@/lib/articles/verify";
 import { prisma } from "@/lib/db";
-import { renderArticleForPush } from "@/lib/domain/articles";
+import { renderArticlesForPush } from "@/lib/domain/articles";
 
 const args = process.argv.slice(2);
 const SHOW_DIFF = args.includes("--diff");
@@ -60,18 +61,17 @@ async function main() {
   });
   console.log(`DB の記事 ${articles.length} 件 / リポジトリの記事 ${inRepo.size} 件 (${DIR})`);
 
+  // push 画面と同じ経路で全件を一度に組み立てる (記事ごとにトランザクションを張らない)
+  const renderedByShortId = new Map((await renderArticlesForPush({})).map((r) => [r.shortId, r]));
+
   const byVerdict: Record<Verdict, string[]> = { identical: [], normalized: [], ref_added: [], changed: [] };
   const missingFile: string[] = [];
   const blocked: string[] = [];
   const diffs: string[] = [];
 
-  let done = 0;
   for (const { shortId, path } of articles) {
-    done++;
-    if (done % 50 === 0) console.log(`  ${done}/${articles.length}`);
-
-    const rendered = await renderArticleForPush(shortId);
-    if (!rendered) throw new Error(`renderArticleForPush が null を返した: ${shortId}`);
+    const rendered = renderedByShortId.get(shortId);
+    if (!rendered) throw new Error(`renderArticlesForPush の結果に無い: ${shortId}`);
     if (!rendered.ok) {
       const nos = rendered.blockedSourceNos.map((n) => `^[${n ?? "-"}]`).join(" ");
       blocked.push(`${path}  非 public の applied/unresolved ${rendered.blockedSourceNos.length} 件 (${nos})`);
