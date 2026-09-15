@@ -19,6 +19,10 @@ const INSTRUCTIONS = [
   "  正式名称を調べ直すか、新規で問題ないと確認できたときだけ createMissingEntities: true を付ける。",
   "- akashic_create_asset で作ったアセットは必ず status=inbox に入る。人間が仕分けする前提の下書きとして扱う。",
   "- 日付は JST 基準。canonicalDate は投稿日ではなく「内容の公開日・放送日」を入れる。",
+  "- 記事 (公開サイトの世界新奈) は akashic_list_articles { hasPending: true } で未反映の紐づけがある記事を探し、",
+  "  akashic_get_article で本文と sources (pending の excerpt) を読む。反映は akashic_apply_article_source で",
+  "  先に脚注番号を採ってから、本文に ^[n] を書いて akashic_update_article で保存する (この順で)。",
+  "  記事への書き込みは次の push で公開サイトに出る。updatedAt は必ず直前に読んだ値を渡す。",
 ].join("\n");
 
 /** authInfo.extra 経由でツール層に渡す API キーの持ち主 */

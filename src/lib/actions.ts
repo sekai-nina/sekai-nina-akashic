@@ -1,6 +1,5 @@
 "use server";
 
-import { auth } from "@/lib/auth";
 import { prisma, withClearance } from "@/lib/db";
 import { normalizeText } from "@/lib/utils";
 import { logAudit } from "@/lib/domain/audit";
@@ -13,6 +12,7 @@ import { createInvitation, deleteInvitation as deleteInvitationDomain } from "@/
 import { backupAssetToDrive } from "@/lib/drive";
 import { createAssetRelation, deleteAssetRelation } from "@/lib/domain/relations";
 import { assertClearance } from "@/lib/classification";
+import { requireRole } from "@/lib/auth/require-role";
 
 /** Verify the calling user has clearance to access the given asset. */
 async function requireClearanceForAsset(assetId: string, user: { clearance: string }) {
@@ -24,18 +24,6 @@ async function requireClearanceForAsset(assetId: string, user: { clearance: stri
   );
   if (!asset) throw new Error("Asset not found");
   assertClearance(user.clearance, asset.classification);
-}
-
-async function requireUser() {
-  const session = await auth();
-  if (!session?.user) throw new Error("Unauthorized");
-  return session.user;
-}
-
-async function requireRole(roles: string[]) {
-  const user = await requireUser();
-  if (!roles.includes(user.role)) throw new Error("Forbidden");
-  return user;
 }
 
 // ========== Assets ==========

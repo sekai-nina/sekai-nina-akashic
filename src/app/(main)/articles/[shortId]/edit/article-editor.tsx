@@ -14,7 +14,7 @@ import {
   cn,
   todayJst,
 } from "@/lib/utils";
-import { previewArticleAction, updateArticleAction, type ArticlePreview, type UpdateArticleState } from "../../actions";
+import { previewArticleAction, updateArticleAction, type ArticlePreview, type UpdateArticleState } from "./actions";
 import { FootnoteAuditWarnings } from "../footnote-audit-warnings";
 import { TagInput } from "./tag-input";
 
@@ -411,7 +411,7 @@ export function ArticleEditor({
               ))}
             </ul>
           )}
-          <p className="text-xs text-slate-400 mt-2">出典の追加・解除は詳細ページから行います</p>
+          <p className="text-xs text-slate-400 mt-2">出典の追加・解除・反映は詳細ページから行います</p>
         </div>
 
         {/* 保存 */}

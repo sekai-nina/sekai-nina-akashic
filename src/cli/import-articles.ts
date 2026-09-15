@@ -27,6 +27,9 @@
  *     スキップしなかった記事は `editedAt` を null に戻す (上書き後は akashic 側の編集が無い)
  *   - `--apply` は checkout が origin/main と一致しない・--dir がトップレベルでないと止まる
  *     (pull し忘れで DB が巻き戻る事故の防止)。承知の上で進めるなら --allow-stale
+ *   - 出典の全置換では、既存行を assetId + sourceNo で突き合わせ (reconcileSources)、抜粋
+ *     (excerpt / note) を新しい行に写す。akashic で applied にしたが上流に無い行 (未 push のまま
+ *     上流が変わった) は削除せず pending に戻す (demotableSources)
  *
  * 書き込みは DIRECT_URL (postgres ロール / RLS バイパス)。
  * 既定は dry-run。実際に書き込むには --apply が要る。
@@ -46,6 +49,7 @@ import {
   ArticleType,
   AssetKind,
   AssetStatus,
+  ClearanceLevel,
   SourceKind,
   SourceType,
 } from "@prisma/client";
@@ -60,6 +64,7 @@ import {
   type ArticleSourceEntry,
 } from "@/lib/articles/frontmatter";
 import { hasChanged } from "@/lib/articles/changes";
+import { demotableSources, reconcileSources } from "@/lib/articles/reconcile";
 import { articlesDirFromArgs, compareCheckoutWithRemote, listArticleFiles } from "@/lib/articles/files";
 import { dirtyAfterImport } from "@/lib/articles/verify";
 import { gitBlobSha } from "@/lib/github/blob";
@@ -255,8 +260,11 @@ async function main() {
         where: { status: { not: ArticleSourceStatus.pending } },
         orderBy: { sortOrder: "asc" },
         select: {
+          id: true,
           assetId: true, status: true, classification: true, sourceNo: true, label: true,
           url: true, date: true, originalRef: true, sortOrder: true,
+          // 全置換で消える抜粋を新しい行に写すため (reconcileSources)。差分判定には使わない
+          excerpt: true, excerptType: true, excerptStart: true, excerptEnd: true, note: true,
         },
       },
     },
@@ -290,6 +298,8 @@ async function main() {
   const lossy: string[] = [];
   /** akashic で編集済み (未 push) だったのに、上流が変わっていたのでファイルで上書きした記事 */
   const overwritten: string[] = [];
+  /** akashic で applied にしたが上流に無かったので pending に戻した出典 */
+  const demoted: string[] = [];
 
   /**
    * DB に akashic の未 push 編集があり (`editedAt` が非 null)、ファイルは取り込んだ時点から
@@ -577,15 +587,51 @@ async function main() {
     // DB にしか無く Markdown から再生成できないので、巻き込んで消すと
     // 復旧できないデータロスになる。
     //
+    // pending → applied に遷移して push 済みの行も frontmatter から作り直されるので、
+    // その抜粋は既存行から assetId + sourceNo で写す (reconcileSources)。
+    //
+    // akashic で applied にしたが push する前に上流が変わった行は、ファイルに無いので
+    // 全置換で消える (PR3 より前は pending のまま残っていた)。これは削除せず pending に戻す
+    // (sourceNo を外し、classification は元アセットの現在値に)。本文の ^[n] はファイルで
+    // 上書きされて消えているので、人か AI が改めて反映し直す。
+    //
     // 削除と再作成は 1 トランザクションにまとめる。途中で落ちると
     // 出典が消えたまま残るため。
-    const replaced = wanted.map((w) => ({ ...w, articleId: article.id }));
+    const { rows, unmatched } = reconcileSources(prev?.sources ?? [], wanted);
+    const replaced = rows.map((w) => ({ ...w, articleId: article.id }));
+    const demote = demotableSources(unmatched);
+    const assetClassification = demote.length
+      ? new Map(
+          (
+            await prisma.asset.findMany({
+              where: { id: { in: demote.map((d) => d.assetId!) } },
+              select: { id: true, classification: true },
+            })
+          ).map((a) => [a.id, a.classification]),
+        )
+      : new Map<string, ClearanceLevel>();
     await prisma.$transaction([
       prisma.articleSource.deleteMany({
-        where: { articleId: article.id, status: { not: ArticleSourceStatus.pending } },
+        where: {
+          articleId: article.id,
+          status: { not: ArticleSourceStatus.pending },
+          id: { notIn: demote.map((d) => d.id) },
+        },
       }),
+      ...demote.map((d) =>
+        prisma.articleSource.update({
+          where: { id: d.id },
+          data: {
+            status: ArticleSourceStatus.pending,
+            sourceNo: null,
+            // apply で public にしたものを戻す。アセットが消えていれば internal (既定と同じ)
+            classification: assetClassification.get(d.assetId!) ?? ClearanceLevel.internal,
+          },
+        }),
+      ),
       ...(replaced.length ? [prisma.articleSource.createMany({ data: replaced })] : []),
     ]);
+    for (const d of demote) demoted.push(`${file.path}  [${d.sourceNo}] asset=${d.assetId}`);
 
     done++;
     if (done % 50 === 0) console.log(`  ${done}/${plan.length}`);
@@ -598,6 +644,10 @@ async function main() {
   if (overwritten.length) {
     console.log(`\n--- akashic の未 push 編集があったが上流が変わっていたので上書きした (${overwritten.length} 件) ---`);
     for (const o of overwritten) console.log(`  ${o}`);
+  }
+  if (demoted.length) {
+    console.log(`\n--- akashic で反映済みにしたが上流に無かったので未反映 (pending) に戻した出典 (${demoted.length} 件) — 本文の ^[n] は消えているので反映し直す ---`);
+    for (const d of demoted) console.log(`  ${d}`);
   }
   if (lossy.length) {
     console.log(`\n--- 値の差分があり dirty にしなかった (${lossy.length} 件) — push すると値が消えるので原因を確認する ---`);

@@ -71,9 +71,27 @@ export function isClassificationDowngrade(
   current: ClearanceLevel | string,
   requested: ClearanceLevel | string
 ): boolean {
-  const currentLevel = LEVEL_ORDER[current as ClearanceLevel];
-  const requestedLevel = LEVEL_ORDER[requested as ClearanceLevel];
-  // 未知の値は fail-closed で「引き下げ」扱いにして止める
-  if (currentLevel === undefined || requestedLevel === undefined) return true;
-  return requestedLevel < currentLevel;
+  return isStrictlyHigher(current, requested);
+}
+
+/**
+ * `classification` が `limit` より上の機密レベルか。
+ *
+ * 機械経路 (REST / MCP) に「ここまでしか扱えない」上限を掛けるのに使う
+ * (例: 記事出典の pending → applied は API キーからは internal 以下しか公開化できない)。
+ * 未知の値は fail-closed で「上」扱い。
+ */
+export function isAboveClearance(
+  classification: ClearanceLevel | string,
+  limit: ClearanceLevel | string
+): boolean {
+  return isStrictlyHigher(classification, limit);
+}
+
+/** `a` が `b` より厳密に上か。未知の値は fail-closed で true (呼び出し側はどちらも「止める」側に倒す) */
+function isStrictlyHigher(a: ClearanceLevel | string, b: ClearanceLevel | string): boolean {
+  const levelA = LEVEL_ORDER[a as ClearanceLevel];
+  const levelB = LEVEL_ORDER[b as ClearanceLevel];
+  if (levelA === undefined || levelB === undefined) return true;
+  return levelA > levelB;
 }

@@ -36,6 +36,7 @@ pnpm cli:keygen <user-email> <key-name>
 - **キーの `permissions` によって見えるツールが変わる。** `write` を持たないキーには書き込みツールが `tools/list` に出ない（呼んでも `Tool ... not found`）
 - クリアランスは**キーの持ち主ユーザーのもの**が使われる。読み取りは RLS が、書き込みは `assertClearance` が上位機密の作成を止める
 - **既存レコードの機密レベルは引き上げしかできない。** `akashic_update_asset` / `akashic_update_place` に現在より低い `classification` を渡すとエラーになる。`assertClearance` は「自分のクリアランスより上を付ける」操作しか止めず、引き下げ (例: `restricted` → `public`) は素通りするため。MCP は LLM がツールを呼ぶ経路なので、プロンプトインジェクション 1 回で機密アセットを公開扱いに落とせないようアプリ層で塞いでいる。引き下げは画面から人間が行う
+  - **例外は `akashic_apply_article_source`。** 記事の紐づけを反映済みにする = その出典を公開リポジトリの frontmatter に載せる操作で、`ArticleSource` の classification を `public` に下げることがツールの目的。ただし **`internal` 以下の出典に限る**（`confidential` / `restricted` はエラー。画面から人間が行う）。→ [記事ツール](#記事ツール)
 - 専用のクリアランスを与えたい場合は、AI 用のユーザーを作ってそのユーザーでキーを発行する
 
 ## ツール一覧
@@ -50,8 +51,12 @@ pnpm cli:keygen <user-email> <key-name>
 | `akashic_update_asset` | write | メタデータ・ステータス・本文の更新 |
 | `akashic_create_place` | write | 聖地登録（Google Maps URL / 緯度経度） |
 | `akashic_update_place` | write | 聖地更新 |
+| `akashic_list_articles` | read | 記事一覧（`hasPending: true` で未反映の紐づけがある記事） |
+| `akashic_get_article` | read | 記事 1 本の本文・frontmatter・出典 |
+| `akashic_update_article` | write | 記事の部分更新（`updatedAt` 必須） |
+| `akashic_apply_article_source` | write | 紐づけを反映済みにし脚注番号を採る（公開判断。internal 以下のみ） |
 
-削除系のツールは意図的に用意していない。削除は画面から人間が行う。
+削除系のツールは意図的に用意していない。削除は画面から人間が行う。記事の新規作成も無い（path / shortId の採番規則が未定）。
 
 ### 検索語の区切り
 
@@ -146,6 +151,25 @@ MCP のツール引数はもともと zod で検証されるが、REST の `POST
 
 同名の聖地が既にある場合は作成せず、既存の `existingPlaceId` を返す。
 
+### 記事ツール
+
+公開サイト（世界新奈）の記事は akashic の DB が編集バッファで、書き込みは `dirty` になり `/articles/push`（画面。admin のみ）で GitHub にまとめて push されるまで公開サイトには出ない。REST の `/api/v1/articles` と同じ domain 関数・同じ検証スキーマを使う（[docs/api.md の記事節](./api.md#記事-articles)）。
+
+想定する使い方は「未反映の紐づけ（pending）を見て、抜粋を本文に反映し、applied にする」で、**順番が決まっている**:
+
+1. `akashic_list_articles { hasPending: true }` で対象を探す
+2. `akashic_get_article` で本文と `sources`（`status: "pending"` の行の `excerpt` が根拠の抜粋）を読む
+3. `akashic_apply_article_source` で **先に** 脚注番号 `sourceNo` を採る
+4. 返った `sourceNo` で本文に `^[n]` を書き、`akashic_update_article { body, updatedAt }` で保存する（`updatedAt` は 3 が返した値）
+
+3 → 4 の順にするのは、途中で止まっても「本文から参照されていない出典」になるだけで、本文に宛先の無い `^[n]` が残らないため。apply の応答には次に何をするかの `hint` が付く。
+
+- **`updatedAt` の楽観ロックが必須。** 直前に読んだ値を渡し、その間に別の保存・取り込み・apply が入っていれば `reason: "conflict"` のエラーになる（現在の `updatedAt` を添えて返すので、それで再実行するか読み直す）。apply 自身も `updatedAt` を進めるので、別の apply が割り込んで番号がズレる競合もこれで検出される。エラーの `reason` が `conflict` 以外（`not_pending` / `asset_missing` / `above_limit` / `not_found`）なら再試行しても解消しない
+- `akashic_update_article` は編集 UI と同じ 12 項目を省略可で受ける（渡した項目だけ変わる）。`null` で消せるのは `type` / `date` / `publishedAt` / `articleUpdatedAt` / `dateDisplay` / `dateMode`。`tags` を空にするなら `[]`。変わっていなければ書かない（`changed` が空）。`path` / `shortId` / モデル外の frontmatter / 出典は変えられない。本文は 200,000 文字まで
+- `akashic_apply_article_source` は **公開を決める操作**。`ArticleSource` が `public` になり、次の push で `label` / `ref` が公開リポジトリの frontmatter に出る。`internal` より上の出典（紐づけ時の値と Asset の現在の値の両方を見る）は反映できない（上の「引き上げのみ」の例外の範囲）。`excerpt` / `note` は残る
+- 一覧・詳細の `sources` はキーの持ち主のクリアランスで見える行だけ（RLS）。加えて `internal` より上の `pending` 行は返さない（apply できない抜粋を本文に貼らせない）。`pendingCount` / `hasPending` も同じ範囲で数える
+- 記事の `updatedAt` / `editedAt` / `lastPushedAt` と `sources[].asset.canonicalDate` は **UTC の ISO のまま**（[返却形式](#返却形式) の JST 変換の例外。`updatedAt` はロックの値なので手を加えない）。frontmatter の日付列は `YYYY-MM-DD`
+
 ### 監査ログ
 
 書き込みツールは domain 層が出す `asset.create` などとは別に、`mcp.<tool>` を 1 本追記する。
@@ -191,7 +215,9 @@ curl -X POST http://localhost:3000/api/mcp \
 |---|---|
 | `src/app/api/mcp/route.ts` | エンドポイント。`requireApiAuth` で認証し `authInfo` に載せて渡す |
 | `src/lib/mcp/server.ts` | `createMcpHandler` の組み立て。リクエストごとに `McpServer` を作る |
-| `src/lib/mcp/tools.ts` | ツール定義。権限で登録するツールを出し分ける |
+| `src/lib/mcp/tools.ts` | ツール定義（アセット・エンティティ・聖地）。権限で登録するツールを出し分ける |
+| `src/lib/mcp/tools-articles.ts` | 記事ツール。REST と `src/lib/articles/patch.ts`（検証）/ `src/lib/domain/article-api.ts`（射影）を共有する |
+| `src/lib/mcp/result.ts` | `ok` / `fail` / `toToolError` などツール結果の共通ヘルパー |
 | `src/lib/mcp/format.ts` | 返却用の射影・URL 組み立て |
 | `src/lib/mcp/entity-resolution.ts` | エンティティ名の解決 |
 | `src/lib/mcp/audit.ts` | `mcp.<tool>` の監査ログ |

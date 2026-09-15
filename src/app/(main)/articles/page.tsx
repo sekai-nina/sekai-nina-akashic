@@ -157,7 +157,7 @@ export default async function ArticlesPage({
               )}
             </div>
             <div className="text-xs text-slate-400 mt-1">
-              {a.publishedAt ? formatDate(a.publishedAt) : "日付なし"} ・ 出典 {a._count.sources} 件 ・{" "}
+              {a.publishedAt ? formatDate(a.publishedAt) : "日付なし"} ・ 出典 {a.sourceCount} 件 ・{" "}
               {a.path}
             </div>
           </Link>
