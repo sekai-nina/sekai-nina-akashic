@@ -521,3 +521,24 @@ export function serializeArticle(
   const yaml = stringifyYaml(clean, { lineWidth: 0 }).trimEnd();
   return `---\n${yaml}\n---\n\n${body.replace(/^\r?\n+/, "")}`;
 }
+
+/** `renderArticleMarkdown` の戻り。`BuiltFrontmatter` の内訳に Markdown を足したもの */
+export interface RenderedMarkdown extends Omit<BuiltFrontmatter, "frontmatter"> {
+  /** 公開リポジトリに書き出す Markdown (frontmatter + 本文) */
+  markdown: string;
+}
+
+/**
+ * Article の行 + 出典 → push 用 Markdown。`buildFrontmatter` と `serializeArticle` を
+ * 続けて呼ぶだけだが、**push (domain) / 取り込みの dirty 判定 / 往復テスト**の 3 箇所が
+ * 同じ経路を通るようにここに 1 つだけ置く。別々に組むと、片方だけ直して
+ * 「テストは緑だが push は別の形を書く」状態になる。
+ *
+ * `blocked` の扱いは呼び出し側が決める (push は拒否、取り込みは不変条件違反として throw)。
+ */
+export function renderArticleMarkdown(
+  input: ArticleFrontmatterInput & { body: string },
+): RenderedMarkdown {
+  const { frontmatter, pending, blocked } = buildFrontmatter(input);
+  return { markdown: serializeArticle(frontmatter, input.body), pending, blocked };
+}

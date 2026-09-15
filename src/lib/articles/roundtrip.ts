@@ -1,9 +1,8 @@
 import { ArticleSourceStatus } from "@prisma/client";
 
 import {
-  buildFrontmatter,
   parseArticle,
-  serializeArticle,
+  renderArticleMarkdown,
   toArticleColumns,
   toArticleSourceRow,
   type ArticleSourceEntry,
@@ -33,13 +32,12 @@ export function resolveOffline(entries: ArticleSourceEntry[]): ArticleSourceRow[
  * Markdown 1 本を **取り込みと同じ経路で** 往復させる。
  *
  *   ファイル → parseArticle → toArticleColumns (DB カラム) → toArticleSourceRow (ArticleSource 行)
- *          → buildFrontmatter → serializeArticle
+ *          → renderArticleMarkdown (buildFrontmatter + serializeArticle)
  *
  * push (#46) が通るのと同じ変換をそのまま並べたもの。テストがここを通ることで、
  * 「テストは緑だが本番の取り込みは別の規則で動く」状態を防ぐ。
  */
 export function roundtrip(raw: string, path = "test.md"): string {
   const cols = toArticleColumns(parseArticle(raw), path);
-  const { frontmatter } = buildFrontmatter({ ...cols, sources: resolveOffline(cols.sources) });
-  return serializeArticle(frontmatter, cols.body);
+  return renderArticleMarkdown({ ...cols, sources: resolveOffline(cols.sources) }).markdown;
 }
