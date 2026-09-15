@@ -683,13 +683,15 @@ model LensItemCheck {
 // push 時に丸ごと生成する。
 // ---------------------------------------------------------------------------
 
+/// sekai-nina-site の src/content/config.ts の enum と揃える (fact / state は
+/// Astro 側の transform で attribute に畳まれるので持たない)。ここに無い値を
+/// push すると Astro のビルドが落ちるため、足すときは両側を同時に変える。
 enum ArticleType {
   attribute
   event
   quote
   column
   item
-  quiz
 }
 
 /// ArticleSource が記事本文に反映済みか。
