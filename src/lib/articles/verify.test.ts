@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { compareArticle, lineDiff } from "./verify";
+import { parseArticle, toArticleColumns, toArticleSourceRow } from "./frontmatter";
+import { resolveOffline, roundtrip } from "./roundtrip";
+import { compareArticle, dirtyAfterImport, lineDiff } from "./verify";
 
 /**
  * DB から組み立てた Markdown と実ファイルの突き合わせ。
@@ -109,5 +111,52 @@ describe("lineDiff", () => {
 
   it("同じなら空", () => {
     expect(lineDiff("a\nb", "a\nb")).toBe("");
+  });
+});
+
+describe("dirtyAfterImport", () => {
+  const decide = (raw: string) => {
+    const cols = toArticleColumns(parseArticle(raw), "x.md");
+    const { sources, ...rest } = cols;
+    return dirtyAfterImport(raw, rest, resolveOffline(sources));
+  };
+
+  it("DB の出力がファイルと一致するなら dirty にしない", () => {
+    // roundtrip を通した形 = 生成側が吐く形そのもの
+    const raw = roundtrip(article(BASE));
+    expect(decide(raw)).toEqual({ dirty: false, verdict: "identical", notes: [] });
+  });
+
+  it("引用符が違うだけ (正規化のみ) なら dirty", () => {
+    const raw = article(['title: "タイトル"', "short_id: abc1234"]);
+    expect(decide(raw).dirty).toBe(true);
+    expect(decide(raw).verdict).toBe("normalized");
+  });
+
+  it("ref が補完されるなら dirty", () => {
+    // ref 無しの行は resolveOffline では unresolved になるので、applied を直接与える
+    const raw = article(["title: t", "short_id: abc1234", "source:", "  - id: 1", "    label: x"]);
+    const cols = toArticleColumns(parseArticle(raw), "x.md");
+    const { sources, ...rest } = cols;
+    const rows = sources.map((e, i) => toArticleSourceRow(e, { assetId: "cuid9", status: "applied" }, i));
+    const r = dirtyAfterImport(raw, rest, rows);
+    expect(r).toEqual({ dirty: true, verdict: "ref_added", notes: ["ref を 1 件補完"] });
+  });
+
+  it("取り込みの行に非 public が混ざっていたら throw する (取り込み側の規則違反)", () => {
+    const raw = article(["title: t", "short_id: abc1234", "source:", "  - id: 1", "    label: x"]);
+    const cols = toArticleColumns(parseArticle(raw), "x.md");
+    const { sources, ...rest } = cols;
+    const rows = resolveOffline(sources).map((r) => ({ ...r, classification: "internal" as const }));
+    expect(() => dirtyAfterImport(raw, rest, rows)).toThrow(/非 public/);
+  });
+
+  it("値の差分 (取りこぼし) は dirty にせず notes で知らせる", () => {
+    // type が enum 外だと push で消える = changed
+    const raw = article(["title: t", "short_id: abc1234", "type: unknown_type"]);
+    const r = decide(raw);
+    expect(r.dirty).toBe(false);
+    expect(r.verdict).toBe("changed");
+    expect(r.notes.some((n) => n.startsWith("type:"))).toBe(true);
   });
 });

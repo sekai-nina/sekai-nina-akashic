@@ -13,6 +13,18 @@
  *   frontmatter 由来の行は公開リポジトリに載っている内容なので classification は public
  *   (src/lib/articles/frontmatter.ts の toArticleSourceRow)。
  *
+ * push (#46) との関係:
+ *   - `githubSha` にファイルの git blob SHA を保存する。push はこれと GitHub 側の tree を
+ *     突き合わせて「取り込んだ後に上流が変わっていないか」を判定する
+ *   - `dirty` は「DB から組み立てた Markdown ≠ ファイル」で立てる (dirtyAfterImport)。
+ *     値は同じでも引用符やキー順が違えば push で差分が出るので、取り込み直後に
+ *     dirty になる記事がある (初回は全件)。値の差分 (取りこぼしの疑い) は dirty にせず警告する
+ *   - **dirty かつファイルが前回から変わっていない (blob SHA と path が同じ) 記事はスキップする**
+ *     (DB 側の未 push 編集をファイルで上書きしない)。ファイルが変わっていれば上流が新しいので
+ *     上書きし、上書きした記事は最後に一覧で知らせる
+ *   - `--apply` は checkout が origin/main と一致しない・--dir がトップレベルでないと止まる
+ *     (pull し忘れで DB が巻き戻る事故の防止)。承知の上で進めるなら --allow-stale
+ *
  * 書き込みは DIRECT_URL (postgres ロール / RLS バイパス)。
  * 既定は dry-run。実際に書き込むには --apply が要る。
  *
@@ -20,6 +32,7 @@
  *   pnpm cli:import-articles --dir <articles-dir>            # dry-run
  *   pnpm cli:import-articles --dir <articles-dir> --apply
  *   pnpm cli:import-articles --dir <articles-dir> --apply --create-missing
+ *   pnpm cli:import-articles --dir <articles-dir> --apply --allow-stale
  */
 
 import { readFile } from "node:fs/promises";
@@ -44,7 +57,9 @@ import {
   type ArticleSourceEntry,
 } from "@/lib/articles/frontmatter";
 import { hasChanged } from "@/lib/articles/changes";
-import { articlesDirFromArgs, listArticleFiles } from "@/lib/articles/files";
+import { articlesDirFromArgs, compareCheckoutWithRemote, listArticleFiles } from "@/lib/articles/files";
+import { dirtyAfterImport } from "@/lib/articles/verify";
+import { gitBlobSha } from "@/lib/github/blob";
 import {
   addCandidate,
   pickCandidate,
@@ -54,6 +69,14 @@ import {
 } from "@/lib/articles/matching";
 import { jstDayString } from "@/lib/utils";
 
+// datasources.url は undefined でも型エラーにならず、schema の env("DATABASE_URL") に
+// 無言でフォールバックする。それだと Asset / SourceRecord / ArticleSource が RLS で 0 行になり、
+// 全部 unresolved として Article だけ書き換わる (githubSha / dirty の唯一の生成元なので致命的)
+if (!process.env.DIRECT_URL) {
+  console.error("DIRECT_URL が未設定です (このスクリプトは RLS バイパス接続が必須)");
+  process.exit(1);
+}
+
 const prisma = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
@@ -61,10 +84,16 @@ const prisma = new PrismaClient({
 const args = process.argv.slice(2);
 const APPLY = args.includes("--apply");
 const CREATE_MISSING = args.includes("--create-missing");
+const ALLOW_STALE = args.includes("--allow-stale");
 const DIR = articlesDirFromArgs(args);
 
 /** カラムに落とした 1 記事。sources は必ず入る (toArticleColumns が詰める) */
-type ParsedFile = ArticleColumns;
+type ParsedFile = ArticleColumns & {
+  /** ファイルの生の内容。dirty 判定 (DB の出力と突き合わせる) に使う */
+  raw: string;
+  /** ファイルの git blob SHA。`Article.githubSha` に入れる */
+  blobSha: string;
+};
 
 type Resolution = {
   entry: ArticleSourceEntry;
@@ -94,7 +123,11 @@ async function main() {
   const warnings: string[] = [];
 
   for (const f of files) {
-    const parsedArticle = parseArticle(await readFile(f, "utf8"));
+    // blob SHA はバイト列から計算する。"utf8" で読むと不正なバイトが U+FFFD に置き換わり、
+    // GitHub 側の SHA と永久に一致しなくなる
+    const bytes = await readFile(f);
+    const raw = bytes.toString("utf8");
+    const parsedArticle = parseArticle(raw);
     const cols = toArticleColumns(parsedArticle, relative(DIR, f));
     if (cols.shortId === "") {
       skipped.push(cols.path);
@@ -113,7 +146,7 @@ async function main() {
     if (rawType != null && cols.type == null) {
       warnings.push(`${cols.path}: type: ${String(rawType)} は ArticleType に無いので取り込まれない`);
     }
-    parsed.push(cols);
+    parsed.push({ ...cols, raw, blobSha: gitBlobSha(bytes) });
   }
   if (skipped.length) {
     console.log(`short_id が無いためスキップ: ${skipped.length} 件`);
@@ -214,7 +247,7 @@ async function main() {
       body: true, date: true, dateDisplay: true, dateMode: true, publishedAt: true,
       articleUpdatedAt: true, draft: true, unlisted: true, ongoing: true, lat: true, lng: true,
       frontmatterExtra: true,
-      dirty: true, lastSyncedAt: true,
+      dirty: true, lastSyncedAt: true, githubSha: true,
       sources: {
         where: { status: { not: ArticleSourceStatus.pending } },
         orderBy: { sortOrder: "asc" },
@@ -249,7 +282,32 @@ async function main() {
   const seenShortIds = new Set(parsed.map((p) => p.shortId));
   const gone = existing.filter((a) => !seenShortIds.has(a.shortId));
 
-  const stats = { applied: 0, unresolved: 0, dangling: 0, created: 0, skipped: 0 };
+  const stats = { applied: 0, unresolved: 0, dangling: 0, created: 0, skipped: 0, preserved: 0, dirty: 0 };
+  /** 値の差分 (取りこぼしの疑い) があり dirty にしなかった記事 */
+  const lossy: string[] = [];
+  /** 未 push の編集があったのに、上流が変わっていたのでファイルで上書きした記事 */
+  const overwritten: string[] = [];
+
+  /**
+   * DB に未 push の編集があり、ファイルは取り込んだ時点から変わっていない
+   * (blob SHA が同じ、path も同じ) → 上流に新しい情報は無い。ファイルで上書きすると
+   * akashic 側の編集が消えるので残す。path も見るのは、内容そのままのリネームを
+   * スキップすると DB が旧 path のまま残り、push が deleted_upstream で衝突し続けるため
+   */
+  const preserve = (file: ParsedFile) => {
+    const prev = existingByShortId.get(file.shortId);
+    return prev != null && prev.dirty && prev.githubSha === file.blobSha && prev.path === file.path;
+  };
+
+  /**
+   * 取り込み後の dirty。resolutions は --create-missing で書き込み中に変わるので、
+   * 書き込む直前 (と dry-run の見積もり) で都度呼ぶ
+   */
+  const decideDirty = (file: ParsedFile, resolutions: Resolution[]) => {
+    const { sources: _sources, raw, blobSha: _sha, ...cols } = file;
+    const wanted = resolutions.map((r, i) => toArticleSourceRow(r.entry, r, i));
+    return { wanted, decision: dirtyAfterImport(raw, cols, wanted) };
+  };
   const plan = parsed.map((p) => {
     const resolutions = p.sources.map(resolve);
     for (const r of resolutions) {
@@ -333,7 +391,61 @@ async function main() {
     console.log("  自動削除はしない。不要なら Prisma Studio で消すか、移動なら path を合わせる");
   }
 
+  // 古い checkout から取り込むと、akashic から push 済みの内容が DB 上で巻き戻る
+  // (githubSha も古い blob になり、次の push で全件が衝突扱いになる)。
+  // dry-run でも同じ検査をして知らせ、--apply では止める
+  const checkoutProblems: string[] = [];
+  try {
+    const { head, remote, upToDate, isTopLevel, modified } = await compareCheckoutWithRemote(DIR);
+    if (modified.length) {
+      console.log(`\n--- 未コミットの変更があるファイル (${modified.length} 件) — 取り込むと push で衝突扱いになる ---`);
+      for (const m of modified) console.log(`  ${m}`);
+    }
+    if (!isTopLevel) {
+      checkoutProblems.push("--dir がリポジトリのトップレベルではありません (path がリポジトリ相対にならず、push で全件が衝突扱いになる)");
+    }
+    if (!upToDate) {
+      checkoutProblems.push(
+        `checkout が origin/main と一致しません (HEAD ${head.slice(0, 7)} / origin/main ${remote.slice(0, 7)})。pull してから取り込んでください`,
+      );
+    }
+  } catch (e) {
+    checkoutProblems.push(
+      `checkout と origin/main の比較ができません: ${e instanceof Error ? e.message : String(e)} (--dir は sekai-nina-public の git checkout を指す)`,
+    );
+  }
+  if (checkoutProblems.length) {
+    console.error(`\n--- checkout の問題 (${checkoutProblems.length} 件) ---`);
+    for (const p of checkoutProblems) console.error(`  ${p}`);
+    if (APPLY && !ALLOW_STALE) {
+      console.error("--apply を中断します。承知の上で進めるなら --allow-stale");
+      process.exitCode = 1;
+      return;
+    }
+    if (APPLY) console.error("--allow-stale のため続行します");
+  }
+
   if (!APPLY) {
+    // 取り込み後に push 待ち (dirty) になる記事の見積もり。--apply と同じく preserved
+    // ガードを通す。--create-missing の分はまだ Asset が無いので ref が補完されず、
+    // 実際より少なめに出ることがある
+    let willDirty = 0;
+    let willPreserve = 0;
+    const willLossy: string[] = [];
+    for (const { file, resolutions } of plan) {
+      if (preserve(file)) {
+        willPreserve++;
+        continue;
+      }
+      const { decision } = decideDirty(file, resolutions);
+      if (decision.dirty) willDirty++;
+      else if (decision.verdict === "changed") willLossy.push(`${file.path}  ${decision.notes.join(" / ")}`);
+    }
+    console.log(`\n取り込み後に push 待ち (dirty) になる記事: ${willDirty} 件 / 未 push の編集を残してスキップ: ${willPreserve} 件`);
+    if (willLossy.length) {
+      console.log(`--- 値の差分があり dirty にしない (${willLossy.length} 件) — push すると値が消えるので原因を確認する ---`);
+      for (const l of willLossy) console.log(`  ${l}`);
+    }
     console.log("\ndry-run のため書き込みはしていません。--apply を付けると反映します");
     return;
   }
@@ -342,6 +454,13 @@ async function main() {
   console.log("\n=== 書き込み ===");
   let done = 0;
   for (const { file, resolutions } of plan) {
+    // ファイルが変わっていれば上流が新しいので、下で普通に上書きする (= 衝突は再取り込みで解消)
+    if (preserve(file)) {
+      stats.preserved++;
+      done++;
+      continue;
+    }
+
     // --create-missing: 未解決のうち手がかりのあるものを Asset として起こす
     for (const r of resolutions) {
       if (!r.needsCreate || !CREATE_MISSING) continue;
@@ -386,11 +505,13 @@ async function main() {
       stats.created++;
     }
 
-    const { sources: _sources, ...cols } = file;
+    const { sources: _sources, raw: _raw, blobSha, ...cols } = file;
 
     // frontmatter 由来の出典。DB に入れる形に揃える (差分判定にも使う)。
     // 形は往復テストと共有する (取り込みだけ別の規則で動くのを防ぐ)
-    const wanted = resolutions.map((r, i) => toArticleSourceRow(r.entry, r, i));
+    const { wanted, decision } = decideDirty(file, resolutions);
+    if (decision.dirty) stats.dirty++;
+    else if (decision.verdict === "changed") lossy.push(`${file.path}  ${decision.notes.join(" / ")}`);
 
     // **変わっていない記事は触らない。**
     // 332 件ぶんの upsert + ArticleSource 全置換を毎回流すと、Supabase の
@@ -398,14 +519,16 @@ async function main() {
     // 70GB 超過の事故がある)
     const prev = existingByShortId.get(file.shortId);
     if (prev && !hasChanged(prev, cols, wanted)) {
-      // 内容は同じでも「取り込んだ」事実は残す。dirty / lastSyncedAt は
+      // 内容は同じでも「取り込んだ」事実は残す。dirty / githubSha / lastSyncedAt は
       // frontmatter 由来ではないので hasChanged の比較対象に入っておらず、
       // ここで更新しないと push 済みの記事が dirty のまま残り、
-      // 一覧の「未 push N 本」が恒久的に嘘をつく
-      if (prev.dirty || prev.lastSyncedAt == null) {
+      // 一覧の「未 push N 本」が恒久的に嘘をつく。
+      // githubSha は、値が同じでもファイルのバイト列が変わっていれば (Obsidian の
+      // 再保存など) 新しい blob に差し替える
+      if (prev.dirty !== decision.dirty || prev.githubSha !== blobSha || prev.lastSyncedAt == null) {
         await prisma.article.update({
           where: { id: prev.id },
-          data: { dirty: false, lastSyncedAt: new Date() },
+          data: { dirty: decision.dirty, githubSha: blobSha, lastSyncedAt: new Date() },
         });
       }
       stats.skipped++;
@@ -413,11 +536,16 @@ async function main() {
       continue;
     }
 
+    // ここに来た dirty な記事は「上流が変わった」ので、DB の未 push の編集はファイルで
+    // 上書きされる (合意済みの解消手順)。黙って消さず、最後に一覧で知らせる
+    if (prev?.dirty) overwritten.push(file.path);
+
     const data = {
       ...cols,
       tags: cols.tags as object,
       frontmatterExtra: cols.frontmatterExtra as object,
-      dirty: false,
+      dirty: decision.dirty,
+      githubSha: blobSha,
       lastSyncedAt: new Date(),
     };
 
@@ -450,8 +578,17 @@ async function main() {
   }
 
   console.log(
-    `\n完了: 記事 ${done} 件 (うち変更なしでスキップ ${stats.skipped} 件) / Asset 新規作成 ${stats.created} 件`,
+    `\n完了: 記事 ${done} 件 (うち変更なしでスキップ ${stats.skipped} 件、未 push の編集を残してスキップ ${stats.preserved} 件) / Asset 新規作成 ${stats.created} 件`,
   );
+  console.log(`push 待ち (dirty) にした記事: ${stats.dirty} 件 → /articles/push から GitHub に書き出せます`);
+  if (overwritten.length) {
+    console.log(`\n--- 未 push の編集があったが上流が変わっていたので上書きした (${overwritten.length} 件) ---`);
+    for (const o of overwritten) console.log(`  ${o}`);
+  }
+  if (lossy.length) {
+    console.log(`\n--- 値の差分があり dirty にしなかった (${lossy.length} 件) — push すると値が消えるので原因を確認する ---`);
+    for (const l of lossy) console.log(`  ${l}`);
+  }
 }
 
 main()
