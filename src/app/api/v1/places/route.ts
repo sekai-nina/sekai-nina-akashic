@@ -3,6 +3,7 @@ import { requireApiAuth } from "@/lib/api-auth";
 import { listPlaces, createPlace } from "@/lib/domain/places";
 import { invalidatePlaces } from "@/lib/cache";
 import type { ClearanceLevel } from "@prisma/client";
+import { parsePlaceKind } from "@/lib/places/kind";
 
 export async function GET(request: Request) {
   const auth = await requireApiAuth(request, "read");
@@ -19,6 +20,7 @@ export async function GET(request: Request) {
     longitude: p.longitude,
     googleMapsUrl: p.googleMapsUrl,
     address: p.address,
+    kind: p.kind,
     classification: p.classification,
     assetCount: p.entity._count.assets,
     createdAt: p.createdAt,
@@ -39,6 +41,10 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+  const kind = parsePlaceKind(body.kind);
+  if (kind === false) {
+    return NextResponse.json({ error: "kind must be one of food, leisure, scenery, venue, shop" }, { status: 400 });
+  }
 
   const place = await createPlace(
     {
@@ -49,6 +55,7 @@ export async function POST(request: Request) {
       address: body.address,
       description: body.description,
       aliases: body.aliases,
+      kind,
       classification: body.classification as ClearanceLevel | undefined,
     },
     auth.clearance
@@ -65,6 +72,7 @@ export async function POST(request: Request) {
       longitude: place.longitude,
       googleMapsUrl: place.googleMapsUrl,
       address: place.address,
+      kind: place.kind,
       classification: place.classification,
       assetCount: place.entity._count.assets,
     },

@@ -46,7 +46,7 @@ pnpm cli:keygen <user-email> <key-name>
 | `akashic_search` | read | アセットの全文検索（本文・タイトル・OCR・書き起こし） |
 | `akashic_get_asset` | read | アセット 1 件の詳細（本文・エンティティ・出典） |
 | `akashic_list_entities` | read | 人物・聖地・タグ・番組の検索 |
-| `akashic_list_places` | read | 聖地一覧（緯度経度・住所つき） |
+| `akashic_list_places` | read | 聖地一覧（緯度経度・住所・種類つき） |
 | `akashic_create_asset` | write | アセットの下書き登録（`status` は必ず `inbox`） |
 | `akashic_update_asset` | write | メタデータ・ステータス・本文の更新 |
 | `akashic_create_place` | write | 聖地登録（Google Maps URL / 緯度経度） |
@@ -150,6 +150,8 @@ MCP のツール引数はもともと zod で検証されるが、REST の `POST
 `akashic_update_place` で `googleMapsUrl` の解決に失敗した場合は**エラーを返して何も更新しない。** 素通しすると URL だけ新しい場所に差し替わり、緯度経度が古いまま残るため。
 
 同名の聖地が既にある場合は作成せず、既存の `existingPlaceId` を返す。
+
+`kind`（聖地の種類: `food` / `leisure` / `scenery` / `venue` / `shop`）は公開サイトの聖地マップでピンのアイコンと絞り込みに使う。`akashic_update_place` では `null` を渡すと未設定に戻る（未設定の場所はサイト側が名前・説明から推定する）。
 
 ### 記事ツール
 

@@ -6,7 +6,8 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, MapPin, ExternalLink, Trash2 } from "lucide-react";
 import { SubmitButton } from "@/components/submit-button";
-import { ASSET_KIND_LABELS, formatDate } from "@/lib/utils";
+import { ASSET_KIND_LABELS, PLACE_KIND_LABELS, formatDate } from "@/lib/utils";
+import type { PlaceKind } from "@prisma/client";
 import { PlaceDetailMap } from "./place-detail-map";
 
 export default async function PlaceDetailPage({
@@ -91,6 +92,12 @@ export default async function PlaceDetailPage({
             <p className="text-sm text-slate-900">{place.address}</p>
           </div>
         )}
+        <div className="bg-white border border-slate-200 rounded-lg p-4">
+          <h3 className="text-xs font-medium text-slate-500 uppercase mb-2">種類</h3>
+          <p className="text-sm text-slate-900">
+            {place.kind ? PLACE_KIND_LABELS[place.kind] : <span className="text-slate-400">未設定</span>}
+          </p>
+        </div>
       </div>
 
       {/* Linked Assets */}
@@ -183,6 +190,22 @@ export default async function PlaceDetailPage({
                 defaultValue={place.address ?? ""}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
               />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">種類</label>
+              <select
+                name="kind"
+                defaultValue={place.kind ?? ""}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
+              >
+                <option value="">未設定（サイト側で名前から推定）</option>
+                {(Object.keys(PLACE_KIND_LABELS) as PlaceKind[]).map((k) => (
+                  <option key={k} value={k}>
+                    {PLACE_KIND_LABELS[k]}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-slate-400 mt-1">公開サイトの聖地マップでピンのアイコンと絞り込みに使う</p>
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">説明</label>

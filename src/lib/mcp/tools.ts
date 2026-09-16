@@ -16,6 +16,7 @@ import {
   describeEnum,
   ASSET_STATUS_LABELS,
   ENTITY_TYPE_LABELS,
+  PLACE_KIND_LABELS,
 } from "@/lib/utils";
 import { resolveGoogleMapsUrl } from "@/lib/places/resolve-google-maps-url";
 import { logMcpToolCall } from "./audit";
@@ -622,6 +623,12 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
         address: z.string().optional(),
         description: z.string().optional().describe("何の聖地かの説明 (出演回・エピソード等)"),
         aliases: z.array(z.string()).optional().describe("別名・通称"),
+        kind: z
+          .enum($Enums.PlaceKind)
+          .optional()
+          .describe(
+            "聖地の種類 (公開サイトの地図でピンのアイコンになる): " + describeEnum(PLACE_KIND_LABELS)
+          ),
         classification: z
           .enum($Enums.ClearanceLevel)
           .optional()
@@ -688,6 +695,7 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
             address: args.address,
             description: args.description,
             aliases: args.aliases,
+            kind: args.kind,
             classification,
           },
           user.clearance
@@ -724,6 +732,15 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
         googleMapsUrl: z.string().url().optional(),
         address: z.string().optional(),
         description: z.string().optional(),
+        kind: z
+          .enum($Enums.PlaceKind)
+          .nullable()
+          .optional()
+          .describe(
+            "聖地の種類 (公開サイトの地図でピンのアイコンになる): " +
+              describeEnum(PLACE_KIND_LABELS) +
+              "。null で未設定に戻す"
+          ),
         classification: z
           .enum($Enums.ClearanceLevel)
           .optional()
@@ -779,6 +796,7 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
             googleMapsUrl,
             address: args.address,
             description: args.description,
+            kind: args.kind,
             classification: args.classification,
           },
           user.clearance

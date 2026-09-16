@@ -4,6 +4,8 @@ import { useState } from "react";
 import { createPlaceAction } from "@/lib/actions";
 import { SubmitButton } from "@/components/submit-button";
 import { PlaceLookup } from "@/components/place-lookup";
+import { PLACE_KIND_LABELS } from "@/lib/utils";
+import type { PlaceKind } from "@prisma/client";
 
 export function NewPlaceForm() {
   const [name, setName] = useState("");
@@ -105,6 +107,19 @@ export function NewPlaceForm() {
           placeholder="例: 東京都港区南青山3-10-20"
           className={fieldClass}
         />
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-1">種類</label>
+        <select name="kind" defaultValue="" className={`${fieldClass} bg-white`}>
+          <option value="">未設定（サイト側で名前から推定）</option>
+          {(Object.keys(PLACE_KIND_LABELS) as PlaceKind[]).map((k) => (
+            <option key={k} value={k}>
+              {PLACE_KIND_LABELS[k]}
+            </option>
+          ))}
+        </select>
+        <p className="text-xs text-slate-400 mt-1">公開サイトの聖地マップでピンのアイコンと絞り込みに使う</p>
       </div>
 
       <div>

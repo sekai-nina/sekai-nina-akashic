@@ -3,6 +3,7 @@ import { requireApiAuth } from "@/lib/api-auth";
 import { getPlaceById, updatePlace, deletePlace } from "@/lib/domain/places";
 import { invalidatePlaces } from "@/lib/cache";
 import type { ClearanceLevel } from "@prisma/client";
+import { parsePlaceKind } from "@/lib/places/kind";
 
 export async function GET(
   request: Request,
@@ -26,6 +27,7 @@ export async function GET(
     longitude: place.longitude,
     googleMapsUrl: place.googleMapsUrl,
     address: place.address,
+    kind: place.kind,
     classification: place.classification,
     assetCount: place.entity._count.assets,
     createdAt: place.createdAt,
@@ -42,6 +44,11 @@ export async function PATCH(
 
   const { id } = await params;
   const body = await request.json();
+
+  const kind = parsePlaceKind(body.kind);
+  if (kind === false) {
+    return NextResponse.json({ error: "kind must be one of food, leisure, scenery, venue, shop" }, { status: 400 });
+  }
 
   // このルートには元々 assertClearance が無く、上位機密の付与を RLS の WITH CHECK
   // だけが止めていた。API キーは MCP と共通なので、アプリ層でも引き上げ/引き下げを検査する。
@@ -79,6 +86,7 @@ export async function PATCH(
       googleMapsUrl: body.googleMapsUrl,
       address: body.address,
       description: body.description,
+      kind,
       classification: body.classification as ClearanceLevel | undefined,
     },
     auth.clearance
@@ -94,6 +102,7 @@ export async function PATCH(
     longitude: place.longitude,
     googleMapsUrl: place.googleMapsUrl,
     address: place.address,
+    kind: place.kind,
     classification: place.classification,
     assetCount: place.entity._count.assets,
   });

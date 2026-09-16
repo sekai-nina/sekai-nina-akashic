@@ -7,7 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
 import { invalidateAssets, invalidateEntities, invalidatePlaces } from "@/lib/cache";
 import { redirect, RedirectType } from "next/navigation";
-import type { AssetKind, AssetStatus, TrustLevel, SourceType, StorageProvider, EntityType, TextType, SourceKind, AnnotationKind, RelationType, ClearanceLevel } from "@prisma/client";
+import type { AssetKind, AssetStatus, TrustLevel, SourceType, StorageProvider, EntityType, TextType, SourceKind, AnnotationKind, RelationType, ClearanceLevel, PlaceKind } from "@prisma/client";
 import { createInvitation, deleteInvitation as deleteInvitationDomain } from "@/lib/domain/invitations";
 import { backupAssetToDrive } from "@/lib/drive";
 import { createAssetRelation, deleteAssetRelation } from "@/lib/domain/relations";
@@ -594,6 +594,7 @@ export async function createPlaceAction(formData: FormData) {
       googleMapsUrl: (formData.get("googleMapsUrl") as string) || undefined,
       address: (formData.get("address") as string) || undefined,
       description: (formData.get("description") as string) || undefined,
+      kind: (formData.get("kind") as PlaceKind) || null,
       classification: (formData.get("classification") as ClearanceLevel) || undefined,
     },
     user.clearance
@@ -617,6 +618,8 @@ export async function updatePlaceAction(id: string, formData: FormData) {
       googleMapsUrl: formData.has("googleMapsUrl") ? (formData.get("googleMapsUrl") as string) || undefined : undefined,
       address: formData.has("address") ? (formData.get("address") as string) || undefined : undefined,
       description: formData.has("description") ? (formData.get("description") as string) || undefined : undefined,
+      // 空の選択は「未設定」に戻す (undefined = 変更なし と区別する)
+      kind: formData.has("kind") ? ((formData.get("kind") as PlaceKind) || null) : undefined,
       classification: (formData.get("classification") as ClearanceLevel) || undefined,
     },
     user.clearance
