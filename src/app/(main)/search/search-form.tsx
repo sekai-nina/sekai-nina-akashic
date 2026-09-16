@@ -7,6 +7,7 @@ import { ASSET_KIND_LABELS, ENTITY_TYPE_LABELS } from "@/lib/utils";
 import { EntityFilter } from "./entity-filter";
 import { AuthorFilter } from "./author-filter";
 import { CARRIED_PARAM_KEYS } from "./params";
+import { readSavedQuery, saveQuery, clearSavedQuery } from "./saved-query";
 import { GENERATION_LABELS } from "@/lib/members";
 
 const NINA_ENTITY_ID = "cmmtp8vrg0004mo381neyztvn";
@@ -18,51 +19,6 @@ const KIND_CHIPS = ["text", "image", "video", "audio", "document", "other"] as c
 
 // テキスト種別のサブフィルタ用タグ名
 const TEXT_SUB_TAGS = ["ブログ", "トーク"];
-
-// 直近の検索 URL の保存。同じタブ内で、最後の検索から一定時間以内のときだけ復元する
-const STORAGE_KEY = "search-last-query";
-const SAVED_QUERY_TTL_MS = 30 * 60 * 1000;
-
-interface SavedQuery {
-  qs: string;
-  savedAt: number;
-}
-
-function readSavedQuery(): string | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.sessionStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const saved = JSON.parse(raw) as Partial<SavedQuery>;
-    if (typeof saved.qs !== "string" || !saved.qs.startsWith("?")) return null;
-    if (typeof saved.savedAt !== "number" || Date.now() - saved.savedAt > SAVED_QUERY_TTL_MS) {
-      window.sessionStorage.removeItem(STORAGE_KEY);
-      return null;
-    }
-    return saved.qs;
-  } catch {
-    return null;
-  }
-}
-
-function saveQuery(qs: string) {
-  if (typeof window === "undefined") return;
-  try {
-    const saved: SavedQuery = { qs, savedAt: Date.now() };
-    window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
-  } catch {
-    // プライベートモード等で storage が使えなくても検索自体は動かす
-  }
-}
-
-function clearSavedQuery() {
-  if (typeof window === "undefined") return;
-  try {
-    window.sessionStorage.removeItem(STORAGE_KEY);
-  } catch {
-    // 同上
-  }
-}
 
 interface SearchFormProps {
   initialQ: string;
@@ -109,10 +65,8 @@ export function SearchForm({
     setSearching(false);
   }, [searchParams]);
 
-  // 結果を見に行って戻ってきたときにフィルタを復元するため、直近の検索 URL を覚えておく。
-  // 保存先は sessionStorage（タブを閉じれば消える）で、さらに TTL を切っている。
-  // localStorage に永続化すると、久しぶりに開いたトップページで過去のクエリが勝手に
-  // 検索されてしまうため。「新しく検索を始めたい」訪問では復元しない
+  // 結果を見に行って戻ってきたときにフィルタを復元するため、直近の検索 URL を覚えておく
+  // （保存の方針は saved-query.ts）
   const hydratedRef = useRef(false);
 
   useEffect(() => {
