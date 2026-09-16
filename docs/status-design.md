@@ -45,7 +45,7 @@
 |---|---|---|---|
 | 収集 | `collect.<DataSource.key>` | `DataSource.publisherPattern` / `titlePattern` で `SourceRecord` を絞り、最終 `createdAt` が閾値を超えたら warn。閾値は `SOURCE_FRESHNESS_MAX_AGE_HOURS`（blog 72h / talk 48h / hinaai 10d。直近 60 日の最大ギャップの実測から）。**YouTube 系 (hinachan / official_ch) は #101 を直すまで外している** | ✓ |
 | 収集 / 加工 / 外部ワーカー | `job.<Job.key>` | 未報告 → unknown。最終成功が `intervalSec × 3`（下限 15 分）を超えて古い → error（途絶）。最後の報告が error でも、**成功が `max(intervalSec, 15分)` 途絶えるまでは ok**（「直近の報告は失敗」を添える。一時的な失敗で ok ↔ error が往復して通知が 2 通ずつ出ないように）。`EXPECTED_JOBS` に無い key の報告も一覧に出る（外部ワーカー扱い） | ✓ |
-| 加工 | `process.discovery_unextracted` | 坂井新奈のブログで本文に「今日の発見」・タグ無し・**直近 7 日**に登録。1 件以上で warn。発見なしの回（「今日の発見はお休み」）も乗るが 7 日で消えるので永久には警告しない | ✓ |
+| 加工 | `process.discovery_unextracted` | 坂井新奈のブログで本文に「今日の発見」（bot と同じ正規表現で「今日の発券」「今日発見」も拾う）・タグ無し・**直近 7 日**に登録。1 件以上で warn。発見なしの回（「今日の発見はお休み」）も乗るが 7 日で消えるので永久には警告しない | ✓ |
 | 加工 | `process.thumbnails_pending` / `process.inbox_backlog` | 件数表示のみ（常に何件かあるので warn にしない）。サムネイルの条件は `src/lib/thumbnails` の `thumbnailPendingWhere()` を `pnpm cli:thumbnails` と共有 | ✗ |
 | 記事 | `articles.dirty` | dirty の件数と最古の編集日（`editedAt`、無ければ `updatedAt`）。7 日超で warn | ✓ |
 | 記事 | `articles.pending` | pending の紐づけ件数（表示のみ） | ✗ |
