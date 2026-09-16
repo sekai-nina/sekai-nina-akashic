@@ -24,6 +24,7 @@ import {
   Twitter,
   Grid3x3,
   FileText,
+  Activity,
 } from "lucide-react";
 import { QuickCreateModal } from "@/components/quick-create-modal";
 
@@ -46,6 +47,7 @@ const navItems = [
   { href: "/graph", label: "グラフ", icon: Network },
   { href: "/analysis", label: "テキスト分析", icon: BarChart3 },
   { href: "/dashboard", label: "ダッシュボード", icon: LayoutDashboard },
+  { href: "/status", label: "ステータス", icon: Activity },
 ];
 
 const adminItems = [
