@@ -117,6 +117,17 @@ enum PlaceStatus {
   candidate
 }
 
+// 聖地の種類。公開サイトの聖地マップでピンのアイコンと絞り込みに使う
+// (sekai-nina-site の src/utils/places.ts PlaceKind と同じ値の集合)。
+// 未設定 (null) の場所はサイト側が名前・説明から推定する
+enum PlaceKind {
+  food     // グルメ
+  leisure  // レジャー
+  scenery  // 寺社・公園・景色
+  venue    // 会場・放送局
+  shop     // 店・施設
+}
+
 enum DataSourceKind {
   blog
   talk
@@ -504,6 +515,7 @@ model Place {
   longitude      Float
   googleMapsUrl  String?
   address        String?
+  kind           PlaceKind?
   classification ClearanceLevel @default(internal)
   status         PlaceStatus    @default(confirmed)
   createdAt      DateTime       @default(now())
