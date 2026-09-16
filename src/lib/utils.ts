@@ -1,6 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { TextType, type ArticleType } from "@prisma/client";
+import { TextType, type ArticleType, type PlaceKind } from "@prisma/client";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -98,6 +98,15 @@ export const ENTITY_TYPE_LABELS: Record<string, string> = {
   source: "出典",
   event: "イベント",
   tag: "タグ",
+};
+
+// 表記は sekai-nina-site の聖地マップ (src/utils/places.ts KIND_LABELS) に合わせる。
+export const PLACE_KIND_LABELS: Record<PlaceKind, string> = {
+  food: "グルメ",
+  leisure: "レジャー",
+  scenery: "寺社・公園・景色",
+  venue: "会場・放送局",
+  shop: "店・施設",
 };
 
 export const RELATION_TYPE_LABELS: Record<string, string> = {

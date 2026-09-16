@@ -171,6 +171,7 @@ export function toPlaceSummary(place: PlaceSummaryInput, baseUrl: string) {
     longitude: place.longitude,
     address: place.address,
     googleMapsUrl: place.googleMapsUrl,
+    kind: place.kind,
     classification: place.classification,
     status: place.status,
     assetCount: place.entity._count?.assets ?? 0,

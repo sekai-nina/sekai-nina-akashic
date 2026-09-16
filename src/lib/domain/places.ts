@@ -1,4 +1,4 @@
-import { ClearanceLevel } from "@prisma/client";
+import { ClearanceLevel, type PlaceKind } from "@prisma/client";
 import { withClearance } from "@/lib/db";
 import { normalizeText } from "@/lib/utils";
 import { logAudit } from "./audit";
@@ -11,6 +11,7 @@ export interface CreatePlaceData {
   address?: string;
   description?: string;
   aliases?: string[];
+  kind?: PlaceKind | null;
   classification?: ClearanceLevel;
 }
 
@@ -21,6 +22,7 @@ export interface UpdatePlaceData {
   googleMapsUrl?: string;
   address?: string;
   description?: string;
+  kind?: PlaceKind | null; // null で未設定に戻す。undefined は変更なし
   classification?: ClearanceLevel;
 }
 
@@ -54,6 +56,7 @@ export async function createPlace(data: CreatePlaceData, clearance: string) {
         longitude: data.longitude,
         googleMapsUrl: data.googleMapsUrl ?? null,
         address: data.address ?? null,
+        kind: data.kind ?? null,
         classification: data.classification ?? "internal",
       },
       include: {
@@ -104,6 +107,7 @@ export async function updatePlace(id: string, data: UpdatePlaceData, clearance: 
         ...(data.longitude !== undefined ? { longitude: data.longitude } : {}),
         ...(data.googleMapsUrl !== undefined ? { googleMapsUrl: data.googleMapsUrl } : {}),
         ...(data.address !== undefined ? { address: data.address } : {}),
+        ...(data.kind !== undefined ? { kind: data.kind } : {}),
         ...(data.classification !== undefined ? { classification: data.classification } : {}),
       },
       include: {
