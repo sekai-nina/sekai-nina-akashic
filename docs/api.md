@@ -48,6 +48,11 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 | GET | `/assets/search` | read | 全文検索 |
 | GET | `/entities` | read | エンティティ一覧・検索 |
 | POST | `/entities` | write | エンティティ作成 |
+| GET | `/places` | read | 聖地一覧（緯度経度・住所・種類） |
+| POST | `/places` | write | 聖地作成 |
+| GET | `/places/:id` | read | 聖地詳細 |
+| PATCH | `/places/:id` | write | 聖地更新 |
+| DELETE | `/places/:id` | write | 聖地削除 |
 | POST | `/upload` | write | ファイルアップロード |
 | GET | `/lenses` | read | 観点一覧 |
 | POST | `/lenses` | write | 観点作成 |
@@ -411,6 +416,46 @@ API キーからは **引き上げしかできない。** `PATCH /assets/:id` �
 ```
 
 **必須フィールド:** `type`, `canonicalName`
+
+---
+
+## Places
+
+聖地（ロケ地・訪問先）。`Entity`（`type: "place"`）と対で管理され、`classification` によるクリアランス制御を受ける。公開サイト（sekai-nina-site）の聖地マップはビルド時に `GET /places` を読む。
+
+### GET /places
+
+クリアランス内の聖地をすべて返す（ページングなし、名前順）。
+
+```json
+[
+  {
+    "id": "cm...",
+    "entityId": "cm...",
+    "name": "SHE WOLF DINER",
+    "description": "2025年12月4日に下田衣珠季とハンバーガーを食べた",
+    "latitude": 35.6638,
+    "longitude": 139.7003,
+    "googleMapsUrl": "https://maps.app.goo.gl/...",
+    "address": "東京都渋谷区...",
+    "kind": "food",
+    "classification": "internal",
+    "assetCount": 3,
+    "createdAt": "...",
+    "updatedAt": "..."
+  }
+]
+```
+
+`kind` は聖地の種類で、公開サイトの地図でピンのアイコンと絞り込みに使う。`food`（グルメ）/ `leisure`（レジャー）/ `scenery`（寺社・公園・景色）/ `venue`（会場・放送局）/ `shop`（店・施設）/ `null`（未設定。サイト側が名前・説明から推定する）。
+
+### POST /places
+
+**必須フィールド:** `name`, `latitude`, `longitude`。任意: `googleMapsUrl`, `address`, `description`, `aliases`, `kind`, `classification`（既定 `internal`）。`kind` に上記以外の値を渡すと `400`。
+
+### PATCH /places/:id
+
+渡したフィールドだけ更新する。`kind` は `null` で未設定に戻せる。`classification` は引き上げのみ（前述）。
 
 ---
 
