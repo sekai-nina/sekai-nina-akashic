@@ -3,11 +3,14 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, MapPin } from "lucide-react";
 import { NewPlaceForm } from "./new-place-form";
+import { listAreaHints } from "@/lib/places/area-hints";
 
 export default async function NewPlacePage() {
   const session = await auth();
   if (!session?.user) notFound();
   if (!["admin", "member"].includes(session.user.role)) notFound();
+
+  const areaHints = await listAreaHints(session.user.clearance);
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -25,7 +28,7 @@ export default async function NewPlacePage() {
         </h1>
       </div>
 
-      <NewPlaceForm />
+      <NewPlaceForm areaHints={areaHints} />
     </div>
   );
 }

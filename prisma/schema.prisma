@@ -516,6 +516,9 @@ model Place {
   googleMapsUrl  String?
   address        String?
   kind           PlaceKind?
+  // 聖地マップのエリア (「東京」「横浜・川崎」「名古屋」等)。人が付ける自由文字列。
+  // 公開サイトの絞り込み・低ズームのまとまりに使う。未設定はサイト側で「その他」扱い
+  area           String?
   classification ClearanceLevel @default(internal)
   status         PlaceStatus    @default(confirmed)
   createdAt      DateTime       @default(now())

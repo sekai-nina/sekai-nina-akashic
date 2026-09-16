@@ -75,6 +75,9 @@ export default async function PlacesPage() {
               )}
             </div>
             <div className="shrink-0 ml-4 flex items-center gap-3 text-right">
+              {place.area && (
+                <span className="text-xs text-slate-500">{place.area}</span>
+              )}
               {place.kind && (
                 <span className="text-xs text-slate-500 border border-slate-200 rounded-full px-2 py-0.5">
                   {PLACE_KIND_LABELS[place.kind]}

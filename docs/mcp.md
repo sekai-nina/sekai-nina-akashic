@@ -46,7 +46,7 @@ pnpm cli:keygen <user-email> <key-name>
 | `akashic_search` | read | アセットの全文検索（本文・タイトル・OCR・書き起こし） |
 | `akashic_get_asset` | read | アセット 1 件の詳細（本文・エンティティ・出典） |
 | `akashic_list_entities` | read | 人物・聖地・タグ・番組の検索 |
-| `akashic_list_places` | read | 聖地一覧（緯度経度・住所・種類つき） |
+| `akashic_list_places` | read | 聖地一覧（緯度経度・住所・種類・エリアつき） |
 | `akashic_create_asset` | write | アセットの下書き登録（`status` は必ず `inbox`） |
 | `akashic_update_asset` | write | メタデータ・ステータス・本文の更新 |
 | `akashic_create_place` | write | 聖地登録（Google Maps URL / 緯度経度） |
@@ -152,6 +152,8 @@ MCP のツール引数はもともと zod で検証されるが、REST の `POST
 同名の聖地が既にある場合は作成せず、既存の `existingPlaceId` を返す。
 
 `kind`（聖地の種類: `food` / `leisure` / `scenery` / `venue` / `shop`）は公開サイトの聖地マップでピンのアイコンと絞り込みに使う。`akashic_update_place` では `null` を渡すと未設定に戻る（未設定の場所はサイト側が名前・説明から推定する）。
+
+`area`（エリア名。`東京` / `横浜・川崎` / `名古屋` など）は絞り込みと遠景でのまとまりに使う自由文字列。表記がブレると別エリアになるので、`akashic_list_places` で既存のエリア名を確認してから同じ表記で渡す。
 
 ### 記事ツール
 

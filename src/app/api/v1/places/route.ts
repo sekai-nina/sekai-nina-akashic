@@ -21,6 +21,7 @@ export async function GET(request: Request) {
     googleMapsUrl: p.googleMapsUrl,
     address: p.address,
     kind: p.kind,
+    area: p.area,
     classification: p.classification,
     assetCount: p.entity._count.assets,
     createdAt: p.createdAt,
@@ -45,6 +46,9 @@ export async function POST(request: Request) {
   if (kind === false) {
     return NextResponse.json({ error: "kind must be one of food, leisure, scenery, venue, shop" }, { status: 400 });
   }
+  if (body.area !== undefined && body.area !== null && typeof body.area !== "string") {
+    return NextResponse.json({ error: "area must be a string" }, { status: 400 });
+  }
 
   const place = await createPlace(
     {
@@ -56,6 +60,7 @@ export async function POST(request: Request) {
       description: body.description,
       aliases: body.aliases,
       kind,
+      area: body.area,
       classification: body.classification as ClearanceLevel | undefined,
     },
     auth.clearance
@@ -73,6 +78,7 @@ export async function POST(request: Request) {
       googleMapsUrl: place.googleMapsUrl,
       address: place.address,
       kind: place.kind,
+      area: place.area,
       classification: place.classification,
       assetCount: place.entity._count.assets,
     },

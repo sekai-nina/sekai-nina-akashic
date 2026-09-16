@@ -439,6 +439,7 @@ API キーからは **引き上げしかできない。** `PATCH /assets/:id` �
     "googleMapsUrl": "https://maps.app.goo.gl/...",
     "address": "東京都渋谷区...",
     "kind": "food",
+    "area": "東京",
     "classification": "internal",
     "assetCount": 3,
     "createdAt": "...",
@@ -449,13 +450,15 @@ API キーからは **引き上げしかできない。** `PATCH /assets/:id` �
 
 `kind` は聖地の種類で、公開サイトの地図でピンのアイコンと絞り込みに使う。`food`（グルメ）/ `leisure`（レジャー）/ `scenery`（寺社・公園・景色）/ `venue`（会場・放送局）/ `shop`（店・施設）/ `null`（未設定。サイト側が名前・説明から推定する）。
 
+`area` は聖地マップのエリア名（`東京` / `横浜・川崎` / `名古屋` など、人が付ける自由文字列）。公開サイトの絞り込みと遠景でのまとまりに使う。`null` はサイト側で「その他」扱い。既存のエリア名と同じ表記を使うこと（画面の入力欄は既存の名前を候補に出す）。
+
 ### POST /places
 
-**必須フィールド:** `name`, `latitude`, `longitude`。任意: `googleMapsUrl`, `address`, `description`, `aliases`, `kind`, `classification`（既定 `internal`）。`kind` に上記以外の値を渡すと `400`。
+**必須フィールド:** `name`, `latitude`, `longitude`。任意: `googleMapsUrl`, `address`, `description`, `aliases`, `kind`, `area`, `classification`（既定 `internal`）。`kind` に上記以外の値を渡すと `400`。
 
 ### PATCH /places/:id
 
-渡したフィールドだけ更新する。`kind` は `null` で未設定に戻せる。`classification` は引き上げのみ（前述）。
+渡したフィールドだけ更新する。`kind` / `area` は `null` で未設定に戻せる（`area` は空文字も未設定扱い）。`classification` は引き上げのみ（前述）。
 
 ---
 

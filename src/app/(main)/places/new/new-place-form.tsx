@@ -1,18 +1,30 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createPlaceAction } from "@/lib/actions";
 import { SubmitButton } from "@/components/submit-button";
 import { PlaceLookup } from "@/components/place-lookup";
 import { PLACE_KIND_LABELS } from "@/lib/utils";
 import type { PlaceKind } from "@prisma/client";
+import { nearestArea, type AreaHint } from "@/lib/places/area-hints";
 
-export function NewPlaceForm() {
+export function NewPlaceForm({ areaHints }: { areaHints: AreaHint[] }) {
   const [name, setName] = useState("");
   const [latitude, setLatitude] = useState("");
   const [longitude, setLongitude] = useState("");
   const [googleMapsUrl, setGoogleMapsUrl] = useState("");
   const [address, setAddress] = useState("");
+  const [area, setArea] = useState("");
+  const [areaTouched, setAreaTouched] = useState(false);
+
+  // 座標が決まったら、近く (重心から 30km 以内) の既存エリアを提案する。手で触ったら上書きしない
+  useEffect(() => {
+    if (areaTouched) return;
+    const lat = parseFloat(latitude);
+    const lng = parseFloat(longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    setArea(nearestArea(areaHints, lat, lng) ?? "");
+  }, [latitude, longitude, areaTouched, areaHints]);
 
   const fieldClass =
     "w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500";
@@ -107,6 +119,30 @@ export function NewPlaceForm() {
           placeholder="例: 東京都港区南青山3-10-20"
           className={fieldClass}
         />
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-1">エリア</label>
+        <input
+          type="text"
+          name="area"
+          list="place-area-hints"
+          value={area}
+          onChange={(e) => {
+            setAreaTouched(true);
+            setArea(e.target.value);
+          }}
+          placeholder="例: 東京 / 横浜・川崎 / 名古屋"
+          className={fieldClass}
+        />
+        <datalist id="place-area-hints">
+          {areaHints.map((h) => (
+            <option key={h.area} value={h.area}>{`${h.area}（${h.count}件）`}</option>
+          ))}
+        </datalist>
+        <p className="text-xs text-slate-400 mt-1">
+          公開サイトの聖地マップの絞り込みと、遠景でのまとまりに使う。座標を入れると近くの場所と同じエリアが入る
+        </p>
       </div>
 
       <div>
