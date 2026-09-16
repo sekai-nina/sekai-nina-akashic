@@ -19,6 +19,51 @@ const KIND_CHIPS = ["text", "image", "video", "audio", "document", "other"] as c
 // テキスト種別のサブフィルタ用タグ名
 const TEXT_SUB_TAGS = ["ブログ", "トーク"];
 
+// 直近の検索 URL の保存。同じタブ内で、最後の検索から一定時間以内のときだけ復元する
+const STORAGE_KEY = "search-last-query";
+const SAVED_QUERY_TTL_MS = 30 * 60 * 1000;
+
+interface SavedQuery {
+  qs: string;
+  savedAt: number;
+}
+
+function readSavedQuery(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const saved = JSON.parse(raw) as Partial<SavedQuery>;
+    if (typeof saved.qs !== "string" || !saved.qs.startsWith("?")) return null;
+    if (typeof saved.savedAt !== "number" || Date.now() - saved.savedAt > SAVED_QUERY_TTL_MS) {
+      window.sessionStorage.removeItem(STORAGE_KEY);
+      return null;
+    }
+    return saved.qs;
+  } catch {
+    return null;
+  }
+}
+
+function saveQuery(qs: string) {
+  if (typeof window === "undefined") return;
+  try {
+    const saved: SavedQuery = { qs, savedAt: Date.now() };
+    window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+  } catch {
+    // プライベートモード等で storage が使えなくても検索自体は動かす
+  }
+}
+
+function clearSavedQuery() {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // 同上
+  }
+}
+
 interface SearchFormProps {
   initialQ: string;
   initialKinds: string[];
@@ -64,30 +109,30 @@ export function SearchForm({
     setSearching(false);
   }, [searchParams]);
 
-  // Persist the current search URL so navigating away and back restores filters.
-  const STORAGE_KEY = "search-last-query";
+  // 結果を見に行って戻ってきたときにフィルタを復元するため、直近の検索 URL を覚えておく。
+  // 保存先は sessionStorage（タブを閉じれば消える）で、さらに TTL を切っている。
+  // localStorage に永続化すると、久しぶりに開いたトップページで過去のクエリが勝手に
+  // 検索されてしまうため。「新しく検索を始めたい」訪問では復元しない
   const hydratedRef = useRef(false);
 
   useEffect(() => {
     if (hydratedRef.current) return;
     hydratedRef.current = true;
-    // Hydrate only when the user lands on /search with no params at all.
+    // パラメータ無しで /search に来たときだけ復元する
     if (searchParams.toString().length > 0) return;
-    if (typeof window === "undefined") return;
-    const saved = window.localStorage.getItem(STORAGE_KEY);
-    if (saved && saved.startsWith("?")) {
+    const saved = readSavedQuery();
+    if (saved) {
       router.replace(`/search${saved}`, { scroll: false });
     }
-    // We deliberately ignore router/searchParams updates after the first mount.
+    // 初回マウント時のみ。以降の router/searchParams の変化は意図的に無視する
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Save the latest URL whenever the params change (so submissions are remembered).
+  // パラメータが変わるたびに保存する（検索・ページ送り・表示切替を覚える）
   useEffect(() => {
-    if (typeof window === "undefined") return;
     const qs = searchParams.toString();
     if (qs.length > 0) {
-      window.localStorage.setItem(STORAGE_KEY, `?${qs}`);
+      saveQuery(`?${qs}`);
     }
   }, [searchParams]);
 
@@ -101,9 +146,7 @@ export function SearchForm({
     for (const ref of [qInputRef, dateFromRef, dateToRef]) {
       if (ref.current) ref.current.value = "";
     }
-    if (typeof window !== "undefined") {
-      window.localStorage.removeItem(STORAGE_KEY);
-    }
+    clearSavedQuery();
     router.push("/search", { scroll: false });
   }, [router]);
 
