@@ -1,5 +1,24 @@
 import sharp from "sharp";
+import type { Prisma } from "@prisma/client";
 import { uploadToR2, isR2Configured, getR2PublicUrl } from "@/lib/r2";
+
+/**
+ * 「R2 にサムネイルが無い」画像・動画の条件。
+ * `pnpm cli:thumbnails` の対象と `/status` の未生成件数が同じ集合を見るための共通定義
+ * (別々に書くと「CLI では対象外なのに status では永久に減らない」ズレが黙って生まれる)。
+ * Drive 以外 (discord_url / external_url / local_none) は CLI が処理できないので含めない。
+ * `R2_PUBLIC_URL` が空だと `startsWith: ""` が全件に一致して条件が壊れるので、呼び出し側は
+ * `isR2Configured()` を先に見る。
+ */
+export function thumbnailPendingWhere(): Prisma.AssetWhereInput {
+  const publicUrl = process.env.R2_PUBLIC_URL ?? "";
+  return {
+    kind: { in: ["image", "video"] },
+    storageProvider: "gdrive",
+    storageKey: { not: null },
+    OR: [{ thumbnailUrl: null }, { thumbnailUrl: { not: { startsWith: publicUrl } } }],
+  };
+}
 
 const GALLERY_WIDTH = 640;
 const LIST_WIDTH = 200;

@@ -21,14 +21,28 @@ export async function listArticleFiles(root: string): Promise<string[]> {
   const out: string[] = [];
   const walk = async (dir: string) => {
     for (const name of await readdir(dir)) {
-      if (name.startsWith(".") || name === "_templates") continue;
+      if (isSkippedSegment(name)) continue;
       const p = join(dir, name);
       if ((await stat(p)).isDirectory()) await walk(p);
-      else if (name.endsWith(".md") && relative(root, p) !== "README.md") out.push(p);
+      else if (isArticlePath(relative(root, p))) out.push(p);
     }
   };
   await walk(root);
   return out;
+}
+
+function isSkippedSegment(name: string): boolean {
+  return name.startsWith(".") || name === "_templates";
+}
+
+/**
+ * リポジトリ相対の path が記事とみなす条件。`listArticleFiles` の walk と、GitHub の tree
+ * から未取り込みの記事を探す `/status` のチェックが同じ規則を使う。
+ */
+export function isArticlePath(relativePath: string): boolean {
+  const segments = relativePath.split("/");
+  if (segments.some(isSkippedSegment)) return false;
+  return relativePath.endsWith(".md") && relativePath !== "README.md";
 }
 
 /** CLI の `--dir <path>` か環境変数 `ARTICLES_DIR`。どちらも無ければ undefined */
