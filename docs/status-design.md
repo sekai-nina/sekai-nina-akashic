@@ -82,7 +82,7 @@
 
 ## 7. 既知の限界・今後
 
-- ハートビートの送信側は別 Issue（sekai-nina-discord-bot#30）。報告が来るまで `job.*` は「未報告」のまま
+- ハートビートの送信側は sekai-nina-discord-bot#31 で対応済み（blog_watch / site_watch / youtube_watch / talk_monitor ×2 / discovery）。`bot.discovery` は抽出が起きるまで「未報告」
 - どの write キーでもどの `key` にも報告できる（別 bot のキーで死んだ bot を健全に見せられる）。報告元の記録と制限は #102
 - YouTube 系の `DataSource`（hinachan / official_ch）は `titlePattern` が youtube_watch の登録形式に合わず、カバレッジの導出も新着を拾えていない（#101）。直したら `SOURCE_FRESHNESS_MAX_AGE_HOURS` に戻す
 - `articles.github_drift` は `short_id` の無い `.md`（取り込みが飛ばすもの）を「未取り込みの新規」に数える。今は該当なし
