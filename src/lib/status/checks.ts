@@ -112,7 +112,7 @@ const discoveryUnextracted: CheckDefinition = {
   key: "process.discovery_unextracted",
   group: "process",
   name: "今日の発見の抽出",
-  description: `直近 ${DISCOVERY_WINDOW_DAYS} 日の坂井新奈ブログで、本文に「今日の発見」があるのにタグが無いもの`,
+  description: `直近 ${DISCOVERY_WINDOW_DAYS} 日の坂井新奈ブログで、本文に「今日の発見」(誤字の「今日の発券」「今日発見」を含む) があるのにタグが無いもの`,
   notify: true,
   async run({ now }) {
     const since = new Date(now.getTime() - DISCOVERY_WINDOW_DAYS * 86_400_000);
@@ -131,7 +131,9 @@ const discoveryUnextracted: CheckDefinition = {
         )
         AND EXISTS (
           SELECT 1 FROM "AssetText" t
-          WHERE t."assetId" = a.id AND t."textType" = 'body' AND t.content LIKE '%今日の発見%'
+          WHERE t."assetId" = a.id AND t."textType" = 'body'
+            -- bot の DISCOVERY_MARKER と同じ揺れ (今日の発券 / 今日発見) を拾う
+            AND t.content ~ '今日の?発[見券]|今日のはっけん'
         )
         AND NOT EXISTS (
           SELECT 1 FROM "AssetEntity" te JOIN "Entity" tg ON tg.id = te."entityId"

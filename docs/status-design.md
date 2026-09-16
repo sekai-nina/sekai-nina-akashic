@@ -45,7 +45,7 @@
 |---|---|---|---|
 | 収集 | `collect.<DataSource.key>` | `DataSource.publisherPattern` / `titlePattern` で `SourceRecord` を絞り、最終 `createdAt` が閾値を超えたら warn。閾値は `SOURCE_FRESHNESS_MAX_AGE_HOURS`（blog 72h / talk 48h / hinaai 10d。直近 60 日の最大ギャップの実測から）。**YouTube 系 (hinachan / official_ch) は #101 を直すまで外している** | ✓ |
 | 収集 / 加工 / 外部ワーカー | `job.<Job.key>` | 未報告 → unknown。最終成功が `intervalSec × 3`（下限 15 分）を超えて古い → error（途絶）。最後の報告が error でも、**成功が `max(intervalSec, 15分)` 途絶えるまでは ok**（「直近の報告は失敗」を添える。一時的な失敗で ok ↔ error が往復して通知が 2 通ずつ出ないように）。`EXPECTED_JOBS` に無い key の報告も一覧に出る（外部ワーカー扱い） | ✓ |
-| 加工 | `process.discovery_unextracted` | 坂井新奈のブログで本文に「今日の発見」・タグ無し・**直近 7 日**に登録。1 件以上で warn。発見なしの回（「今日の発見はお休み」）も乗るが 7 日で消えるので永久には警告しない | ✓ |
+| 加工 | `process.discovery_unextracted` | 坂井新奈のブログで本文に「今日の発見」（bot と同じ正規表現で「今日の発券」「今日発見」も拾う）・タグ無し・**直近 7 日**に登録。1 件以上で warn。発見なしの回（「今日の発見はお休み」）も乗るが 7 日で消えるので永久には警告しない | ✓ |
 | 加工 | `process.thumbnails_pending` / `process.inbox_backlog` | 件数表示のみ（常に何件かあるので warn にしない）。サムネイルの条件は `src/lib/thumbnails` の `thumbnailPendingWhere()` を `pnpm cli:thumbnails` と共有 | ✗ |
 | 記事 | `articles.dirty` | dirty の件数と最古の編集日（`editedAt`、無ければ `updatedAt`）。7 日超で warn | ✓ |
 | 記事 | `articles.pending` | pending の紐づけ件数（表示のみ） | ✗ |
@@ -82,7 +82,7 @@
 
 ## 7. 既知の限界・今後
 
-- ハートビートの送信側は別 Issue（sekai-nina-discord-bot#30）。報告が来るまで `job.*` は「未報告」のまま
+- ハートビートの送信側は sekai-nina-discord-bot#31 で対応済み（blog_watch / site_watch / youtube_watch / talk_monitor ×2 / discovery）。`bot.discovery` は抽出が起きるまで「未報告」
 - どの write キーでもどの `key` にも報告できる（別 bot のキーで死んだ bot を健全に見せられる）。報告元の記録と制限は #102
 - YouTube 系の `DataSource`（hinachan / official_ch）は `titlePattern` が youtube_watch の登録形式に合わず、カバレッジの導出も新着を拾えていない（#101）。直したら `SOURCE_FRESHNESS_MAX_AGE_HOURS` に戻す
 - `articles.github_drift` は `short_id` の無い `.md`（取り込みが飛ばすもの）を「未取り込みの新規」に数える。今は該当なし

@@ -63,6 +63,7 @@ export const SOURCE_FRESHNESS_MAX_AGE_HOURS: Record<string, number> = {
 export const EXPECTED_JOBS: { key: string; name: string; group: CheckGroup }[] = [
   { key: "bot.blog_watch", name: "bot: ブログ監視", group: "collect" },
   { key: "bot.talk_monitor", name: "bot: トーク監視", group: "collect" },
+  { key: "bot.talk_monitor.blog", name: "bot: トーク監視 (ブログ言及)", group: "collect" },
   { key: "bot.site_watch", name: "bot: 公式サイト監視", group: "collect" },
   { key: "bot.youtube_watch", name: "bot: YouTube 監視", group: "collect" },
   { key: "bot.discovery", name: "bot: 今日の発見の抽出", group: "process" },
