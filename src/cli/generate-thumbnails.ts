@@ -21,6 +21,7 @@ import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { readFileSync, readdirSync, existsSync } from "fs";
 import { join } from "path";
 import "dotenv/config";
+import { thumbnailPendingWhere } from "@/lib/thumbnails";
 
 // 既定の DATABASE_URL は app_runtime ロールで RLS が効くため、CLI から素で繋ぐと
 // エラーではなく無言で 0 行になる。RLS をバイパスする DIRECT_URL を使う
@@ -243,26 +244,25 @@ async function main() {
     return;
   }
 
-  // 通常モード: Drive から画像をダウンロードしてサムネイル生成
+  // 通常モード: Drive から画像をダウンロードしてサムネイル生成。
+  // 対象の条件は /status の未生成件数と共有する (src/lib/thumbnails の thumbnailPendingWhere)
+  const pending = thumbnailPendingWhere();
   const where: Record<string, unknown> = {
-    storageProvider: "gdrive",
-    storageKey: { not: null },
+    storageProvider: pending.storageProvider,
+    storageKey: pending.storageKey,
   };
 
   if (kindFilter === "image" || kindFilter === "video") {
     where.kind = kindFilter;
   } else {
-    where.kind = { in: ["image", "video"] };
+    where.kind = pending.kind;
   }
 
   if (singleId) {
     where.id = singleId;
     delete where.kind;
   } else if (!force) {
-    where.OR = [
-      { thumbnailUrl: null },
-      { thumbnailUrl: { not: { startsWith: R2_PUBLIC_URL } } },
-    ];
+    where.OR = pending.OR;
   }
 
   const assets = await prisma.asset.findMany({

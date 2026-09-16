@@ -54,7 +54,7 @@ const clearance = auth.clearance;
 | ユーザーがデータを作成/更新/削除する | `withClearance(clearance, ...)` |
 | CLI ツール・Bot（内部処理） | `prismaInternal` |
 | 統計集計（全体カウント等） | `prismaInternal` |
-| User / Entity / Article の操作 | `prisma`（保護対象外テーブル） |
+| User / Entity / Article / Job / JobRun / StatusCheckState の操作 | `prisma`（保護対象外テーブル） |
 | Entity を一覧・検索でユーザーに返す | `listEntities` / `searchEntities` / `getEntityById`（`entityClearanceWhere` を通す） |
 
 ## 保護テーブル一覧
@@ -67,6 +67,8 @@ const clearance = auth.clearance;
 - `RepoCollection`, `RepoTweet`, `RepoTweetMedia`
 - `Lens`, `DataSource`, `Coverage`, `LensItemCheck`
 - `ArticleSource`（`Article` 自体は公開記事のミラーなので非保護）
+
+`Job` / `JobRun` / `StatusCheckState`（パイプライン監視 `/status`）は件数・時刻・メッセージしか持たない運用情報なので非保護。評価 (`src/lib/status/checks.ts`) は cron がセッション外で走らせるため保護テーブルを `prismaInternal` で数えるが、結果はログイン済み全員に見えるので **`detail` に写す名前・タイトルは `internal` 以下の行に限る**（`STATUS_VISIBLE_CLEARANCE`。今日の発見の SQL は `classificationFilterSql("internal")`、鮮度チェックは public / internal の `DataSource` だけ）。confidential 以上は件数にも入れない。本文は出さない（リンク先は各ページの RLS で守られる）。
 
 ## 新しいテーブルを追加するとき
 

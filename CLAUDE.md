@@ -131,7 +131,7 @@ src/
 └── middleware.ts
 ```
 
-主要ページ: `/search`（既定）, `/gallery`, `/assets`, `/inbox`, `/entities`, `/places`（聖地マップ）, `/dossiers`（特定支援）, `/testimonials`, `/repo`, `/coverage`, `/graph`, `/analysis`, `/dashboard`, `/admin/*`
+主要ページ: `/search`（既定）, `/gallery`, `/assets`, `/inbox`, `/entities`, `/places`（聖地マップ）, `/dossiers`（特定支援）, `/testimonials`, `/repo`, `/coverage`, `/graph`, `/analysis`, `/dashboard`, `/status`（パイプライン監視）, `/admin/*`
 
 ## コード規約
 
@@ -147,7 +147,7 @@ src/
 
 ## データモデル
 
-`prisma/schema.prisma`（26 モデル）。`Asset` がハブ。
+`prisma/schema.prisma`（28 モデル）。`Asset` がハブ。
 
 - `Entity` は `type`（person/place/source/event/tag）で 1 テーブル統合、`@@unique([type, canonicalName])`
 - `DossierItem` は `kind` で `asset_ref` / `external_link` / `external_image` の多態。**意図的に `@@unique([dossierId, assetId])` を持たない**（同一アセットを抜粋ごとに複数回追加できる）
@@ -182,6 +182,7 @@ src/
 
 - **Web: Vercel**。`vercel.json` で **region `hnd1` 固定**（Supabase ap-northeast-1 とのコロケーション。既定の iad1 だとページ読み込みが 5-8 秒かかった）
 - **CI**: `.github/workflows/ci.yml` が push to `main` で `pnpm typecheck` を回すだけ（Discord bot は撤去済み）
+- **Vercel Cron**: `vercel.json` の `*/15 * * * *` が `GET /api/cron/status` を呼ぶ（`CRON_SECRET` 必須。未設定なら 503 で何もしない）
 - `instrumentation.ts` が起動時に Prisma を事前接続（pooler の ~800ms コールドコネクト回避）
 
 ## ドキュメント
@@ -192,6 +193,7 @@ src/
 | `docs/api.md` | REST API v1 の完全仕様 |
 | `docs/mcp.md` | MCP サーバー（`/api/mcp`）の仕様と設計判断 |
 | `docs/coverage-design.md` | 収集カバレッジ設計書 |
+| `docs/status-design.md` | パイプライン監視（`/status`・ハートビート API・Cron 評価・Discord 通知）設計書 |
 | `docs/security.md` / `docs/security-admin.md` | 非エンジニア / 管理者向け |
 | `docs/architecture.md` | 設計の「なぜ」（RLS を中心に据えた理由、Asset/AssetText の分離、PGroonga 採用の理由） |
 

@@ -1,6 +1,12 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { TextType, type ArticleType, type PlaceKind } from "@prisma/client";
+import {
+  TextType,
+  type ArticleType,
+  type JobRunStatus,
+  type PlaceKind,
+  type StatusLevel,
+} from "@prisma/client";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -156,6 +162,51 @@ export const ARTICLE_FLAG_LABELS = {
   unlisted: "限定公開",
   ongoing: "進行中",
 } as const;
+
+/** パイプライン監視 (/status) のチェック状態 */
+export const STATUS_LEVEL_LABELS: Record<StatusLevel, string> = {
+  ok: "正常",
+  warn: "注意",
+  error: "異常",
+  unknown: "不明",
+};
+
+/** /status のチェックのグループ */
+export const CHECK_GROUP_LABELS = {
+  collect: "収集",
+  process: "加工",
+  articles: "記事",
+  workers: "外部ワーカー",
+  system: "akashic 自身",
+} as const;
+
+export type CheckGroup = keyof typeof CHECK_GROUP_LABELS;
+
+/** グループの表示順 (= CHECK_GROUP_LABELS の定義順) */
+export const CHECK_GROUPS = Object.keys(CHECK_GROUP_LABELS) as CheckGroup[];
+
+/** ハートビート (JobRun) の結果 */
+export const JOB_RUN_STATUS_LABELS: Record<JobRunStatus, string> = {
+  ok: "成功",
+  error: "失敗",
+};
+
+/**
+ * 「3 分前」「2 時間前」「5 日前」の相対表示。/status の「最終登録」「最終成功」に使う。
+ * 未来 (時計のずれ) は「たった今」に丸める。null は空文字。
+ */
+export function formatRelative(date: Date | string | null, now: Date = new Date()): string {
+  if (!date) return "";
+  const d = typeof date === "string" ? new Date(date) : date;
+  if (Number.isNaN(d.getTime())) return "";
+  const sec = Math.floor((now.getTime() - d.getTime()) / 1000);
+  if (sec < 60) return "たった今";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min} 分前`;
+  const hour = Math.floor(min / 60);
+  if (hour < 48) return `${hour} 時間前`;
+  return `${Math.floor(hour / 24)} 日前`;
+}
 
 /**
  * 未検証の文字列を TextType に絞り込む。

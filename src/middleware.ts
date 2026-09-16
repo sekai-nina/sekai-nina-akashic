@@ -54,9 +54,9 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // API キー認証の経路 (/api/v1/, /api/mcp) は Cookie を持たないので middleware を通す
-    // 意味がない。matcher から外して Supabase クライアントの生成ごと省く。
+    // API キー認証の経路 (/api/v1/, /api/mcp) と Vercel Cron (/api/cron/) は Cookie を持たないので
+    // middleware を通す意味がない。matcher から外して Supabase クライアントの生成ごと省く。
     // MCP は 1 セッションで initialize → tools/list → tools/call と何往復もするので効く。
-    "/((?!api/v1/|api/mcp|_next/static|_next/image|favicon.ico|icon.jpg|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!api/v1/|api/mcp|api/cron/|_next/static|_next/image|favicon.ico|icon.jpg|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
