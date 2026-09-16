@@ -70,6 +70,7 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 | GET | `/articles/:shortId` | read | 記事詳細（本文・frontmatter・出典） |
 | PATCH | `/articles/:shortId` | write | 記事の部分更新（`updatedAt` 必須の楽観ロック） |
 | POST | `/articles/:shortId/sources/:sourceId/apply` | write | 紐づけを反映済みにする（公開判断。internal 以下のみ） |
+| POST | `/jobs/:key/runs` | write | ハートビート（bot / ワーカーのジョブが実行結果を報告する） |
 
 ---
 
@@ -853,6 +854,56 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 | 409 | `conflict` | `updatedAt` が現在と違う。`updatedAt` に現在の値が付くので、それで再試行するか読み直す |
 
 記事の新規作成 API は無い（path / shortId の採番規則が未定。別 Issue）。
+
+---
+
+## パイプライン監視 (Jobs)
+
+bot や外部ワーカーの各ジョブが実行ごとに結果を報告し、akashic の `/status` が「報告が途絶えた」「失敗した」を検知する（設計は `docs/status-design.md`）。
+
+### POST /jobs/:key/runs
+
+1 サイクル分の実行結果を報告する。`key` は報告側が名乗る識別子（`^[a-z0-9][a-z0-9_.-]{0,63}$`。`bot.blog_watch` / `worker.stats` のように `<出所>.<ジョブ>`）。Job は**初回の報告で自動作成**される。
+
+```json
+{
+  "status": "ok",
+  "message": "",
+  "count": 2,
+  "durationMs": 1830,
+  "intervalSec": 60,
+  "name": "bot: ブログ監視"
+}
+```
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `status` | `"ok"` / `"error"` | ✓ | 例外で落ちた回は `error` |
+| `message` | string (≤2000) | | 失敗理由の**要約**。ok でも補足があれば |
+| `count` | integer ≥ 0 | | 処理した件数（登録した記事数など）。`0` は「無し」と同じ扱い |
+| `durationMs` | integer ≥ 0 | | 実行時間 |
+| `intervalSec` | integer ≥ 1 | | 実行間隔（秒）。**申告すると `/status` が「その 3 倍の時間、成功が無い」を途絶として検知する**（下限 15 分）。毎回送ってよい |
+| `name` | string (≤100) | | 表示名。無ければ `key` |
+
+未知のフィールドは 400（strict）。`key` が `^[a-z0-9][a-z0-9_.-]{0,63}$` に合わなければ 400。
+
+- **正常で何も無かった回も `ok` で報告する**（それが生存の証拠）。`ok` で `count` が無い報告は、最新の履歴行（`JobRun`）から 1 時間以内なら行を増やさず最終成功時刻だけ更新する（= 静かな成功は 1 時間に 1 行）
+- **`message` に本文や秘密を入れない。** `/status` はログイン済み全員に見え、要約は Discord にも流れる（要約は 200 字に切る）。例外の型と一言で十分。署名付き URL・トークン・処理対象のメッセージ本文は載せない
+- 1 回の `error` では `/status` は error にならない。**1 周期（下限 15 分）成功が無い**ときに error になる（一時的な失敗で通知が往復しないため）
+- 報告の失敗（akashic 側の障害）は報告側でログに残すだけにし、監視処理を止めない
+- 監査ログには残さない
+- どの write キーでもどの `key` にも報告できる（報告元の記録と制限は #102）
+
+**レスポンス:**
+
+```json
+{
+  "job": {"key": "bot.blog_watch", "name": "bot: ブログ監視", "intervalSec": 60, "lastRunAt": "…", "lastOkAt": "…", "lastStatus": "ok"},
+  "recorded": true
+}
+```
+
+`recorded` は履歴行を作ったかどうか（上のまとめ規則で作らなかったときは `false`）。
 
 ---
 
