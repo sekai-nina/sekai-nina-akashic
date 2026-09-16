@@ -9,6 +9,7 @@ import { SubmitButton } from "@/components/submit-button";
 import { ASSET_KIND_LABELS, PLACE_KIND_LABELS, formatDate } from "@/lib/utils";
 import type { PlaceKind } from "@prisma/client";
 import { PlaceDetailMap } from "./place-detail-map";
+import { listAreaHints } from "@/lib/places/area-hints";
 
 export default async function PlaceDetailPage({
   params,
@@ -33,6 +34,7 @@ export default async function PlaceDetailPage({
   ) as Array<{ id: string; createdAt: Date; asset: { id: string; title: string; kind: string; canonicalDate: Date | null; thumbnailUrl: string | null } }>;
 
   const canEdit = ["admin", "member"].includes(session.user.role);
+  const areaHints = canEdit ? await listAreaHints(session.user.clearance) : [];
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -92,6 +94,12 @@ export default async function PlaceDetailPage({
             <p className="text-sm text-slate-900">{place.address}</p>
           </div>
         )}
+        <div className="bg-white border border-slate-200 rounded-lg p-4">
+          <h3 className="text-xs font-medium text-slate-500 uppercase mb-2">エリア</h3>
+          <p className="text-sm text-slate-900">
+            {place.area ?? <span className="text-slate-400">未設定</span>}
+          </p>
+        </div>
         <div className="bg-white border border-slate-200 rounded-lg p-4">
           <h3 className="text-xs font-medium text-slate-500 uppercase mb-2">種類</h3>
           <p className="text-sm text-slate-900">
@@ -190,6 +198,23 @@ export default async function PlaceDetailPage({
                 defaultValue={place.address ?? ""}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
               />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">エリア</label>
+              <input
+                type="text"
+                name="area"
+                list="place-area-hints"
+                defaultValue={place.area ?? ""}
+                placeholder="例: 東京 / 横浜・川崎 / 名古屋"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+              />
+              <datalist id="place-area-hints">
+                {areaHints.map((h) => (
+                  <option key={h.area} value={h.area}>{`${h.area}（${h.count}件）`}</option>
+                ))}
+              </datalist>
+              <p className="text-xs text-slate-400 mt-1">公開サイトの聖地マップの絞り込みと、遠景でのまとまりに使う</p>
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">種類</label>

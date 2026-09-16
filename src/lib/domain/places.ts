@@ -12,6 +12,7 @@ export interface CreatePlaceData {
   description?: string;
   aliases?: string[];
   kind?: PlaceKind | null;
+  area?: string | null;
   classification?: ClearanceLevel;
 }
 
@@ -23,7 +24,15 @@ export interface UpdatePlaceData {
   address?: string;
   description?: string;
   kind?: PlaceKind | null; // null で未設定に戻す。undefined は変更なし
+  area?: string | null; // 同上
   classification?: ClearanceLevel;
+}
+
+// エリア名は前後の空白を落とし、空なら未設定 (null) にする
+export function normalizeArea(area: string | null | undefined): string | null | undefined {
+  if (area === undefined) return undefined;
+  const t = (area ?? "").trim();
+  return t ? t : null;
 }
 
 export type PlaceWithEntity = Awaited<ReturnType<typeof getPlaceById>> & {};
@@ -57,6 +66,7 @@ export async function createPlace(data: CreatePlaceData, clearance: string) {
         googleMapsUrl: data.googleMapsUrl ?? null,
         address: data.address ?? null,
         kind: data.kind ?? null,
+        area: normalizeArea(data.area) ?? null,
         classification: data.classification ?? "internal",
       },
       include: {
@@ -108,6 +118,7 @@ export async function updatePlace(id: string, data: UpdatePlaceData, clearance: 
         ...(data.googleMapsUrl !== undefined ? { googleMapsUrl: data.googleMapsUrl } : {}),
         ...(data.address !== undefined ? { address: data.address } : {}),
         ...(data.kind !== undefined ? { kind: data.kind } : {}),
+        ...(data.area !== undefined ? { area: normalizeArea(data.area) } : {}),
         ...(data.classification !== undefined ? { classification: data.classification } : {}),
       },
       include: {

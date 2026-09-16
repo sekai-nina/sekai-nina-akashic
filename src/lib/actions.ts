@@ -595,6 +595,7 @@ export async function createPlaceAction(formData: FormData) {
       address: (formData.get("address") as string) || undefined,
       description: (formData.get("description") as string) || undefined,
       kind: (formData.get("kind") as PlaceKind) || null,
+      area: (formData.get("area") as string) || null,
       classification: (formData.get("classification") as ClearanceLevel) || undefined,
     },
     user.clearance
@@ -620,6 +621,7 @@ export async function updatePlaceAction(id: string, formData: FormData) {
       description: formData.has("description") ? (formData.get("description") as string) || undefined : undefined,
       // 空の選択は「未設定」に戻す (undefined = 変更なし と区別する)
       kind: formData.has("kind") ? ((formData.get("kind") as PlaceKind) || null) : undefined,
+      area: formData.has("area") ? ((formData.get("area") as string) || null) : undefined,
       classification: (formData.get("classification") as ClearanceLevel) || undefined,
     },
     user.clearance

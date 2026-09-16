@@ -629,6 +629,12 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
           .describe(
             "聖地の種類 (公開サイトの地図でピンのアイコンになる): " + describeEnum(PLACE_KIND_LABELS)
           ),
+        area: z
+          .string()
+          .optional()
+          .describe(
+            "聖地マップのエリア名 (例: 東京 / 横浜・川崎 / 名古屋)。akashic_list_places で既存のエリア名を確認し、同じ表記を使う"
+          ),
         classification: z
           .enum($Enums.ClearanceLevel)
           .optional()
@@ -696,6 +702,7 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
             description: args.description,
             aliases: args.aliases,
             kind: args.kind,
+            area: args.area,
             classification,
           },
           user.clearance
@@ -741,6 +748,11 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
               describeEnum(PLACE_KIND_LABELS) +
               "。null で未設定に戻す"
           ),
+        area: z
+          .string()
+          .nullable()
+          .optional()
+          .describe("聖地マップのエリア名。既存のエリア名と同じ表記を使う。null で未設定に戻す"),
         classification: z
           .enum($Enums.ClearanceLevel)
           .optional()
@@ -797,6 +809,7 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
             address: args.address,
             description: args.description,
             kind: args.kind,
+            area: args.area,
             classification: args.classification,
           },
           user.clearance

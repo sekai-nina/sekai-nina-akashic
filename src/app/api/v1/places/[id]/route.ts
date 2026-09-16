@@ -28,6 +28,7 @@ export async function GET(
     googleMapsUrl: place.googleMapsUrl,
     address: place.address,
     kind: place.kind,
+    area: place.area,
     classification: place.classification,
     assetCount: place.entity._count.assets,
     createdAt: place.createdAt,
@@ -48,6 +49,9 @@ export async function PATCH(
   const kind = parsePlaceKind(body.kind);
   if (kind === false) {
     return NextResponse.json({ error: "kind must be one of food, leisure, scenery, venue, shop" }, { status: 400 });
+  }
+  if (body.area !== undefined && body.area !== null && typeof body.area !== "string") {
+    return NextResponse.json({ error: "area must be a string" }, { status: 400 });
   }
 
   // このルートには元々 assertClearance が無く、上位機密の付与を RLS の WITH CHECK
@@ -87,6 +91,7 @@ export async function PATCH(
       address: body.address,
       description: body.description,
       kind,
+      area: body.area,
       classification: body.classification as ClearanceLevel | undefined,
     },
     auth.clearance
@@ -103,6 +108,7 @@ export async function PATCH(
     googleMapsUrl: place.googleMapsUrl,
     address: place.address,
     kind: place.kind,
+    area: place.area,
     classification: place.classification,
     assetCount: place.entity._count.assets,
   });
