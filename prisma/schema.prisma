@@ -823,3 +823,92 @@ model ArticleSource {
   @@index([status])
   @@index([classification])
 }
+
+// ---------------------------------------------------------------------------
+// パイプライン監視 (/status)
+//
+// bot や外部ワーカーの各ジョブが実行結果を報告する受け口 (Job / JobRun) と、
+// Cron が評価したチェックの現在状態 (StatusCheckState)。いずれも件数・時刻・
+// メッセージしか持たない運用情報なので非保護 (RLS 対象外、素の prisma で触る)。
+// ---------------------------------------------------------------------------
+
+enum JobRunStatus {
+  ok
+  error
+}
+
+enum StatusLevel {
+  ok
+  warn
+  error
+  unknown
+}
+
+/// ハートビートを報告するジョブ。初回の報告で自動作成される
+model Job {
+  id   String @id @default(cuid())
+  /// 報告側が名乗る識別子 (bot.blog_watch / worker.stats など)
+  key  String @unique
+  name String
+  /// 報告側が申告する実行間隔 (秒)。null なら「報告が途絶えた」判定をしない
+  intervalSec Int?
+
+  lastRunAt   DateTime?
+  lastOkAt    DateTime?
+  lastStatus  JobRunStatus?
+  lastMessage String        @default("")
+
+  runs JobRun[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// ジョブの実行履歴。ok で count=0 の報告が続くときは行を増やさない (Job.lastOkAt だけ更新)
+model JobRun {
+  id    String @id @default(cuid())
+  jobId String
+  job   Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  status     JobRunStatus
+  message    String       @default("")
+  /// 処理した件数 (登録した記事数など)。報告側が任意で付ける
+  count      Int?
+  durationMs Int?
+
+  createdAt DateTime @default(now())
+
+  @@index([jobId, createdAt])
+  @@index([createdAt])
+}
+
+/// チェックごとの現在状態。Cron の評価結果を保存し、通知の遷移判定と /status の表示に使う。
+/// 表示に要る名前・グループも評価時に写しておく (/status は保護テーブルを読まずにこの表だけで描ける)
+model StatusCheckState {
+  id  String @id @default(cuid())
+  key String @unique
+
+  /// CHECK_GROUP_LABELS のキー (collect / process / articles / workers)
+  group       String
+  name        String
+  description String  @default("")
+  /// false は件数を眺めるだけの info チェック (Discord に通知しない)
+  notify      Boolean @default(true)
+
+  status  StatusLevel
+  summary String      @default("")
+  /// 一覧に出す補足 (アセット ID や記事の shortId など)。形はチェックごと
+  detail  Json        @default("{}")
+
+  /// 現在の status になった時刻
+  since          DateTime
+  evaluatedAt    DateTime
+  lastNotifiedAt DateTime?
+  /// 最後に Discord へ通知できた (または通知不要と判断して同期した) status。
+  /// 通知の遷移判定はこれと今回の status を比べる (前回の status ではない)。
+  /// 送信に失敗した回はここが進まないので、次の評価で同じ遷移をもう一度送れる
+  notifiedStatus StatusLevel?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
