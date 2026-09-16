@@ -7,6 +7,7 @@ import { ASSET_KIND_LABELS, ENTITY_TYPE_LABELS } from "@/lib/utils";
 import { EntityFilter } from "./entity-filter";
 import { AuthorFilter } from "./author-filter";
 import { CARRIED_PARAM_KEYS } from "./params";
+import { readSavedQuery, saveQuery, clearSavedQuery } from "./saved-query";
 import { GENERATION_LABELS } from "@/lib/members";
 
 const NINA_ENTITY_ID = "cmmtp8vrg0004mo381neyztvn";
@@ -64,31 +65,35 @@ export function SearchForm({
     setSearching(false);
   }, [searchParams]);
 
-  // Persist the current search URL so navigating away and back restores filters.
-  const STORAGE_KEY = "search-last-query";
+  // 結果を見に行って戻ってきたときにフィルタを復元するため、直近の検索 URL を覚えておく
+  // （保存の方針は saved-query.ts）
   const hydratedRef = useRef(false);
+  // 復元で差し替えた URL。これ由来の searchParams 変化は「検索した」に数えず、TTL を延ばさない
+  const restoredQsRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (hydratedRef.current) return;
     hydratedRef.current = true;
-    // Hydrate only when the user lands on /search with no params at all.
+    // パラメータ無しで /search に来たときだけ復元する
     if (searchParams.toString().length > 0) return;
-    if (typeof window === "undefined") return;
-    const saved = window.localStorage.getItem(STORAGE_KEY);
-    if (saved && saved.startsWith("?")) {
+    const saved = readSavedQuery();
+    if (saved) {
+      restoredQsRef.current = saved;
       router.replace(`/search${saved}`, { scroll: false });
     }
-    // We deliberately ignore router/searchParams updates after the first mount.
+    // 初回マウント時のみ。以降の router/searchParams の変化は意図的に無視する
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Save the latest URL whenever the params change (so submissions are remembered).
+  // パラメータが変わるたびに保存する（検索・ページ送り・表示切替を覚える）
   useEffect(() => {
-    if (typeof window === "undefined") return;
     const qs = searchParams.toString();
-    if (qs.length > 0) {
-      window.localStorage.setItem(STORAGE_KEY, `?${qs}`);
+    if (qs.length === 0) return;
+    if (`?${qs}` === restoredQsRef.current) {
+      restoredQsRef.current = null;
+      return;
     }
+    saveQuery(`?${qs}`);
   }, [searchParams]);
 
   const handleReset = useCallback(() => {
@@ -101,9 +106,7 @@ export function SearchForm({
     for (const ref of [qInputRef, dateFromRef, dateToRef]) {
       if (ref.current) ref.current.value = "";
     }
-    if (typeof window !== "undefined") {
-      window.localStorage.removeItem(STORAGE_KEY);
-    }
+    clearSavedQuery();
     router.push("/search", { scroll: false });
   }, [router]);
 
