@@ -3,7 +3,7 @@ import { frontmatterExtraKeys, toDateInputValue } from "@/lib/articles/edit";
 import { isAboveClearance } from "@/lib/classification";
 import { ArticleSourceStatus } from "@prisma/client";
 
-import type { getArticleByShortId, listArticles } from "./articles";
+import type { ArticleDetailRow, listArticles } from "./articles";
 
 /**
  * 記事を API キー経路 (REST `/api/v1/articles` と MCP の記事ツール) に返すときの形。
@@ -24,7 +24,6 @@ import type { getArticleByShortId, listArticles } from "./articles";
  */
 
 type ListedArticle = Awaited<ReturnType<typeof listArticles>>["items"][number];
-type ArticleDetailRow = NonNullable<Awaited<ReturnType<typeof getArticleByShortId>>>;
 type ArticleSourceRowWithAsset = ArticleDetailRow["sources"][number];
 
 const dateOnly = (d: Date | null) => toDateInputValue(d) || null;

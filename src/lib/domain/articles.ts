@@ -3,6 +3,12 @@ import { accessibleClassifications, assertClearance, isAboveClearance } from "@/
 import { logAudit } from "@/lib/domain/audit";
 import { nextSortOrder, nextSourceNo } from "@/lib/articles/apply";
 import {
+  deriveArticlePath,
+  generateShortId,
+  parseArticleCreateInput,
+  type ArticleCreateInput,
+} from "@/lib/articles/create";
+import {
   diffArticleEdit,
   parseArticleEditForm,
   toArticleEditValues,
@@ -13,6 +19,7 @@ import { mergeArticleEditPatch, type ArticleEditPatch } from "@/lib/articles/pat
 import { renderArticleMarkdown } from "@/lib/articles/frontmatter";
 import { buildCommitMessage, planPush, type PushPlan, type RenderedArticle } from "@/lib/articles/push";
 import { gitBlobSha } from "@/lib/github/blob";
+import { todayJst } from "@/lib/utils";
 import {
   commitFiles,
   getArticlesRepo,
@@ -160,31 +167,31 @@ export async function listArticles(opts: ListArticlesOptions) {
   });
 }
 
-export async function getArticleByShortId(shortId: string, clearance: string) {
-  return withClearance(clearance, (tx) =>
-    tx.article.findUnique({
-      where: { shortId },
-      include: {
-        sources: {
-          // pending 行の sortOrder は apply 後の行と同値になりうる (nextSortOrder は非 pending だけで
-          // 採る)。同値の並びが不定にならないよう紐づけた順で安定させる
-          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-          include: {
-            asset: {
-              select: {
-                id: true,
-                title: true,
-                kind: true,
-                canonicalDate: true,
-                thumbnailUrl: true,
-                classification: true,
-              },
-            },
-          },
+/** 記事詳細の形 (`ArticleSource` は保護テーブルなので `withClearance` の中でしか読まない) */
+const ARTICLE_DETAIL_INCLUDE = {
+  sources: {
+    // pending 行の sortOrder は apply 後の行と同値になりうる (nextSortOrder は非 pending だけで
+    // 採る)。同値の並びが不定にならないよう紐づけた順で安定させる
+    orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+    include: {
+      asset: {
+        select: {
+          id: true,
+          title: true,
+          kind: true,
+          canonicalDate: true,
+          thumbnailUrl: true,
+          classification: true,
         },
       },
-    }),
-  );
+    },
+  },
+} satisfies Prisma.ArticleInclude;
+
+export type ArticleDetailRow = Prisma.ArticleGetPayload<{ include: typeof ARTICLE_DETAIL_INCLUDE }>;
+
+export async function getArticleByShortId(shortId: string, clearance: string): Promise<ArticleDetailRow | null> {
+  return withClearance(clearance, (tx) => tx.article.findUnique({ where: { shortId }, include: ARTICLE_DETAIL_INCLUDE }));
 }
 
 /**
@@ -608,6 +615,150 @@ export async function patchArticle(
   const parsed = parseArticleEditForm(mergeArticleEditPatch(toArticleEditValues(current), patch));
   if (!parsed.ok) return { ok: false, reason: "invalid", errors: parsed.errors };
   return updateArticleFrom(shortId, current, expectedUpdatedAt, parsed.values, actor);
+}
+
+export type CreateArticleResult =
+  | { ok: true; article: ArticleDetailRow }
+  /** `parseArticleEditForm` の検証 (暦に無い日付 / 本文の長さ / dateMode) */
+  | { ok: false; reason: "invalid"; errors: Partial<Record<ArticleEditField, string>> }
+  /** タイトルから path を導出できない (`deriveArticlePath`) */
+  | { ok: false; reason: "invalid_path"; error: string }
+  /** 同じ path の記事が既にある。呼び出し側はその shortId を PATCH すればよい */
+  | { ok: false; reason: "path_exists"; path: string; existingShortId: string; existingTitle: string }
+  /** DB には無いが公開リポジトリに同じ path のファイルがある。取り込んでからでないと作れない */
+  | { ok: false; reason: "path_exists_upstream"; path: string };
+
+/**
+ * `shortId` の `@unique` 衝突で再採番する上限。62^7 ≈ 3.5 兆通りに対して 335 本なので
+ * 実質 1 回で決まる。上限に達したら乱数か DB がおかしいので投げる
+ */
+const SHORT_ID_ATTEMPTS = 5;
+
+/**
+ * P2002 が `meta.target` で示す衝突先に列名が含まれるか。
+ *
+ * Postgres + prisma-client-js は列名の配列 (`["path"]`) を返すが、制約名 (`"Article_path_key"`)
+ * を返す構成もある。どちらでも同じ分岐に入るよう部分一致で見る (外すと path 衝突が 409 ではなく
+ * 500 になる)。
+ */
+function isUniqueViolationOn(e: Prisma.PrismaClientKnownRequestError, column: string): boolean {
+  const target = e.meta?.target;
+  const parts = Array.isArray(target) ? target.map(String) : typeof target === "string" ? [target] : [];
+  return parts.some((t) => t.includes(column));
+}
+
+/**
+ * 公開リポジトリ側に同じ path のファイルがあるか (DB には無いもの)。
+ *
+ * **これを見ないと取り込みが止まる。** 上流にあって DB に無いファイル (Obsidian で足して未取り込み /
+ * `short_id` が無くて取り込まれない) と同じ path で作ると、
+ *
+ * - `planPush` は tree に path があるのに `githubSha` が null なので `not_imported` 扱いにし、
+ *   その記事は永久に push できない
+ * - 次の `pnpm cli:import-articles` は `pathConflicts` で **取り込み全体を中断する**
+ *   (`src/cli/import-articles.ts`。DB の行を人が消すまで 1 本も取り込めない)
+ *
+ * GitHub 未設定なら見ない (ローカル開発)。読みに失敗したときも作成は止めない — 記事の作成が
+ * GitHub の可用性に依存すると、トークン失効で書き込み経路ごと死ぬ。DB 側の検査は効いたままなので
+ * fail-open で構わない。比較は DB と同じく大文字小文字を無視する。
+ */
+async function pathExistsUpstream(path: string): Promise<boolean> {
+  if (!isGithubConfigured()) return false;
+  try {
+    const { tree } = await readUpstream();
+    const lower = path.toLowerCase();
+    for (const p of tree.keys()) if (p.toLowerCase() === lower) return true;
+    return false;
+  } catch (e) {
+    console.error("記事作成時の GitHub tree 照会に失敗 (作成は続行):", e);
+    return false;
+  }
+}
+
+/**
+ * 外部 (REST `POST /api/v1/articles` / MCP `akashic_create_article`) からの記事の新規作成。
+ *
+ * 採番規則と既定値は `src/lib/articles/create.ts` (#104)。入力は PATCH と同じ経路
+ * (`mergeArticleEditPatch` → `parseArticleEditForm`) で `ArticleEditValues` にするので、
+ * 正規化と検証が編集 UI / PATCH とズレない。
+ *
+ * - `shortId` はサーバが採番し、`@unique` 衝突 (P2002) なら再採番する
+ * - `path` の衝突は create の前に DB と公開リポジトリの両方で見る (`path_exists` /
+ *   `path_exists_upstream`)。読んでから書くまでに同じ path が作られた場合は create の P2002 で
+ *   同じ結果にする
+ * - 書く内容は `dirty = true` / `editedAt = now` / `githubSha = null` (規約。`githubSha` が null で
+ *   GitHub の tree に path が無ければ `planPush` が新規ファイルとして push する)。`slug` は null、
+ *   `frontmatterExtra` は `{}`
+ * - 出典 (`ArticleSource`) は作らない。紐づけは別経路 (#110)
+ * - 監査ログ `article.create` はここで書く (REST / MCP 共通)
+ *
+ * Article は非保護テーブルなので素の prisma。詳細と同じ形で返すために `sources` を足すが、
+ * **`include` では引かない** — 保護テーブルを素の prisma で読むと RLS で無言の 0 行になり、
+ * 「作成直後だから空」と「RLS で消えた」が型の上で区別できなくなる。空なのは事実なので直に置く。
+ */
+export async function createArticle(input: ArticleCreateInput, actor: ArticleActor): Promise<CreateArticleResult> {
+  const derived = deriveArticlePath(input.type, input.title);
+  if (!derived.ok) return { ok: false, reason: "invalid_path", error: derived.error };
+  const parsed = parseArticleCreateInput(input, todayJst());
+  if (!parsed.ok) return { ok: false, reason: "invalid", errors: parsed.errors };
+
+  const pathExists = async (): Promise<CreateArticleResult | null> => {
+    // 大文字小文字を無視して見る。`@@unique` は区別するので DB には両方入るが、
+    // macOS (case-insensitive な APFS) の checkout は片方しか実体化できず、取り込みと
+    // git status が永久に食い違う。Prisma の insensitive equals は `_` をワイルドカードに
+    // しない (実測) ので path をそのまま渡してよい
+    const owner = await prisma.article.findFirst({
+      where: { path: { equals: derived.path, mode: "insensitive" } },
+      select: { shortId: true, path: true, title: true },
+    });
+    // 既存のタイトルも返す: 全角置換は多対一なので「違う記事の本文を PATCH で潰す」判断材料が要る
+    return owner
+      ? { ok: false, reason: "path_exists", path: owner.path, existingShortId: owner.shortId, existingTitle: owner.title }
+      : null;
+  };
+  const existing = await pathExists();
+  if (existing) return existing;
+  const upstream = await pathExistsUpstream(derived.path);
+  if (upstream) return { ok: false, reason: "path_exists_upstream", path: derived.path };
+
+  for (let attempt = 1; ; attempt++) {
+    const shortId = generateShortId();
+    try {
+      const created = await prisma.article.create({
+        data: {
+          shortId,
+          path: derived.path,
+          slug: null,
+          ...parsed.values,
+          frontmatterExtra: {},
+          githubSha: null,
+          dirty: true,
+          editedAt: new Date(),
+        },
+      });
+      const article: ArticleDetailRow = { ...created, sources: [] };
+      await auditArticle(actor, {
+        action: "article.create",
+        targetType: "Article",
+        targetId: shortId,
+        metadata: { path: derived.path, title: article.title, type: article.type },
+      });
+      return { ok: true, article };
+    } catch (e) {
+      if (!(e instanceof Prisma.PrismaClientKnownRequestError) || e.code !== "P2002") throw e;
+      if (isUniqueViolationOn(e, "path")) {
+        // 読んでから書くまでに同じ path が作られた。owner が引けないのは消された直後なので投げる
+        const raced = await pathExists();
+        if (raced) return raced;
+        throw e;
+      }
+      if (!isUniqueViolationOn(e, "shortId")) throw e;
+      // 「重複しているので更新ツールを使え」と読める P2002 のままにしない (そんな記事は無い)
+      if (attempt >= SHORT_ID_ATTEMPTS) {
+        throw new Error(`shortId を ${SHORT_ID_ATTEMPTS} 回採番しても空きが見つかりませんでした`);
+      }
+    }
+  }
 }
 
 /**

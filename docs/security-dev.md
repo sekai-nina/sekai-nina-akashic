@@ -158,7 +158,7 @@ akashic が記事の真実になると、古い checkout から取り込むと D
 - **ファイルの blob SHA == DB の `githubSha` かつ path も同じ かつ `editedAt` が非 null の記事はスキップ**（上流が変わっていない = DB の編集の方が新しい）。SHA が違えば上流が新しいのでファイルで上書きし、akashic の編集を捨てた記事（`editedAt` が非 null だったもの）は最後に一覧で知らせる。`dirty` ではなく `editedAt` で見るのは、正規化だけの dirty まで守ると `--create-missing` や照合のやり直しが push まで効かなくなるため。path も見るのは、内容そのままのリネームをスキップすると DB が旧 path のまま残って push が `deleted_upstream` で衝突し続けるため。スキップしなかった記事は `editedAt` を null に戻す（値がファイルと同じで書き込みを省いた経路も同様）
 - **`--apply` は checkout の HEAD が origin/main と一致しない・`--dir` がリポジトリのトップレベルでないと止まる**（`compareCheckoutWithRemote`）。承知の上なら `--allow-stale`。dry-run でも同じ検査を警告として出す。未コミットの変更があるファイルは警告だけ（取り込むと push で衝突扱いになる）
 
-**push の出力に影響する書き込みは必ず `Article.dirty = true` と `editedAt = now` を立てること**（本文・frontmatter カラム・`ArticleSource` の `applied` / `public` への遷移）。`dirty` を立て忘れると push 画面に出ず、GitHub と DB が食い違ったまま気づけません。`editedAt` を立て忘れると、次の取り込みがその編集をファイルで黙って上書きします。現状この書き込みをするのは `updateArticle` / `patchArticle`（編集 UI と API の保存）と `applyArticleSource` の 3 つで、いずれも `src/lib/domain/articles.ts`。
+**push の出力に影響する書き込みは必ず `Article.dirty = true` と `editedAt = now` を立てること**（本文・frontmatter カラム・`ArticleSource` の `applied` / `public` への遷移）。`dirty` を立て忘れると push 画面に出ず、GitHub と DB が食い違ったまま気づけません。`editedAt` を立て忘れると、次の取り込みがその編集をファイルで黙って上書きします。現状この書き込みをするのは `updateArticle` / `patchArticle`（編集 UI と API の保存）、`createArticle`（API の新規作成）、`applyArticleSource` の 4 つで、いずれも `src/lib/domain/articles.ts`。
 
 ### 記事の編集 UI（`/articles/[shortId]/edit`）と API（`/api/v1/articles`）
 
@@ -168,6 +168,7 @@ akashic が記事の真実になると、古い checkout から取り込むと D
 - フォーム値の変換は `src/lib/articles/edit.ts` の純粋関数（vitest あり）。本文は `\r\n → \n` と先頭空行の除去だけ正規化し（`parseArticle` と同じ）、末尾は触らない。日付は `<input type="date">` の date-only を `parseFrontmatterDate` で UTC 深夜にする（取り込みと同じ規則。ここを変えると編集しただけで push に差分が出る）
 - **API（REST `PATCH` / MCP `akashic_update_article`）は同じ経路に合流する。** `ArticleEditPatchSchema`（`src/lib/articles/patch.ts`、zod。未知キーは除去）で検証した部分更新を現在値に重ねてフォームの形にし（`mergeArticleEditPatch`）、UI と同じ `parseArticleEditForm` → `updateArticleFrom` を通す（`patchArticle`）。`updatedAt` は API では body で必須（`UpdatedAtSchema`）。API は権限（`write`）だけを見て role は見ない（既存の REST と同じ）
 - 監査ログ（`article.update` / `article.source.apply`）は domain が `ArticleActor`（`id` + API キーなら `apiKeyId`）から書く。REST / MCP / 画面の 3 経路で書き分けない。MCP はさらに `mcp.<tool>` を 1 本足す
+- **新規作成（REST `POST /api/v1/articles` / MCP `akashic_create_article`）は `createArticle`。** 採番はサーバ側で行い、クライアントには `shortId` / `path` を指定させない（`src/lib/articles/create.ts`、vitest あり）。`shortId` は 7 桁 base62（公開サイトの `assign-slugs.ts` と同じ字母。公開サイトのビルドは `short_id` 欠落で落ちるので必ず振る。`@unique` 衝突は再採番）。`path` は `<type>/<ファイル名>.md` で、ファイル名はタイトルを NFC 正規化（#88）→ 制御文字除去 → `/ \ : * ? " < > |` を全角に置換 → trim したもの（タイトル側は NFC 正規化だけ。NFD のまま保存すると `[[タイトル]]` の完全一致解決から漏れる）。`.` / `_` 始まりと `readme` を含むファイル名は公開サイト（Astro / `EXCLUDED_SLUGS`）が無視するので 400。既定は `draft: true`。**これは公開サイトの記事ページに出さないだけで、push を止めるものではない**（本文は公開リポジトリに載り、後で消しても git 履歴に残る）。`Article` は非保護テーブルで本文の書き込みに classification のガードが無いのは下記のとおりで、作成 API はその範囲を「既存記事の本文」から「公開リポジトリに置くファイルの集合」へ広げる、`publishedAt` / `articleUpdatedAt` は今日（JST）。入力は PATCH と同じ `mergeArticleEditPatch` → `parseArticleEditForm` を通す。`githubSha = null` で作るので `planPush` が新規ファイルとして扱う。出典は作らない（#110）
 - `Article` は非保護テーブルなので、API から本文を書くこと自体には classification のガードが無い。保護アセットの抜粋が公開記事に入る経路のガードは apply 側（上の「紐づけの反映」）で、AI は抜粋を **apply できた出典だけ** 本文に書く前提
 
 ## DB 接続の構成

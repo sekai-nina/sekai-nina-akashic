@@ -67,6 +67,7 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 | POST | `/coverage/checks/bulk` | write | 範囲一括チェック |
 | GET | `/coverage/summary` | read | 公開サイト用の要約 |
 | GET | `/articles` | read | 記事一覧（`hasPending=true` で未反映の紐づけがある記事） |
+| POST | `/articles` | write | 記事の新規作成（`shortId` / `path` はサーバ採番。既定 `draft: true`） |
 | GET | `/articles/:shortId` | read | 記事詳細（本文・frontmatter・出典） |
 | PATCH | `/articles/:shortId` | write | 記事の部分更新（`updatedAt` 必須の楽観ロック） |
 | POST | `/articles/:shortId/sources/:sourceId/apply` | write | 紐づけを反映済みにする（公開判断。internal 以下のみ） |
@@ -682,6 +683,8 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 
 3 → 4 の順なのは、途中で止まっても「本文から参照されていない出典」（quote 記事では普通の状態）になるだけで、本文に宛先の無い `^[n]` が残らないため。
 
+記事を起こすところから任せるときは、先に `POST /articles` で作る（`draft: true` で作られるので push されても公開サイトには出ない。出典の紐づけと draft の解除は人が画面で行う。紐づけ API は #110）。
+
 書き込み系（PATCH / apply）は **`updatedAt` による楽観ロックが必須**。GET が返した `updatedAt`（ISO 8601）をそのまま渡し、その間に別の保存・取り込み・apply が入っていれば `409 {"reason": "conflict", "updatedAt": "<現在>"}` が返る（読み直して作り直す）。push は `updatedAt` を動かさないので、push を挟んでも通る。
 
 エラー応答の `reason` は機械可読な区別用（409 が衝突以外にも使われる apply で見る）。`conflict` 以外の 409 は再試行しても解消しない。
@@ -726,6 +729,60 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 ```
 
 `sourceCount` はキーの持ち主のクリアランスで見える行の数（`ArticleSource` は RLS 対象）。`pendingCount` と `hasPending` は **API から apply できる pending 行（`internal` 以下）だけ**を数える（下記）。
+
+### POST /articles
+
+記事を新規作成する。`title` と `type` が必須、残りは PATCH と同じ項目を省略可。`shortId` と `path` はサーバが採番する（クライアントは指定できない）。
+
+```json
+{
+  "title": "Yes, me now?",
+  "type": "quote",
+  "tags": ["歌詞"],
+  "body": "## 概要\n\n…",
+  "date": "2026-09-01"
+}
+```
+
+| フィールド | 型 | 備考 |
+|---|---|---|
+| `title` | string | **必須。空不可**（PATCH と違う）。`path` のファイル名になる |
+| `type` | `attribute` / `event` / `quote` / `column` / `item` | **必須**。`path` のディレクトリになる |
+| `tags` / `body` / `date` / `dateDisplay` / `dateMode` / `publishedAt` / `articleUpdatedAt` / `draft` / `unlisted` / `ongoing` | PATCH と同じ | 省略時は下の既定値。正規化・検証も PATCH と同じ |
+
+**省略時の既定値:**
+
+| フィールド | 既定 | 理由 |
+|---|---|---|
+| `draft` | `true` | 公開サイトの記事ページに出さない。**push そのものは止めないので、本文は公開リポジトリ（`sekai-nina-public`、public）に載る**。公開サイトに出すのは人が編集 UI か PATCH で `draft: false` にしたとき（作成時に `draft: false` を明示することもできる） |
+| `publishedAt` / `articleUpdatedAt` | 今日（JST） | Obsidian のテンプレートと同じ。呼び出し側が UTC で「今日」を計算すると JST 0〜9 時に 1 日ずれるので、省略してサーバに任せるのが安全 |
+| `date` | null | event 以外はほぼ空。出来事の日は明示する |
+| `tags` / `body` | `[]` / `""` | |
+| `dateDisplay` / `dateMode` | null | |
+| `unlisted` / `ongoing` | `false` | |
+
+明示した `null` / `""` は空のまま（今日で埋めない）。
+
+**採番規則:**
+
+- `shortId`: 7 桁 base62 のランダム（公開サイトの `scripts/assign-slugs.ts` と同じ。衝突なら再採番）
+- `path`: `<type>/<ファイル名>.md`。ファイル名はタイトルを **NFC に正規化 → 制御文字を除去 → ファイル名に使えない `/ \ : * ? " < > |` を全角 `／ ＼ ： ＊ ？ ” ＜ ＞ ｜` に置換 → 前後の空白を trim** したもの（上の例は `quote/Yes, me now？.md`）。**タイトルは NFC 正規化だけで、全角置換はしない**（`title` は `Yes, me now?` のまま）
+- 409 は**導出後の path** で判定し、大文字小文字は区別しない（macOS の checkout が `abc.md` と `ABC.md` を同時に持てないため）。`Yes, me now?` と `Yes, me now？` は同じ `path` になるので衝突する。全角置換は多対一なので、`path_exists` の応答には既存記事の `title` も入る
+- 判定は DB だけでなく**公開リポジトリの tree に対しても行う**（`ARTICLES_GITHUB_TOKEN` がある環境のみ。取り込み前のファイルと同じ path で作ると、次の取り込みが中断し、その記事も永久に push できなくなる）
+- タイトルは NFC に正規化し、制御文字を取り除いてから保存する（`\u0000` は Postgres の `text` に入らず、他の C0 文字は公開リポジトリの `title:` に不可視文字として残る）
+- 作成後にタイトルを変えても `path` は追随しない（PATCH と同じ）。`slug` は null、モデル外の frontmatter は空
+
+**レスポンス:** `201` で `GET /articles/:shortId` と同じ形（`sources` は空）。`updatedAt` は続けて PATCH するときの楽観ロックに使う。
+
+| ステータス | `reason` | 意味 |
+|---|---|---|
+| 400 | | JSON / 型の誤り、`title` / `type` の欠落・空（zod の検証。`reason` なし） |
+| 400 | `invalid` | 暦に無い日付・本文の長さ超過・`dateMode` 不正（`fieldErrors` 付き） |
+| 400 | `invalid_path` | `path` にできないタイトル（`.` / `_` 始まり、`readme` を含む、ファイル名が 255 バイト超）。理由は `fieldErrors.title` |
+| 409 | `path_exists` | 同じ `path` の記事が既にある（大文字小文字は区別しない）。`{"reason": "path_exists", "path": "…", "shortId": "<既存>", "title": "<既存のタイトル>"}`。再試行せず、同じ題材ならその `shortId` を PATCH し、別の記事ならタイトルを変える |
+| 409 | `path_exists_upstream` | 公開リポジトリに同じ `path` のファイルがあるが、akashic に取り込まれていない。**そのまま作ると取り込みが止まる**ので作らせない。別のタイトルにするか、先に `pnpm cli:import-articles` を実行してもらう |
+
+書いたら `dirty = true` / `editedAt = now` になり、次の push で新規ファイルとして公開リポジトリに載る。`path` は必ず `<type>/` 始まりなので、`quiz/` 配下（実データ 3 本。`type` は `attribute`）はこの API からは作れない。出典（`ArticleSource`）は作成時には付かない。
 
 ### GET /articles/:shortId
 
@@ -853,7 +910,7 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 | 409 | `asset_missing` | 紐づけ先の Asset が削除済み。再試行しない |
 | 409 | `conflict` | `updatedAt` が現在と違う。`updatedAt` に現在の値が付くので、それで再試行するか読み直す |
 
-記事の新規作成 API は無い（path / shortId の採番規則が未定。別 Issue）。
+記事の削除 API は無い（削除は画面から人間が行う）。出典を pending で紐づける API は #110。
 
 ---
 
@@ -987,6 +1044,31 @@ requests.patch(f"{API}/articles/{article['shortId']}", json={
     "body": body,
     "articleUpdatedAt": "2026-09-16",
 }, headers=HEADERS)
+```
+
+### AI エージェントが記事を起こす
+
+```python
+# draft: true / publishedAt・articleUpdatedAt = 今日 (JST) で作られる。shortId / path はサーバ採番
+created = requests.post(f"{API}/articles", json={
+    "title": "好きな時間帯",
+    "type": "attribute",
+    "tags": ["生活"],
+    "body": "## 概要\n\n…",
+}, headers=HEADERS)
+if created.status_code == 409:            # 同じ path の記事が既にある → そちらを PATCH する
+    short_id = created.json()["shortId"]
+    article = requests.get(f"{API}/articles/{short_id}", headers=HEADERS).json()
+else:
+    created.raise_for_status()            # 400 は入力の誤り (fieldErrors を見る)
+    article = created.json()              # GET /articles/:shortId と同じ形
+
+# 続けて直すときは (読み直さずに) 返った updatedAt を渡す
+requests.patch(f"{API}/articles/{article['shortId']}", json={
+    "updatedAt": article["updatedAt"],
+    "body": article["body"] + "\n追記\n",
+}, headers=HEADERS)
+# 出典の紐づけと draft の解除は人が画面で行う (紐づけ API は #110)
 ```
 
 ### 他システム（facebench等）からアセットを検索・取得
