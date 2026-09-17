@@ -67,6 +67,7 @@ const clearance = auth.clearance;
 - `RepoCollection`, `RepoTweet`, `RepoTweetMedia`
 - `Lens`, `DataSource`, `Coverage`, `LensItemCheck`
 - `ArticleSource`（`Article` 自体は公開記事のミラーなので非保護）
+- `MeetGreet`（ミーグリ記事ワークフロー。ドシエを include する読みは所有者判定が要るので `withSession`）
 
 `Job` / `JobRun` / `StatusCheckState`（パイプライン監視 `/status`）は件数・時刻・メッセージしか持たない運用情報なので非保護。評価 (`src/lib/status/checks.ts`) は cron がセッション外で走らせるため保護テーブルを `prismaInternal` で数えるが、結果はログイン済み全員に見えるので **`detail` に写す名前・タイトルは `internal` 以下の行に限る**（`STATUS_VISIBLE_CLEARANCE`。今日の発見の SQL は `classificationFilterSql("internal")`、鮮度チェックは public / internal の `DataSource` だけ）。confidential 以上は件数にも入れない。本文は出さない（リンク先は各ページの RLS で守られる）。
 

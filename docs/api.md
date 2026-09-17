@@ -71,6 +71,12 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 | PATCH | `/articles/:shortId` | write | 記事の部分更新（`updatedAt` 必須の楽観ロック） |
 | POST | `/articles/:shortId/sources/:sourceId/apply` | write | 紐づけを反映済みにする（公開判断。internal 以下のみ） |
 | POST | `/jobs/:key/runs` | write | ハートビート（bot / ワーカーのジョブが実行結果を報告する） |
+| GET | `/meetgreets` | read | ミーグリ（記事ワークフロー）一覧と進み具合 |
+| POST | `/meetgreets` | write | ミーグリ作成（ドシエと X レポ収集を自動作成し収集を 1 回実行、素材候補を返す） |
+| GET | `/meetgreets/:id` | read | ミーグリ詳細 + 素材候補 |
+| PATCH | `/meetgreets/:id` | write | シングル名・呼び分け・スケッチ追加指示の更新 |
+| POST | `/meetgreets/:id/materials` | write | 素材候補のチェック結果をドシエに反映 |
+| POST | `/meetgreets/:id/reports` | write | X レポの再収集 |
 
 ---
 
@@ -854,6 +860,123 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 | 409 | `conflict` | `updatedAt` が現在と違う。`updatedAt` に現在の値が付くので、それで再試行するか読み直す |
 
 記事の新規作成 API は無い（path / shortId の採番規則が未定。別 Issue）。
+
+---
+
+## ミーグリ記事ワークフロー (MeetGreets)
+
+ミーグリ 1 回分の記事を作る手順（素材のドシエ → X レポ → スケッチ → 記事）を akashic で完結させるための器（設計は #106）。1 回のミーグリにつき 1 行で、素材置き場の `Dossier`（1:1、作成時に自動生成）・X レポの `RepoCollection`・生成した `Article` を束ねる。Discord bot はここを叩いて「確認はこちら」のリンクを返す想定。
+
+`MeetGreet` は保護テーブル（`classification`、既定 `internal`）。一覧・詳細は API キーの持ち主の clearance で見える行だけ。
+
+### GET /meetgreets
+
+日付降順の一覧。各行に進み具合（ドシエの件数 / keep 件数 / スケッチ有無 / 記事有無）が付く。
+
+```json
+{
+  "items": [
+    {
+      "id": "…",
+      "date": "2026-08-01",
+      "format": "real",
+      "single": "17thシングル「Kind of love」",
+      "label": "京都",
+      "classification": "internal",
+      "dossier": {"id": "…", "title": "2026-08-01 京都リアミ", "itemCount": 18, "updatedAt": "…"},
+      "repoCollection": {"id": "…", "name": "…", "lastFetchedAt": "…", "keep": 8, "total": 99},
+      "article": null,
+      "sketch": {"key": null, "url": null, "candidates": [], "extraPrompt": ""},
+      "createdBy": {"id": "…", "name": "…"},
+      "createdAt": "…",
+      "updatedAt": "…"
+    }
+  ]
+}
+```
+
+- `format` は `online` / `real`。記事のタイトル・地の文では「オンラインミーグリ / リアルミーグリ」（略称は使わない）
+- `date` は JST の暦日（`YYYY-MM-DD`）。ISO 日時ではない
+- `article` は記事生成（#109）後に埋まる。`sketch` はスケッチ生成（#108）後に埋まる
+
+### POST /meetgreets
+
+起点。1 回の呼び出しで次を行う:
+
+1. ドシエを `"<date> <label><オンミ|リアミ>"`（例: `2026-08-01 京都リアミ`）で作成。`viewMode` / `editMode` は `clearance`（キーの持ち主以外も編集できるように）
+2. X レポ収集（`RepoCollection`）を既定のハッシュタグ条件（`src/lib/meetgreet/config.ts` の `reportTagGroups`。オンライン = `(#坂井新奈 #ミーグリ) OR #にぃぐり`、リアルはさらに `#リアルミーグリ` / `#リアルレポ` / `#坂井新奈` 単独）、期間 = 当日〜翌日 で作成し、**収集を 1 回走らせる**
+3. 素材候補（下記）を返す
+
+```json
+{
+  "date": "2026-08-01",
+  "format": "real",
+  "single": "17thシングル「Kind of love」",
+  "label": "京都",
+  "classification": "internal"
+}
+```
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `date` | `YYYY-MM-DD` | ✓ | 開催日（JST） |
+| `format` | `"online"` / `"real"` | ✓ | 形式 |
+| `single` | string (≤200) | | シングル名。記事 frontmatter の `meetgreet.single` に出る |
+| `label` | string (≤50) | | 回の呼び分け（通常 / 初回限定盤 / 京都 など）。ドシエ・収集の名前に付くだけ |
+| `classification` | enum | | 既定 `internal`。キーの持ち主の clearance より上は 403 |
+
+未知のフィールドは 400（strict）。
+
+**レスポンス（201）:** 一覧の 1 行と同じ形に `fetch` と `candidates` が付く。
+
+```json
+{
+  "id": "…",
+  "…": "…",
+  "fetch": {"ok": true, "result": {"fetched": 99, "added": 99, "mediaSaved": 120}},
+  "candidates": [
+    {
+      "key": "blog:https://www.hinatazaka46.com/s/official/diary/detail/70435",
+      "kind": "blog",
+      "title": "坂井新奈ブログ「待ち合わせ🎐」",
+      "url": "https://www.hinatazaka46.com/s/official/diary/detail/70435",
+      "matched": true,
+      "assets": [
+        {"id": "…", "kind": "text", "title": "坂井新奈ブログ「待ち合わせ🎐」", "canonicalDate": "…", "thumbnailUrl": null, "inDossier": false, "suggested": true},
+        {"id": "…", "kind": "image", "title": "坂井新奈ブログ「待ち合わせ🎐」 (1/11)", "canonicalDate": "…", "thumbnailUrl": "https://…", "inDossier": false, "suggested": true}
+      ]
+    },
+    {"key": "talk", "kind": "talk", "title": "トーク", "url": null, "matched": false, "assets": ["…"]}
+  ]
+}
+```
+
+- **X の収集失敗は 201 のまま `fetch.ok = false`**（`error` に理由）。recent search は直近 7 日しか遡れないので、古い日付では必ず失敗する。あとから `POST /meetgreets/:id/reports` で再収集できる
+- `candidates` は当日〜10 日後の、坂井新奈が付いたアセットを **出典で分類**したもの（`kind`: `blog` = 本人ブログ / `staff` = ひなたぼっこ日記 / `talk` = トーク / `other`）。ブログは URL ごとに 1 グループ
+- `suggested` が初期チェック（本文にミーグリの話があるブログ = `matched` の全アセット、当日〜翌日のトーク画像 / 動画、本文にミーグリの話があるトークのテキスト）。`inDossier` は既にドシエに入っている
+- 抜粋（本人の感想）はここでは付かない。ドシエ側の範囲選択（#108 で LLM の提案が入る）
+
+### GET /meetgreets/:id
+
+一覧の 1 行 + `candidates`（`POST` と同じ形。`inDossier` は現在のドシエの状態を反映）。
+
+### PATCH /meetgreets/:id
+
+`single` / `label` / `extraSketchPrompt` を部分更新（渡した項目だけ変わる）。`date` / `format` は変えられない（変えたければ作り直す。ドシエ・収集は残る）。
+
+### POST /meetgreets/:id/materials
+
+```json
+{"assetIds": ["…", "…"]}
+```
+
+指定したアセットをドシエに `asset_ref` で入れる（caption = アセットのタイトル）。**同じアセットは 2 回入らない**（既にある / キーの clearance で見えない / 存在しないものは `skipped` に数えて飛ばす）。
+
+**レスポンス:** `{"added": 12, "skipped": 2, "dossierId": "…"}`
+
+### POST /meetgreets/:id/reports
+
+X レポを再収集する（作成時に失敗したとき、翌日以降の投稿を拾うとき）。ボディ無し。成功で `{"fetched": n, "added": n, "mediaSaved": n}`、X API の失敗は 502。keep / total は `GET /meetgreets/:id` の `repoCollection` で読む。判定（keep / reject）自体の API は無い（画面 `/repo/:id` で人が行う）。
 
 ---
 

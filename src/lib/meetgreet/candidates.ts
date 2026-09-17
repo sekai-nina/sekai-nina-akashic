@@ -1,0 +1,174 @@
+/**
+ * ミーグリの素材候補 (ブログ / トーク) の分類と初期チェックの判定。
+ *
+ * DB を触らない純粋関数。分類は `asset.kind` ではなく **出典 (SourceRecord)** で行う
+ * (トークのスクショは `kind: image` で来るので、kind で分けるとブログ画像に化ける。
+ * sekai-nina-site の generate.py で実戦で判明したルール)。
+ *
+ *   - 本人ブログ: 出典 URL が `/diary/detail/`。URL ごとに 1 グループ (本文 text + 画像)
+ *   - ひなたぼっこ日記 (運営ブログ): 出典 URL が `/diary/manager/`。本文 text には本人の
+ *     人物エンティティが付かないので、候補の外から本文を引いて (staffTexts) キーワード判定する
+ *   - トーク: `トーク` タグ、または出典タイトルが `Talk` 始まり
+ *   - その他: 上のどれでもない (YouTube 等)。列挙はするが初期チェックしない
+ */
+
+import type { AssetKind } from "@prisma/client";
+import { MEETGREET_KEYWORDS, TALK_SUGGEST_DAYS } from "./config";
+
+export type CandidateGroupKind = "blog" | "staff" | "talk" | "other";
+
+export interface CandidateAssetInput {
+  id: string;
+  kind: AssetKind;
+  title: string;
+  /** Asset.canonicalDate (JST 深夜 = 前日 15:00 UTC の規約) */
+  canonicalDate: Date | null;
+  thumbnailUrl: string | null;
+  source: { url: string | null; title: string } | null;
+  /** body / message_body の本文。キーワード判定にだけ使う */
+  text: string | null;
+  hasTalkTag: boolean;
+}
+
+export interface CandidateAsset {
+  id: string;
+  kind: AssetKind;
+  title: string;
+  canonicalDate: string | null;
+  thumbnailUrl: string | null;
+  /** 既にドシエに入っている (チェック不可・済み表示) */
+  inDossier: boolean;
+  /** 初期チェック */
+  suggested: boolean;
+}
+
+export interface CandidateGroup {
+  key: string;
+  kind: CandidateGroupKind;
+  /** ブログの題 / 「トーク」/ 「その他」 */
+  title: string;
+  url: string | null;
+  /** グループ内にキーワード一致の本文があった (ブログ / 運営ブログ) */
+  matched: boolean;
+  assets: CandidateAsset[];
+}
+
+export interface ClassifyOptions {
+  /** 開催日 (JST "YYYY-MM-DD") */
+  date: string;
+  /** 既にドシエに入っているアセット ID */
+  inDossier: Set<string>;
+  /** 運営ブログの URL → 本文。候補 (本人タグ付き) には本文 text が含まれないので別引き */
+  staffTexts: Map<string, string>;
+}
+
+export function matchesKeywords(text: string | null | undefined): boolean {
+  if (!text) return false;
+  return MEETGREET_KEYWORDS.some((k) => text.includes(k));
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** "YYYY-MM-DD" → その JST 暦日を表す Date (UTC 深夜。canonicalDate の JST 規約は呼び出し側で合わせる) */
+function dayIndex(date: Date | null, base: string): number | null {
+  if (!date) return null;
+  // canonicalDate は JST 深夜 = UTC 15:00 前日。+9h して UTC 暦日に寄せてから差を取る
+  const jst = new Date(date.getTime() + 9 * 3600 * 1000);
+  const baseUtc = new Date(`${base}T00:00:00Z`);
+  return Math.floor((jst.getTime() - baseUtc.getTime()) / DAY_MS);
+}
+
+export function classifyGroupKind(a: CandidateAssetInput): CandidateGroupKind {
+  const url = a.source?.url ?? "";
+  if (url.includes("/diary/detail/")) return "blog";
+  if (url.includes("/diary/manager/")) return "staff";
+  if (a.hasTalkTag || (a.source?.title ?? "").startsWith("Talk")) return "talk";
+  return "other";
+}
+
+/** ブログ題 = 画像タイトルの ` (n/N)` を落としたもの */
+function blogTitle(assets: CandidateAssetInput[]): string {
+  const text = assets.find((a) => a.kind === "text");
+  const raw = text?.title ?? assets[0]?.title ?? "";
+  return raw.replace(/\s*\(\d+\/\d+\)\s*$/, "");
+}
+
+export function classifyCandidates(
+  assets: CandidateAssetInput[],
+  opts: ClassifyOptions
+): CandidateGroup[] {
+  const buckets = new Map<string, { kind: CandidateGroupKind; assets: CandidateAssetInput[] }>();
+  for (const a of assets) {
+    const kind = classifyGroupKind(a);
+    const key =
+      kind === "blog" || kind === "staff" ? `${kind}:${a.source?.url ?? ""}` : kind;
+    const b = buckets.get(key) ?? { kind, assets: [] };
+    b.assets.push(a);
+    buckets.set(key, b);
+  }
+
+  const groups: CandidateGroup[] = [];
+  for (const [key, b] of buckets) {
+    const sorted = [...b.assets].sort(byDateThenTitle);
+    const url = b.kind === "blog" || b.kind === "staff" ? (sorted[0].source?.url ?? null) : null;
+
+    let matched = false;
+    if (b.kind === "blog") {
+      matched = sorted.some((a) => a.kind === "text" && matchesKeywords(a.text));
+    } else if (b.kind === "staff") {
+      const own = sorted.some((a) => a.kind === "text" && matchesKeywords(a.text));
+      matched = own || matchesKeywords(url ? opts.staffTexts.get(url) : null);
+    }
+
+    const items: CandidateAsset[] = sorted.map((a) => {
+      let suggested = false;
+      if (b.kind === "blog" || b.kind === "staff") {
+        suggested = matched;
+      } else if (b.kind === "talk") {
+        const d = dayIndex(a.canonicalDate, opts.date);
+        const inWindow = d !== null && d >= 0 && d <= TALK_SUGGEST_DAYS;
+        suggested =
+          a.kind === "text" ? matchesKeywords(a.text) : inWindow;
+      }
+      return {
+        id: a.id,
+        kind: a.kind,
+        title: a.title,
+        canonicalDate: a.canonicalDate ? a.canonicalDate.toISOString() : null,
+        thumbnailUrl: a.thumbnailUrl,
+        inDossier: opts.inDossier.has(a.id),
+        suggested: suggested && !opts.inDossier.has(a.id),
+      };
+    });
+
+    groups.push({
+      key,
+      kind: b.kind,
+      title:
+        b.kind === "talk" ? "トーク" : b.kind === "other" ? "その他" : blogTitle(sorted),
+      url,
+      matched,
+      assets: items,
+    });
+  }
+
+  const order: Record<CandidateGroupKind, number> = { blog: 0, staff: 1, talk: 2, other: 3 };
+  groups.sort((x, y) => {
+    if (order[x.kind] !== order[y.kind]) return order[x.kind] - order[y.kind];
+    const dx = x.assets[0]?.canonicalDate ?? "";
+    const dy = y.assets[0]?.canonicalDate ?? "";
+    return dx < dy ? -1 : dx > dy ? 1 : 0;
+  });
+  return groups;
+}
+
+function byDateThenTitle(a: CandidateAssetInput, b: CandidateAssetInput): number {
+  const ta = a.canonicalDate?.getTime() ?? 0;
+  const tb = b.canonicalDate?.getTime() ?? 0;
+  if (ta !== tb) return ta - tb;
+  // ブログ画像の (n/N) は数値順に (文字列比較だと 10 が 2 の前に来る)
+  const na = Number(a.title.match(/\((\d+)\/\d+\)\s*$/)?.[1] ?? 0);
+  const nb = Number(b.title.match(/\((\d+)\/\d+\)\s*$/)?.[1] ?? 0);
+  if (na !== nb) return na - nb;
+  return a.title.localeCompare(b.title, "ja");
+}

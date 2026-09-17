@@ -4,6 +4,7 @@ import {
   TextType,
   type ArticleType,
   type JobRunStatus,
+  type MeetGreetFormat,
   type PlaceKind,
   type StatusLevel,
 } from "@prisma/client";
@@ -113,6 +114,26 @@ export const PLACE_KIND_LABELS: Record<PlaceKind, string> = {
   scenery: "寺社・公園・景色",
   venue: "会場・放送局",
   shop: "店・施設",
+};
+
+/** ミーグリの形式。記事のタイトル・地の文は「オンラインミーグリ / リアルミーグリ」(略称は使わない) */
+export const MEETGREET_FORMAT_LABELS: Record<MeetGreetFormat, string> = {
+  online: "オンライン",
+  real: "リアル",
+};
+
+/** ドシエ名など内部向けの略称 (手作業時代の `2026-08-09 通常オンミ` に合わせる) */
+export const MEETGREET_FORMAT_SHORT_LABELS: Record<MeetGreetFormat, string> = {
+  online: "オンミ",
+  real: "リアミ",
+};
+
+/** 素材候補のグループ (src/lib/meetgreet/candidates.ts の CandidateGroupKind) */
+export const MEETGREET_CANDIDATE_GROUP_LABELS: Record<string, string> = {
+  blog: "ブログ",
+  staff: "ひなたぼっこ日記",
+  talk: "トーク",
+  other: "その他",
 };
 
 export const RELATION_TYPE_LABELS: Record<string, string> = {
