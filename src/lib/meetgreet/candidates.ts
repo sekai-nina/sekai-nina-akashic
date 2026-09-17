@@ -13,6 +13,7 @@
  */
 
 import type { AssetKind } from "@prisma/client";
+import { jstDayString } from "@/lib/utils";
 import { MEETGREET_KEYWORDS, TALK_SUGGEST_DAYS } from "./config";
 
 export type CandidateGroupKind = "blog" | "staff" | "talk" | "other";
@@ -45,7 +46,7 @@ export interface CandidateAsset {
 export interface CandidateGroup {
   key: string;
   kind: CandidateGroupKind;
-  /** ブログの題 / 「トーク」/ 「その他」 */
+  /** ブログの題。トーク / その他はグループ名がラベルそのものなので空 (画面は kind のラベルを出す) */
   title: string;
   url: string | null;
   /** グループ内にキーワード一致の本文があった (ブログ / 運営ブログ) */
@@ -69,13 +70,16 @@ export function matchesKeywords(text: string | null | undefined): boolean {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** "YYYY-MM-DD" → その JST 暦日を表す Date (UTC 深夜。canonicalDate の JST 規約は呼び出し側で合わせる) */
+/**
+ * `base` (JST の暦日) から何日目かを返す。当日 = 0、翌日 = 1。
+ * `canonicalDate` は JST 深夜 (= 前日 15:00 UTC) の規約なので、`jstDayString` と同じく
+ * +9h して UTC 暦日に寄せてから差を取る。
+ */
 function dayIndex(date: Date | null, base: string): number | null {
   if (!date) return null;
-  // canonicalDate は JST 深夜 = UTC 15:00 前日。+9h して UTC 暦日に寄せてから差を取る
-  const jst = new Date(date.getTime() + 9 * 3600 * 1000);
+  const jstDay = new Date(`${jstDayString(date)}T00:00:00Z`);
   const baseUtc = new Date(`${base}T00:00:00Z`);
-  return Math.floor((jst.getTime() - baseUtc.getTime()) / DAY_MS);
+  return Math.round((jstDay.getTime() - baseUtc.getTime()) / DAY_MS);
 }
 
 export function classifyGroupKind(a: CandidateAssetInput): CandidateGroupKind {
@@ -144,8 +148,7 @@ export function classifyCandidates(
     groups.push({
       key,
       kind: b.kind,
-      title:
-        b.kind === "talk" ? "トーク" : b.kind === "other" ? "その他" : blogTitle(sorted),
+      title: b.kind === "blog" || b.kind === "staff" ? blogTitle(sorted) : "",
       url,
       matched,
       assets: items,

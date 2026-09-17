@@ -2,9 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Plus } from "lucide-react";
 import { auth } from "@/lib/auth";
-import { listMeetGreets } from "@/lib/domain/meetgreets";
-import { formatDate, MEETGREET_FORMAT_LABELS } from "@/lib/utils";
-import { formatJpDate } from "@/lib/domain/meetgreets";
+import { listMeetGreets, meetGreetTitle } from "@/lib/domain/meetgreets";
+import { formatDate } from "@/lib/utils";
 
 /**
  * ミーグリ記事の作成ワークフロー (#106)。
@@ -40,32 +39,31 @@ export default async function MeetGreetsPage() {
       ) : (
         <div className="bg-white border border-slate-200 rounded-lg divide-y divide-slate-100">
           {rows.map((r) => {
-            const items = r.dossier._count.items;
+            const items = r.dossier?.itemCount ?? 0;
             const keep = r.reports?.keep ?? 0;
             const total = r.reports?.total ?? 0;
             return (
               <Link
                 key={r.id}
                 href={`/meetgreets/${r.id}`}
-                className="flex items-center gap-4 px-4 py-3 hover:bg-slate-50"
+                className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4 px-4 py-3 hover:bg-slate-50"
               >
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium text-slate-900 truncate">
-                    {formatJpDate(r.date)} {r.label}
-                    {MEETGREET_FORMAT_LABELS[r.format]}ミーグリ
+                    {meetGreetTitle(r)}
                   </div>
                   <div className="text-xs text-slate-500 truncate mt-0.5">
                     {r.single || "シングル未設定"} · 作成 {formatDate(r.createdAt)}
                   </div>
                 </div>
-                <div className="flex items-center gap-1.5 shrink-0">
+                <div className="flex flex-wrap items-center gap-1.5 sm:shrink-0">
                   <Step label="素材" done={items > 0} detail={`${items}`} />
                   <Step label="レポ" done={keep > 0} detail={`${keep}/${total}`} />
                   <Step label="スケッチ" done={!!r.sketchKey} />
                   <Step
                     label="記事"
                     done={!!r.article}
-                    detail={r.article ? (r.article.dirty ? "未push" : "push済") : undefined}
+                    detail={r.article ? (r.article.dirty ? "未 push" : "push 済み") : undefined}
                   />
                 </div>
               </Link>

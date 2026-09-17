@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
 import { invalidateDossiers } from "@/lib/cache";
-import { applyMaterials, getMeetGreet } from "@/lib/domain/meetgreets";
+import { applyMaterials, getMeetGreet, MeetGreetInputError } from "@/lib/domain/meetgreets";
 import { ApplyMaterialsSchema } from "@/lib/meetgreet/api";
 import { formatZodError } from "@/lib/zod-error";
 
@@ -32,7 +32,13 @@ export async function POST(request: Request, { params }: Params) {
     invalidateDossiers();
     return NextResponse.json({ added: result.added, skipped: result.skipped, dossierId: mg.dossierId });
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    return NextResponse.json({ error: message }, { status: 403 });
+    // 権限不足は 403、ドシエが消えていれば 404。それ以外 (DB エラー等) は 500
+    if (e instanceof MeetGreetInputError) {
+      return NextResponse.json({ error: e.message }, { status: 404 });
+    }
+    if (e instanceof Error && e.message.includes("Access denied")) {
+      return NextResponse.json({ error: e.message }, { status: 403 });
+    }
+    throw e;
   }
 }

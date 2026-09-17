@@ -45,7 +45,7 @@ export function MetaForm({ id, single, label }: { id: string; single: string; la
   }
 
   function remove() {
-    if (!confirm("このミーグリの行を削除します。ドシエと X レポ収集は残ります。よろしいですか？")) return;
+    if (!confirm("このミーグリを削除します。ドシエと X レポ収集は残ります。よろしいですか？")) return;
     startTransition(async () => {
       const res = await deleteMeetGreetAction(id);
       if (!res.ok) {
@@ -58,8 +58,20 @@ export function MetaForm({ id, single, label }: { id: string; single: string; la
 
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
-      <input className={inputCls + " w-72"} value={s} onChange={(e) => setS(e.target.value)} placeholder="シングル" />
-      <input className={inputCls + " w-32"} value={l} onChange={(e) => setL(e.target.value)} placeholder="呼び分け" />
+      <input
+        className={inputCls + " w-72"}
+        value={s}
+        onChange={(e) => setS(e.target.value)}
+        placeholder="シングル"
+        aria-label="シングル"
+      />
+      <input
+        className={inputCls + " w-32"}
+        value={l}
+        onChange={(e) => setL(e.target.value)}
+        placeholder="呼び分け"
+        aria-label="呼び分け"
+      />
       <button
         type="button"
         onClick={save}
@@ -81,8 +93,11 @@ export function MetaForm({ id, single, label }: { id: string; single: string; la
         disabled={pending}
         className="h-8 px-3 rounded-md text-xs text-red-600 hover:bg-red-50 ml-auto"
       >
-        この行を削除
+        削除
       </button>
+      <p className="text-xs text-slate-400 w-full">
+        作成済みのドシエ・X レポ収集の名前は変わりません (それぞれの画面で変更してください)。
+      </p>
       {msg && <span className="text-xs text-red-600 w-full">{msg}</span>}
     </div>
   );

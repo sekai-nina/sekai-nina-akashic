@@ -7,8 +7,15 @@ import {
   listMaterialCandidates,
   listMeetGreets,
 } from "@/lib/domain/meetgreets";
+import { MeetGreetInputError } from "@/lib/domain/meetgreets";
 import { CreateMeetGreetSchema, projectCandidates, projectMeetGreet } from "@/lib/meetgreet/api";
 import { formatZodError } from "@/lib/zod-error";
+
+/**
+ * X の収集 (画像を 1 枚ずつ R2 に載せる) で 1 分を超えることがある。
+ * Discord bot はこの所要時間を見越して deferred ack してから呼ぶこと。
+ */
+export const maxDuration = 300;
 
 export async function GET(request: Request) {
   const auth = await requireApiAuth(request, "read");
@@ -42,9 +49,15 @@ export async function POST(request: Request) {
   try {
     created = await createMeetGreet(auth, parsed.data);
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    const status = message.startsWith("Access denied") ? 403 : 400;
-    return NextResponse.json({ error: message }, { status });
+    // 想定外 (DB エラー等) は握り潰さず 500 にする。400 に丸めると呼び出し側が
+    // 「入力が悪い」と誤解して同じ内容で再試行し、ドシエ・収集が二重にできる
+    if (e instanceof MeetGreetInputError) {
+      return NextResponse.json({ error: e.message }, { status: 400 });
+    }
+    if (e instanceof Error && e.message.includes("Access denied")) {
+      return NextResponse.json({ error: e.message }, { status: 403 });
+    }
+    throw e;
   }
   invalidateDossiers();
 

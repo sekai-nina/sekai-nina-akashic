@@ -9,7 +9,7 @@
  */
 
 import sharp from "sharp";
-import { Prisma, RepoTweetStatus } from "@prisma/client";
+import { Prisma, RepoTweetStatus, type ClearanceLevel } from "@prisma/client";
 import { withClearance } from "@/lib/db";
 import { uploadToR2, deleteFromR2, getR2PublicUrl, isR2Configured } from "@/lib/r2";
 import {
@@ -33,6 +33,8 @@ export interface CreateCollectionInput {
   excludeRetweets: boolean;
   langJa: boolean;
   extra: string;
+  /** 省略時はスキーマ既定の internal。呼び出し元の単位 (ミーグリ等) に合わせたいときに渡す */
+  classification?: ClearanceLevel;
 }
 
 export type TweetSort = "newest" | "oldest" | "likes";
@@ -95,6 +97,7 @@ export async function createCollection(input: CreateCollectionInput, clearance: 
         excludeRetweets: input.excludeRetweets,
         langJa: input.langJa,
         extra: input.extra,
+        ...(input.classification ? { classification: input.classification } : {}),
       },
     })
   );

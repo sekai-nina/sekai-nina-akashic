@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import type { MeetGreetFormat } from "@prisma/client";
-import { auth } from "@/lib/auth";
+import { requireRole } from "@/lib/auth/require-role";
 import { invalidateDossiers } from "@/lib/cache";
 import {
   applyMaterials,
@@ -12,13 +12,9 @@ import {
   refetchReports,
   updateMeetGreet,
 } from "@/lib/domain/meetgreets";
+import { MAX_MATERIALS_PER_APPLY } from "@/lib/meetgreet/api";
 
-async function requireMember() {
-  const session = await auth();
-  if (!session?.user) throw new Error("Unauthorized");
-  if (!["admin", "member"].includes(session.user.role)) throw new Error("Forbidden");
-  return session.user;
-}
+const requireMember = () => requireRole(["admin", "member"]);
 
 function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -35,6 +31,7 @@ export async function createMeetGreetAction(input: {
     const { id, fetch } = await createMeetGreet(user, input);
     invalidateDossiers();
     revalidatePath("/meetgreets");
+    revalidatePath("/dossiers");
     revalidatePath("/repo");
     return { ok: true as const, id, fetch };
   } catch (e) {
@@ -59,6 +56,9 @@ export async function updateMeetGreetAction(
 
 export async function applyMaterialsAction(id: string, assetIds: string[]) {
   const user = await requireMember();
+  if (assetIds.length > MAX_MATERIALS_PER_APPLY) {
+    return { ok: false as const, error: `一度に反映できるのは ${MAX_MATERIALS_PER_APPLY} 件までです` };
+  }
   try {
     const mg = await getMeetGreet(user, id);
     if (!mg) throw new Error("見つかりません");
@@ -79,6 +79,7 @@ export async function refetchReportsAction(id: string) {
     if (!mg) throw new Error("見つかりません");
     const outcome = await refetchReports(user, mg);
     revalidatePath(`/meetgreets/${id}`);
+    revalidatePath("/meetgreets");
     if (mg.repoCollectionId) revalidatePath(`/repo/${mg.repoCollectionId}`);
     revalidatePath("/repo");
     return outcome.ok

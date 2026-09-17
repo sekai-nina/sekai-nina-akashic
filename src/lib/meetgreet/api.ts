@@ -4,15 +4,16 @@
  */
 
 import { z } from "zod";
+import { isValidDateString } from "@/lib/utils";
 import type { MeetGreetSummary, MeetGreetDetail } from "@/lib/domain/meetgreets";
 import type { CandidateGroup } from "./candidates";
 import { getR2PublicUrl } from "@/lib/r2";
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-
 export const CreateMeetGreetSchema = z
   .object({
-    date: z.string().regex(DATE_RE, "YYYY-MM-DD で指定してください"),
+    date: z
+      .string()
+      .refine(isValidDateString, "暦に実在する YYYY-MM-DD で指定してください"),
     format: z.enum(["online", "real"]),
     single: z.string().max(200).optional(),
     label: z.string().max(50).optional(),
@@ -26,11 +27,17 @@ export const UpdateMeetGreetSchema = z
     label: z.string().max(50).optional(),
     extraSketchPrompt: z.string().max(4000).optional(),
   })
-  .strict();
+  .strict()
+  .refine((v) => Object.values(v).some((x) => x !== undefined), {
+    message: "更新項目がありません",
+  });
+
+/** 1 回の反映で受け付けるアセット数の上限 (画面・REST 共通) */
+export const MAX_MATERIALS_PER_APPLY = 500;
 
 export const ApplyMaterialsSchema = z
   .object({
-    assetIds: z.array(z.string().min(1)).min(1).max(500),
+    assetIds: z.array(z.string().min(1)).min(1).max(MAX_MATERIALS_PER_APPLY),
   })
   .strict();
 
@@ -42,12 +49,16 @@ export function projectMeetGreet(mg: MeetGreetSummary | MeetGreetDetail) {
     single: mg.single,
     label: mg.label,
     classification: mg.classification,
-    dossier: {
-      id: mg.dossier.id,
-      title: mg.dossier.title,
-      itemCount: mg.dossier._count.items,
-      updatedAt: mg.dossier.updatedAt,
-    },
+    // ドシエが所有者に private へ戻された / 機密を上げられたときは null (RLS で見えない)
+    dossier: mg.dossier
+      ? {
+          id: mg.dossier.id,
+          title: mg.dossier.title,
+          itemCount: mg.dossier.itemCount,
+          updatedAt: mg.dossier.updatedAt,
+        }
+      : null,
+    dossierId: mg.dossierId,
     repoCollection: mg.repoCollection
       ? {
           id: mg.repoCollection.id,
@@ -69,9 +80,10 @@ export function projectMeetGreet(mg: MeetGreetSummary | MeetGreetDetail) {
     sketch: {
       key: mg.sketchKey,
       url: mg.sketchKey ? getR2PublicUrl(mg.sketchKey) : null,
-      candidates: Array.isArray(mg.sketchCandidates)
-        ? (mg.sketchCandidates as string[]).map((k) => ({ key: k, url: getR2PublicUrl(k) }))
-        : [],
+      // Json 列なので中身は信用しない (文字列以外が混ざっていても URL を組み立てない)
+      candidates: (Array.isArray(mg.sketchCandidates) ? mg.sketchCandidates : [])
+        .filter((k): k is string => typeof k === "string")
+        .map((k) => ({ key: k, url: getR2PublicUrl(k) })),
       extraPrompt: mg.extraSketchPrompt,
     },
     createdBy: mg.createdBy,

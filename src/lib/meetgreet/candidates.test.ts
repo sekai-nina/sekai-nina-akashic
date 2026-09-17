@@ -138,6 +138,50 @@ describe("classifyCandidates", () => {
     });
   });
 
+  it("トークの初期チェックは JST の暦日で切る (当日 0:00 と翌日 23:59 は入り、翌々日 0:00 は入らない)", () => {
+    // canonicalDate は JST 深夜 = 前日 15:00 UTC の規約。境界をまたぐ時刻で確かめる
+    const groups = classifyCandidates(
+      [
+        talkImg("t-00:00", "2026-08-01", "00:00"),
+        talkImg("t-23:59", "2026-08-02", "23:59"),
+        talkImg("t-next-00:00", "2026-08-03", "00:00"),
+      ],
+      opts()
+    );
+    expect(Object.fromEntries(groups[0].assets.map((a) => [a.id, a.suggested]))).toEqual({
+      "t-00:00": true,
+      "t-23:59": true,
+      "t-next-00:00": false,
+    });
+  });
+
+  it("日付の無いトークはチェックしない", () => {
+    const groups = classifyCandidates(
+      [asset({ id: "t-null", hasTalkTag: true, canonicalDate: null })],
+      opts()
+    );
+    expect(groups[0].assets[0]).toMatchObject({ canonicalDate: null, suggested: false });
+  });
+
+  it("トーク / その他の title は空にする (画面は種別ラベルだけを出す)", () => {
+    const groups = classifyCandidates(
+      [
+        talkImg("t", "2026-08-01", "10:00"),
+        asset({ id: "yt", source: { url: "https://www.youtube.com/shorts/x", title: "" } }),
+      ],
+      opts()
+    );
+    expect(groups.map((g) => [g.kind, g.title])).toEqual([
+      ["talk", ""],
+      ["other", ""],
+    ]);
+  });
+
+  it("本文アセットの無いブログは先頭画像のタイトルから (n/N) を落として題にする", () => {
+    const groups = classifyCandidates([blogImg(3), blogImg(1)], opts());
+    expect(groups[0].title).toBe("坂井新奈ブログ「待ち合わせ🎐」");
+  });
+
   it("既にドシエにあるものは inDossier で、チェックは付けない", () => {
     const groups = classifyCandidates(
       [talkImg("t-next", "2026-08-02", "13:15")],

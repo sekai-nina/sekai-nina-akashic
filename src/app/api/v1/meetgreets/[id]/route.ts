@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
-import { getMeetGreet, listMaterialCandidates, updateMeetGreet } from "@/lib/domain/meetgreets";
+import {
+  getMeetGreet,
+  listMaterialCandidates,
+  MeetGreetInputError,
+  updateMeetGreet,
+} from "@/lib/domain/meetgreets";
 import { UpdateMeetGreetSchema, projectCandidates, projectMeetGreet } from "@/lib/meetgreet/api";
 import { formatZodError } from "@/lib/zod-error";
 
@@ -37,7 +42,15 @@ export async function PATCH(request: Request, { params }: Params) {
   const existing = await getMeetGreet(auth, id);
   if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  await updateMeetGreet(auth, id, parsed.data);
+  try {
+    await updateMeetGreet(auth, id, parsed.data);
+  } catch (e) {
+    if (e instanceof MeetGreetInputError) {
+      return NextResponse.json({ error: e.message }, { status: 400 });
+    }
+    throw e;
+  }
   const mg = await getMeetGreet(auth, id);
-  return NextResponse.json(projectMeetGreet(mg!));
+  if (!mg) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  return NextResponse.json(projectMeetGreet(mg));
 }

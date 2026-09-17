@@ -2,8 +2,9 @@ import Link from "next/link";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { formatJpDate, getMeetGreet, listMaterialCandidates } from "@/lib/domain/meetgreets";
-import { formatDate, MEETGREET_FORMAT_LABELS } from "@/lib/utils";
+import { getMeetGreet, listMaterialCandidates, meetGreetTitle } from "@/lib/domain/meetgreets";
+import { MATERIAL_WINDOW_DAYS, REPORT_WINDOW_DAYS, TALK_SUGGEST_DAYS } from "@/lib/meetgreet/config";
+import { formatDate } from "@/lib/utils";
 import { MetaForm } from "./meta-form";
 import { MaterialsStep } from "./materials-step";
 import { ReportsStep } from "./reports-step";
@@ -11,6 +12,9 @@ import { ReportsStep } from "./reports-step";
 interface Props {
   params: Promise<{ id: string }>;
 }
+
+/** X レポの収集は最大 90 秒ほどかかる (画像を 1 枚ずつ R2 に載せるため) */
+export const maxDuration = 300;
 
 /**
  * ミーグリ 1 回分の進行画面。素材 → レポ → スケッチ → 記事 を縦に並べる。
@@ -29,17 +33,16 @@ export default async function MeetGreetDetailPage({ params }: Props) {
     (n, g) => n + g.assets.filter((a) => a.suggested).length,
     0
   );
-
-  const title = `${formatJpDate(mg.date)} ${mg.label}${MEETGREET_FORMAT_LABELS[mg.format]}ミーグリ`;
+  const itemCount = mg.dossier?.itemCount ?? 0;
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6">
+    <div className="max-w-4xl mx-auto">
       <Link href="/meetgreets" className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600">
         <ArrowLeft size={14} /> ミーグリ一覧へ
       </Link>
 
       <div className="mt-2 mb-6">
-        <h1 className="text-2xl font-bold text-slate-900">{title}</h1>
+        <h1 className="text-2xl font-bold text-slate-900">{meetGreetTitle(mg)}</h1>
         <p className="text-xs text-slate-500 mt-1">
           作成 {formatDate(mg.createdAt)} · {mg.createdBy.name}
         </p>
@@ -50,18 +53,30 @@ export default async function MeetGreetDetailPage({ params }: Props) {
       <StepCard
         no={1}
         title="素材"
-        done={mg.dossier._count.items > 0}
-        summary={`ドシエに ${mg.dossier._count.items} 件`}
+        done={itemCount > 0}
+        summary={mg.dossier ? `ドシエに ${itemCount} 件` : "ドシエが見えません"}
         action={
-          <Link href={`/dossiers/${mg.dossierId}`} className={linkCls}>
-            ドシエを開く <ExternalLink size={12} />
-          </Link>
+          mg.dossier ? (
+            <Link href={`/dossiers/${mg.dossierId}`} className={linkCls}>
+              ドシエを開く <ExternalLink size={12} />
+            </Link>
+          ) : null
         }
       >
-        <p className="text-xs text-slate-500 mb-3">
-          当日〜10 日後のブログ・トークから候補を出しています。本文にミーグリの話があるブログと、当日〜翌日のトーク画像 / 動画は最初からチェック済み ({suggestedCount} 件)。外す / 足すだけして「ドシエに反映」を押してください。抜粋 (本人の感想) はドシエ側で範囲選択します。
-        </p>
-        <MaterialsStep meetGreetId={mg.id} groups={candidates} />
+        {mg.dossier ? (
+          <>
+            <p className="text-xs text-slate-500 mb-3">
+              当日〜{MATERIAL_WINDOW_DAYS} 日後のブログ・トークから候補を出しています。本文にミーグリの話があるブログと、当日〜
+              {TALK_SUGGEST_DAYS === 1 ? "翌日" : `${TALK_SUGGEST_DAYS} 日後`}
+              のトーク画像 / 動画は最初からチェック済み ({suggestedCount} 件)。外す / 足すだけして「ドシエに反映」を押してください。抜粋 (本人の感想) はドシエ側で範囲選択します。
+            </p>
+            <MaterialsStep meetGreetId={mg.id} groups={candidates} />
+          </>
+        ) : (
+          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-3">
+            素材置き場のドシエが表示できません (所有者が非公開に戻したか、機密レベルが上がっています)。所有者にドシエの公開範囲を戻してもらってください。
+          </p>
+        )}
       </StepCard>
 
       {/* 2. レポ */}
@@ -71,19 +86,21 @@ export default async function MeetGreetDetailPage({ params }: Props) {
         done={(mg.reports?.keep ?? 0) > 0}
         summary={
           mg.reports
-            ? `keep ${mg.reports.keep} / 取得 ${mg.reports.total}${mg.repoCollection?.lastFetchedAt ? ` · 最終収集 ${formatDate(mg.repoCollection.lastFetchedAt, true)}` : ""}`
+            ? `採用 ${mg.reports.keep} / 取得 ${mg.reports.total}${mg.repoCollection?.lastFetchedAt ? ` · 最終収集 ${formatDate(mg.repoCollection.lastFetchedAt, true)}` : ""}`
             : "収集が紐づいていません"
         }
         action={
-          mg.repoCollectionId ? (
-            <Link href={`/repo/${mg.repoCollectionId}`} className={linkCls}>
+          mg.repoCollection ? (
+            <Link href={`/repo/${mg.repoCollection.id}`} className={linkCls}>
               レポを判定する <ExternalLink size={12} />
             </Link>
           ) : null
         }
       >
         <p className="text-xs text-slate-500 mb-3">
-          収集は作成時に 1 回走っています (X の recent search は直近 7 日まで)。翌日以降の投稿を拾うときや、作成時に失敗したときは再収集してください。keep にしたツイートは記事生成がそのまま読みます。
+          収集は作成時に 1 回走っています (X の recent search は直近 7 日まで)。
+          {REPORT_WINDOW_DAYS === 1 ? "翌日" : `${REPORT_WINDOW_DAYS} 日後`}
+          以降の投稿を拾うときや、作成時に失敗したときは再収集してください。採用にしたツイートは記事生成がそのまま読みます。
         </p>
         <ReportsStep meetGreetId={mg.id} hasCollection={!!mg.repoCollectionId} />
       </StepCard>
@@ -110,7 +127,7 @@ export default async function MeetGreetDetailPage({ params }: Props) {
         }
       >
         <p className="text-xs text-slate-400">
-          ドシエと keep したレポから記事を生成する機能は #109 で入ります。それまでは従来どおりローカルの dossier-to-meetgreet-article スキルで生成してください。
+          ドシエと採用したレポから記事を生成する機能は #109 で入ります。それまでは従来どおりローカルの dossier-to-meetgreet-article スキルで生成してください。
         </p>
       </StepCard>
     </div>
@@ -118,7 +135,7 @@ export default async function MeetGreetDetailPage({ params }: Props) {
 }
 
 const linkCls =
-  "inline-flex items-center gap-1 text-xs text-slate-600 hover:text-slate-900 underline underline-offset-2";
+  "inline-flex items-center gap-1 text-xs text-slate-600 hover:text-slate-900 underline underline-offset-2 shrink-0 whitespace-nowrap";
 
 function StepCard({
   no,
@@ -147,7 +164,7 @@ function StepCard({
           >
             {no}
           </span>
-          <h2 className="text-sm font-semibold text-slate-900">{title}</h2>
+          <h2 className="text-sm font-semibold text-slate-900 shrink-0">{title}</h2>
           <span className="text-xs text-slate-500 truncate">{summary}</span>
         </div>
         {action}

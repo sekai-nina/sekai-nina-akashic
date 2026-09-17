@@ -38,15 +38,22 @@ export function NewMeetGreetForm({ defaultDate }: { defaultDate: string }) {
 
   return (
     <div className="bg-white border border-slate-200 rounded-lg p-5">
-      <label className={labelCls}>開催日</label>
-      <input type="date" className={inputCls} value={date} onChange={(e) => setDate(e.target.value)} />
+      <label className={labelCls} htmlFor="mg-date">開催日</label>
+      <input
+        id="mg-date"
+        type="date"
+        className={inputCls}
+        value={date}
+        onChange={(e) => setDate(e.target.value)}
+      />
 
-      <label className={labelCls}>形式</label>
+      <span className={labelCls}>形式</span>
       <div className="flex gap-2">
         {(Object.keys(MEETGREET_FORMAT_LABELS) as MeetGreetFormat[]).map((f) => (
           <button
             key={f}
             type="button"
+            aria-pressed={format === f}
             onClick={() => setFormat(f)}
             className={
               "px-3 py-1.5 rounded-md border text-sm " +
@@ -60,11 +67,27 @@ export function NewMeetGreetForm({ defaultDate }: { defaultDate: string }) {
         ))}
       </div>
 
-      <label className={labelCls}>シングル (記事の meetgreet.single に出ます。例: 17thシングル「Kind of love」)</label>
-      <input className={inputCls} value={single} onChange={(e) => setSingle(e.target.value)} placeholder="17thシングル「Kind of love」" />
+      <label className={labelCls} htmlFor="mg-single">
+        シングル (記事の meetgreet.single に出ます。例: 17thシングル「Kind of love」)
+      </label>
+      <input
+        id="mg-single"
+        className={inputCls}
+        value={single}
+        onChange={(e) => setSingle(e.target.value)}
+        placeholder="17thシングル「Kind of love」"
+      />
 
-      <label className={labelCls}>呼び分け (任意。ドシエ名に付くだけ。例: 通常 / 初回限定盤 / 京都)</label>
-      <input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="通常" />
+      <label className={labelCls} htmlFor="mg-label">
+        呼び分け (任意。作成時のドシエ名・収集名に付くだけ。例: 通常 / 初回限定盤 / 京都)
+      </label>
+      <input
+        id="mg-label"
+        className={inputCls}
+        value={label}
+        onChange={(e) => setLabel(e.target.value)}
+        placeholder="通常"
+      />
 
       <div className="mt-5 flex items-center gap-3">
         <button

@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import type { CandidateGroupKind } from "@/lib/meetgreet/candidates";
 import {
   TextType,
   type ArticleType,
@@ -116,7 +117,7 @@ export const PLACE_KIND_LABELS: Record<PlaceKind, string> = {
   shop: "店・施設",
 };
 
-/** ミーグリの形式。記事のタイトル・地の文は「オンラインミーグリ / リアルミーグリ」(略称は使わない) */
+/** ミーグリの形式。「ミーグリ」を後ろに付けて使う (記事・画面では略称のオンミ / リアミを使わない) */
 export const MEETGREET_FORMAT_LABELS: Record<MeetGreetFormat, string> = {
   online: "オンライン",
   real: "リアル",
@@ -128,8 +129,8 @@ export const MEETGREET_FORMAT_SHORT_LABELS: Record<MeetGreetFormat, string> = {
   real: "リアミ",
 };
 
-/** 素材候補のグループ (src/lib/meetgreet/candidates.ts の CandidateGroupKind) */
-export const MEETGREET_CANDIDATE_GROUP_LABELS: Record<string, string> = {
+/** 素材候補のグループ */
+export const MEETGREET_CANDIDATE_GROUP_LABELS: Record<CandidateGroupKind, string> = {
   blog: "ブログ",
   staff: "ひなたぼっこ日記",
   talk: "トーク",
@@ -289,4 +290,31 @@ export function toJstDateOnly(d: Date | null | undefined): string | null {
 /** JST の今日を「YYYY-MM-DD」で返す (記事編集の「今日にする」) */
 export function todayJst(): string {
   return toJstDateOnly(new Date())!;
+}
+
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * 暦に実在する「YYYY-MM-DD」か。
+ *
+ * `Date.parse("2026-02-30")` は 3/2 に**正規化して通る**ので、正規表現だけでは
+ * 弾けない (画面の `<input type="date">` は防げるが REST は防げない)。往復で確かめる。
+ */
+export function isValidDateString(date: string): boolean {
+  if (!DATE_ONLY_RE.test(date)) return false;
+  const d = new Date(`${date}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === date;
+}
+
+/** 「YYYY-MM-DD」に日数を足す。暦日文字列どうしの演算なので UTC で計算してよい */
+export function addDaysToDateString(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/** 「2026-08-01」→「2026年8月1日」(記事タイトル・画面見出し用) */
+export function formatJpDate(date: string): string {
+  const [y, m, d] = date.split("-").map(Number);
+  return `${y}年${m}月${d}日`;
 }
