@@ -30,6 +30,7 @@ export async function GET(request: Request) {
     counts: countByLevel(result.checks.map((c) => c.state.status)),
     notified: result.notified.length,
     notifyError: result.notifyError,
+    failed: result.failedKeys,
     prunedRuns: result.prunedRuns,
     checks: result.checks.map((c) => ({ key: c.state.key, status: c.state.status, summary: c.state.summary })),
   });

@@ -1,6 +1,7 @@
 import type { JobRunStatus, StatusLevel } from "@prisma/client";
 import { formatRelative } from "@/lib/utils";
 import {
+  ALERT_CONFIRM_SEC,
   HEARTBEAT_STALE_FACTOR,
   HEARTBEAT_STALE_MIN_SEC,
   RENOTIFY_INTERVAL_HOURS,
@@ -107,6 +108,8 @@ export interface NotifyDecisionInput {
   /** 最後に通知できた (または通知不要で同期した) status。初回は null */
   notifiedStatus: StatusLevel | null;
   nextStatus: StatusLevel;
+  /** 今の status になった時刻。非 ok の第一報はここから ALERT_CONFIRM_SEC 待って裏を取る */
+  since: Date;
   lastNotifiedAt: Date | null;
   now: Date;
 }
@@ -114,19 +117,23 @@ export interface NotifyDecisionInput {
 /**
  * Discord に流すかどうか。**前回の status ではなく「最後に通知できた status」と比べる**
  * (送信に失敗した回の遷移を次の評価で拾い直すため)。
- *   - ok / unknown → warn / error: 第一報
- *   - warn ↔ error: 悪化・軽減も一報 (状態が変わったことは知らせる)
- *   - warn / error → ok: 復旧
+ *   - ok / unknown → warn / error: 第一報。ただし **`since` から ALERT_CONFIRM_SEC 経つまで待つ**
+ *     (= 2 回続けて同じ非 ok を観測してから。1 回きりの異常で通知が往復しないため)
+ *   - warn ↔ error: 悪化・軽減も一報 (同じく確認してから)
+ *   - warn / error → ok: 復旧。**待たずにすぐ出す** (通知済みの異常が消えたことは早く知りたい)
  *   - warn / error のまま 24h 経過: 放置防止のリマインド
- * 初回評価 (notifiedStatus が null) で warn / error なら第一報を出す。unknown への遷移は出さない
- * (トークン未設定などの構成の話で、障害ではない)。
+ * 初回評価 (notifiedStatus が null) で warn / error なら確認後に第一報を出す。unknown への遷移は
+ * 出さない (トークン未設定などの構成の話で、障害ではない)。
  */
 export function decideNotification(input: NotifyDecisionInput): "transition" | "reminder" | null {
-  const { notifiedStatus, nextStatus, lastNotifiedAt, now } = input;
+  const { notifiedStatus, nextStatus, since, lastNotifiedAt, now } = input;
   const nextAlert = ALERT_LEVELS.has(nextStatus);
   const prevAlert = notifiedStatus != null && ALERT_LEVELS.has(notifiedStatus);
   if (notifiedStatus !== nextStatus) {
-    if (nextAlert) return "transition";
+    if (nextAlert) {
+      const confirmedSec = (now.getTime() - since.getTime()) / 1000;
+      return confirmedSec >= ALERT_CONFIRM_SEC ? "transition" : null;
+    }
     if (prevAlert && nextStatus === "ok") return "transition";
     return null;
   }

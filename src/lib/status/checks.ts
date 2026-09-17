@@ -11,6 +11,7 @@ import { judgeFreshness, judgeHeartbeat } from "./judge";
 import {
   ARTICLE_DIRTY_MAX_AGE_DAYS,
   CHECK_TIMEOUT_MS,
+  EVALUATION_BUDGET_MS,
   DETAIL_LIMIT,
   DISCOVERY_WINDOW_DAYS,
   EXPECTED_JOBS,
@@ -326,24 +327,38 @@ export async function getCheckDefinitions(): Promise<CheckDefinition[]> {
     .map(({ c }) => c);
 }
 
-export type CheckRun = { def: CheckDefinition; outcome: CheckOutcome };
+/** 評価できたら outcome、できなかったら failure (理由)。両方入ることはない */
+export type CheckRun = { def: CheckDefinition; outcome?: CheckOutcome; failure?: string };
 
 /**
- * 全チェックを並列で走らせる。例外とタイムアウトは握って error にする
- * (GitHub が固まっても他のチェックの保存と通知を止めない)
+ * 全チェックを**直列で**走らせる。
+ *
+ * 並列 (Promise.all) にすると 19 本のクエリが同時に Prisma の接続プールを奪い合う。
+ * 本番の接続数は 1 なので、待たされたチェックが 10 秒でプールのタイムアウトに当たり
+ * 「評価に失敗」になっていた (実際に 2026-09-17 に日中ずっと ok ↔ 異常が往復した)。
+ * 直列なら 19 本でも実測 8 秒ほどで、cron の 15 分間隔から見れば充分速い。
+ *
+ * 例外・タイムアウト・予算切れは `failure` として返す (**error にはしない**)。
+ * 測れなかったことと「パイプラインが壊れている」ことは別なので、呼び出し側が
+ * 前回の状態を保つ (`evaluate.ts`)。
  */
 export async function runAllChecks(ctx: CheckContext): Promise<CheckRun[]> {
   const defs = await getCheckDefinitions();
-  return Promise.all(
-    defs.map(async (def) => {
-      try {
-        return { def, outcome: await withTimeout(def.run(ctx), CHECK_TIMEOUT_MS) };
-      } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        return { def, outcome: { status: "error" as const, summary: `評価に失敗: ${message}`, detail: {} } };
-      }
-    }),
-  );
+  const started = Date.now();
+  const runs: CheckRun[] = [];
+  for (const def of defs) {
+    const left = EVALUATION_BUDGET_MS - (Date.now() - started);
+    if (left <= 0) {
+      runs.push({ def, failure: "評価の時間切れ (予算内に順番が回らなかった)" });
+      continue;
+    }
+    try {
+      runs.push({ def, outcome: await withTimeout(def.run(ctx), Math.min(CHECK_TIMEOUT_MS, left)) });
+    } catch (e) {
+      runs.push({ def, failure: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return runs;
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
