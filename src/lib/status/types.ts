@@ -91,8 +91,23 @@ export const JOB_RUN_RETENTION_DAYS = 30;
 /** ok / count 無しの報告は、最新の JobRun 行からこの間隔以内なら行を増やさない */
 export const JOB_RUN_DEDUP_SEC = 60 * 60;
 
-/** 1 つのチェックの評価に許す時間。超えたら「評価に失敗」にして他のチェックの保存を守る */
-export const CHECK_TIMEOUT_MS = 20_000;
+/** 1 つのチェックの評価に許す時間。超えたら「評価できず」にして他のチェックの保存を守る */
+export const CHECK_TIMEOUT_MS = 15_000;
+
+/**
+ * 評価全体の予算。超えたら残りのチェックは走らせず「評価できず」にする
+ * (cron の maxDuration 60 秒に収め、保存と通知まで必ず到達させる)。
+ */
+export const EVALUATION_BUDGET_MS = 40_000;
+
+/**
+ * 非 ok になってから通知するまでの確認時間。
+ *
+ * チェックは 15 分ごとなので、この時間を超える = **2 回続けて同じ非 ok を観測した**ということ。
+ * 1 回だけの瞬間的な異常 (DB の接続待ち・GitHub の 5xx・bot の一時的な失敗) で通知が
+ * 往復しないようにする。次の評価で ok に戻れば since が巻き戻り、通知は出ない。
+ */
+export const ALERT_CONFIRM_SEC = 13 * 60;
 
 /** この時間以内に別の評価が走っていたら評価しない (cron と「今すぐ評価」の二重通知を防ぐ) */
 export const EVALUATION_MIN_INTERVAL_SEC = 30;

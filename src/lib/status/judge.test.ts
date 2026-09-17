@@ -143,45 +143,64 @@ describe("judgeHeartbeat", () => {
 });
 
 describe("decideNotification", () => {
-  it("ok → warn / error は第一報", () => {
-    expect(decideNotification({ notifiedStatus: "ok", nextStatus: "warn", lastNotifiedAt: null, now })).toBe("transition");
-    expect(decideNotification({ notifiedStatus: "ok", nextStatus: "error", lastNotifiedAt: null, now })).toBe("transition");
+  // 非 ok の第一報は since から 13 分 (= 2 回続けて観測) 待つ。確認済み / 未確認の 2 種類を用意する
+  const confirmed = hoursAgo(1);
+  const justNow = secAgo(30);
+
+  it("ok → warn / error は確認後に第一報", () => {
+    expect(decideNotification({ notifiedStatus: "ok", nextStatus: "warn", since: confirmed, lastNotifiedAt: null, now })).toBe("transition");
+    expect(decideNotification({ notifiedStatus: "ok", nextStatus: "error", since: confirmed, lastNotifiedAt: null, now })).toBe("transition");
   });
 
-  it("初回評価 (通知済み無し) で warn / error も第一報、ok は出さない", () => {
-    expect(decideNotification({ notifiedStatus: null, nextStatus: "error", lastNotifiedAt: null, now })).toBe("transition");
-    expect(decideNotification({ notifiedStatus: null, nextStatus: "ok", lastNotifiedAt: null, now })).toBeNull();
+  it("非 ok になった直後は通知しない (1 回きりの異常で往復させない)", () => {
+    expect(decideNotification({ notifiedStatus: "ok", nextStatus: "error", since: justNow, lastNotifiedAt: null, now })).toBeNull();
+    // 13 分ちょうどで確認とみなす
+    expect(decideNotification({ notifiedStatus: "ok", nextStatus: "error", since: secAgo(13 * 60), lastNotifiedAt: null, now })).toBe("transition");
+    expect(decideNotification({ notifiedStatus: "ok", nextStatus: "error", since: secAgo(13 * 60 - 1), lastNotifiedAt: null, now })).toBeNull();
   });
 
-  it("warn ↔ error も一報", () => {
-    expect(decideNotification({ notifiedStatus: "warn", nextStatus: "error", lastNotifiedAt: hoursAgo(1), now })).toBe("transition");
-    expect(decideNotification({ notifiedStatus: "error", nextStatus: "warn", lastNotifiedAt: hoursAgo(1), now })).toBe("transition");
+  it("確認前に ok に戻れば何も出ない (瞬間的な異常)", () => {
+    // 1 回目: error を観測したが未確認 → 通知せず notifiedStatus は ok のまま
+    expect(decideNotification({ notifiedStatus: "ok", nextStatus: "error", since: justNow, lastNotifiedAt: null, now })).toBeNull();
+    // 2 回目: ok に戻った → 通知済みも ok なので何も出ない
+    expect(decideNotification({ notifiedStatus: "ok", nextStatus: "ok", since: justNow, lastNotifiedAt: null, now })).toBeNull();
   });
 
-  it("warn / error → ok は復旧の一報。unknown → ok は出さない", () => {
-    expect(decideNotification({ notifiedStatus: "error", nextStatus: "ok", lastNotifiedAt: hoursAgo(1), now })).toBe("transition");
-    expect(decideNotification({ notifiedStatus: "unknown", nextStatus: "ok", lastNotifiedAt: null, now })).toBeNull();
+  it("初回評価 (通知済み無し) で warn / error も確認後に第一報、ok は出さない", () => {
+    expect(decideNotification({ notifiedStatus: null, nextStatus: "error", since: confirmed, lastNotifiedAt: null, now })).toBe("transition");
+    expect(decideNotification({ notifiedStatus: null, nextStatus: "error", since: justNow, lastNotifiedAt: null, now })).toBeNull();
+    expect(decideNotification({ notifiedStatus: null, nextStatus: "ok", since: confirmed, lastNotifiedAt: null, now })).toBeNull();
+  });
+
+  it("warn ↔ error も確認後に一報", () => {
+    expect(decideNotification({ notifiedStatus: "warn", nextStatus: "error", since: confirmed, lastNotifiedAt: hoursAgo(1), now })).toBe("transition");
+    expect(decideNotification({ notifiedStatus: "error", nextStatus: "warn", since: justNow, lastNotifiedAt: hoursAgo(1), now })).toBeNull();
+  });
+
+  it("復旧は待たずにすぐ出す。unknown → ok は出さない", () => {
+    expect(decideNotification({ notifiedStatus: "error", nextStatus: "ok", since: justNow, lastNotifiedAt: hoursAgo(1), now })).toBe("transition");
+    expect(decideNotification({ notifiedStatus: "unknown", nextStatus: "ok", since: justNow, lastNotifiedAt: null, now })).toBeNull();
   });
 
   it("unknown への遷移は出さない (構成の話で障害ではない)", () => {
-    expect(decideNotification({ notifiedStatus: "ok", nextStatus: "unknown", lastNotifiedAt: null, now })).toBeNull();
-    expect(decideNotification({ notifiedStatus: "error", nextStatus: "unknown", lastNotifiedAt: hoursAgo(1), now })).toBeNull();
+    expect(decideNotification({ notifiedStatus: "ok", nextStatus: "unknown", since: confirmed, lastNotifiedAt: null, now })).toBeNull();
+    expect(decideNotification({ notifiedStatus: "error", nextStatus: "unknown", since: confirmed, lastNotifiedAt: hoursAgo(1), now })).toBeNull();
   });
 
   it("非 ok が続くときは 24h ごとにリマインド", () => {
-    expect(decideNotification({ notifiedStatus: "warn", nextStatus: "warn", lastNotifiedAt: hoursAgo(23), now })).toBeNull();
-    expect(decideNotification({ notifiedStatus: "warn", nextStatus: "warn", lastNotifiedAt: hoursAgo(24), now })).toBe("reminder");
+    expect(decideNotification({ notifiedStatus: "warn", nextStatus: "warn", since: hoursAgo(30), lastNotifiedAt: hoursAgo(23), now })).toBeNull();
+    expect(decideNotification({ notifiedStatus: "warn", nextStatus: "warn", since: hoursAgo(30), lastNotifiedAt: hoursAgo(24), now })).toBe("reminder");
     // 第一報が送れていない (lastNotifiedAt 無し) ならすぐ出す
-    expect(decideNotification({ notifiedStatus: "error", nextStatus: "error", lastNotifiedAt: null, now })).toBe("reminder");
+    expect(decideNotification({ notifiedStatus: "error", nextStatus: "error", since: hoursAgo(30), lastNotifiedAt: null, now })).toBe("reminder");
   });
 
   it("送信に失敗した遷移は notifiedStatus が進まないので、次の評価でも同じ遷移として出る", () => {
     // error → ok の復旧を送れなかった: 通知済みは error のまま、今回も ok → まだ「復旧」を出す
-    expect(decideNotification({ notifiedStatus: "error", nextStatus: "ok", lastNotifiedAt: hoursAgo(2), now })).toBe("transition");
+    expect(decideNotification({ notifiedStatus: "error", nextStatus: "ok", since: hoursAgo(2), lastNotifiedAt: hoursAgo(2), now })).toBe("transition");
   });
 
   it("ok のままなら何も出さない", () => {
-    expect(decideNotification({ notifiedStatus: "ok", nextStatus: "ok", lastNotifiedAt: null, now })).toBeNull();
+    expect(decideNotification({ notifiedStatus: "ok", nextStatus: "ok", since: hoursAgo(5), lastNotifiedAt: null, now })).toBeNull();
   });
 });
 

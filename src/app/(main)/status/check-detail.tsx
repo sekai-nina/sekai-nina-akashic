@@ -90,6 +90,23 @@ export function CheckDetail({ detail }: { detail: unknown }) {
     );
   }
 
+  // 評価そのもの: 測れなかったチェックと理由
+  const failed = asArray<{ key: string; name: string; reason: string }>(d.failed);
+  if (failed.length) {
+    rows.push(
+      <Row key="failed" label="測れなかった">
+        <ul className="space-y-0.5">
+          {failed.map((f) => (
+            <li key={f.key}>
+              {f.name} <span className="text-slate-400 font-mono text-xs">{f.key}</span>
+              <div className="text-xs text-slate-500 font-mono break-all">{f.reason}</div>
+            </li>
+          ))}
+        </ul>
+      </Row>,
+    );
+  }
+
   const added = asArray<string>(d.added);
   if (added.length) {
     rows.push(

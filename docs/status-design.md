@@ -52,7 +52,13 @@
 | 記事 | `articles.github_drift` | GitHub の tree の blob SHA と `Article.githubSha` を突き合わせ、GitHub 側が進んだ（消えた）記事・未取り込みの新規があれば warn「取り込みが必要」。`ARTICLES_GITHUB_TOKEN` 未設定なら unknown | ✓ |
 | akashic 自身 | `system.internal_db` | `prismaInternal` で `Asset` が 0 件なら error。`DIRECT_URL` 未設定だと `DATABASE_URL` に無言でフォールバックして上のチェックが全件 0（fail-open）になるのを検知する番犬 | ✓ |
 
-チェックを足すときは `CheckDefinition` を 1 つ書いて `getCheckDefinitions()` の配列に入れる。`detail` の形は `src/app/(main)/status/check-detail.tsx` が描ける形（`assets[]` / `articles[]` / `changed[]` / `added[]` / `lastAt` / `lastRunAt`）に揃える。各チェックは `CHECK_TIMEOUT_MS`（20 秒）で打ち切られ「評価に失敗」になる（GitHub が固まっても他のチェックの保存と通知を止めない）。
+| akashic 自身 | `system.evaluation` | 今回の評価で測れなかったチェックがあれば warn（合成チェック。`evaluate.ts` が作る） | ✓ |
+
+チェックを足すときは `CheckDefinition` を 1 つ書いて `getCheckDefinitions()` の配列に入れる。`detail` の形は `src/app/(main)/status/check-detail.tsx` が描ける形（`assets[]` / `articles[]` / `changed[]` / `added[]` / `failed[]` / `lastAt` / `lastRunAt`）に揃える。
+
+**チェックは直列で走らせる。** 並列（`Promise.all`）にすると 19 本のクエリが同時に Prisma の接続プールを奪い合い、本番の接続数は 1 なので待たされた側が 10 秒でプールのタイムアウトに当たる（2026-09-17 に日中ずっと ok ↔ 異常が往復した）。直列でも実測 2〜11 秒で、15 分間隔から見れば充分速い。各チェックは `CHECK_TIMEOUT_MS`（15 秒）、評価全体は `EVALUATION_BUDGET_MS`（40 秒）で打ち切る。
+
+**測れなかったチェックは「異常」にしない。** 前回の status / `since` / `detail` をそのまま持ち越し、測れなかった事実は `system.evaluation` に集約する（測れないことと壊れていることは別。接続待ちや GitHub の 5xx で異常通知を出さない）。
 
 ## 4. 評価と通知（`src/lib/status/evaluate.ts`）
 
@@ -60,6 +66,7 @@
 - 全チェックを並列に走らせ、1 つの例外・タイムアウトは error として扱って他は続ける
 - 前回と同じ status なら `since` を引き継ぐ。定義から消えた key の行は消す
 - **通知の判定**（`decideNotification`）は**前回の status ではなく `notifiedStatus`（最後に通知できた status）と比べる**: ok/unknown → warn/error の第一報、warn ↔ error の変化、warn/error → ok の復旧、**warn/error のまま 24h 経過のリマインド**。unknown への遷移は出さない（トークン未設定などの構成の話）。`notify: false` のチェックは出さない
+- **非 ok の第一報は `ALERT_CONFIRM_SEC`（13 分 = 1 回分の間隔）待って裏を取る。** つまり**2 回続けて同じ非 ok を観測してから**通知する。1 回きりの異常（DB の接続待ち・GitHub の 5xx・bot の一時的な失敗）で通知が往復しない。次の評価で ok に戻れば `since` が巻き戻って通知は出ない。**復旧（→ ok）は待たずにすぐ出す**
 - 1 回の評価で複数変わっても **1 メッセージ**（`DISCORD_STATUS_WEBHOOK_URL`、素の `fetch`、行単位で 1900 字に収めて `/status` へのリンクは必ず残す）。送れたものだけ `lastNotifiedAt` / `notifiedStatus` を進める（**送信に失敗した遷移は次の評価で同じ遷移としてもう一度出る**）。通知の要らない行は `notifiedStatus` を今回の status に同期する
 - bot の `message` は要約と Discord では 200 字に切る（`clipMessage`）
 - 同じ cron で 30 日超の `JobRun` を消す
