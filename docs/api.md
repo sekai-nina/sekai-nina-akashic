@@ -884,9 +884,10 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
       "label": "京都",
       "classification": "internal",
       "dossier": {"id": "…", "title": "2026-08-01 京都リアミ", "itemCount": 18, "updatedAt": "…"},
+      "dossierId": "…",
       "repoCollection": {"id": "…", "name": "…", "lastFetchedAt": "…", "keep": 8, "total": 99},
       "article": null,
-      "sketch": {"key": null, "url": null, "candidates": [], "extraPrompt": ""},
+      "sketch": {"key": null, "url": null, "candidates": [{"key": "meetgreet/…/sketch/0.png", "url": "https://…"}], "extraPrompt": ""},
       "createdBy": {"id": "…", "name": "…"},
       "createdAt": "…",
       "updatedAt": "…"
@@ -898,6 +899,8 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 - `format` は `online` / `real`。記事のタイトル・地の文では「オンラインミーグリ / リアルミーグリ」（略称は使わない）
 - `date` は JST の暦日（`YYYY-MM-DD`）。ISO 日時ではない
 - `article` は記事生成（#109）後に埋まる。`sketch` はスケッチ生成（#108）後に埋まる
+- **`dossier` は `null` になりうる。** ドシエは別テーブルで所有者・`viewMode` による RLS が別に効くので、所有者があとから `private` に戻したり機密を上げると、他の人には見えなくなる。ID は常に `dossierId` で返すので、`dossier` が `null` なら「ドシエが見えない」を表示する
+- `repoCollection` も `null` になりうる（収集を消した場合。`classification` は MeetGreet と同じ値で作られるので、通常は同じ人に見える）
 
 ### POST /meetgreets
 
@@ -906,6 +909,10 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 1. ドシエを `"<date> <label><オンミ|リアミ>"`（例: `2026-08-01 京都リアミ`）で作成。`viewMode` / `editMode` は `clearance`（キーの持ち主以外も編集できるように）
 2. X レポ収集（`RepoCollection`）を既定のハッシュタグ条件（`src/lib/meetgreet/config.ts` の `reportTagGroups`。オンライン = `(#坂井新奈 #ミーグリ) OR #にぃぐり`、リアルはさらに `#リアルミーグリ` / `#リアルレポ` / `#坂井新奈` 単独）、期間 = 当日〜翌日 で作成し、**収集を 1 回走らせる**
 3. 素材候補（下記）を返す
+
+1〜2 の作成（ドシエ・収集・MeetGreet）は **1 トランザクション**。途中で失敗しても名前だけ同じドシエが残ることはない。収集の実行は作成の後（トランザクション外）。
+
+**この呼び出しは数十秒かかる**（X API のページングと、取得した画像を 1 枚ずつ縮小して R2 に上げるため。実測で最大 80 秒程度）。Discord bot から呼ぶときは先に deferred ack すること。**冪等ではない**ので、タイムアウトしても再送しない（ドシエと収集が二重にできる）。応答が無いときは `GET /meetgreets` で作成済みか確かめる。
 
 ```json
 {
@@ -923,9 +930,11 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 | `format` | `"online"` / `"real"` | ✓ | 形式 |
 | `single` | string (≤200) | | シングル名。記事 frontmatter の `meetgreet.single` に出る |
 | `label` | string (≤50) | | 回の呼び分け（通常 / 初回限定盤 / 京都 など）。ドシエ・収集の名前に付くだけ |
-| `classification` | enum | | 既定 `internal`。キーの持ち主の clearance より上は 403 |
+| `classification` | enum | | 既定 `internal`。キーの持ち主の clearance より上は 403。**MeetGreet・ドシエ・X レポ収集の 3 つに同じ値が付く** |
 
-未知のフィールドは 400（strict）。
+未知のフィールドは 400（strict）。`date` は**暦に実在する日付**でなければ 400（`2026-02-30` のような日付は `Date.parse` が 3/2 に正規化して通してしまうので、往復で検証している）。
+
+エラーの切り分け: 入力が不正なら 400、clearance が足りなければ 403、それ以外（DB エラー等）は 500。**400 は「直さない限り何度送っても失敗する」を意味する**ので、再送してよいのは入力を直したときだけ。
 
 **レスポンス（201）:** 一覧の 1 行と同じ形に `fetch` と `candidates` が付く。
 
@@ -962,7 +971,11 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 
 ### PATCH /meetgreets/:id
 
-`single` / `label` / `extraSketchPrompt` を部分更新（渡した項目だけ変わる）。`date` / `format` は変えられない（変えたければ作り直す。ドシエ・収集は残る）。
+`single` / `label` / `extraSketchPrompt` を部分更新（渡した項目だけ変わる）。`date` / `format` は変えられない（変えたければ作り直す。ドシエ・収集は残る）。更新項目が 1 つも無い（`{}`）なら 400。
+
+**レスポンス:** 更新後の行（`GET /meetgreets` の 1 行と同じ形。`candidates` は付かない）。
+
+なお `label` を変えても、**作成済みのドシエ名・収集名は変わらない**（それぞれの画面で変更する）。
 
 ### POST /meetgreets/:id/materials
 
@@ -970,13 +983,17 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 {"assetIds": ["…", "…"]}
 ```
 
-指定したアセットをドシエに `asset_ref` で入れる（caption = アセットのタイトル）。**同じアセットは 2 回入らない**（既にある / キーの clearance で見えない / 存在しないものは `skipped` に数えて飛ばす）。
+指定したアセットをドシエに `asset_ref` で入れる（caption = アセットのタイトル、`sortOrder` は末尾に連番）。**同じアセットは 2 回入らない**（既にドシエにある / キーの clearance で見えない / 存在しないものは `skipped` に数えて飛ばす）。1 回に 500 件まで。
+
+書き込みはドシエの編集権限が要る（`editMode: clearance` + role `admin` / `member` + clearance が足りること。作成時のドシエはこの条件を満たす）。権限が無ければ 403、ドシエが消えていれば 404。
 
 **レスポンス:** `{"added": 12, "skipped": 2, "dossierId": "…"}`
 
 ### POST /meetgreets/:id/reports
 
-X レポを再収集する（作成時に失敗したとき、翌日以降の投稿を拾うとき）。ボディ無し。成功で `{"fetched": n, "added": n, "mediaSaved": n}`、X API の失敗は 502。keep / total は `GET /meetgreets/:id` の `repoCollection` で読む。判定（keep / reject）自体の API は無い（画面 `/repo/:id` で人が行う）。
+X レポを再収集する（作成時に失敗したとき、翌日以降の投稿を拾うとき）。ボディ無し。成功で `{"fetched": n, "added": n, "mediaSaved": n}`。収集が紐づいていなければ 409、X API 側の失敗（トークン未設定・レート制限・7 日より前の日付）は 502。**`POST /meetgreets` と同じく数十秒かかる。**
+
+keep / total は `GET /meetgreets/:id` の `repoCollection` で読む。判定（keep / reject）自体の API は無い（画面 `/repo/:id` で人が行う）。
 
 ---
 
