@@ -25,6 +25,7 @@ import {
   Grid3x3,
   FileText,
   Activity,
+  Sparkles,
 } from "lucide-react";
 import { QuickCreateModal } from "@/components/quick-create-modal";
 
@@ -43,6 +44,7 @@ const navItems = [
   { href: "/articles", label: "記事", icon: FileText },
   { href: "/testimonials", label: "口コミ管理", icon: MessageCircle },
   { href: "/repo", label: "レポ収集", icon: Twitter },
+  { href: "/meetgreets", label: "ミーグリ", icon: Sparkles },
   { href: "/coverage", label: "収集カバレッジ", icon: Grid3x3 },
   { href: "/graph", label: "グラフ", icon: Network },
   { href: "/analysis", label: "テキスト分析", icon: BarChart3 },

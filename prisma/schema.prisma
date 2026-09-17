@@ -121,11 +121,11 @@ enum PlaceStatus {
 // (sekai-nina-site の src/utils/places.ts PlaceKind と同じ値の集合)。
 // 未設定 (null) の場所はサイト側が名前・説明から推定する
 enum PlaceKind {
-  food     // グルメ
-  leisure  // レジャー
-  scenery  // 寺社・公園・景色
-  venue    // 会場・放送局
-  shop     // 店・施設
+  food // グルメ
+  leisure // レジャー
+  scenery // 寺社・公園・景色
+  venue // 会場・放送局
+  shop // 店・施設
 }
 
 enum DataSourceKind {
@@ -173,6 +173,7 @@ model User {
   apiKeys            ApiKey[]
   invitation         Invitation?
   createdInvitations Invitation[] @relation("InvitationCreatedBy")
+  meetGreets         MeetGreet[]  @relation("MeetGreetCreatedBy")
 }
 
 model Asset {
@@ -337,6 +338,7 @@ model Dossier {
 
   items           DossierItem[]
   placeCandidates DossierPlaceCandidate[]
+  meetGreet       MeetGreet?
 
   @@index([ownerId])
   @@index([classification])
@@ -558,7 +560,8 @@ model RepoCollection {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
-  tweets RepoTweet[]
+  tweets    RepoTweet[]
+  meetGreet MeetGreet?
 
   @@index([classification])
 }
@@ -767,7 +770,8 @@ model Article {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  sources ArticleSource[]
+  sources   ArticleSource[]
+  meetGreet MeetGreet?
 
   @@index([type])
   @@index([dirty])
@@ -846,10 +850,10 @@ enum StatusLevel {
 
 /// ハートビートを報告するジョブ。初回の報告で自動作成される
 model Job {
-  id   String @id @default(cuid())
+  id          String @id @default(cuid())
   /// 報告側が名乗る識別子 (bot.blog_watch / worker.stats など)
-  key  String @unique
-  name String
+  key         String @unique
+  name        String
   /// 報告側が申告する実行間隔 (秒)。null なら「報告が途絶えた」判定をしない
   intervalSec Int?
 
@@ -911,4 +915,59 @@ model StatusCheckState {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// ============================================================
+// ミーグリ記事の作成ワークフロー (#106)
+// 1 回のミーグリにつき 1 行。素材置き場のドシエ・X レポの RepoCollection・
+// 生成した記事を束ね、スケッチ候補と確定を持つ。ドシエ / /repo / 記事の
+// 各画面はそのまま使い、ここは「どこまで進んだか」と横断の紐づけだけを持つ。
+// ============================================================
+
+enum MeetGreetFormat {
+  online
+  real
+}
+
+/// 保護テーブル。classification の direct-classification RLS (Place / RepoCollection と同形)。
+/// ドシエは所有者判定があるので、ドシエを include する読みは withSession で行う。
+model MeetGreet {
+  id     String          @id @default(cuid())
+  /// 開催日 (JST "YYYY-MM-DD")。RepoCollection.startDate と同じく文字列で持つ (TZ 事故回避)
+  date   String
+  format MeetGreetFormat
+  /// シングル名 (例: 17thシングル「Kind of love」)。記事 frontmatter の meetgreet.single に出る
+  single String          @default("")
+  /// 回の呼び分け (「通常」「初回限定盤」「京都」など)。ドシエ / コレクションの名前に使うだけで記事には出ない
+  label  String          @default("")
+
+  classification ClearanceLevel @default(internal)
+
+  /// 素材置き場。作成時に自動で作る (1:1)。ドシエが消えたらこの行も消す
+  dossierId String  @unique
+  dossier   Dossier @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+
+  /// X レポの収集。作成時に自動で作る。コレクションだけ消しても行は残す
+  repoCollectionId String?         @unique
+  repoCollection   RepoCollection? @relation(fields: [repoCollectionId], references: [id], onDelete: SetNull)
+
+  /// 生成した記事 (PR3 で埋まる)
+  articleId String?  @unique
+  article   Article? @relation(fields: [articleId], references: [id], onDelete: SetNull)
+
+  /// スケッチ候補の R2 key の配列 (PR2 で使う)
+  sketchCandidates  Json    @default("[]")
+  /// 確定したスケッチの R2 key。記事のサムネになる
+  sketchKey         String?
+  /// スケッチ生成時にプロンプト本体へ追記する、この回だけの指示
+  extraSketchPrompt String  @default("")
+
+  createdById String
+  createdBy   User   @relation("MeetGreetCreatedBy", fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([date])
+  @@index([classification])
 }
