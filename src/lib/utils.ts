@@ -3,6 +3,7 @@ import { twMerge } from "tailwind-merge";
 import type { CandidateGroupKind } from "@/lib/meetgreet/candidates";
 import {
   TextType,
+  type AnnouncementKind,
   type ArticleType,
   type JobRunStatus,
   type LlmProvider,
@@ -176,6 +177,13 @@ export const ARTICLE_TYPE_LABELS: Record<ArticleType, string> = {
   item: "物",
 };
 
+/** お知らせの種類。公開サイトの一覧で見出しの前に出る小さな文字 */
+export const ANNOUNCEMENT_KIND_LABELS: Record<AnnouncementKind, string> = {
+  feature: "機能",
+  article: "記事",
+  info: "運営",
+};
+
 /**
  * enum の説明文を `*_LABELS` から生成する (`attribute=属性 / event=出来事 …`)。
  * API / MCP のスキーマの describe に使う。直書きすると画面表示とズレる
@@ -346,6 +354,24 @@ export function toJstDateOnly(d: Date | null | undefined): string | null {
 /** JST の今日を「YYYY-MM-DD」で返す (記事編集の「今日にする」) */
 export function todayJst(): string {
   return toJstDateOnly(new Date())!;
+}
+
+/** 実時刻を JST の `<input type="datetime-local">` 表記 "YYYY-MM-DDTHH:mm" にする (分まで) */
+export function toJstDateTimeLocal(d: Date | null | undefined): string {
+  if (!d) return "";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(d);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
+  // hour は "24" が出うる (hourCycle の癖) ので 0 に寄せる
+  const hour = get("hour") === "24" ? "00" : get("hour");
+  return `${get("year")}-${get("month")}-${get("day")}T${hour}:${get("minute")}`;
 }
 
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;

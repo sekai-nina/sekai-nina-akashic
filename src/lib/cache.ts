@@ -12,6 +12,7 @@ export const CACHE_TAGS = {
   stats: "stats",
   places: "places",
   anniversaries: "anniversaries",
+  announcements: "announcements",
 } as const;
 
 export function invalidateAssets() {
@@ -45,6 +46,10 @@ export function invalidatePlaces() {
 
 export function invalidateAnniversaries() {
   revalidateTag(CACHE_TAGS.anniversaries, "max");
+}
+
+export function invalidateAnnouncements() {
+  revalidateTag(CACHE_TAGS.announcements, "max");
 }
 
 export function invalidateDossiers() {
