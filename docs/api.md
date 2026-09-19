@@ -1336,6 +1336,32 @@ LLM の利用量を報告する。akashic が単価表で USD に換算し、**�
 
 ---
 
+## Instagram の監視対象
+
+### GET /insta/targets
+
+insta-watch が見張るハンドルの一覧。**有効なものだけ**返す。
+
+認証は API キー（読むだけなので read / write の別は問わない）。
+
+```json
+{
+  "targets": [
+    { "handle": "hinatazaka46", "tier": "normal", "intervalMinutes": 18 },
+    { "handle": "hiyotan928_official", "tier": "hot", "intervalMinutes": 10 }
+  ]
+}
+```
+
+| フィールド | 内容 |
+|---|---|
+| `handle` | `@` を除いた小文字のハンドル |
+| `tier` | `hot` / `normal` / `cold` |
+| `intervalMinutes` | 実際に使う間隔（分）。明示指定が無ければ tier の既定（10 / 18 / 240） |
+
+対象は `/admin/insta`（admin のみ）から登録する。**bot 側は最後に読めた一覧を保持する**
+前提で、ここが一時的に落ちても監視は止まらない。
+
 ## 典型的な利用パターン
 
 ### Discord Botからブログ更新を自動登録
