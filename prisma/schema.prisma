@@ -173,6 +173,7 @@ model User {
   apiKeys            ApiKey[]
   invitation         Invitation?
   aiSettings         AiSetting[]
+  sketchSettings     SketchSetting[] @relation("SketchSettingUpdatedBy")
   createdInvitations Invitation[]     @relation("InvitationCreatedBy")
   meetGreets         MeetGreet[]      @relation("MeetGreetCreatedBy")
   creditSnapshots    CreditSnapshot[] @relation("CreditSnapshotCreatedBy")
@@ -969,6 +970,11 @@ model MeetGreet {
   /// スケッチ生成時にプロンプト本体へ追記する、この回だけの指示
   extraSketchPrompt String  @default("")
 
+  /// 参照写真の切り抜き枠 (#136)。ツーショットで隣の人を拾わないよう、本人だけを送る。
+  /// `{ "<assetId>": { "x": 0.1, "y": 0, "w": 0.5, "h": 1 } }` の**割合 (0〜1)** で持つ。
+  /// 画面はサムネイル、生成は Drive の原本 1280px と解像度が違うので、画素だと合わない
+  sketchCrops Json @default("{}")
+
   /// 記事に**足さない**と決めたもののキー (#134)。
   /// 追記は「記事の本文に無い = まだ足していない」としか判断できず、人が意図的に消したものを
   /// 区別できない (X 側で削除されたレポを手で消しても、次の追記で復活する)。外したものを
@@ -1172,6 +1178,25 @@ model AiQuestion {
 /// 止めたいときに、サイトを作り直さずに即座に止められるようにするためのもの。
 /// Worker がここを見に来る（短いキャッシュ付き）。Akashic が落ちていても
 /// Worker は最後に読めた値で動き続けるので、これが原因で AI が止まることはない。
+/// スケッチ生成の設定 (#136)。**全体で 1 行**。
+/// プロンプトと画風の見本を画面から直せるようにするためのもので、
+/// 空なら組み込みの既定 (`src/lib/meetgreet/sketch-prompt.ts` / `STYLE_REFERENCE_KEY`) を使う
+model SketchSetting {
+  id String @id @default("singleton")
+  /// プロンプト本体。空文字なら組み込みの既定
+  prompt String @default("")
+  /// 画風の見本の R2 key。空文字なら組み込みの既定
+  styleReferenceKey String @default("")
+
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+  updatedBy   User?    @relation("SketchSettingUpdatedBy", fields: [updatedById], references: [id])
+
+  classification ClearanceLevel @default(internal)
+
+  @@index([classification])
+}
+
 model AiSetting {
   id      String  @id @default("singleton")
   /// false にすると、回答を止めたうえでサイトから入口ごと消える
