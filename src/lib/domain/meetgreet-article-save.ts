@@ -421,9 +421,11 @@ export async function saveMeetGreetArticle(
 
     // **先に紐づける。** 出典や本文の書き込みで落ちたとき、記事だけできて MeetGreet に
     // 繋がっていないと、次の実行が path_exists で止まり手当てのしようがなくなる
-    await withClearance(user.clearance, (tx) =>
-      tx.meetGreet.update({ where: { id: meetGreet.id }, data: { articleId } })
-    );
+    await withClearance(user.clearance, async (tx) => {
+      await tx.meetGreet.update({ where: { id: meetGreet.id }, data: { articleId } });
+      // 記事の素材ドシエ (#41) は回のドシエ。updatedAt を進めないよう素の SQL で書く
+      await tx.$executeRaw`UPDATE "Article" SET "dossierId" = ${meetGreet.dossierId} WHERE "id" = ${articleId} AND "dossierId" IS NULL`;
+    });
 
     // 1. 出典を反映して番号を確定させる (本文はまだ空なので 1, 2, … と振られる)
     const applied = await applySources(

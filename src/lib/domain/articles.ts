@@ -315,13 +315,24 @@ export async function ensureArticleDossier(
   user: { id: string; role: string; clearance: string },
   articleId: string
 ): Promise<{ dossierId: string; created: boolean }> {
-  // Article は非保護テーブル
-  const article = await prisma.article.findUnique({
-    where: { id: articleId },
-    select: { id: true, title: true, path: true, dossierId: true },
-  });
+  // Article は非保護テーブル。MeetGreet も所有者判定は無い (classification のみ) が
+  // 保護テーブルなので、ここは withSession で読む
+  const article = await withSession(user, (tx) =>
+    tx.article.findUnique({
+      where: { id: articleId },
+      select: { id: true, title: true, path: true, dossierId: true, meetGreet: { select: { dossierId: true } } },
+    })
+  );
   if (!article) throw new ArticleDossierError("記事が見つかりません");
   if (article.dossierId) return linkedDossier(user, article.dossierId);
+
+  // ミーグリ記事は回の素材ドシエ (MeetGreet.dossierId) がそのまま素材ドシエ。二重に作らない
+  if (article.meetGreet?.dossierId) {
+    await prisma.$executeRaw`
+      UPDATE "Article" SET "dossierId" = ${article.meetGreet.dossierId}
+      WHERE "id" = ${article.id} AND "dossierId" IS NULL`;
+    return linkedDossier(user, article.meetGreet.dossierId);
+  }
 
   const dossier = await createDossier(user, {
     title: article.title || article.path,

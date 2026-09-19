@@ -242,9 +242,15 @@ export async function linkArticles(
   const failed: { title: string; error: string }[] = [];
   for (const c of candidates) {
     try {
-      await withClearance(user.clearance, (tx) =>
-        tx.meetGreet.update({ where: { id: c.meetGreetId }, data: { articleId: c.articleId } })
-      );
+      await withClearance(user.clearance, async (tx) => {
+        const mg = await tx.meetGreet.update({
+          where: { id: c.meetGreetId },
+          data: { articleId: c.articleId },
+          select: { dossierId: true },
+        });
+        // 記事の素材ドシエ (#41) は回のドシエ。updatedAt を進めないよう素の SQL で書く
+        await tx.$executeRaw`UPDATE "Article" SET "dossierId" = ${mg.dossierId} WHERE "id" = ${c.articleId} AND "dossierId" IS NULL`;
+      });
       linked++;
     } catch (e) {
       failed.push({ title: c.articleTitle, error: e instanceof Error ? e.message : String(e) });

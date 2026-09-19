@@ -6,6 +6,7 @@
  *
  * 記事ごとに:
  *   1. `Article.dossierId` が埋まっていればスキップ (冪等)
+ *   1'. ミーグリ記事 (`MeetGreet.articleId` で繋がっている) は回の素材ドシエ `MeetGreet.dossierId` にリンク
  *   2. `frontmatterExtra.dossier.id` が指すドシエが実在すれば、それにリンクするだけ (中身は触らない。
  *      旧ワークフローで人が選んだ素材なので)
  *   3. `applied` (かつ `public`) で `assetId` のある `ArticleSource` があれば、ドシエを新規作成して
@@ -77,6 +78,7 @@ async function main() {
       path: true,
       title: true,
       dossierId: true,
+      meetGreet: { select: { dossierId: true } },
       frontmatterExtra: true,
       publishedAt: true,
       articleUpdatedAt: true,
@@ -100,12 +102,22 @@ async function main() {
     },
   });
 
-  const stats = { skipped: 0, linked: 0, created: 0, items: 0, noSources: 0, fmMissing: 0 };
+  const stats = { skipped: 0, meetGreet: 0, linked: 0, created: 0, items: 0, noSources: 0, fmMissing: 0 };
 
   for (const a of articles) {
     const label = `${a.shortId} ${a.path}`;
     if (a.dossierId) {
       stats.skipped++;
+      continue;
+    }
+
+    // 1'. ミーグリ記事は回の素材ドシエ
+    if (a.meetGreet?.dossierId) {
+      stats.meetGreet++;
+      console.log(`  [ミーグリ] ${label} → ${a.meetGreet.dossierId}`);
+      if (APPLY) {
+        await prisma.$executeRaw`UPDATE "Article" SET "dossierId" = ${a.meetGreet.dossierId} WHERE "id" = ${a.id}`;
+      }
       continue;
     }
 
@@ -177,6 +189,7 @@ async function main() {
     [
       `記事 ${articles.length} 件`,
       `既にリンク済み ${stats.skipped}`,
+      `ミーグリのドシエにリンク ${stats.meetGreet}`,
       `既存ドシエにリンク ${stats.linked}`,
       `新規作成 ${stats.created} (アイテム ${stats.items})`,
       `出典なしで見送り ${stats.noSources}`,
