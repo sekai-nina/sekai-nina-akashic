@@ -11,6 +11,7 @@ import {
 } from "@/lib/costs/report";
 import { isAnthropicAdminConfigured, isOpenAiAdminConfigured } from "@/lib/costs/providers";
 import { CREDIT_WARN_DAYS, fillMissingDays } from "@/lib/costs/summary";
+import { describeRate, formatMoney } from "@/lib/costs/currency";
 import {
   LLM_PROVIDER_BILLING_URLS,
   LLM_PROVIDER_LABELS,
@@ -120,6 +121,14 @@ export default async function CostsPage() {
               {s.snapshotAt ? (
                 <>
                   残高の記録: {formatDate(s.snapshotAt, true)}（{formatRelative(s.snapshotAt, now)}）
+                  {/* 円で記録したものを USD で見せているので、元の額と使ったレートを添える */}
+                  {s.snapshotSource && s.snapshotSource.currency !== "USD" && (
+                    <>
+                      <br />
+                      {formatMoney(s.snapshotSource.amount, s.snapshotSource.currency)} /{" "}
+                      {describeRate(s.snapshotSource.currency, s.snapshotSource.unitsPerUsd)}
+                    </>
+                  )}
                 </>
               ) : (
                 "残高が未登録"
