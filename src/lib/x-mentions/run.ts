@@ -3,7 +3,7 @@ import { prismaInternal } from "@/lib/db";
 import { postDiscordWebhook } from "@/lib/status/discord";
 import { recordJobRun } from "@/lib/status/jobs";
 import { XApiError, clampRecentWindow, xSearchRecent } from "@/lib/twitter/x-search";
-import { formatDate } from "@/lib/utils";
+import { formatHitMessage } from "./format";
 import { JOB_KEY, SETTING_ID, buildMentionQuery, isExcluded, newerTweetId, tweetIdTimestampMs } from "./query";
 
 /**
@@ -46,8 +46,6 @@ const DISCORD_GAP_MS = 500;
  * 次回に続きから送る (異常ではないので job は ok のまま、残り件数だけ伝える)
  */
 const MAX_NOTIFY_PER_RUN = 60;
-/** 本文をメッセージに載せる長さ (Discord がリンクを展開するので全文は要らない) */
-const TEXT_MAX_CHARS = 280;
 /** Discord に流してよい classification。上位機密に上げたヒットは保存だけして外に出さない */
 const NOTIFIABLE_CLASSIFICATIONS = ["public", "internal"] as const;
 
@@ -267,19 +265,4 @@ async function notifyPending(): Promise<{ notified: number; remaining: number; n
     notified += 1;
   }
   return { notified, remaining: 0, notifyError: null };
-}
-
-/**
- * 1 ヒットぶんのメッセージ。URL は裸で置いて Discord にツイートを展開させる。
- * 本文は長ければ切る (展開で全文が見える)。`allowed_mentions` は空なので @ が鳴ることはない
- */
-export function formatHitMessage(
-  hit: Pick<XMentionHit, "authorUsername" | "authorName" | "text" | "tweetedAt" | "url">,
-  queries: string[]
-): string {
-  const who = hit.authorName ? `${hit.authorName} (@${hit.authorUsername})` : `@${hit.authorUsername}`;
-  const when = hit.tweetedAt ? formatDate(hit.tweetedAt, true) : "";
-  const text = hit.text.replace(/\s+/g, " ").trim();
-  const body = text.length > TEXT_MAX_CHARS ? `${text.slice(0, TEXT_MAX_CHARS)}…` : text;
-  return [`🔎 **${queries.join(" / ")}** — ${who}${when ? `　${when}` : ""}`, `> ${body}`, hit.url].join("\n");
 }

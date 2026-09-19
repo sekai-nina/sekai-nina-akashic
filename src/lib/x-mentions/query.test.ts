@@ -10,7 +10,7 @@ import {
   parseUsernames,
   tweetIdTimestampMs,
 } from "./query";
-import { formatHitMessage } from "./run";
+import { formatHitMessage } from "./format";
 
 describe("normalizeUsername", () => {
   it("@ (全角も) と前後の空白を落として小文字にする", () => {
