@@ -1068,7 +1068,7 @@ keep / total は `GET /meetgreets/:id` の `repoCollection` で読む。判定�
 
 | フィールド | 型 | 必須 | 説明 |
 |---|---|---|---|
-| `assetIds` | string[] | ✓ | 参照にする画像。**ドシエに入っている画像に限る**（1〜15 枚） |
+| `assetIds` | string[] | ✓ | 参照にする画像。**ドシエに入っている `internal` 以下の画像に限る**（1〜15 枚。`revisionOf` を渡すときは 14 枚まで） |
 | `revisionOf` | string | | 作り直しの元にする候補の key（`sketch.candidates[].key`）。渡すとその画像も参照に足す |
 | `revisionNote` | string (≤2000) | | 作り直しの指示 |
 
@@ -1076,10 +1076,12 @@ keep / total は `GET /meetgreets/:id` の `repoCollection` で読む。判定�
 
 - **1 回あたり 1 分前後かかる**（実測: 参照 2 枚 + 基準スケッチで 59 秒）。`POST /meetgreets` と同じく bot は deferred ack してから呼ぶ
 - 回ごとの追加指示（どの髪型を中央にするか等）は `PATCH /meetgreets/:id` の `extraSketchPrompt` に入れておく。生成のたびにプロンプトの末尾に足される
-- 参照は **16 枚まで**という API の制限があり、最後の 1 枚を基準スケッチに使うので写真は 15 枚まで
+- 入力は **16 枚まで**という API の制限があり、最後の 1 枚を基準スケッチに使うので写真は 15 枚まで。**作り直しのときは直す候補でもう 1 枚使うので 14 枚まで**（超えると 400）
+- **`confidential` 以上のアセットは参照にできない。** 画像の中身を外部 API に送る操作なので、`internal` 以下に限っている（[docs/security-dev.md](./security-dev.md)）
 - 画像は Drive に原本があればそれを、無ければ R2 の 640px サムネイルを使う
 - 生成は `1536x1024` で行い、**左右に白を足して 1.91:1（1956x1024）にする**。`gpt-image-1` が出せるのは 1024x1024 / 1536x1024 / 1024x1536 の 3 つだけで 1.91:1 を直接出せないため。上下を切ると頭や補助スケッチが欠けるので、描かれたものが減らない白埋めにしている
-- 入力が不正なら 400、生成・保存の失敗（OpenAI / R2）は 502
+- `revisionNote` は `revisionOf` と一緒にしか渡せない（単独なら 400）
+- 入力が不正なら 400、生成の失敗（OpenAI / R2）は 502、こちらの設定漏れ（キー未設定等）は 500
 
 ### POST /meetgreets/:id/sketch/select
 
