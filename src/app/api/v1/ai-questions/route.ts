@@ -50,6 +50,7 @@ export async function POST(request: Request) {
       citations,
       cached: body.cached === true,
       origin: typeof body.origin === "string" ? body.origin.slice(0, 200) : "",
+      followUp: body.followUp === true,
     },
     auth.clearance
   );

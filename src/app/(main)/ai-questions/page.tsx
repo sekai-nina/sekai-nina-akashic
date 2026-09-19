@@ -102,7 +102,18 @@ export default async function AiQuestionsPage({
             return (
               <li key={item.id} className="py-4">
                 <div className="flex items-baseline gap-3">
-                  <p className="font-medium text-slate-900 flex-1">{item.question}</p>
+                  <p className="font-medium text-slate-900 flex-1">
+                    {item.followUp && (
+                      // 単独の質問と読み違えないための印。どの質問の続きかは記録していない
+                      <span
+                        className="mr-2 align-middle rounded bg-slate-100 text-slate-500 px-1.5 py-0.5 text-xs font-normal"
+                        title="会話の続きとして聞かれた質問です（どの質問の続きかは記録していません）"
+                      >
+                        続き
+                      </span>
+                    )}
+                    {item.question}
+                  </p>
                   <time className="text-xs text-slate-400 shrink-0">{formatJst(item.askedAt)}</time>
                 </div>
                 <p className="text-sm text-slate-600 mt-1 whitespace-pre-wrap">{item.answer}</p>

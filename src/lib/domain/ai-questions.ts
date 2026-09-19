@@ -19,6 +19,8 @@ export interface AiQuestionInput {
   citations: { title: string; url: string }[];
   cached: boolean;
   origin: string;
+  /** 会話の続きとして聞かれたか。どの質問の続きかは持たない */
+  followUp: boolean;
 }
 
 export function expiryFor(askedAt: Date): Date {
@@ -36,6 +38,7 @@ export async function recordAiQuestion(input: AiQuestionInput, clearance: string
         citationCount: input.citations.length,
         cached: input.cached,
         origin: input.origin,
+        followUp: input.followUp,
         expiresAt: expiryFor(input.askedAt),
       },
     })
