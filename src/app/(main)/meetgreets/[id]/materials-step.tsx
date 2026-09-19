@@ -10,7 +10,11 @@ import { applyMaterialsAction } from "../actions";
 import { Lightbox } from "./lightbox";
 
 /**
- * 素材候補のチェックリスト。初期チェックは suggested、既にドシエにあるものは固定表示。
+ * 素材候補のチェックリスト。既にドシエにあるものは固定表示。
+ *
+ * **最初は何もチェックしない (#160)。** 以前は「おすすめ」を初期チェックにしていたが、
+ * チェックの状態はどこにも保存していないので、ページを開き直すたびに毎回そこから作り直され、
+ * **外したはずのものが何度でも戻ってきた**。入れるものは人が決める。
  *
  * **中身を見て判断できることを優先する (#135)。** 題だけでは何のトークか分からないので
  * 本文の頭を出し、画像は並べて大きく見せる。チェックの付いていないテキストは数が多いので
@@ -26,8 +30,14 @@ export function MaterialsStep({ meetGreetId, groups }: { meetGreetId: string; gr
   const [expandedText, setExpandedText] = useState<Set<string>>(new Set());
   const [showAllText, setShowAllText] = useState<Set<string>>(new Set());
   const [zoom, setZoom] = useState<{ url: string; title: string } | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(() => suggestedIds(groups));
+  // **最初は何もチェックしない (#160)。** 以前は「おすすめ」を初期チェックにしていたが、
+  // ページを開き直すたびに毎回そこから作り直すので、**外したはずのものが何度でも戻ってきた**。
+  // 入れるものは人が決める。おすすめは下の「おすすめをチェック」で一括で入れられる
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [closed, setClosed] = useState<Set<string>>(() => uninterestingKeys(groups));
+
+  /** 「おすすめ」= まとめて入れる導線に使うだけ。**初期チェックには使わない** */
+  const suggested = useMemo(() => suggestedIds(groups), [groups]);
 
   /**
    * 候補の顔ぶれ。**これが変わったときだけ**チェックと畳みを組み直す。
@@ -47,12 +57,11 @@ export function MaterialsStep({ meetGreetId, groups }: { meetGreetId: string; gr
     if (!prev) return; // 初期値は useState の初期化で入れている
 
     setSelected((chosen) => {
+      // **勝手に足さない。** ドシエに入ったものを外すだけ
       const next = new Set<string>();
       for (const g of groups) {
         for (const a of g.assets) {
-          if (a.inDossier) continue; // 入ったものは外す
-          // 手で触ったチェックは残す。新しく出てきた候補だけおすすめに従う
-          if (prev.ids.has(a.id) ? chosen.has(a.id) : a.suggested) next.add(a.id);
+          if (!a.inDossier && chosen.has(a.id)) next.add(a.id);
         }
       }
       return next;
@@ -261,6 +270,16 @@ export function MaterialsStep({ meetGreetId, groups }: { meetGreetId: string; gr
       </div>
 
       <div className="mt-3 flex items-center gap-3 flex-wrap">
+        {suggested.size > 0 && (
+          <button
+            type="button"
+            onClick={() => setSelected((s) => new Set([...s, ...suggested]))}
+            disabled={pending}
+            className="h-9 px-3 rounded-md border border-slate-200 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            おすすめ {suggested.size} 件をチェック
+          </button>
+        )}
         <button
           type="button"
           onClick={apply}
@@ -286,9 +305,13 @@ export function MaterialsStep({ meetGreetId, groups }: { meetGreetId: string; gr
   );
 }
 
-/** 初期チェック */
+/** 「おすすめ」= 本文にミーグリの話があるブログ / 当日前後のトーク。**チェックはしない**、まとめて入れる導線に使うだけ */
 function suggestedIds(groups: CandidateGroup[]): Set<string> {
-  return new Set(groups.flatMap((g) => g.assets.filter((a) => a.suggested).map((a) => a.id)));
+  return new Set(
+    groups.flatMap((g) =>
+      g.assets.filter((a) => a.suggested && !a.inDossier).map((a) => a.id)
+    )
+  );
 }
 
 /** 何も勧めておらず、ドシエにも入っていない = 最初から畳んでおくグループ */
