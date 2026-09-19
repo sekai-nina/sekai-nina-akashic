@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { FileText } from "lucide-react";
 import type { ArticlePreview } from "@/lib/meetgreet/types";
-import { previewArticleAction, saveArticleAction } from "../actions";
+import { previewArticleAction, restoreExclusionsAction, saveArticleAction } from "../actions";
 
 /**
  * 記事の生成。まず差分を見せ、確認してから保存する。
@@ -23,6 +23,8 @@ export function ArticleStep({
   const [pending, startTransition] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
   const [preview, setPreview] = useState<ArticlePreview | null>(null);
+  /** 足すものにチェック。外したものは「今後足さない」として覚える (#134) */
+  const [keep, setKeep] = useState<Set<string>>(new Set());
 
   if (!hasDossier) {
     return <p className="text-xs text-slate-400">ドシエが見えないため記事を作れません。</p>;
@@ -40,6 +42,7 @@ export function ArticleStep({
         return;
       }
       setPreview(res.preview);
+      setKeep(new Set(res.preview.additions.map((a) => a.key)));
       setMsg(
         res.preview.empty
           ? "増えているものはありません"
@@ -52,11 +55,12 @@ export function ArticleStep({
 
   function save() {
     if (!preview) return;
+    const exclude = preview.additions.filter((a) => !keep.has(a.key)).map((a) => a.key);
     setMsg("保存中…");
     const digest = preview.digest;
     startTransition(async () => {
       // 見せた内容と保存する内容が食い違っていたら中止させる
-      const res = await saveArticleAction(meetGreetId, digest).catch((e: unknown) => ({
+      const res = await saveArticleAction(meetGreetId, digest, exclude).catch((e: unknown) => ({
         ok: false as const,
         error: e instanceof Error ? e.message : "通信に失敗しました",
       }));
@@ -64,13 +68,32 @@ export function ArticleStep({
         setMsg(`エラー: ${res.error}`);
         return;
       }
+      const dropped = exclude.length > 0 ? ` / ${exclude.length} 件は今後足しません` : "";
       setMsg(
         res.mode === "create"
           ? `記事を作りました（出典 ${res.sources} 件）。公開は記事の push から`
-          : `${res.added} 行を追記しました（出典 +${res.sources}）`
+          : res.added === 0
+            ? `本文は変えていません${dropped}`
+            : `${res.added} 行を追記しました（出典 +${res.sources}）${dropped}`
       );
       setPreview(null);
       router.refresh();
+    });
+  }
+
+  function restore(key: string) {
+    setMsg("戻しています…");
+    startTransition(async () => {
+      const res = await restoreExclusionsAction(meetGreetId, [key]).catch((e: unknown) => ({
+        ok: false as const,
+        error: e instanceof Error ? e.message : "通信に失敗しました",
+      }));
+      if (!res.ok) {
+        setMsg(`エラー: ${res.error}`);
+        return;
+      }
+      // 戻したものが候補に出てくるので、差分を取り直す
+      load();
     });
   }
 
@@ -105,6 +128,62 @@ export function ArticleStep({
           機密レベルが internal を超えるアセット {preview.droppedByClearance} 件は本文に載せていません
           （記事は公開リポジトリに push されるため）。必要なら記事の編集画面から手で足してください。
         </p>
+      )}
+
+      {preview && preview.additions.length > 0 && (
+        <div>
+          <div className="text-xs font-medium text-slate-600 mb-1.5">
+            足すもの（外したものは今後この回では提示されません）
+          </div>
+          <ul className="rounded-md border border-slate-200 divide-y divide-slate-100">
+            {preview.additions.map((a) => (
+              <li key={a.key}>
+                <label className="flex items-start gap-2 px-3 py-2 cursor-pointer hover:bg-slate-50">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 shrink-0"
+                    checked={keep.has(a.key)}
+                    onChange={() =>
+                      setKeep((s) => {
+                        const next = new Set(s);
+                        if (next.has(a.key)) next.delete(a.key);
+                        else next.add(a.key);
+                        return next;
+                      })
+                    }
+                    aria-label={a.label}
+                  />
+                  <span className="text-xs text-slate-700 break-all">{a.label}</span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {preview && preview.excluded.length > 0 && (
+        <div>
+          <div className="text-xs font-medium text-slate-600 mb-1.5">
+            今後足さないもの（{preview.excluded.length} 件）
+          </div>
+          <ul className="rounded-md border border-slate-200 divide-y divide-slate-100">
+            {preview.excluded.map((e) => (
+              <li key={e.key} className="flex items-start gap-2 px-3 py-2">
+                <span className="text-xs text-slate-400 break-all flex-1 line-through">
+                  {e.label}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => restore(e.key)}
+                  disabled={pending}
+                  className="shrink-0 h-6 px-2 rounded border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  戻す
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
       {preview && !preview.empty && (

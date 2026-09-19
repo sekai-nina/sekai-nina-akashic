@@ -18,15 +18,9 @@ import { parseFrontmatterDate } from "@/lib/articles/frontmatter";
 import { jpDate } from "@/lib/meetgreet/article";
 import { MAX_ARTICLE_CLEARANCE } from "@/lib/meetgreet/config";
 import { planAppend, isPureAppend, appendDiff } from "@/lib/meetgreet/append";
+import { jsonStringArray } from "@/lib/meetgreet/config";
 import type { RenderedSource } from "@/lib/meetgreet/article";
 import type { ArticleMode, ArticlePreview } from "@/lib/meetgreet/types";
-
-export type { ArticleMode, ArticlePreview };
-
-/** プレビューした内容と保存する内容が同じかを見るための指紋 */
-export function bodyDigest(body: string): string {
-  return createHash("sha256").update(body).digest("hex").slice(0, 16);
-}
 import {
   addAssetToArticle,
   applyArticleSource,
@@ -38,6 +32,12 @@ import { buildMeetGreetArticle } from "./meetgreet-article";
 import { MeetGreetInputError, type ActingUser } from "./meetgreets";
 import { logAudit } from "./audit";
 
+export type { ArticleMode, ArticlePreview };
+
+/** プレビューした内容と保存する内容が同じかを見るための指紋 */
+export function bodyDigest(body: string): string {
+  return createHash("sha256").update(body).digest("hex").slice(0, 16);
+}
 
 
 export interface MeetGreetForArticle {
@@ -52,6 +52,8 @@ export interface MeetGreetForArticle {
   sketchKey: string | null;
   articleId: string | null;
   classification: string;
+  /** 「足さない」と決めたもののキー (#134) */
+  articleExclusions: unknown;
 }
 
 /**
@@ -73,6 +75,8 @@ export async function previewMeetGreetArticle(
       addedLines: [],
       newSources: rendered.sources,
       droppedByClearance: rendered.droppedByClearance,
+      additions: [],
+      excluded: [],
       empty: false,
       shortId: null,
     };
@@ -85,12 +89,14 @@ export async function previewMeetGreetArticle(
   if (!article) throw new MeetGreetInputError("紐づいている記事が見つかりません");
   const existingSources = await loadArticleSources(user, meetGreet.articleId);
 
-  const plan = planAppend({
+  const stored = jsonStringArray(meetGreet.articleExclusions);
+  const planArgs = {
     existingBody: article.body,
     parts: rendered.parts,
     sources: rendered.sources,
     existingSources,
-  });
+  };
+  const plan = planAppend({ ...planArgs, excluded: stored });
   return {
     mode: "append",
     title: rendered.title,
@@ -99,9 +105,51 @@ export async function previewMeetGreetArticle(
     addedLines: appendDiff(article.body, plan.body).added,
     newSources: plan.newSources,
     droppedByClearance: rendered.droppedByClearance,
+    additions: plan.additions,
+    excluded: describeExclusions(stored, planArgs),
     empty: plan.empty,
     shortId: article.shortId,
   };
+}
+
+/**
+ * 外しているものに名前をつける (戻す判断ができるように)。
+ * 除外を当てずに組み直すと、外した当人が `additions` に現れるのでラベルが取れる。
+ * ドシエから消えたものは候補に出てこないので、キーをそのまま見せる
+ * (見えないまま残ると、同じものを足し直したいときに理由の分からない不在になる)。
+ */
+function describeExclusions(
+  stored: readonly string[],
+  planArgs: Omit<Parameters<typeof planAppend>[0], "excluded">
+): { key: string; label: string }[] {
+  if (stored.length === 0) return [];
+  const labels = new Map(planAppend(planArgs).additions.map((a) => [a.key, a.label]));
+  return stored.map((key) => ({ key, label: labels.get(key) ?? key }));
+}
+
+/** 「今後足さない」を取り消す。次のプレビューからまた候補に出る (#134) */
+export async function restoreMeetGreetExclusions(
+  user: ActingUser,
+  meetGreet: MeetGreetForArticle,
+  keys: readonly string[]
+): Promise<number> {
+  const stored = jsonStringArray(meetGreet.articleExclusions);
+  const next = stored.filter((k) => !keys.includes(k));
+  if (next.length === stored.length) return 0;
+  await withClearance(user.clearance, (tx) =>
+    tx.meetGreet.update({
+      where: { id: meetGreet.id },
+      data: { articleExclusions: next as unknown as Prisma.InputJsonValue },
+    })
+  );
+  await logAudit({
+    actorId: user.id,
+    action: "meetgreet.article.restore",
+    targetType: "MeetGreet",
+    targetId: meetGreet.id,
+    metadata: { restored: stored.length - next.length, keys: [...keys] },
+  });
+  return stored.length - next.length;
 }
 
 export type SaveArticleResult =
@@ -202,6 +250,14 @@ async function applySources(
 }
 
 /** frontmatter の dossier / meetgreet を入れ直す (push でそのまま復元される) */
+/** 比較用に `dossier.synced_at` を落とす (取り込んだ日は中身の変化ではない) */
+function withoutSyncedAt(extra: Record<string, unknown>): Record<string, unknown> {
+  const dossier = extra.dossier;
+  if (!dossier || typeof dossier !== "object" || Array.isArray(dossier)) return extra;
+  const { synced_at: _drop, ...rest } = dossier as Record<string, unknown>;
+  return { ...extra, dossier: rest };
+}
+
 async function saveFrontmatterExtra(
   articleId: string,
   extra: Record<string, unknown>
@@ -214,11 +270,17 @@ async function saveFrontmatterExtra(
     current?.frontmatterExtra && typeof current.frontmatterExtra === "object" && !Array.isArray(current.frontmatterExtra)
       ? (current.frontmatterExtra as Record<string, unknown>)
       : {};
+  const next = { ...base, ...extra };
+  // **実質同じなら書かない。** dirty は「DB の出力 ≠ GitHub」の意味なので、何も増えなかった
+  // 保存のたびに立てると、`synced_at` の日付が動いただけの push が積まれる。
+  // 「要反映」の判定に使うのは `item_count` と `updated_at` だけ (`loadNeedsSync`) なので、
+  // `synced_at` の差は変化と見なさない (= 本当に取り込んだ日が残る)
+  if (JSON.stringify(withoutSyncedAt(next)) === JSON.stringify(withoutSyncedAt(base))) return;
   await prisma.article.update({
     where: { id: articleId },
     // 直接書くので dirty / editedAt も自分で立てる (次の push に載せるため)
     data: {
-      frontmatterExtra: { ...base, ...extra } as Prisma.InputJsonValue,
+      frontmatterExtra: next as Prisma.InputJsonValue,
       dirty: true,
       editedAt: new Date(),
     },
@@ -230,7 +292,9 @@ export async function saveMeetGreetArticle(
   user: ActingUser,
   meetGreet: MeetGreetForArticle,
   /** 画面が見せたプレビューの指紋。渡すと、組み立て直した結果が変わっていたら中止する */
-  expectedDigest?: string
+  expectedDigest?: string,
+  /** 今回「足さない」と決めたもののキー。除外リストに追加してから組み立て直す (#134) */
+  exclude: readonly string[] = []
 ): Promise<SaveArticleResult> {
   const actor: ArticleActor = { id: user.id };
   const rendered = await buildMeetGreetArticle(user, meetGreet);
@@ -370,24 +434,40 @@ export async function saveMeetGreetArticle(
   if (!article) return { ok: false, error: "紐づいている記事が見つかりません" };
   const existingSources = await loadArticleSources(user, meetGreet.articleId);
 
-  const plan = planAppend({
+  const stored = jsonStringArray(meetGreet.articleExclusions);
+  const planArgs = {
     existingBody: article.body,
     parts: rendered.parts,
     sources: rendered.sources,
     existingSources,
-  });
-  if (plan.empty) {
-    // 本文が増えなくてもドシエは動いている (アイテム削除・抜粋の編集など)。
-    // スナップショットを更新しないと「要反映」バッジが永久に消えない
-    await saveFrontmatterExtra(meetGreet.articleId, { dossier: rendered.frontmatterExtra.dossier });
-    return { ok: true, mode: "append", shortId: article.shortId, added: 0, sources: 0, failed: [] };
-  }
+  };
 
-  if (mismatch(plan.body)) {
+  // **指紋は「見せたときと同じ条件」で照合する。** 除外を足すと本文が変わるので、
+  // 除外を当てる前の結果と突き合わせる (除外を渡せば照合をすり抜けられる、を防ぐ)
+  const shown = planAppend({ ...planArgs, excluded: stored });
+  if (mismatch(shown.body)) {
     return {
       ok: false,
       error: "内容が変わりました (素材が増減したか、記事が他で編集されました)。もう一度差分を見てください",
     };
+  }
+
+  const exclusions = [...new Set([...stored, ...exclude])];
+  const plan = exclude.length > 0 ? planAppend({ ...planArgs, excluded: exclusions }) : shown;
+  if (plan.empty) {
+    // 全部外したケース。本文は変えないが、外した事実は覚える
+    if (exclude.length > 0) {
+      await withClearance(user.clearance, (tx) =>
+        tx.meetGreet.update({
+          where: { id: meetGreet.id },
+          data: { articleExclusions: exclusions as unknown as Prisma.InputJsonValue },
+        })
+      );
+    }
+    // 本文が増えなくてもドシエは動いている (アイテム削除・抜粋の編集など)。
+    // スナップショットを更新しないと「要反映」バッジが永久に消えない
+    await saveFrontmatterExtra(meetGreet.articleId, { dossier: rendered.frontmatterExtra.dossier });
+    return { ok: true, mode: "append", shortId: article.shortId, added: 0, sources: 0, failed: [] };
   }
 
   // **既存行が 1 行でも消えていたら適用しない。** 手で入れた ![rep] や文面の調整を守る最後の砦
@@ -437,13 +517,31 @@ export async function saveMeetGreetArticle(
     dossier: rendered.frontmatterExtra.dossier,
   });
 
+  // **除外を覚えるのは本文の保存に成功してから。** 先に書くと、衝突や純粋追記でない等で
+  // 中止したときに「外した」だけが残り、戻す手段が無くなる
+  if (exclude.length > 0) {
+    await withClearance(user.clearance, (tx) =>
+      tx.meetGreet.update({
+        where: { id: meetGreet.id },
+        data: { articleExclusions: exclusions as unknown as Prisma.InputJsonValue },
+      })
+    );
+  }
+
   const added = appendDiff(article.body, plan.body).added.length;
   await logAudit({
     actorId: user.id,
     action: "meetgreet.article.append",
     targetType: "MeetGreet",
     targetId: meetGreet.id,
-    metadata: { shortId: article.shortId, added, sources: applied.applied, failed: applied.failed.length, ...plan.added },
+    metadata: {
+      shortId: article.shortId,
+      added,
+      sources: applied.applied,
+      failed: applied.failed.length,
+      excluded: exclude,
+      ...plan.added,
+    },
   });
   return {
     ok: true,

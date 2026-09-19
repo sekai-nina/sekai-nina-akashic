@@ -92,8 +92,8 @@ export const MAX_EXCERPTS_PER_APPLY = 50;
  */
 export const MAX_EXTERNAL_AI_CLEARANCE = "internal" as const;
 
-/** Json 列の sketchCandidates から key の配列を取り出す (中身を信用しない) */
-export function sketchCandidateKeys(value: unknown): string[] {
+/** Json 列 (sketchCandidates / articleExclusions) から文字列だけを取り出す (中身を信用しない) */
+export function jsonStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((k): k is string => typeof k === "string") : [];
 }
 

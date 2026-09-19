@@ -94,8 +94,17 @@ export const ArticleGenerateSchema = z
     dryRun: z.boolean().optional(),
     /** dryRun で受け取った digest。渡すと、組み立て直した結果が変わっていたら 409 */
     expectedDigest: z.string().min(1).optional(),
+    /** 「今後この回では足さない」と決めたもののキー (dryRun の additions[].key) */
+    exclude: z.array(z.string().min(1)).max(200).optional(),
+    /** 「足さない」を取り消すキー (dryRun の excluded[].key)。単独で送る */
+    restore: z.array(z.string().min(1)).max(200).optional(),
   })
-  .strict();
+  .strict()
+  // 取り消しは記事を触らない別の操作。同じ要求に混ぜると、先に取り消したぶん本文が変わって
+  // expectedDigest が必ず食い違う (= 何が起きたか分からない 409 になる)
+  .refine((v) => !(v.restore?.length && (v.dryRun || v.exclude?.length || v.expectedDigest)), {
+    message: "restore は単独で指定してください",
+  });
 
 export const SelectSketchSchema = z.object({ key: z.string().min(1) }).strict();
 

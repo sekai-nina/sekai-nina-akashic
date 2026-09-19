@@ -63,6 +63,10 @@ export interface ArticlePreview {
   newSources: { sourceNo: number; label: string; url: string | null; assetId: string | null }[];
   /** 機密レベルで本文に載せなかったアセットの数 */
   droppedByClearance: number;
+  /** 足されるものの一覧。チェックを外したものは「今後足さない」として覚える (#134) */
+  additions: { key: string; kind: string; label: string }[];
+  /** 今「足さない」と覚えているもの。戻せるように見せる (#134) */
+  excluded: { key: string; label: string }[];
   /** 何も増えない */
   empty: boolean;
   /** 既存記事がある場合の shortId */

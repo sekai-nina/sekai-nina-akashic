@@ -14,7 +14,11 @@ import {
 } from "@/lib/domain/meetgreets";
 import { applyExcerpts, proposeExcerptsForDossier } from "@/lib/domain/meetgreet-excerpts";
 import { importMeetGreets, linkArticles } from "@/lib/domain/meetgreet-import";
-import { previewMeetGreetArticle, saveMeetGreetArticle } from "@/lib/domain/meetgreet-article-save";
+import {
+  previewMeetGreetArticle,
+  restoreMeetGreetExclusions,
+  saveMeetGreetArticle,
+} from "@/lib/domain/meetgreet-article-save";
 import { generateSketch, selectSketch } from "@/lib/domain/meetgreet-sketch";
 import {
   ApplyExcerptsSchema,
@@ -210,12 +214,35 @@ export async function previewArticleAction(id: string) {
   }
 }
 
-export async function saveArticleAction(id: string, expectedDigest?: string) {
+/** 「今後足さない」を取り消す (#134) */
+export async function restoreExclusionsAction(id: string, keys: string[]) {
   const user = await requireMember();
   try {
     const mg = await getMeetGreet(user, id);
     if (!mg) throw new Error("見つかりません");
-    const result = await saveMeetGreetArticle(user, { ...mg, format: mg.format }, expectedDigest);
+    const restored = await restoreMeetGreetExclusions(user, { ...mg, format: mg.format }, keys);
+    revalidatePath(`/meetgreets/${id}`);
+    return { ok: true as const, restored };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+export async function saveArticleAction(
+  id: string,
+  expectedDigest?: string,
+  exclude: string[] = []
+) {
+  const user = await requireMember();
+  try {
+    const mg = await getMeetGreet(user, id);
+    if (!mg) throw new Error("見つかりません");
+    const result = await saveMeetGreetArticle(
+      user,
+      { ...mg, format: mg.format },
+      expectedDigest,
+      exclude
+    );
     if (!result.ok) return { ok: false as const, error: result.error };
     revalidatePath(`/meetgreets/${id}`);
     revalidatePath("/meetgreets");

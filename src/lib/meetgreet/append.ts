@@ -93,6 +93,17 @@ function renumber(line: string, map: Map<number, number>): string {
   });
 }
 
+/** 行の末尾の `^[n]` から番号を取り出す */
+function footnoteOf(line: string): number | null {
+  const m = line.match(/\^\[(\d+)\]\s*$/);
+  return m ? Number(m[1]) : null;
+}
+
+/** 抜粋の identity に使う先頭行 (重複判定と除外キーで同じものを使う) */
+function quoteHead(excerpt: string): string {
+  return excerpt.split("\n").find((l) => l.trim())?.trim() ?? "";
+}
+
 /** 脚注番号を外した行の中身 */
 function lineCore(line: string): string {
   return line.replace(/\^\[\d+\]\s*$/, "").trim();
@@ -117,13 +128,55 @@ export interface ExistingSource {
   url: string | null;
 }
 
+/** 追記で足される 1 項目 (画面がチェックボックスを出すのに使う) */
+export interface AppendItem {
+  key: string;
+  kind: ExclusionKind;
+  /** 画面に出す短い説明 */
+  label: string;
+}
+
 export interface AppendPlan {
   body: string;
   /** 追加する出典 (sourceNo は採番済み) */
   newSources: RenderedSource[];
   added: { quotes: number; reports: number; talks: number; blogImages: number; tiktoks: number };
+  /** 足されるものの一覧。ここから外したものを除外リストに入れる */
+  additions: AppendItem[];
   /** 何も増えなかった */
   empty: boolean;
+}
+
+/**
+ * 「足さない」と決めたものを覚えるためのキー (#134)。
+ *
+ * 追記は「記事の本文に無い = まだ足していない」としか判断できないので、人が意図的に
+ * 消したもの (X 側で削除されたレポなど) を外したことをここで覚える。
+ */
+export type ExclusionKind = "quote" | "report" | "tiktok" | "talk" | "blogImage";
+
+/** 文字列の短い指紋 (FNV-1a)。抜粋のキーに使う */
+function fingerprint(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
+
+export function exclusionKey(kind: ExclusionKind, value: string): string {
+  // ツイートは status ID だけで持つ。ユーザー名が変わっても、mobile.twitter.com 等の
+  // 表記で入っても同じキーになる
+  if (kind === "report") {
+    const id = value.match(/\/status\/(\d+)/)?.[1];
+    return `report:${id ?? normalizeTweetUrl(value)}`;
+  }
+  if (kind === "tiktok") return `tiktok:${tiktokVideoId(value) ?? normalizeTweetUrl(value)}`;
+  // 抜粋は**先頭行**で見る。重複判定も先頭行なので identity を揃える
+  // (下の行を直しただけで別キーになると、除外したはずの引用が復活する)
+  if (kind === "quote") return `quote:${fingerprint(quoteHead(value))}`;
+  return `asset:${value}`; // talk / blogImage はアセット単位
 }
 
 /** TikTok の URL から video ID を取り出す (短縮 URL からは取れない) */
@@ -142,10 +195,79 @@ export function planAppend(input: {
   /** フル生成したときの出典 (assetId / url で既存と突き合わせる) */
   sources: RenderedSource[];
   existingSources: ExistingSource[];
+  /** 「足さない」と決めたもののキー (#134) */
+  excluded?: readonly string[];
 }): AppendPlan {
   const { existingBody, parts } = input;
+  const excluded = new Set(input.excluded ?? []);
+  const additions: AppendItem[] = [];
+  /** 除外されていなければ一覧に足して true を返す */
+  const take = (kind: ExclusionKind, value: string, label: string): boolean => {
+    const key = exclusionKey(kind, value);
+    if (excluded.has(key)) return false;
+    additions.push({ key, kind, label });
+    return true;
+  };
 
-  // 1. 出典の対応づけ: 既存にあるものはその番号、無いものは末尾に採番
+  // 既に本文にある行 (脚注番号を外したもの)。トーク / ブログ画像の重複判定に使う
+  const bodyLines = new Set(existingBody.split("\n").map(lineCore).filter((l) => l.length > 0));
+  const sections = parseSections(existingBody);
+  const added = { quotes: 0, reports: 0, talks: 0, blogImages: 0, tiktoks: 0 };
+
+  // --- 1. 何を足すか決める (ここで除外を効かせる) ---
+
+  const freshQuotes = parts.quotes
+    .map((q) => ({
+      ...q,
+      excerpts: q.excerpts.filter((ex) => {
+        const head = quoteHead(ex);
+        if (head.length === 0 || existingBody.includes(head)) return false;
+        return take("quote", ex, `引用「${head.slice(0, 24)}…」`);
+      }),
+    }))
+    .filter((q) => q.excerpts.length > 0);
+
+  const seenReports = new Set(
+    (existingBody.match(/https?:\/\/(?:www\.)?(?:x|twitter)\.com\/[^\s)]+/g) ?? []).map(normalizeTweetUrl)
+  );
+  const freshReports = parts.reports.filter(
+    (u) => !seenReports.has(normalizeTweetUrl(u)) && take("report", u, `レポ ${u}`)
+  );
+
+  // TikTok は **video ID で突き合わせる** (ドシエには短縮 URL、記事には解決済みの URL が
+  // 載るので、URL の文字列比較だと毎回「新規」になる)
+  const freshTiktoks = parts.tiktoks.filter((u) => {
+    const id = tiktokVideoId(u);
+    const already = id ? existingBody.includes(id) : existingBody.includes(normalizeTweetUrl(u));
+    return !already && take("tiktok", u, `TikTok ${u}`);
+  });
+
+  const freshTalks = parts.talks.filter(
+    (t) => !hasLine(bodyLines, t.line) && take("talk", t.assetId, lineCore(t.line))
+  );
+
+  const freshImages = parts.blogImages.filter(
+    (b) => !hasLine(bodyLines, b.line) && take("blogImage", b.assetId, lineCore(b.line))
+  );
+
+  // --- 2. 足すものが参照する出典にだけ番号を振る ---
+  //
+  // **除外したものの出典を作らないこと。** 本文から消えても ArticleSource が残ると、
+  // 記事の frontmatter に載って公開リポジトリに push されてしまう (#134 が防ぎたい漏れ)。
+  // 番号は applySources が max+1 で順に採るので、飛び番を作らないことも大事。
+  const neededSourceNos = new Set<number>();
+  for (const q of freshQuotes) neededSourceNos.add(q.sourceNo);
+  for (const b of freshImages) {
+    const n = footnoteOf(b.line);
+    if (n !== null) neededSourceNos.add(n);
+  }
+  const sourceByAssetId = new Map<string, RenderedSource>();
+  for (const s of input.sources) if (s.assetId) sourceByAssetId.set(s.assetId, s);
+  for (const t of freshTalks) {
+    const s = sourceByAssetId.get(t.assetId);
+    if (s) neededSourceNos.add(s.sourceNo);
+  }
+
   const byAsset = new Map<string, number>();
   const byUrl = new Map<string, number>();
   let maxNo = 0;
@@ -165,27 +287,14 @@ export function planAppend(input: {
       renumberMap.set(s.sourceNo, hit);
       continue;
     }
+    if (!neededSourceNos.has(s.sourceNo)) continue; // 足すものが無い出典は作らない
     maxNo += 1;
     renumberMap.set(s.sourceNo, maxNo);
     newSources.push({ ...s, sourceNo: maxNo });
   }
 
-  // 既に本文にある行 (脚注番号を外したもの)。トーク / ブログ画像の重複判定に使う
-  const bodyLines = new Set(existingBody.split("\n").map(lineCore).filter((l) => l.length > 0));
+  // --- 3. 本文に差し込む ---
 
-  const sections = parseSections(existingBody);
-  const added = { quotes: 0, reports: 0, talks: 0, blogImages: 0, tiktoks: 0 };
-
-  // 2. 本人の感想: 本文に無い抜粋だけを足す
-  const freshQuotes = parts.quotes
-    .map((q) => ({
-      ...q,
-      excerpts: q.excerpts.filter((ex) => {
-        const head = ex.split("\n").find((l) => l.trim())?.trim() ?? "";
-        return head.length > 0 && !existingBody.includes(head);
-      }),
-    }))
-    .filter((q) => q.excerpts.length > 0);
   if (freshQuotes.length > 0) {
     const sec = ensureSection(sections, H_QUOTES, [H_REPORTS, H_MEDIA]);
     const at = appendIndex(sec.lines);
@@ -202,11 +311,6 @@ export function planAppend(input: {
     sec.lines.splice(at, 0, ...lines);
   }
 
-  // 3. レポ: 末尾に足す
-  const seenReports = new Set(
-    (existingBody.match(/https?:\/\/(?:www\.)?(?:x|twitter)\.com\/[^\s)]+/g) ?? []).map(normalizeTweetUrl)
-  );
-  const freshReports = parts.reports.filter((u) => !seenReports.has(normalizeTweetUrl(u)));
   if (freshReports.length > 0) {
     const sec = ensureSection(sections, H_REPORTS, [H_MEDIA]);
     if (sec.lines.every((l) => l.trim() === "")) {
@@ -216,13 +320,6 @@ export function planAppend(input: {
     added.reports = freshReports.length;
   }
 
-  // 4. TikTok。**video ID で突き合わせる** (ドシエには短縮 URL (vt.tiktok.com)、
-  // 記事には解決済みの URL が載るので、URL の文字列比較だと毎回「新規」になる)
-  const freshTiktoks = parts.tiktoks.filter((u) => {
-    const id = tiktokVideoId(u);
-    if (id) return !existingBody.includes(id);
-    return !existingBody.includes(normalizeTweetUrl(u));
-  });
   if (freshTiktoks.length > 0) {
     ensureSection(sections, H_MEDIA, []);
     const sec = ensureSection(sections, H_TIKTOK, [H_TALK, H_BLOG_IMAGES]);
@@ -230,8 +327,7 @@ export function planAppend(input: {
     added.tiktoks = freshTiktoks.length;
   }
 
-  // 5. トーク: 時系列の正しい位置に差し込む (脚注番号は飛んでよい。順序 > 番号の連続性)
-  const freshTalks = parts.talks.filter((t) => !hasLine(bodyLines, t.line));
+  // トークは時系列の正しい位置に差し込む (脚注番号は飛んでよい。順序 > 番号の連続性)
   if (freshTalks.length > 0) {
     ensureSection(sections, H_MEDIA, []);
     const sec = ensureSection(sections, H_TALK, [H_BLOG_IMAGES]);
@@ -253,8 +349,6 @@ export function planAppend(input: {
     }
   }
 
-  // 6. ブログ画像: 末尾に足す
-  const freshImages = parts.blogImages.filter((b) => !hasLine(bodyLines, b.line));
   if (freshImages.length > 0) {
     ensureSection(sections, H_MEDIA, []);
     const sec = ensureSection(sections, H_BLOG_IMAGES, []);
@@ -271,6 +365,7 @@ export function planAppend(input: {
     body: toBody(sections),
     newSources,
     added,
+    additions,
     empty: total === 0 && newSources.length === 0,
   };
 }
