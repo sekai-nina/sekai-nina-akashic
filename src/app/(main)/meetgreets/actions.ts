@@ -13,6 +13,7 @@ import {
   updateMeetGreet,
 } from "@/lib/domain/meetgreets";
 import { applyExcerpts, proposeExcerptsForDossier } from "@/lib/domain/meetgreet-excerpts";
+import { importMeetGreets } from "@/lib/domain/meetgreet-import";
 import { generateSketch, selectSketch } from "@/lib/domain/meetgreet-sketch";
 import {
   ApplyExcerptsSchema,
@@ -34,15 +35,17 @@ export async function createMeetGreetAction(input: {
   format: MeetGreetFormat;
   single: string;
   label: string;
+  dossierId?: string;
+  repoCollectionId?: string;
 }) {
   const user = await requireMember();
   try {
-    const { id, fetch } = await createMeetGreet(user, input);
+    const { id } = await createMeetGreet(user, input);
     invalidateDossiers();
     revalidatePath("/meetgreets");
     revalidatePath("/dossiers");
     revalidatePath("/repo");
-    return { ok: true as const, id, fetch };
+    return { ok: true as const, id };
   } catch (e) {
     return { ok: false as const, error: errorMessage(e) };
   }
@@ -170,6 +173,23 @@ export async function selectSketchAction(id: string, key: string) {
     revalidatePath(`/meetgreets/${id}`);
     revalidatePath("/meetgreets");
     return { ok: true as const };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+/** 過去のドシエを取り込む (#118) */
+export async function importMeetGreetsAction(dossierIds: string[]) {
+  const user = await requireMember();
+  if (dossierIds.length === 0 || dossierIds.length > 200) {
+    return { ok: false as const, error: "取り込む件数が不正です" };
+  }
+  try {
+    const result = await importMeetGreets(user, dossierIds);
+    invalidateDossiers();
+    revalidatePath("/meetgreets");
+    revalidatePath("/meetgreets/import");
+    return { ok: true as const, ...result };
   } catch (e) {
     return { ok: false as const, error: errorMessage(e) };
   }

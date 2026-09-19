@@ -969,12 +969,16 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 起点。1 回の呼び出しで次を行う:
 
 1. ドシエを `"<date> <label><オンミ|リアミ>"`（例: `2026-08-01 京都リアミ`）で作成。`viewMode` / `editMode` は `clearance`（キーの持ち主以外も編集できるように）
-2. X レポ収集（`RepoCollection`）を既定のハッシュタグ条件（`src/lib/meetgreet/config.ts` の `reportTagGroups`。オンライン = `(#坂井新奈 #ミーグリ) OR #にぃぐり`、リアルはさらに `#リアルミーグリ` / `#リアルレポ` / `#坂井新奈` 単独）、期間 = 当日〜翌日 で作成し、**収集を 1 回走らせる**
+2. X レポ収集（`RepoCollection`）を既定のハッシュタグ条件（`src/lib/meetgreet/config.ts` の `reportTagGroups`。オンライン = `(#坂井新奈 #ミーグリ) OR #にぃぐり`、リアルはさらに `#リアルミーグリ` / `#リアルレポ` / `#坂井新奈` 単独）、期間 = 当日〜翌日 で作成する（**収集は走らせない**）
 3. 素材候補（下記）を返す
 
-1〜2 の作成（ドシエ・収集・MeetGreet）は **1 トランザクション**。途中で失敗しても名前だけ同じドシエが残ることはない。収集の実行は作成の後（トランザクション外）。
+`dossierId` / `repoCollectionId` を渡すと、新しく作らず**既にあるものを使う**。`/meetgreets` を作る前から手で用意していたドシエ・収集を拾い直すときに使う（画面の「過去のドシエを取り込む」が内部でこれを呼ぶ）。
 
-**この呼び出しは数十秒かかる**（X API のページングと、取得した画像を 1 枚ずつ縮小して R2 に上げるため。実測で最大 80 秒程度）。Discord bot から呼ぶときは先に deferred ack すること。**冪等ではない**ので、タイムアウトしても再送しない（ドシエと収集が二重にできる）。応答が無いときは `GET /meetgreets` で作成済みか確かめる。
+作成は **1 トランザクション**。途中で失敗しても名前だけ同じドシエが残ることはない。
+
+**X の収集はここでは走らない**（#118）。収集するかどうかは別の判断なので、`POST /meetgreets/:id/reports` で明示的に実行する。作成自体は数秒で返る。
+
+**冪等ではない**ので、応答が無いときは再送せず `GET /meetgreets` で作成済みか確かめる。
 
 ```json
 {
@@ -992,19 +996,22 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 | `format` | `"online"` / `"real"` | ✓ | 形式 |
 | `single` | string (≤200) | | シングル名。記事 frontmatter の `meetgreet.single` に出る |
 | `label` | string (≤50) | | 回の呼び分け（通常 / 初回限定盤 / 京都 など）。ドシエ・収集の名前に付くだけ |
-| `classification` | enum | | 既定 `internal`。キーの持ち主の clearance より上は 403。**MeetGreet・ドシエ・X レポ収集の 3 つに同じ値が付く** |
+| `classification` | enum | | 既定 `internal`。キーの持ち主の clearance より上は 403。**MeetGreet・ドシエ・X レポ収集の 3 つに同じ値が付く**（既存のものに紐づけるときは、そちらの値は変えない） |
+| `dossierId` | string | | 既にあるドシエを使う。未指定なら新しく作る |
+| `repoCollectionId` | string | | 既にある X レポ収集を使う。未指定なら新しく作る |
 
 未知のフィールドは 400（strict）。`date` は**暦に実在する日付**でなければ 400（`2026-02-30` のような日付は `Date.parse` が 3/2 に正規化して通してしまうので、往復で検証している）。
 
 エラーの切り分け: 入力が不正なら 400、clearance が足りなければ 403、それ以外（DB エラー等）は 500。**400 は「直さない限り何度送っても失敗する」を意味する**ので、再送してよいのは入力を直したときだけ。
 
-**レスポンス（201）:** 一覧の 1 行と同じ形に `fetch` と `candidates` が付く。
+既に別のミーグリに使われているドシエ・収集を指定すると 400。
+
+**レスポンス（201）:** 一覧の 1 行と同じ形に `candidates` が付く。
 
 ```json
 {
   "id": "…",
   "…": "…",
-  "fetch": {"ok": true, "result": {"fetched": 99, "added": 99, "mediaSaved": 120}},
   "candidates": [
     {
       "key": "blog:https://www.hinatazaka46.com/s/official/diary/detail/70435",
@@ -1022,7 +1029,6 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 }
 ```
 
-- **X の収集失敗は 201 のまま `fetch.ok = false`**（`error` に理由）。recent search は直近 7 日しか遡れないので、古い日付では必ず失敗する。あとから `POST /meetgreets/:id/reports` で再収集できる
 - `candidates` は当日〜10 日後の、坂井新奈が付いたアセットを **出典で分類**したもの（`kind`: `blog` = 本人ブログ / `staff` = ひなたぼっこ日記 / `talk` = トーク / `other`）。ブログは URL ごとに 1 グループ
 - `suggested` が初期チェック（本文にミーグリの話があるブログ = `matched` の全アセット、当日〜翌日のトーク画像 / 動画、本文にミーグリの話があるトークのテキスト）。`inDossier` は既にドシエに入っている
 - 抜粋（本人の感想）はここでは付かない。ドシエ側の範囲選択（#108 で LLM の提案が入る）
@@ -1053,7 +1059,7 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 
 ### POST /meetgreets/:id/reports
 
-X レポを再収集する（作成時に失敗したとき、翌日以降の投稿を拾うとき）。ボディ無し。成功で `{"fetched": n, "added": n, "mediaSaved": n}`。収集が紐づいていなければ 409、X API 側の失敗（トークン未設定・レート制限・7 日より前の日付）は 502。**`POST /meetgreets` と同じく数十秒かかる。**
+X レポを収集する（作成時には走らないので、**最初の 1 回もこれで実行する**）。ボディ無し。成功で `{"fetched": n, "added": n, "mediaSaved": n}`。収集が紐づいていなければ 409、X API 側の失敗（トークン未設定・レート制限・7 日より前の日付）は 502。**数十秒かかる**（X API のページングと、取得した画像を 1 枚ずつ縮小して R2 に上げるため。実測で最大 80 秒程度）。bot から呼ぶときは先に deferred ack すること。
 
 keep / total は `GET /meetgreets/:id` の `repoCollection` で読む。判定（keep / reject）自体の API は無い（画面 `/repo/:id` で人が行う）。
 

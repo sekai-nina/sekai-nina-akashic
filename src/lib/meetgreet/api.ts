@@ -25,6 +25,9 @@ export const CreateMeetGreetSchema = z
     single: z.string().max(200).optional(),
     label: z.string().max(50).optional(),
     classification: z.enum(["public", "internal", "confidential", "restricted"]).optional(),
+    /** 既にあるドシエ / X レポ収集を使う (未指定なら新しく作る) */
+    dossierId: z.string().min(1).optional(),
+    repoCollectionId: z.string().min(1).optional(),
   })
   .strict();
 

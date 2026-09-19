@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Plus } from "lucide-react";
+import { Download, Plus } from "lucide-react";
 import { auth } from "@/lib/auth";
 import { listMeetGreets, meetGreetTitle } from "@/lib/domain/meetgreets";
 import { formatDate } from "@/lib/utils";
@@ -24,17 +24,26 @@ export default async function MeetGreetsPage() {
             日付と形式から素材のドシエと X レポ収集を自動で作り、記事まで持っていく
           </p>
         </div>
-        <Link
-          href="/meetgreets/new"
-          className="inline-flex items-center gap-1 h-9 px-3 rounded-md bg-slate-900 text-white text-sm hover:bg-slate-800 shrink-0"
-        >
-          <Plus size={14} /> 新規作成
-        </Link>
+        <div className="flex items-center gap-2 shrink-0">
+          <Link
+            href="/meetgreets/import"
+            className="inline-flex items-center gap-1 h-9 px-3 rounded-md border border-slate-200 text-sm text-slate-700 hover:bg-slate-50"
+          >
+            <Download size={14} /> 過去のドシエを取り込む
+          </Link>
+          <Link
+            href="/meetgreets/new"
+            className="inline-flex items-center gap-1 h-9 px-3 rounded-md bg-slate-900 text-white text-sm hover:bg-slate-800"
+          >
+            <Plus size={14} /> 新規作成
+          </Link>
+        </div>
       </div>
 
       {rows.length === 0 ? (
         <div className="bg-white border border-dashed border-slate-300 rounded-lg p-10 text-center text-sm text-slate-500">
-          まだありません。「新規作成」から日付と形式を入れると、ドシエと X レポ収集が自動で作られます。
+          まだありません。「新規作成」から日付と形式を入れるとドシエと X レポ収集が用意されます。
+          以前に手で作ったドシエがあれば「過去のドシエを取り込む」から拾えます。
         </div>
       ) : (
         <div className="bg-white border border-slate-200 rounded-lg divide-y divide-slate-100">

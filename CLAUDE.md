@@ -147,7 +147,7 @@ src/
 
 ## データモデル
 
-`prisma/schema.prisma`（32 モデル）。`Asset` がハブ。
+`prisma/schema.prisma`（33 モデル）。`Asset` がハブ。
 
 - `Entity` は `type`（person/place/source/event/tag）で 1 テーブル統合、`@@unique([type, canonicalName])`
 - `DossierItem` は `kind` で `asset_ref` / `external_link` / `external_image` の多態。**意図的に `@@unique([dossierId, assetId])` を持たない**（同一アセットを抜粋ごとに複数回追加できる）

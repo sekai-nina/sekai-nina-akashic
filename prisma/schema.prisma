@@ -1061,3 +1061,40 @@ model CreditSnapshot {
 
   @@index([provider, observedAt])
 }
+
+/// 案内AI「ふぃたん」に来た質問と回答の記録。
+///
+/// 何が聞かれているかを人が眺めて、アーカイブの穴を見つけるためのもの。
+/// 個人を特定できる情報は受け取らない（IP・UA・リファラ・セッションIDは Worker 側でも保存していない）。
+/// 1問1答ずつ独立した行で、同じ人の連続した質問を結び付ける手段は無い。
+///
+/// 公開している方針文（/ai）で「最大180日間保存」と約束しているので、
+/// expiresAt を過ぎた行は消す（scripts/purge-ai-questions.ts）。
+model AiQuestion {
+  id String @id @default(cuid())
+
+  askedAt       DateTime
+  question      String
+  answer        String
+  /// 回答の根拠にした記事。[{title, url}] の配列
+  citations     Json     @default("[]")
+  /// 0 件なら答えられなかった質問。アーカイブの穴の候補
+  citationCount Int      @default(0)
+  /// 回答をキャッシュから返したか
+  cached        Boolean  @default(false)
+  /// 質問元。本番とプレビューを混ぜて数えないため
+  origin        String   @default("")
+
+  /// 他のテーブルと同じくクリアランスの RLS を掛ける。
+  /// 中身は公開サイトへの質問なので internal で十分だが、素通しの穴を作らないために揃える
+  classification ClearanceLevel @default(internal)
+
+  createdAt DateTime @default(now())
+  /// 180日後。これを過ぎた行は削除する
+  expiresAt DateTime
+
+  @@index([askedAt])
+  @@index([citationCount, askedAt])
+  @@index([expiresAt])
+  @@index([classification])
+}
