@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { CropRect } from "@/lib/meetgreet/crop";
+import { MIN_FRACTION, type CropRect } from "@/lib/meetgreet/crop";
 
 /**
  * 参照写真の切り抜き枠を引く (#136)。
@@ -9,8 +9,11 @@ import type { CropRect } from "@/lib/meetgreet/crop";
  * ミーグリの写真はツーショットが多く、そのまま渡すと隣の人の服を拾う。
  * 本人のところだけを囲ってもらう。
  *
- * **枠は割合 (0〜1) で返す。** ここで見ているのはサムネイルだが、生成に使うのは
- * Drive の原本なので、画素で返すと合わない。
+ * **枠は割合 (0〜1) で返す。** 見ているのは `sketch-reference` が返す画像 = サーバーが
+ * 実際に切るものと同じなので、割合がそのまま通る (サムネイルだと出どころで向きが変わり、
+ * どちらの座標系で引いたかをサーバーが知れない)。
+ *
+ * ドラッグで囲うほかに、数値でも指定できる (ポインタが無いと使えない機能にしないため)。
  */
 export function CropEditor({
   src,
@@ -30,21 +33,29 @@ export function CropEditor({
   saving: boolean;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
   const [rect, setRect] = useState<CropRect | null>(value);
   /** ドラッグ中の起点 (割合) */
   const anchor = useRef<{ x: number; y: number } | null>(null);
+  // onClose は親が毎レンダー作り直すので、effect の依存に入れると張り直しになる
+  const closeHandler = useRef(onClose);
+  closeHandler.current = onClose;
 
   useEffect(() => {
+    const opener = document.activeElement;
+    closeRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") closeHandler.current();
     };
     document.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden";
     return () => {
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = "";
+      // 開く前にいた場所へ戻す (キーボードだけだと、閉じたあとどこにいるか分からなくなる)
+      if (opener instanceof HTMLElement) opener.focus();
     };
-  }, [onClose]);
+  }, []);
 
   /** 画面の座標を、画像に対する割合に直す */
   function toFraction(e: { clientX: number; clientY: number }) {
@@ -57,11 +68,13 @@ export function CropEditor({
   }
 
   function onPointerDown(e: React.PointerEvent) {
+    // 右クリックや 2 本目の指で引き直しが始まらないようにする
+    if (e.button !== 0 || !e.isPrimary || anchor.current) return;
     const p = toFraction(e);
     if (!p) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     anchor.current = p;
-    setRect({ x: p.x, y: p.y, w: 0, h: 0 });
+    // **ここでは枠を消さない。** 押しただけ (ドラッグ無し) で、いまの枠が黙って消えてしまう
   }
 
   function onPointerMove(e: React.PointerEvent) {
@@ -81,8 +94,19 @@ export function CropEditor({
     anchor.current = null;
   }
 
-  // 小さすぎる枠は保存させない (生成側で無視され、切ったつもりで切れていないことになる)
-  const tooSmall = !rect || rect.w < 0.02 || rect.h < 0.02;
+  // 小さすぎる枠は保存させない (生成側で落とされ、参照が 1 枚減ってしまう)
+  const tooSmall = !rect || rect.w < MIN_FRACTION || rect.h < MIN_FRACTION;
+
+  /** 数値での指定 (ドラッグできない環境向け)。% で受けて割合に直す */
+  function setField(key: keyof CropRect, percent: number) {
+    const base = rect ?? { x: 0, y: 0, w: 1, h: 1 };
+    const v = clamp01(percent / 100);
+    const next = { ...base, [key]: v };
+    // 画像の外にはみ出さないように幅・高さのほうを詰める
+    next.w = Math.min(next.w, 1 - next.x);
+    next.h = Math.min(next.h, 1 - next.y);
+    setRect(next);
+  }
 
   return (
     <div
@@ -139,6 +163,24 @@ export function CropEditor({
         )}
       </div>
 
+      <div className="flex items-center gap-2 flex-wrap justify-center text-white/80 text-[11px]">
+        {(["x", "y", "w", "h"] as const).map((k) => (
+          <label key={k} className="inline-flex items-center gap-1">
+            {{ x: "左", y: "上", w: "幅", h: "高さ" }[k]}
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={1}
+              value={Math.round((rect?.[k] ?? (k === "w" || k === "h" ? 1 : 0)) * 100)}
+              onChange={(e) => setField(k, Number(e.target.value))}
+              className="w-16 rounded border border-white/30 bg-white/10 px-1 py-0.5 text-white"
+            />
+            %
+          </label>
+        ))}
+      </div>
+
       <div className="flex items-center gap-2 flex-wrap justify-center">
         <button
           type="button"
@@ -157,6 +199,7 @@ export function CropEditor({
           切り抜きをやめる（画像全体を使う）
         </button>
         <button
+          ref={closeRef}
           type="button"
           onClick={onClose}
           disabled={saving}

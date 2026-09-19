@@ -41,7 +41,7 @@ export default async function MeetGreetDetailPage({ params }: Props) {
     listMaterialCandidates(session.user, mg),
     listSketchSources(session.user, mg),
     listMeetGreetKeeps(session.user, mg, mg.reports?.keep ?? 0),
-    getSketchSetting(session.user.clearance),
+    getSketchSetting(),
   ]);
   // 新しい候補を先に出す (作り直すほど古いものが上に溜まらないように)
   const sketchCandidates = jsonStringArray(mg.sketchCandidates)

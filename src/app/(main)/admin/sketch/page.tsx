@@ -3,13 +3,8 @@ import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { getSketchSetting, listConfirmedSketches } from "@/lib/domain/sketch-setting";
 import { SubmitButton } from "@/components/submit-button";
-import {
-  pickStyleReference,
-  resetSketchPrompt,
-  resetStyleReference,
-  saveSketchPrompt,
-  uploadStyleReference,
-} from "./actions";
+import { pickStyleReference, resetSketchPrompt, resetStyleReference, saveSketchPrompt } from "./actions";
+import { StyleReferenceUpload } from "./style-upload";
 
 /**
  * スケッチ生成の設定 (#136)。
@@ -37,7 +32,7 @@ export default async function AdminSketchPage() {
   if (session.user.role !== "admin") notFound();
 
   const [setting, confirmed] = await Promise.all([
-    getSketchSetting(session.user.clearance),
+    getSketchSetting(),
     listConfirmedSketches(session.user.clearance),
   ]);
 
@@ -63,6 +58,10 @@ export default async function AdminSketchPage() {
         <p className="text-xs text-slate-500 mt-1">
           毎回この 1 枚を参考に描かせています。直前の生成結果を参照し続けると、コピーのコピーで
           画風が少しずつずれていくため、回をまたいで同じものを使います。
+          <strong className="text-slate-700">
+            見本は生成のたびに外部 AI（OpenAI）へ送られ、ミーグリ画面を開ける人全員に見えます。
+          </strong>
+          機密レベルが internal を超えるものは選べません。
         </p>
 
         <div className="mt-3 flex items-start gap-4">
@@ -91,22 +90,7 @@ export default async function AdminSketchPage() {
           </div>
         </div>
 
-        <form action={uploadStyleReference} className="mt-4 flex items-center gap-3 flex-wrap">
-          <label className="text-xs text-slate-600" htmlFor="style-file">
-            画像をアップロードして差し替える
-          </label>
-          <input
-            id="style-file"
-            type="file"
-            name="file"
-            accept="image/*"
-            required
-            className="text-xs text-slate-600 file:mr-2 file:h-8 file:rounded-md file:border file:border-slate-200 file:bg-white file:px-3 file:text-xs file:text-slate-700"
-          />
-          <SubmitButton className="h-8 px-3 rounded-md bg-slate-900 text-white text-xs hover:bg-slate-800">
-            差し替える
-          </SubmitButton>
-        </form>
+        <StyleReferenceUpload />
 
         {confirmed.length > 0 && (
           <div className="mt-5">

@@ -1178,6 +1178,20 @@ model AiQuestion {
 /// 止めたいときに、サイトを作り直さずに即座に止められるようにするためのもの。
 /// Worker がここを見に来る（短いキャッシュ付き）。Akashic が落ちていても
 /// Worker は最後に読めた値で動き続けるので、これが原因で AI が止まることはない。
+model AiSetting {
+  id      String  @id @default("singleton")
+  /// false にすると、回答を止めたうえでサイトから入口ごと消える
+  enabled Boolean @default(true)
+  /// 止めた理由。運用の記録用で、利用者には出さない
+  note    String  @default("")
+
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+  updatedBy   User?    @relation(fields: [updatedById], references: [id])
+
+  classification ClearanceLevel @default(internal)
+}
+
 /// スケッチ生成の設定 (#136)。**全体で 1 行**。
 /// プロンプトと画風の見本を画面から直せるようにするためのもので、
 /// 空なら組み込みの既定 (`src/lib/meetgreet/sketch-prompt.ts` / `STYLE_REFERENCE_KEY`) を使う
@@ -1195,18 +1209,4 @@ model SketchSetting {
   classification ClearanceLevel @default(internal)
 
   @@index([classification])
-}
-
-model AiSetting {
-  id      String  @id @default("singleton")
-  /// false にすると、回答を止めたうえでサイトから入口ごと消える
-  enabled Boolean @default(true)
-  /// 止めた理由。運用の記録用で、利用者には出さない
-  note    String  @default("")
-
-  updatedAt   DateTime @updatedAt
-  updatedById String?
-  updatedBy   User?    @relation(fields: [updatedById], references: [id])
-
-  classification ClearanceLevel @default(internal)
 }

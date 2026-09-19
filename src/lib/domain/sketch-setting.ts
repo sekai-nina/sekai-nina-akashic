@@ -8,12 +8,30 @@
  * いまの文面で動き続けるほうが事故が小さい (`AiSetting` と同じ考え方)。
  */
 
+import { classificationFilter } from "@/lib/classification";
 import { withClearance } from "@/lib/db";
 import { getR2PublicUrl } from "@/lib/r2";
+import { MAX_EXTERNAL_AI_CLEARANCE } from "@/lib/meetgreet/config";
 import { STYLE_REFERENCE_KEY } from "@/lib/meetgreet/sketch";
 import { SKETCH_PROMPT } from "@/lib/meetgreet/sketch-prompt";
 
 export const SINGLETON_ID = "singleton";
+
+/**
+ * **設定は固定のクリアランスで読む。**
+ *
+ * 行は internal なので、操作している人のクリアランスで読むと public の人には
+ * 無言で 0 行になり、「既定の文面で生成された」ことに誰も気づけない
+ * (`renderArticlesForPush` の `PUSH_CLEARANCE` と同じ考え方)。
+ * 設定は個人のデータではなく運用の設定なので、読みは一律この値で行う。
+ */
+const SETTING_CLEARANCE = MAX_EXTERNAL_AI_CLEARANCE;
+
+/** 見本に選べる上限。**生成のたびに外部 AI へ送るので、参照写真と同じ天井を掛ける** */
+export const MAX_STYLE_REFERENCE_CLEARANCE = MAX_EXTERNAL_AI_CLEARANCE;
+
+/** 見本の候補として出す枚数 (画面と検証で同じものを使う) */
+export const CONFIRMED_SKETCH_LIMIT = 24;
 
 export interface SketchSettingView {
   /** 実際に使われるプロンプト (未設定なら組み込みの既定) */
@@ -65,11 +83,17 @@ export interface ConfirmedSketch {
 
 export async function listConfirmedSketches(
   clearance: string,
-  limit = 24
+  limit = CONFIRMED_SKETCH_LIMIT
 ): Promise<ConfirmedSketch[]> {
   const rows = await withClearance(clearance, (tx) =>
     tx.meetGreet.findMany({
-      where: { sketchKey: { not: null } },
+      // **機密レベルの天井を掛ける。** RLS だけだと「操作している人に見えるもの」で
+      // 止まり、restricted の回のスケッチを見本にできてしまう。見本は生成のたびに
+      // 外部 AI へ送られ、ミーグリ画面を開ける人全員に表示される
+      where: {
+        sketchKey: { not: null },
+        ...classificationFilter(MAX_STYLE_REFERENCE_CLEARANCE),
+      },
       orderBy: { date: "desc" },
       take: limit,
       select: { sketchKey: true, date: true, venue: true, label: true },
@@ -89,8 +113,8 @@ export async function listConfirmedSketches(
   });
 }
 
-export async function getSketchSetting(clearance: string): Promise<SketchSettingView> {
-  const row = await withClearance(clearance, (tx) =>
+export async function getSketchSetting(): Promise<SketchSettingView> {
+  const row = await withClearance(SETTING_CLEARANCE, (tx) =>
     tx.sketchSetting.findUnique({
       where: { id: SINGLETON_ID },
       select: {
@@ -112,7 +136,6 @@ export interface SketchSettingInput {
 
 export async function updateSketchSetting(
   input: SketchSettingInput,
-  clearance: string,
   userId: string
 ): Promise<SketchSettingView> {
   // 既定と同じ文面を入れたら「未設定」に畳む (既定を直したときに追随するように)
@@ -130,7 +153,7 @@ export async function updateSketchSetting(
         ? ""
         : input.styleReferenceKey.trim();
 
-  await withClearance(clearance, (tx) =>
+  await withClearance(SETTING_CLEARANCE, (tx) =>
     tx.sketchSetting.upsert({
       where: { id: SINGLETON_ID },
       create: {
@@ -146,5 +169,5 @@ export async function updateSketchSetting(
       },
     })
   );
-  return getSketchSetting(clearance);
+  return getSketchSetting();
 }

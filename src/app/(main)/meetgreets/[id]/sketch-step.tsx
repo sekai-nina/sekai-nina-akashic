@@ -292,9 +292,11 @@ export function SketchStep({
         {msg && <span className="text-xs text-slate-500">{msg}</span>}
       </div>
 
-      {cropping?.thumbnailUrl && (
+      {cropping && (
         <CropEditor
-          src={cropping.thumbnailUrl}
+          // **サムネイルではなく、サーバーが実際に切る画像**の上で枠を引く
+          // (サムネイルは出どころで向きが変わり、座標系が揃わない)
+          src={`/api/meetgreets/${meetGreetId}/sketch-reference/${cropping.id}`}
           title={cropping.title}
           value={crops[cropping.id] ?? null}
           saving={pending}

@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { cropsFromJson, isValidCrop, toPixelRect, withCrops, MIN_CROP_PIXELS } from "./crop";
+import {
+  cropsFromJson,
+  isValidCrop,
+  toPixelRect,
+  withCrops,
+  MIN_CROP_PIXELS,
+  MIN_FRACTION,
+} from "./crop";
 
 const FULL = { x: 0, y: 0, w: 1, h: 1 };
 const RIGHT_HALF = { x: 0.5, y: 0, w: 0.5, h: 1 };
@@ -17,7 +24,7 @@ describe("isValidCrop", () => {
   });
 
   it("潰れた枠・数でないものは弾く", () => {
-    expect(isValidCrop({ x: 0, y: 0, w: 0.001, h: 1 })).toBe(false);
+    expect(isValidCrop({ x: 0, y: 0, w: MIN_FRACTION / 2, h: 1 })).toBe(false);
     expect(isValidCrop({ x: 0, y: 0, w: 1 })).toBe(false);
     expect(isValidCrop({ x: -0.1, y: 0, w: 1, h: 1 })).toBe(false);
     expect(isValidCrop({ x: 0, y: 0, w: Number.NaN, h: 1 })).toBe(false);
@@ -26,7 +33,9 @@ describe("isValidCrop", () => {
   });
 
   it("丸めで 1 をわずかに超えるのは許す", () => {
+    // 0.30005 + 0.7 = 1.00005。画面の端まで囲うと端数でこうなる
     expect(isValidCrop({ x: 0.30005, y: 0, w: 0.7, h: 1 })).toBe(true);
+    expect(isValidCrop({ x: 0.31, y: 0, w: 0.7, h: 1 })).toBe(false);
   });
 });
 
@@ -83,9 +92,17 @@ describe("toPixelRect", () => {
     expect(r2.top + r2.height).toBeLessThanOrEqual(101);
   });
 
-  it("小さすぎる枠は null (切らずに送る)", () => {
+  it("小さすぎる枠は null (呼び出し側がその 1 枚を落とす)", () => {
     const tiny = MIN_CROP_PIXELS / 2 / 100;
     expect(toPixelRect({ x: 0, y: 0, w: tiny, h: 1 }, 100, 100)).toBeNull();
+  });
+
+  it("受け付ける最小の枠は、いちばん小さい入力でも切り出せる", () => {
+    // **これが崩れると「枠はあるのに効かない」になる。** 下限どうしが噛み合っているか。
+    // 生成に使う画像のうち小さいほうは R2 のサムネイル (640px)
+    const min = { x: 0, y: 0, w: MIN_FRACTION, h: MIN_FRACTION };
+    expect(isValidCrop(min)).toBe(true);
+    expect(toPixelRect(min, 640, 640)).not.toBeNull();
   });
 
   it("寸法が読めないときは null", () => {

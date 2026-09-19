@@ -13,6 +13,7 @@ import {
 } from "./config";
 import type { MeetGreetSummary, MeetGreetDetail } from "@/lib/domain/meetgreets";
 import type { CandidateGroup } from "./candidates";
+import { MIN_FRACTION } from "./crop";
 import { getR2PublicUrl } from "@/lib/r2";
 
 /** 作り直しの指示の長さ */
@@ -110,8 +111,8 @@ export const SketchCropsSchema = z
       .object({
         x: z.number().min(0).max(1),
         y: z.number().min(0).max(1),
-        w: z.number().min(0.02).max(1),
-        h: z.number().min(0.02).max(1),
+        w: z.number().min(MIN_FRACTION).max(1),
+        h: z.number().min(MIN_FRACTION).max(1),
       })
       .strict()
       // 画像の外にはみ出す枠は受け取らない (丸めのぶんだけ許す)

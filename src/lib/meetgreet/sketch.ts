@@ -63,9 +63,9 @@ async function toReferenceImage(
 ): Promise<SketchSourceImage | null> {
   try {
     const meta = await sharp(bytes).metadata();
-    // **切り抜きは縮小より先。** 割合は元画像に対するものなので、縮めた後に当てるとずれる。
-    // `rotate()` は Exif の向きを反映するので、寸法も反映後のもので測る
+    // **切り抜きは縮小より先。** 割合は元画像に対するものなので、縮めた後に当てるとずれる
     const source = crop ? await cropBytes(bytes, crop) : bytes;
+    if (source === null) return null; // 切れなかった = 隣の人ごと送らない
     const pipeline = sharp(source).rotate().resize(REFERENCE_MAX_EDGE, REFERENCE_MAX_EDGE, {
       fit: "inside",
       withoutEnlargement: true,
@@ -91,19 +91,26 @@ async function toReferenceImage(
 }
 
 /**
- * 割合の枠で切り抜く。切り出せないときは元のバイト列を返す
- * (枠のせいで参照が 1 枚減るより、切らずに送るほうがまし)。
+ * 割合の枠で切り抜く。
+ *
+ * **枠は「正立の画像」に対する割合。** 画面は
+ * `/api/meetgreets/[id]/sketch-reference/[assetId]` が返す画像 (= この関数に入るのと
+ * 同じ経路で作った、Exif を当てたもの) の上で枠を引く。サムネイルを直接見せると、
+ * R2 の webp (Exif を当てずに作る = 生の画素) と Drive のプロキシ (ブラウザが当てる
+ * = 正立) で座標系が変わり、どちらで引いたかをサーバーが知れない。
+ *
+ * **切り出せなかったら null。** 枠があるということは「隣の人を送りたくない」なので、
+ * 切れないまま全体を送るくらいなら、その 1 枚を落とすほうが安全。
  */
-async function cropBytes(bytes: Buffer, crop: CropRect): Promise<Buffer> {
+export async function cropBytes(bytes: Buffer, crop: CropRect): Promise<Buffer | null> {
   try {
-    // Exif の向きを先に当ててから測る (縦横が入れ替わっている写真がある)
     const upright = await sharp(bytes).rotate().toBuffer();
     const meta = await sharp(upright).metadata();
     const rect = toPixelRect(crop, meta.width ?? 0, meta.height ?? 0);
-    if (!rect) return bytes;
+    if (!rect) return null;
     return await sharp(upright).extract(rect).toBuffer();
   } catch {
-    return bytes;
+    return null;
   }
 }
 
@@ -158,9 +165,22 @@ export async function loadR2Image(key: string, filename: string): Promise<Sketch
   return { filename, contentType: "image/png", bytes: Buffer.from(await res.arrayBuffer()) };
 }
 
-/** 基準スケッチを R2 から取る */
-export function loadStyleReference(key = STYLE_REFERENCE_KEY): Promise<SketchSourceImage> {
-  return loadR2Image(key, "style-reference.png");
+/**
+ * 基準スケッチを R2 から取る。
+ *
+ * **差し替えた見本が引けなければ既定に落とす。** 消された / key を打ち間違えた設定 1 つで
+ * 全員の生成が 502 になるより、既定の画風で作り続けるほうがまし (`SketchSetting` の
+ * 「空なら既定」と同じ考え方)。
+ */
+export async function loadStyleReference(
+  key = STYLE_REFERENCE_KEY
+): Promise<SketchSourceImage> {
+  try {
+    return await loadR2Image(key, "style-reference.png");
+  } catch (e) {
+    if (key === STYLE_REFERENCE_KEY) throw e;
+    return loadR2Image(STYLE_REFERENCE_KEY, "style-reference.png");
+  }
 }
 
 /**

@@ -125,7 +125,7 @@ export async function generateSketch(
     : undefined;
 
   // プロンプトと画風の見本は画面から直せる (#136)。未設定なら組み込みの既定
-  const setting = await getSketchSetting(user.clearance);
+  const setting = await getSketchSetting();
   const candidates = await generateSketches({
     meetGreetId: meetGreet.id,
     photos,
@@ -183,10 +183,12 @@ export async function saveSketchCrops(
     throw new MeetGreetInputError(`一度に指定できるのは ${MAX_SKETCH_SOURCES} 枚までです`);
   }
 
+  // **消す指定はドシエの中身を見ない。** ドシエから外した画像の枠が永久に消せなくなる
+  const setIds = ids.filter((id) => changes[id] !== null);
   const known = await withSession(user, (tx) =>
     tx.asset.findMany({
       where: {
-        id: { in: ids },
+        id: { in: setIds },
         kind: "image",
         ...classificationFilter(MAX_EXTERNAL_AI_CLEARANCE),
         dossierItems: { some: { dossierId: meetGreet.dossierId } },
@@ -195,8 +197,7 @@ export async function saveSketchCrops(
     })
   );
   const allowed = new Set(known.map((a) => a.id));
-  const unknown = ids.filter((id) => !allowed.has(id));
-  if (unknown.length > 0) {
+  if (setIds.some((id) => !allowed.has(id))) {
     throw new MeetGreetInputError("ドシエにある画像を選んでください");
   }
 

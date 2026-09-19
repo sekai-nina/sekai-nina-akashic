@@ -23,8 +23,12 @@ export type CropMap = Record<string, CropRect>;
 /** sharp の extract に渡せる最小の辺 (これ未満は潰れて参照にならない) */
 export const MIN_CROP_PIXELS = 16;
 
-/** 枠が小さすぎないか (割合ベースの最低限。画素の下限は切り出し側で見る) */
-const MIN_FRACTION = 0.02;
+/**
+ * 枠の最小の割合。
+ * **`MIN_CROP_PIXELS` を割らない値にしておく。** 小さいほうの入力は 640px のサムネイルで、
+ * 0.02 だと 13px になって切り出し側が諦め、枠があるのに効かない状態になる
+ */
+export const MIN_FRACTION = 0.025;
 
 function isFraction(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1;
