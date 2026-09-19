@@ -6,11 +6,16 @@ import { Check, ChevronDown, ChevronRight, Image as ImageIcon, Video } from "luc
 import type { CandidateAsset, CandidateGroup } from "@/lib/meetgreet/candidates";
 import { MATERIAL_WINDOW_DAYS } from "@/lib/meetgreet/config";
 import { formatDate, MEETGREET_CANDIDATE_GROUP_LABELS } from "@/lib/utils";
-import { applyMaterialsAction } from "../actions";
 import { Lightbox } from "./lightbox";
 
+/** 「ドシエに反映」の結果。ミーグリ / ライブの Server Action が同じ形で返す */
+export type ApplyMaterialsResult =
+  | { ok: true; added: number; skipped: number }
+  | { ok: false; error: string };
+
 /**
- * 素材候補のチェックリスト。既にドシエにあるものは固定表示。
+ * 素材候補のチェックリスト (ミーグリ #106 / ライブ #148 で共用)。既にドシエにあるものは固定表示。
+ * 反映の Server Action は器ごとに違うので `onApply` で受け取る。
  *
  * **最初は何もチェックしない (#160)。** 以前は「おすすめ」を初期チェックにしていたが、
  * チェックの状態はどこにも保存していないので、ページを開き直すたびに毎回そこから作り直され、
@@ -23,7 +28,16 @@ import { Lightbox } from "./lightbox";
  * **反映するのは画面に出ているものだけ。** 畳んだ先のチェックは消さずに取っておくが、
  * 送らない (見えないものが黙ってドシエに入るのを防ぐ。開き直せばまた対象に戻る)。
  */
-export function MaterialsStep({ meetGreetId, groups }: { meetGreetId: string; groups: CandidateGroup[] }) {
+export function MaterialsStep({
+  groups,
+  topic,
+  onApply,
+}: {
+  groups: CandidateGroup[];
+  /** 「本文に○○の話」のラベル (ミーグリ / ライブ) */
+  topic: string;
+  onApply: (assetIds: string[]) => Promise<ApplyMaterialsResult>;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
@@ -139,7 +153,7 @@ export function MaterialsStep({ meetGreetId, groups }: { meetGreetId: string; gr
     }
     setMsg("反映中…");
     startTransition(async () => {
-      const res = await applyMaterialsAction(meetGreetId, targetIds);
+      const res = await onApply(targetIds);
       setMsg(
         res.ok
           ? `${res.added} 件をドシエに追加しました${res.skipped > 0 ? ` (${res.skipped} 件は追加済み)` : ""}`
@@ -152,7 +166,7 @@ export function MaterialsStep({ meetGreetId, groups }: { meetGreetId: string; gr
   if (groups.length === 0) {
     return (
       <p className="text-sm text-slate-500">
-        候補がありません (当日〜{MATERIAL_WINDOW_DAYS} 日後に本人のブログ・トークが取り込まれていないか、まだ先の日付です)。
+        候補がありません (開催日〜{MATERIAL_WINDOW_DAYS} 日後に本人のブログ・トークが取り込まれていないか、まだ先の日付です)。
       </p>
     );
   }
@@ -201,7 +215,7 @@ export function MaterialsStep({ meetGreetId, groups }: { meetGreetId: string; gr
                 )}
                 {g.matched && (
                   <span className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
-                    本文にミーグリの話
+                    本文に{topic}の話
                   </span>
                 )}
                 <span className="ml-auto text-xs text-slate-500 tabular-nums shrink-0">
@@ -257,8 +271,8 @@ export function MaterialsStep({ meetGreetId, groups }: { meetGreetId: string; gr
                         className="text-xs text-slate-500 hover:text-slate-800 underline underline-offset-2"
                       >
                         {showAllText.has(g.key)
-                          ? "ミーグリの話が見つからなかったテキストを隠す"
-                          : `ミーグリの話が見つからなかったテキストも表示 (${v.hiddenCount} 件)`}
+                          ? `${topic}の話が見つからなかったテキストを隠す`
+                          : `${topic}の話が見つからなかったテキストも表示 (${v.hiddenCount} 件)`}
                       </button>
                     </div>
                   )}
@@ -305,7 +319,7 @@ export function MaterialsStep({ meetGreetId, groups }: { meetGreetId: string; gr
   );
 }
 
-/** 「おすすめ」= 本文にミーグリの話があるブログ / 当日前後のトーク。**チェックはしない**、まとめて入れる導線に使うだけ */
+/** 「おすすめ」= 本文にその話題があるブログ / 開催日前後のトーク。**チェックはしない**、まとめて入れる導線に使うだけ */
 function suggestedIds(groups: CandidateGroup[]): Set<string> {
   return new Set(
     groups.flatMap((g) =>

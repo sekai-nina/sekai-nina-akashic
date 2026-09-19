@@ -400,3 +400,15 @@ export function formatJpDate(date: string): string {
   const [y, m, d] = date.split("-").map(Number);
   return `${y}年${m}月${d}日`;
 }
+
+/**
+ * 「2025-09-20」〜「2025-11-21」→「2025年9月20日〜11月21日」(ライブの公演期間 #148)。
+ * 同じ日なら日付だけ、年をまたぐなら後ろも年から出す。記事の date_display にも使う
+ */
+export function formatJpDateRange(first: string, last: string): string {
+  if (last === first) return formatJpDate(first);
+  const [fy] = first.split("-");
+  const [ly, lm, ld] = last.split("-");
+  const tail = fy === ly ? `${Number(lm)}月${Number(ld)}日` : formatJpDate(last);
+  return `${formatJpDate(first)}〜${tail}`;
+}

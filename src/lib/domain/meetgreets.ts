@@ -12,9 +12,8 @@
 
 import { Prisma } from "@prisma/client";
 import type { ClearanceLevel, MeetGreetFormat } from "@prisma/client";
-import { prisma, withClearance, withSession, type TransactionClient } from "@/lib/db";
+import { withClearance, withSession } from "@/lib/db";
 import { assertClearance } from "@/lib/classification";
-import { canEditDossier } from "@/lib/auth/dossier-permissions";
 import {
   addDaysToDateString,
   formatJpDate,
@@ -28,22 +27,24 @@ import { buildQuery } from "@/lib/twitter/x-search";
 import { fetchCollection, type FetchResult } from "./repo";
 import { logAudit } from "./audit";
 import {
+  applyMaterialsToDossier,
+  keepCounts,
+  loadDossiers,
+  loadMaterialInputs,
+  loadNeedsSync,
+  WorkflowInputError,
+  type ActingUser,
+  type DossierBrief,
+} from "./article-workflow";
+import {
   MATERIAL_WINDOW_DAYS,
   MEETGREET_PERSON_NAME,
   REPORT_WINDOW_DAYS,
   reportTagGroups,
 } from "@/lib/meetgreet/config";
-import {
-  classifyCandidates,
-  type CandidateAssetInput,
-  type CandidateGroup,
-} from "@/lib/meetgreet/candidates";
+import { classifyCandidates, type CandidateGroup } from "@/lib/meetgreet/candidates";
 
-export interface ActingUser {
-  id: string;
-  role: string;
-  clearance: string;
-}
+export type { ActingUser, DossierBrief };
 
 export interface MeetGreetNaming {
   date: string;
@@ -90,7 +91,7 @@ export type ReportFetchOutcome =
   | { ok: false; error: string };
 
 /** 入力が不正なことを呼び出し元 (REST の 400) に伝える */
-export class MeetGreetInputError extends Error {}
+export class MeetGreetInputError extends WorkflowInputError {}
 
 /**
  * 起点。ドシエと X レポ収集を用意して紐づける。
@@ -251,91 +252,6 @@ const listInclude = {
   article: { select: { id: true, shortId: true, title: true, dirty: true, lastPushedAt: true } },
   createdBy: { select: { id: true, name: true } },
 } satisfies Prisma.MeetGreetInclude;
-
-export interface DossierBrief {
-  id: string;
-  title: string;
-  itemCount: number;
-  updatedAt: Date;
-}
-
-/**
- * ドシエは **include せず別に引く**。
- *
- * `MeetGreet.dossier` は必須リレーションだが、Dossier の RLS は owner / viewMode で
- * 別に判定される。作成時は `viewMode: clearance` にしているものの、所有者があとから
- * private に戻したり機密を上げると、他の人には行が見えなくなる。必須リレーションを
- * include したままだと Prisma が "Field dossier is required to return data" を投げ、
- * **その 1 行ではなく一覧全体が 500 になる**。見えないものは null にして画面で伝える。
- */
-async function loadDossiers(
-  tx: TransactionClient,
-  ids: string[]
-): Promise<Map<string, DossierBrief>> {
-  if (ids.length === 0) return new Map();
-  const rows = await tx.dossier.findMany({
-    where: { id: { in: ids } },
-    select: { id: true, title: true, updatedAt: true, _count: { select: { items: true } } },
-  });
-  return new Map(
-    rows.map((d) => [d.id, { id: d.id, title: d.title, updatedAt: d.updatedAt, itemCount: d._count.items }])
-  );
-}
-
-async function keepCounts(tx: TransactionClient, collectionIds: string[]) {
-  if (collectionIds.length === 0) return new Map<string, { keep: number; total: number }>();
-  const grouped = await tx.repoTweet.groupBy({
-    by: ["collectionId", "status"],
-    where: { collectionId: { in: collectionIds } },
-    _count: { _all: true },
-  });
-  const counts = new Map<string, { keep: number; total: number }>();
-  for (const g of grouped) {
-    const c = counts.get(g.collectionId) ?? { keep: 0, total: 0 };
-    c.total += g._count._all;
-    if (g.status === "keep") c.keep += g._count._all;
-    counts.set(g.collectionId, c);
-  }
-  return counts;
-}
-
-
-/**
- * 記事の frontmatter に書いてあるドシエのスナップショットと、いまのドシエを突き合わせて
- * 「要反映」を判定する (sekai-nina-site の `pnpm check:dossiers` を akashic 側に持ってきたもの)。
- *
- * Article は非保護テーブルなので素の prisma でよい。
- */
-async function loadNeedsSync(
-  articleIds: string[],
-  dossiers: Map<string, DossierBrief>,
-  dossierIdByArticleId: Map<string, string>
-): Promise<Set<string>> {
-  if (articleIds.length === 0) return new Set();
-  const rows = await prisma.article.findMany({
-    where: { id: { in: articleIds } },
-    select: { id: true, frontmatterExtra: true },
-  });
-  const stale = new Set<string>();
-  for (const row of rows) {
-    const extra = row.frontmatterExtra;
-    const snap =
-      extra && typeof extra === "object" && !Array.isArray(extra)
-        ? (extra as { dossier?: { item_count?: unknown; updated_at?: unknown } }).dossier
-        : undefined;
-    const dossierId = dossierIdByArticleId.get(row.id);
-    const current = dossierId ? dossiers.get(dossierId) : undefined;
-    if (!current) continue;
-    // スナップショットが無い記事は判定できないので「要反映」にしない (毎回出続けるのを避ける)
-    if (!snap) continue;
-    const countChanged =
-      typeof snap.item_count === "number" && snap.item_count !== current.itemCount;
-    const updatedChanged =
-      typeof snap.updated_at === "string" && new Date(snap.updated_at) < current.updatedAt;
-    if (countChanged || updatedChanged) stale.add(row.id);
-  }
-  return stale;
-}
 
 export async function listMeetGreets(user: ActingUser) {
   const loaded = await withSession(user, async (tx) => {
@@ -538,91 +454,21 @@ export async function listMaterialCandidates(
   );
 
   return withSession(user, async (tx) => {
-    const [assets, inDossier] = await Promise.all([
-      tx.asset.findMany({
-        where: {
-          canonicalDate: { gte: start, lt: end },
-          entities: { some: { entity: { type: "person", canonicalName: MEETGREET_PERSON_NAME } } },
-        },
-        orderBy: { canonicalDate: "asc" },
-        select: {
-          id: true,
-          kind: true,
-          title: true,
-          canonicalDate: true,
-          thumbnailUrl: true,
-          sourceRecords: { select: { url: true, title: true }, take: 1, orderBy: { createdAt: "asc" } },
-          texts: {
-            where: { textType: { in: ["body", "message_body"] } },
-            select: { content: true },
-            orderBy: { createdAt: "asc" },
-            take: 1,
-          },
-          entities: {
-            where: { entity: { type: "tag", canonicalName: "トーク" } },
-            select: { entityId: true },
-            take: 1,
-          },
-        },
-      }),
-      tx.dossierItem.findMany({
-        where: { dossierId: meetGreet.dossierId, assetId: { not: null } },
-        select: { assetId: true },
-      }),
-    ]);
-
-    const inputs: CandidateAssetInput[] = assets.map((a) => ({
-      id: a.id,
-      kind: a.kind,
-      title: a.title,
-      canonicalDate: a.canonicalDate,
-      thumbnailUrl: a.thumbnailUrl,
-      source: a.sourceRecords[0] ?? null,
-      text: a.texts[0]?.content ?? null,
-      hasTalkTag: a.entities.length > 0,
-    }));
-
-    // 運営ブログの本文 (本人タグ無し) を URL ごとに引く
-    const staffUrls = [
-      ...new Set(
-        inputs.map((i) => i.source?.url ?? "").filter((u) => u.includes("/diary/manager/"))
-      ),
-    ];
-    const staffTexts = new Map<string, string>();
-    if (staffUrls.length > 0) {
-      const staff = await tx.asset.findMany({
-        where: { kind: "text", sourceRecords: { some: { url: { in: staffUrls } } } },
-        select: {
-          // 対象の URL を持つ出典に限る (別の出典が先頭だと違う URL で引いてしまう)
-          sourceRecords: { where: { url: { in: staffUrls } }, select: { url: true }, take: 1 },
-          texts: { where: { textType: "body" }, select: { content: true }, take: 1 },
-        },
-      });
-      for (const s of staff) {
-        const url = s.sourceRecords[0]?.url;
-        const content = s.texts[0]?.content;
-        if (url && content) staffTexts.set(url, content);
-      }
-    }
-
-    return classifyCandidates(inputs, {
-      date: meetGreet.date,
-      inDossier: new Set(inDossier.flatMap((i) => (i.assetId ? [i.assetId] : []))),
-      staffTexts,
-    });
+    const { inputs, inDossier, staffTexts } = await loadMaterialInputs(
+      tx,
+      {
+        canonicalDate: { gte: start, lt: end },
+        entities: { some: { entity: { type: "person", canonicalName: MEETGREET_PERSON_NAME } } },
+      },
+      meetGreet.dossierId
+    );
+    return classifyCandidates(inputs, { date: meetGreet.date, inDossier, staffTexts });
   });
 }
 
 /**
- * チェックされたアセットをドシエに asset_ref で入れる。
- *
- * `addAssetItem` を 1 件ずつ呼ぶと 1 アセットあたり 2 トランザクション (権限チェック +
- * 追加) になり、30 件で数百クエリになる。権限は同じドシエに対して 1 回で足りるので、
- * ここでまとめて 1 トランザクションに収める。
- *
- * 既にドシエにあるアセットは飛ばす (`skipped`)。判定は listMaterialCandidates の
- * `inDossier` と同じく「そのアセットの DossierItem があるか」で、抜粋付きで入っている
- * ものも「ある」として扱う (画面でチェックできないものが REST から二重に入らないように)。
+ * チェックされたアセットをドシエに asset_ref で入れる (本体は `applyMaterialsToDossier`)。
+ * ドシエが見えないときはこの器のエラーに読み替える (REST が 404 にする)。
  */
 export async function applyMaterials(
   user: ActingUser,
@@ -632,47 +478,13 @@ export async function applyMaterials(
   const ids = [...new Set(assetIds)];
   if (ids.length === 0) return { added: 0, skipped: 0 };
 
-  const result = await withSession(user, async (tx) => {
-    const dossier = await tx.dossier.findUnique({
-      where: { id: meetGreet.dossierId },
-      select: { id: true, ownerId: true, classification: true, viewMode: true, editMode: true },
-    });
-    if (!dossier) throw new MeetGreetInputError("ドシエが見つかりません");
-    if (!canEditDossier(user, dossier)) {
-      throw new Error("Access denied: insufficient permission to edit this dossier");
-    }
-
-    const [assets, existing, last] = await Promise.all([
-      tx.asset.findMany({ where: { id: { in: ids } }, select: { id: true, title: true } }),
-      tx.dossierItem.findMany({
-        where: { dossierId: meetGreet.dossierId, assetId: { in: ids } },
-        select: { assetId: true },
-      }),
-      tx.dossierItem.findFirst({
-        where: { dossierId: meetGreet.dossierId },
-        orderBy: { sortOrder: "desc" },
-        select: { sortOrder: true },
-      }),
-    ]);
-    const titles = new Map(assets.map((a) => [a.id, a.title]));
-    const already = new Set(existing.flatMap((i) => (i.assetId ? [i.assetId] : [])));
-
-    // クリアランス外・存在しない・既にあるものを飛ばす
-    const toAdd = ids.filter((id) => titles.has(id) && !already.has(id));
-    if (toAdd.length === 0) return { added: 0, skipped: ids.length };
-
-    const base = (last?.sortOrder ?? -1) + 1;
-    await tx.dossierItem.createMany({
-      data: toAdd.map((assetId, i) => ({
-        dossierId: meetGreet.dossierId,
-        kind: "asset_ref" as const,
-        assetId,
-        caption: titles.get(assetId)!,
-        sortOrder: base + i,
-      })),
-    });
-    return { added: toAdd.length, skipped: ids.length - toAdd.length };
-  });
+  let result: { added: number; skipped: number };
+  try {
+    result = await applyMaterialsToDossier(user, meetGreet.dossierId, ids);
+  } catch (e) {
+    if (e instanceof WorkflowInputError) throw new MeetGreetInputError(e.message);
+    throw e;
+  }
 
   await logAudit({
     actorId: user.id,

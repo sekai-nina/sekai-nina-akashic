@@ -62,15 +62,25 @@ export interface CandidateGroup {
 export interface ClassifyOptions {
   /** 開催日 (JST "YYYY-MM-DD") */
   date: string;
+  /**
+   * 開催日が複数あるとき (ライブの公演日 #148)。トークの初期チェックは
+   * **どれかの日〜 +TALK_SUGGEST_DAYS** に入っていれば付ける。未指定なら `date` だけ
+   */
+  dates?: string[];
+  /** 本文の初期チェックに使うキーワード。未指定ならミーグリのもの */
+  keywords?: readonly string[];
   /** 既にドシエに入っているアセット ID */
   inDossier: Set<string>;
   /** 運営ブログの URL → 本文。候補 (本人タグ付き) には本文 text が含まれないので別引き */
   staffTexts: Map<string, string>;
 }
 
-export function matchesKeywords(text: string | null | undefined): boolean {
+export function matchesKeywords(
+  text: string | null | undefined,
+  keywords: readonly string[] = MEETGREET_KEYWORDS
+): boolean {
   if (!text) return false;
-  return MEETGREET_KEYWORDS.some((k) => text.includes(k));
+  return keywords.some((k) => k && text.includes(k));
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -106,6 +116,8 @@ export function classifyCandidates(
   assets: CandidateAssetInput[],
   opts: ClassifyOptions
 ): CandidateGroup[] {
+  const keywords = opts.keywords ?? MEETGREET_KEYWORDS;
+  const dates = opts.dates ?? [opts.date];
   const buckets = new Map<string, { kind: CandidateGroupKind; assets: CandidateAssetInput[] }>();
   for (const a of assets) {
     const kind = classifyGroupKind(a);
@@ -123,10 +135,10 @@ export function classifyCandidates(
 
     let matched = false;
     if (b.kind === "blog") {
-      matched = sorted.some((a) => a.kind === "text" && matchesKeywords(a.text));
+      matched = sorted.some((a) => a.kind === "text" && matchesKeywords(a.text, keywords));
     } else if (b.kind === "staff") {
-      const own = sorted.some((a) => a.kind === "text" && matchesKeywords(a.text));
-      matched = own || matchesKeywords(url ? opts.staffTexts.get(url) : null);
+      const own = sorted.some((a) => a.kind === "text" && matchesKeywords(a.text, keywords));
+      matched = own || matchesKeywords(url ? opts.staffTexts.get(url) : null, keywords);
     }
 
     const items: CandidateAsset[] = sorted.map((a) => {
@@ -134,10 +146,11 @@ export function classifyCandidates(
       if (b.kind === "blog" || b.kind === "staff") {
         suggested = matched;
       } else if (b.kind === "talk") {
-        const d = dayIndex(a.canonicalDate, opts.date);
-        const inWindow = d !== null && d >= 0 && d <= TALK_SUGGEST_DAYS;
-        suggested =
-          a.kind === "text" ? matchesKeywords(a.text) : inWindow;
+        const inWindow = dates.some((base) => {
+          const d = dayIndex(a.canonicalDate, base);
+          return d !== null && d >= 0 && d <= TALK_SUGGEST_DAYS;
+        });
+        suggested = a.kind === "text" ? matchesKeywords(a.text, keywords) : inWindow;
       }
       return {
         id: a.id,

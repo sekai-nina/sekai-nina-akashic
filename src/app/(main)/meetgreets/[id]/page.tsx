@@ -13,7 +13,8 @@ import { getR2PublicUrl } from "@/lib/r2";
 import { MATERIAL_WINDOW_DAYS, REPORT_WINDOW_DAYS, TALK_SUGGEST_DAYS } from "@/lib/meetgreet/config";
 import { formatDate } from "@/lib/utils";
 import { MetaForm } from "./meta-form";
-import { MaterialsStep } from "./materials-step";
+import { MaterialsStep } from "@/components/materials-step";
+import { applyMaterialsAction } from "../actions";
 import { ExcerptStep } from "./excerpt-step";
 import { ReportsStep } from "./reports-step";
 import { ArticleStep } from "./article-step";
@@ -106,7 +107,11 @@ export default async function MeetGreetDetailPage({ params, searchParams }: Prop
               {TALK_SUGGEST_DAYS === 1 ? "翌日" : `${TALK_SUGGEST_DAYS} 日後`}
               のトーク画像 / 動画 ({suggestedCount} 件) は「おすすめ」としてまとめて入れられます。抜粋 (本人の感想) はドシエ側で範囲選択します。
             </p>
-            <MaterialsStep meetGreetId={mg.id} groups={candidates} />
+            <MaterialsStep
+              groups={candidates}
+              topic="ミーグリ"
+              onApply={applyMaterialsAction.bind(null, mg.id)}
+            />
             <ExcerptStep meetGreetId={mg.id} />
           </>
         ) : (
