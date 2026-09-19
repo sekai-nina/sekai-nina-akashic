@@ -13,6 +13,10 @@ export const WATCH_QUERY_MAX_CHARS = 200;
 export const SETTING_ID = "singleton";
 /** /status に残すハートビートの key */
 export const JOB_KEY = "cron.x_mentions";
+/** 「過去 N 日を取り直す」の N。recent search が遡れる上限 (7 日) */
+export const BACKFILL_DAYS = 7;
+/** X Developer Portal (プラン・支払い・利用量)。X_BEARER_TOKEN の持ち主が見る */
+export const X_DEVELOPER_PORTAL_URL = "https://developer.x.com/en/portal/dashboard";
 
 /** X のユーザー名 (@ 抜き)。英数字とアンダースコア、15 文字まで */
 const USERNAME_PATTERN = /^[a-z0-9_]{1,15}$/;

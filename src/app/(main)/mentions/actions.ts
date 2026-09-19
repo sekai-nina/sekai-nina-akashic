@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/auth/require-role";
 import { logAudit } from "@/lib/domain/audit";
 import { createWatch, deleteWatch, setExcludedUsernames, updateWatch } from "@/lib/domain/x-mentions";
+import { BACKFILL_DAYS } from "@/lib/x-mentions/query";
 import { runMentionWatch } from "@/lib/x-mentions/run";
 
 export type MentionActionState = { ok: true; message: string } | { ok: false; error: string };
@@ -69,12 +70,24 @@ export async function setExcludedUsernamesAction(
  * X の読み取り枠を使うので連打しない前提で member 以上に開けている。
  */
 export async function runNowAction(): Promise<MentionActionState> {
+  return runAndReport("x_mentions.run", {});
+}
+
+/**
+ * since_id を無視して直近 7 日を取り直す。初回の 24 時間より前を拾いたいとき用。
+ * 保存済みのヒットは二度入らないので、押し直しても Discord に同じものは流れない
+ */
+export async function backfillAction(): Promise<MentionActionState> {
+  return runAndReport("x_mentions.backfill", { lookbackDays: BACKFILL_DAYS });
+}
+
+async function runAndReport(action: string, opts: { lookbackDays?: number }): Promise<MentionActionState> {
   const user = await requireRole(EDITORS);
   try {
-    const result = await runMentionWatch();
+    const result = await runMentionWatch(opts);
     await logAudit({
       actorId: user.id,
-      action: "x_mentions.run",
+      action,
       targetType: "XMentionWatch",
       targetId: "all",
       metadata: {
@@ -83,6 +96,7 @@ export async function runNowAction(): Promise<MentionActionState> {
         notified: result.notified,
         notifyRemaining: result.notifyRemaining,
         notifyError: result.notifyError,
+        lookbackDays: opts.lookbackDays ?? null,
       },
     });
     revalidatePath("/mentions");
