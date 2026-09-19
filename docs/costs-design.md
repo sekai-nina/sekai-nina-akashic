@@ -115,7 +115,7 @@ Vercel Cron が 1 日 1 回 `GET /api/cron/costs` を呼ぶ（`CRON_SECRET`、`/
 
 Supabase は public スキーマの全テーブルに `anon` / `authenticated` への DML を既定で与え、PostgREST (`/rest/v1/<table>`) がそれを外に出す。**保護テーブルが守られているのは RLS のおかげで、権限のおかげではない**（ポリシーが `TO app_runtime` なので他のロールはどのポリシーにも一致せず 0 行になる）。
 
-RLS を張らない非保護テーブルにはその守りが無いため、`20260919020000_revoke_anon_on_unprotected` で `LlmUsageDaily` / `LlmCostDaily` / `CreditSnapshot` と、`/status` の `Job` / `JobRun` / `StatusCheckState` から `anon` / `authenticated` の権限を剥がした（akashic は PostgREST を使わず Prisma が `app_runtime` で直接つなぐので影響は無い）。
+RLS を張らない非保護テーブルにはその守りが無いため、`20260919020000_revoke_anon_on_unprotected` で `LlmUsageDaily` / `LlmCostDaily` / `CreditSnapshot` と、`/status` の `Job` / `JobRun` / `StatusCheckState` から `anon` / `authenticated` の権限を剥がした（akashic は PostgREST を使わず Prisma が `app_runtime` で直接つなぐので影響は無い）。`Article` も同じ状態だったので `20260919030000_revoke_anon_on_article` で塞いだ（#121）。
 
 **非保護テーブルを足すときは毎回 REVOKE を書く。** 書かないと publishable key で読み書きできる。
 

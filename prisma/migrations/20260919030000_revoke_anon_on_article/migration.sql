@@ -1,0 +1,28 @@
+-- Article から anon / authenticated の権限を剥がす (#121)
+--
+-- Supabase は public スキーマの全テーブルに anon / authenticated への DML を既定で与え、
+-- PostgREST (`/rest/v1/<table>`) がそれを外に出す。保護テーブルが守られているのは RLS の
+-- ポリシーが `TO app_runtime` だからで、権限のためではない。RLS を張っていない Article は
+-- **ブラウザに配られる publishable key で読み書きできる状態だった**。
+--
+-- 本番で確認した実害:
+--   GET /rest/v1/Article?select=*&limit=1 → 200 で記事の中身が返る
+--   権限上は INSERT / UPDATE / DELETE も通る (= 記事を消せる)
+--
+-- 記事本文は公開リポジトリ (sekai-nina-public) にミラーされているので読みの実害は小さいが、
+-- 書きは実害が大きい。
+--
+-- 剥がしてよいことの確認 (2026-09-19):
+--   - akashic の supabase クライアント (src/lib/supabase/*) は **auth 専用**。
+--     テーブルアクセス (`.from(...)`) は 1 箇所も無く、DB は Prisma が app_runtime で直接読む
+--   - sekai-nina-site / sekai-nina-ai-worker / sekai-nina-stats-worker / sekai-nina-sync /
+--     sekai-nina-discord-bot のいずれも supabase-js も /rest/v1 も使っていない
+--     (公開サイトの記事は GitHub のリポジトリから読んでいる)
+--
+-- #117 の 20260919020000 で運用テーブル 6 つは剥がし済み。これで RLS 非対象のテーブルは
+-- すべて PostgREST から閉じる。**非保護テーブルを足すときは毎回これを書く**
+-- (docs/security-dev.md)。
+--
+-- ⚠ 本番では SQL を先に当てる (アプリの挙動は変わらない)。
+
+REVOKE ALL ON TABLE "Article" FROM anon, authenticated;
