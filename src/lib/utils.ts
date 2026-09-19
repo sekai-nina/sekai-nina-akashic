@@ -225,6 +225,19 @@ export const LLM_PROVIDER_LABELS: Record<LlmProvider, string> = {
   google: "Google (Gemini)",
 };
 
+/**
+ * 残高を補充する画面。/costs の「補充する」から開く。
+ *
+ * Gemini だけ**課金画面への安定した直リンクが無い**ので AI Studio のトップに送る
+ * (残高は Dashboard → Usage and Limits に出る)。URL は各社の都合で変わるので、
+ * 飛んだ先が違っていたらここを直す。
+ */
+export const LLM_PROVIDER_BILLING_URLS: Record<LlmProvider, string> = {
+  openai: "https://platform.openai.com/settings/organization/billing/overview",
+  anthropic: "https://platform.claude.com/settings/billing",
+  google: "https://aistudio.google.com/",
+};
+
 /** LLM の利用量の出どころ */
 export const LLM_USAGE_SOURCE_LABELS: Record<LlmUsageSource, string> = {
   reported: "自己申告",

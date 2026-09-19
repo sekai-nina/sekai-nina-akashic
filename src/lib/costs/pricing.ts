@@ -48,6 +48,10 @@ export const PRICING: Record<LlmProvider, Record<string, ModelPricing>> = {
     "gpt-5.6-terra": { input: 2, output: 12 },
     "gpt-5.6-luna": { input: 0.2, output: 1.2 },
     "gpt-5.6-sol": { input: 4, output: 20 },
+    // 画像編集・生成 (meet-greet のラフ案)。**テキスト入力 $5 / 画像入力 $10 と単価が分かれるが、
+    // usage API はどちらも input_tokens にまとめて返す**ので、高いほう (画像入力) で見積もる。
+    // 実測 (2026-09-19, 入力 43,836 / 出力 12,416): この表で $0.935、OpenAI の確定額は $0.912
+    "gpt-image-1": { input: 10, cachedInput: 2.5, output: 40 },
   },
   anthropic: {
     "claude-opus-5": anthropic(5, 25),

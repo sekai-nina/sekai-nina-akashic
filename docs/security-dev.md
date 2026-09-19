@@ -69,7 +69,9 @@ const clearance = auth.clearance;
 - `ArticleSource`（`Article` 自体は公開記事のミラーなので非保護）
 - `MeetGreet`（ミーグリ記事ワークフロー。ドシエを include する読みは所有者判定が要るので `withSession`）
 
-**非保護テーブルを足したら `REVOKE ALL ON TABLE "<Table>" FROM anon, authenticated;` を migration に書く。** Supabase は public スキーマの全テーブルに `anon` / `authenticated` への DML を既定で与え、PostgREST (`/rest/v1/<table>`) がそれを外に出す。保護テーブルが守られているのは RLS が `TO app_runtime` のポリシーしか持たないからで、権限のためではない（`20260919020000_revoke_anon_on_unprotected` で実際に塞いだ）。
+**非保護テーブルを足したら `REVOKE ALL ON TABLE "<Table>" FROM anon, authenticated;` を migration に書く。** Supabase は public スキーマの全テーブルに `anon` / `authenticated` への DML を既定で与え、PostgREST (`/rest/v1/<table>`) がそれを外に出す。保護テーブルが守られているのは RLS が `TO app_runtime` のポリシーしか持たないからで、権限のためではない。
+
+既存分は `20260919020000_revoke_anon_on_unprotected`（`Job` / `JobRun` / `StatusCheckState` / `LlmUsageDaily` / `LlmCostDaily` / `CreditSnapshot`）と `20260919030000_revoke_anon_on_article`（`Article`）で塞いだ。**現在 RLS 非対象のテーブルはすべて PostgREST から閉じている**ので、足すときに書き忘れるとそこだけ穴になる。akashic の supabase クライアント（`src/lib/supabase/*`）は auth 専用でテーブルを触らないため、剥がしてもアプリには影響しない。
 
 `LlmUsageDaily` / `LlmCostDaily` / `CreditSnapshot`（コスト管理 `/costs`）も非保護。金額とトークン数しか持たないが、**画面と Server Action は admin のみ**に絞る（口座の残高なので member / viewer には見せない）。`/status` のコストのチェックも admin にだけ表示し、Discord に流れる要約には金額を入れない。
 

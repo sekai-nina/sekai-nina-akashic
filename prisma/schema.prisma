@@ -172,6 +172,7 @@ model User {
   auditLogs          AuditLog[]
   apiKeys            ApiKey[]
   invitation         Invitation?
+  aiSettings         AiSetting[]
   createdInvitations Invitation[]     @relation("InvitationCreatedBy")
   meetGreets         MeetGreet[]      @relation("MeetGreetCreatedBy")
   creditSnapshots    CreditSnapshot[] @relation("CreditSnapshotCreatedBy")
@@ -1104,4 +1105,23 @@ model AiQuestion {
   @@index([citationCount, askedAt])
   @@index([expiresAt])
   @@index([classification])
+}
+
+/// 案内AI「ふぃたん」の運転スイッチ。行は1つだけ（id = "singleton"）。
+///
+/// 止めたいときに、サイトを作り直さずに即座に止められるようにするためのもの。
+/// Worker がここを見に来る（短いキャッシュ付き）。Akashic が落ちていても
+/// Worker は最後に読めた値で動き続けるので、これが原因で AI が止まることはない。
+model AiSetting {
+  id      String  @id @default("singleton")
+  /// false にすると、回答を止めたうえでサイトから入口ごと消える
+  enabled Boolean @default(true)
+  /// 止めた理由。運用の記録用で、利用者には出さない
+  note    String  @default("")
+
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+  updatedBy   User?    @relation(fields: [updatedById], references: [id])
+
+  classification ClearanceLevel @default(internal)
 }
