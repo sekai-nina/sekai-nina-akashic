@@ -1,0 +1,47 @@
+/**
+ * 画面 (クライアント部品) とドメイン層で共有する型。
+ *
+ * **重い依存 (sharp / R2 / Drive / Prisma Client の値) を持ち込まない。**
+ * クライアント部品がドメイン層から型を import すると、型は消えてもモジュール解決が
+ * 走って sharp まで引きずり込み、ビルドが落ちる。共有する形はここに置く。
+ */
+
+import type { AssetKind } from "@prisma/client";
+
+/** スケッチの参照に使えるドシエ内の画像 */
+export interface SketchSourceAsset {
+  id: string;
+  title: string;
+  kind: AssetKind;
+  thumbnailUrl: string | null;
+}
+
+/** 生成した候補 */
+export interface SketchCandidate {
+  key: string;
+  url: string;
+}
+
+/** 抜粋の提案 1 件 */
+export interface ExcerptProposal {
+  text: string;
+  /** なぜその範囲を選んだか (画面に出す) */
+  reason: string;
+  start: number;
+  end: number;
+}
+
+/** ブログ 1 本ぶんの提案 */
+export interface BlogExcerptProposals {
+  assetId: string;
+  title: string;
+  url: string | null;
+  proposals: ExcerptProposal[];
+}
+
+/** 反映する抜粋の範囲 */
+export interface ApplyExcerptInput {
+  assetId: string;
+  start: number;
+  end: number;
+}

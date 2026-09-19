@@ -104,6 +104,28 @@ const clearance = auth.clearance;
 
 RLS があるので読み取り時は不要ですが、**書き込み時のクリアランスチェック**（例：ユーザーが自分のクリアランスより高い機密レベルでアセットを作成しようとした場合）には引き続き使います。
 
+## 外部の AI に渡すもの（ミーグリの抜粋提案・スケッチ生成）
+
+ミーグリの 2 つの機能は、**アセットの中身そのものを OpenAI に送ります**。
+
+| 機能 | 送るもの |
+|---|---|
+| 抜粋の提案（`src/lib/meetgreet/excerpt.ts`） | ドシエに入っている本人ブログの**本文全文** |
+| スケッチ生成（`src/lib/meetgreet/sketch.ts`） | ドシエで選んだ**画像**（Drive の原本を 1280px に縮小したもの）+ 基準スケッチ |
+
+**送ってよいのは `internal` 以下だけです** → `src/lib/meetgreet/config.ts` の `MAX_EXTERNAL_AI_CLEARANCE`。
+`confidential` / `restricted` のアセットは候補にも出さず、ID を直接指定しても弾きます
+（`classificationFilter(MAX_EXTERNAL_AI_CLEARANCE)` を、抜粋・スケッチ双方のクエリに入れている）。
+
+RLS は「その人が読めるか」しか見ないので、**読める人が外に出せてしまうのを止めるのはアプリ層**です。
+MCP の `akashic_apply_article_source` が公開判断を `internal` 以下に限っているのと同じ考え方で、
+機械（LLM）に上位機密を触らせないための線引きです。上位機密のものを外部 AI に渡したくなったら、
+まず分類を見直してください。
+
+関連して、スケッチ生成が参照にできるのは**そのミーグリのドシエに入っている画像だけ**で、
+抜粋の反映も**そのドシエに入っているアセットの本文だけ**を対象にします。これを外すと、
+読めるアセットの中身を internal のドシエに写して下位に降ろせてしまいます。
+
 ## 公開リポジトリへ書き出すもの（記事の push）
 
 記事（`Article`）は公開リポジトリ sekai-nina/sekai-nina-public のミラーで、push 時に DB のカラムから frontmatter を丸ごと生成し直します。`ArticleSource` は保護テーブルで、frontmatter 由来の行（`public`）と akashic 側で付けた紐づけ（元アセットの classification を継承）が混ざるため、**読んだものをそのまま書き出すと押した人の clearance で公開内容が変わります**。

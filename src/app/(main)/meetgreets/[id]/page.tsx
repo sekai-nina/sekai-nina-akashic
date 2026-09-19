@@ -3,11 +3,16 @@ import { ArrowLeft, ExternalLink } from "lucide-react";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getMeetGreet, listMaterialCandidates, meetGreetTitle } from "@/lib/domain/meetgreets";
+import { listSketchSources } from "@/lib/domain/meetgreet-sketch";
+import { sketchCandidateKeys } from "@/lib/meetgreet/config";
+import { getR2PublicUrl } from "@/lib/r2";
 import { MATERIAL_WINDOW_DAYS, REPORT_WINDOW_DAYS, TALK_SUGGEST_DAYS } from "@/lib/meetgreet/config";
 import { formatDate } from "@/lib/utils";
 import { MetaForm } from "./meta-form";
 import { MaterialsStep } from "./materials-step";
+import { ExcerptStep } from "./excerpt-step";
 import { ReportsStep } from "./reports-step";
+import { SketchStep } from "./sketch-step";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -28,7 +33,14 @@ export default async function MeetGreetDetailPage({ params }: Props) {
   const mg = await getMeetGreet(session.user, id);
   if (!mg) notFound();
 
-  const candidates = await listMaterialCandidates(session.user, mg);
+  const [candidates, sketchSources] = await Promise.all([
+    listMaterialCandidates(session.user, mg),
+    listSketchSources(session.user, mg),
+  ]);
+  // 新しい候補を先に出す (作り直すほど古いものが上に溜まらないように)
+  const sketchCandidates = sketchCandidateKeys(mg.sketchCandidates)
+    .map((key) => ({ key, url: getR2PublicUrl(key) }))
+    .reverse();
   const suggestedCount = candidates.reduce(
     (n, g) => n + g.assets.filter((a) => a.suggested).length,
     0
@@ -71,6 +83,7 @@ export default async function MeetGreetDetailPage({ params }: Props) {
               のトーク画像 / 動画は最初からチェック済み ({suggestedCount} 件)。外す / 足すだけして「ドシエに反映」を押してください。抜粋 (本人の感想) はドシエ側で範囲選択します。
             </p>
             <MaterialsStep meetGreetId={mg.id} groups={candidates} />
+            <ExcerptStep meetGreetId={mg.id} />
           </>
         ) : (
           <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-3">
@@ -106,10 +119,32 @@ export default async function MeetGreetDetailPage({ params }: Props) {
       </StepCard>
 
       {/* 3. スケッチ */}
-      <StepCard no={3} title="スケッチ" done={!!mg.sketchKey} summary={mg.sketchKey ? "確定済み" : "未生成"}>
-        <p className="text-xs text-slate-400">
-          ドシエの画像を参照にスケッチを生成する機能は次の PR (#108) で入ります。それまでは従来どおり ChatGPT で作り、ドシエに「サムネ」として追加してください。
-        </p>
+      <StepCard
+        no={3}
+        title="スケッチ"
+        done={!!mg.sketchKey}
+        summary={
+          mg.sketchKey
+            ? "確定済み"
+            : sketchCandidates.length > 0
+              ? `候補 ${sketchCandidates.length} 枚`
+              : "未生成"
+        }
+        action={
+          mg.sketchKey ? (
+            <a href={getR2PublicUrl(mg.sketchKey)} target="_blank" rel="noreferrer" className={linkCls}>
+              確定した画像を開く <ExternalLink size={12} />
+            </a>
+          ) : null
+        }
+      >
+        <SketchStep
+          meetGreetId={mg.id}
+          sources={sketchSources}
+          candidates={sketchCandidates}
+          selectedKey={mg.sketchKey}
+          extraPrompt={mg.extraSketchPrompt}
+        />
       </StepCard>
 
       {/* 4. 記事 */}

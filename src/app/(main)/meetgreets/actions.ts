@@ -12,7 +12,16 @@ import {
   refetchReports,
   updateMeetGreet,
 } from "@/lib/domain/meetgreets";
-import { MAX_MATERIALS_PER_APPLY } from "@/lib/meetgreet/api";
+import { applyExcerpts, proposeExcerptsForDossier } from "@/lib/domain/meetgreet-excerpts";
+import { generateSketch, selectSketch } from "@/lib/domain/meetgreet-sketch";
+import {
+  ApplyExcerptsSchema,
+  GenerateSketchSchema,
+  MAX_MATERIALS_PER_APPLY,
+  UpdateMeetGreetSchema,
+} from "@/lib/meetgreet/api";
+import { formatZodError } from "@/lib/zod-error";
+import type { ApplyExcerptInput } from "@/lib/meetgreet/types";
 
 const requireMember = () => requireRole(["admin", "member"]);
 
@@ -44,6 +53,8 @@ export async function updateMeetGreetAction(
   input: { single?: string; label?: string; extraSketchPrompt?: string }
 ) {
   const user = await requireMember();
+  const parsed = UpdateMeetGreetSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: formatZodError(parsed.error) };
   try {
     await updateMeetGreet(user, id, input);
     revalidatePath(`/meetgreets/${id}`);
@@ -94,6 +105,69 @@ export async function deleteMeetGreetAction(id: string) {
   const user = await requireMember();
   try {
     await deleteMeetGreet(user, id);
+    revalidatePath("/meetgreets");
+    return { ok: true as const };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+// --- 抜粋の提案 / スケッチ (#108) ---
+
+export async function proposeExcerptsAction(id: string) {
+  const user = await requireMember();
+  try {
+    const mg = await getMeetGreet(user, id);
+    if (!mg) throw new Error("見つかりません");
+    const blogs = await proposeExcerptsForDossier(user, mg);
+    return { ok: true as const, blogs };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+export async function applyExcerptsAction(id: string, inputs: ApplyExcerptInput[]) {
+  const user = await requireMember();
+  const parsed = ApplyExcerptsSchema.safeParse({ inputs });
+  if (!parsed.success) return { ok: false as const, error: formatZodError(parsed.error) };
+  try {
+    const mg = await getMeetGreet(user, id);
+    if (!mg) throw new Error("見つかりません");
+    const result = await applyExcerpts(user, mg, parsed.data.inputs);
+    invalidateDossiers();
+    revalidatePath(`/meetgreets/${id}`);
+    revalidatePath(`/dossiers/${mg.dossierId}`);
+    return { ok: true as const, ...result };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+export async function generateSketchAction(
+  id: string,
+  options: { assetIds: string[]; revisionOf?: string; revisionNote?: string }
+) {
+  const user = await requireMember();
+  const parsed = GenerateSketchSchema.safeParse(options);
+  if (!parsed.success) return { ok: false as const, error: formatZodError(parsed.error) };
+  try {
+    const mg = await getMeetGreet(user, id);
+    if (!mg) throw new Error("見つかりません");
+    const { candidates } = await generateSketch(user, mg, parsed.data);
+    revalidatePath(`/meetgreets/${id}`);
+    return { ok: true as const, candidates };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+export async function selectSketchAction(id: string, key: string) {
+  const user = await requireMember();
+  try {
+    const mg = await getMeetGreet(user, id);
+    if (!mg) throw new Error("見つかりません");
+    await selectSketch(user, mg, key);
+    revalidatePath(`/meetgreets/${id}`);
     revalidatePath("/meetgreets");
     return { ok: true as const };
   } catch (e) {

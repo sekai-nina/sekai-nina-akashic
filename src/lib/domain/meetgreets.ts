@@ -38,7 +38,7 @@ import {
   type CandidateGroup,
 } from "@/lib/meetgreet/candidates";
 
-interface ActingUser {
+export interface ActingUser {
   id: string;
   role: string;
   clearance: string;
