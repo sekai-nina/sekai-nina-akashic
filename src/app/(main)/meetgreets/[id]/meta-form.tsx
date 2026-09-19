@@ -9,18 +9,35 @@ const inputCls =
   "px-2 py-1 rounded-md border border-slate-200 bg-white text-sm text-slate-900 outline-none focus:border-slate-400";
 
 /** シングル名・呼び分けの編集と、行の削除 (ドシエ / 収集は残る) */
-export function MetaForm({ id, single, label }: { id: string; single: string; label: string }) {
+export function MetaForm({
+  id,
+  single,
+  label,
+  venue,
+  isReal,
+}: {
+  id: string;
+  single: string;
+  label: string;
+  venue: string | null;
+  /** リアルミーグリのときだけ会場名を出す (記事タイトルに使うのはリアルだけ) */
+  isReal: boolean;
+}) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [pending, startTransition] = useTransition();
   const [s, setS] = useState(single);
   const [l, setL] = useState(label);
+  const [v, setV] = useState(venue ?? "");
   const [msg, setMsg] = useState<string | null>(null);
 
   if (!editing) {
     return (
       <div className="mt-1 flex items-center gap-2 text-sm text-slate-600">
-        <span>{single || <span className="text-slate-400">シングル未設定</span>}</span>
+        <span>
+          {single || <span className="text-slate-400">シングル未設定</span>}
+          {isReal && venue && <span className="text-slate-500"> · {venue}</span>}
+        </span>
         <button
           type="button"
           onClick={() => setEditing(true)}
@@ -34,7 +51,7 @@ export function MetaForm({ id, single, label }: { id: string; single: string; la
 
   function save() {
     startTransition(async () => {
-      const res = await updateMeetGreetAction(id, { single: s, label: l });
+      const res = await updateMeetGreetAction(id, { single: s, label: l, ...(isReal ? { venue: v } : {}) });
       if (!res.ok) {
         setMsg(`エラー: ${res.error}`);
         return;
@@ -72,6 +89,15 @@ export function MetaForm({ id, single, label }: { id: string; single: string; la
         placeholder="呼び分け"
         aria-label="呼び分け"
       />
+      {isReal && (
+        <input
+          className={inputCls + " w-40"}
+          value={v}
+          onChange={(e) => setV(e.target.value)}
+          placeholder="会場 (例: 幕張メッセ)"
+          aria-label="会場の正式名称"
+        />
+      )}
       <button
         type="button"
         onClick={save}
@@ -97,6 +123,7 @@ export function MetaForm({ id, single, label }: { id: string; single: string; la
       </button>
       <p className="text-xs text-slate-400 w-full">
         作成済みのドシエ・X レポ収集の名前は変わりません (それぞれの画面で変更してください)。
+        {isReal && " 会場は記事タイトルに出ます (未入力なら呼び分けを使います)。"}
       </p>
       {msg && <span className="text-xs text-red-600 w-full">{msg}</span>}
     </div>

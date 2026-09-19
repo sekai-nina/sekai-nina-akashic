@@ -942,6 +942,9 @@ model MeetGreet {
   single String          @default("")
   /// 回の呼び分け (「通常」「初回限定盤」「京都」など)。ドシエ / コレクションの名前に使うだけで記事には出ない
   label  String          @default("")
+  /// 会場の正式名称 (「幕張メッセ」など)。**リアルミーグリの記事タイトルに出る**。
+  /// label が短い通称 (幕張) なのに対し、こちらは表に出す名前。オンラインでは使わない
+  venue  String?
 
   classification ClearanceLevel @default(internal)
 

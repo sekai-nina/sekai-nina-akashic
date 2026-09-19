@@ -96,3 +96,12 @@ export const MAX_EXTERNAL_AI_CLEARANCE = "internal" as const;
 export function sketchCandidateKeys(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((k): k is string => typeof k === "string") : [];
 }
+
+/**
+ * **生成する記事の本文に載せてよい機密レベルの上限 (#109)。**
+ *
+ * `Article` は非保護テーブルで、本文 (引用・トーク名・画像名) は push でそのまま
+ * 公開リポジトリに載る。confidential 以上のアセットは本文にも出典にも出さない。
+ * 外部 AI に渡す上限 (`MAX_EXTERNAL_AI_CLEARANCE`) と同じ線引き。
+ */
+export const MAX_ARTICLE_CLEARANCE = "internal" as const;

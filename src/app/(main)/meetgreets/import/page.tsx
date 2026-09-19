@@ -2,8 +2,9 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { listImportCandidates } from "@/lib/domain/meetgreet-import";
+import { listArticleLinkCandidates, listImportCandidates } from "@/lib/domain/meetgreet-import";
 import { ImportForm } from "./import-form";
+import { ArticleLinkForm } from "./link-form";
 
 /**
  * 過去のドシエの取り込み (#118)。
@@ -13,7 +14,10 @@ export default async function ImportMeetGreetsPage() {
   const session = await auth();
   if (!session?.user) notFound();
 
-  const candidates = await listImportCandidates(session.user);
+  const [candidates, linkCandidates] = await Promise.all([
+    listImportCandidates(session.user),
+    listArticleLinkCandidates(session.user),
+  ]);
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -26,6 +30,14 @@ export default async function ImportMeetGreetsPage() {
         素材とレポは集め直しません（<strong>X の収集は走りません</strong>）。取り込み済みのものは出ません。
       </p>
       <ImportForm candidates={candidates} />
+
+      <h2 className="text-sm font-medium text-slate-500 mt-10 mb-2">公開済みの記事を紐づける</h2>
+      <p className="text-slate-500 text-sm mb-4">
+        <span className="font-mono text-xs">/meetgreets</span>{" "}
+        を作る前に書いた記事は frontmatter にドシエの ID を持っているので、
+        それで突き合わせます。紐づけると、以降はドシエが増えたぶんを差分として追記できるようになります。
+      </p>
+      <ArticleLinkForm candidates={linkCandidates} />
     </div>
   );
 }

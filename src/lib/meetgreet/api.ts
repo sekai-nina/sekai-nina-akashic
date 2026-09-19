@@ -35,6 +35,8 @@ export const UpdateMeetGreetSchema = z
   .object({
     single: z.string().max(200).optional(),
     label: z.string().max(50).optional(),
+    /** 会場の正式名称。リアルの記事タイトルに出る (空文字で消せる) */
+    venue: z.string().max(100).optional(),
     extraSketchPrompt: z.string().max(MAX_EXTRA_SKETCH_PROMPT).optional(),
   })
   .strict()
@@ -86,6 +88,15 @@ export const GenerateSketchSchema = z
     message: `作り直しのときの参照写真は ${maxReferencePhotos(true)} 枚までです`,
   });
 
+export const ArticleGenerateSchema = z
+  .object({
+    /** true なら書き込まず、適用後の本文と増える行だけ返す */
+    dryRun: z.boolean().optional(),
+    /** dryRun で受け取った digest。渡すと、組み立て直した結果が変わっていたら 409 */
+    expectedDigest: z.string().min(1).optional(),
+  })
+  .strict();
+
 export const SelectSketchSchema = z.object({ key: z.string().min(1) }).strict();
 
 export function projectMeetGreet(mg: MeetGreetSummary | MeetGreetDetail) {
@@ -95,6 +106,7 @@ export function projectMeetGreet(mg: MeetGreetSummary | MeetGreetDetail) {
     format: mg.format,
     single: mg.single,
     label: mg.label,
+    venue: mg.venue,
     classification: mg.classification,
     // ドシエが所有者に private へ戻された / 機密を上げられたときは null (RLS で見えない)
     dossier: mg.dossier
