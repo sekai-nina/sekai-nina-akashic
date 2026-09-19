@@ -3,8 +3,9 @@ import { ArrowLeft, ExternalLink } from "lucide-react";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getMeetGreet, listMaterialCandidates, meetGreetTitle } from "@/lib/domain/meetgreets";
+import { listMeetGreetKeeps } from "@/lib/domain/meetgreet-reports";
 import { listSketchSources } from "@/lib/domain/meetgreet-sketch";
-import { sketchCandidateKeys } from "@/lib/meetgreet/config";
+import { jsonStringArray } from "@/lib/meetgreet/config";
 import { getR2PublicUrl } from "@/lib/r2";
 import { MATERIAL_WINDOW_DAYS, REPORT_WINDOW_DAYS, TALK_SUGGEST_DAYS } from "@/lib/meetgreet/config";
 import { formatDate } from "@/lib/utils";
@@ -12,6 +13,7 @@ import { MetaForm } from "./meta-form";
 import { MaterialsStep } from "./materials-step";
 import { ExcerptStep } from "./excerpt-step";
 import { ReportsStep } from "./reports-step";
+import { ArticleStep } from "./article-step";
 import { SketchStep } from "./sketch-step";
 
 interface Props {
@@ -33,12 +35,13 @@ export default async function MeetGreetDetailPage({ params }: Props) {
   const mg = await getMeetGreet(session.user, id);
   if (!mg) notFound();
 
-  const [candidates, sketchSources] = await Promise.all([
+  const [candidates, sketchSources, keeps] = await Promise.all([
     listMaterialCandidates(session.user, mg),
     listSketchSources(session.user, mg),
+    listMeetGreetKeeps(session.user, mg, mg.reports?.keep ?? 0),
   ]);
   // 新しい候補を先に出す (作り直すほど古いものが上に溜まらないように)
-  const sketchCandidates = sketchCandidateKeys(mg.sketchCandidates)
+  const sketchCandidates = jsonStringArray(mg.sketchCandidates)
     .map((key) => ({ key, url: getR2PublicUrl(key) }))
     .reverse();
   const suggestedCount = candidates.reduce(
@@ -58,7 +61,13 @@ export default async function MeetGreetDetailPage({ params }: Props) {
         <p className="text-xs text-slate-500 mt-1">
           作成 {formatDate(mg.createdAt)} · {mg.createdBy.name}
         </p>
-        <MetaForm id={mg.id} single={mg.single} label={mg.label} />
+        <MetaForm
+          id={mg.id}
+          single={mg.single}
+          label={mg.label}
+          venue={mg.venue}
+          isReal={mg.format === "real"}
+        />
       </div>
 
       {/* 1. 素材 */}
@@ -120,6 +129,7 @@ export default async function MeetGreetDetailPage({ params }: Props) {
           meetGreetId={mg.id}
           hasCollection={!!mg.repoCollectionId}
           fetched={!!mg.repoCollection?.lastFetchedAt}
+          keeps={keeps}
         />
       </StepCard>
 
@@ -157,7 +167,11 @@ export default async function MeetGreetDetailPage({ params }: Props) {
         no={4}
         title="記事"
         done={!!mg.article}
-        summary={mg.article ? `${mg.article.title} (${mg.article.dirty ? "未 push" : "push 済み"})` : "未生成"}
+        summary={
+          mg.article
+            ? `${mg.article.title} (${mg.article.dirty ? "未 push" : "push 済み"}${mg.needsSync ? " · 要反映" : ""})`
+            : "未生成"
+        }
         action={
           mg.article ? (
             <Link href={`/articles/${mg.article.shortId}`} className={linkCls}>
@@ -166,9 +180,12 @@ export default async function MeetGreetDetailPage({ params }: Props) {
           ) : null
         }
       >
-        <p className="text-xs text-slate-400">
-          ドシエと採用したレポから記事を生成する機能は #109 で入ります。それまでは従来どおりローカルの dossier-to-meetgreet-article スキルで生成してください。
-        </p>
+        {mg.needsSync && (
+          <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-3">
+            記事を書いた後にドシエが変わっています。差分を見て追記してください。
+          </p>
+        )}
+        <ArticleStep meetGreetId={mg.id} hasArticle={!!mg.article} hasDossier={!!mg.dossier} />
       </StepCard>
     </div>
   );

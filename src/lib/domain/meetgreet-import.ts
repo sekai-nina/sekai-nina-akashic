@@ -7,7 +7,7 @@
  * **X の収集は走らせない**（すでに集め終わっている）。
  */
 
-import { withSession } from "@/lib/db";
+import { prisma, withClearance, withSession } from "@/lib/db";
 import { assertClearance } from "@/lib/classification";
 import { parseDossierTitle, parseSingleFromCollectionName } from "@/lib/meetgreet/import";
 import type { MeetGreetFormat } from "@prisma/client";
@@ -154,4 +154,109 @@ export async function importMeetGreets(
     metadata: { requested: wanted.size, imported, failed: failed.length },
   });
   return { imported, failed };
+}
+
+// --- 既存記事の紐づけ (#109) ---
+
+export interface ArticleLinkCandidate {
+  meetGreetId: string;
+  date: string;
+  dossierTitle: string;
+  articleId: string;
+  articleTitle: string;
+  articleShortId: string;
+}
+
+/**
+ * まだ記事が紐づいていない MeetGreet のうち、公開記事の frontmatter が
+ * 同じドシエを指しているものを挙げる。
+ *
+ * `/meetgreets` を作る前に書いた記事は `dossier.id` を frontmatter に持っているので、
+ * それで機械的に突き合わせられる。
+ */
+export async function listArticleLinkCandidates(user: ActingUser): Promise<ArticleLinkCandidate[]> {
+  const meetGreets = await withSession(user, (tx) =>
+    tx.meetGreet.findMany({
+      where: { articleId: null },
+      select: { id: true, date: true, dossierId: true, dossier: { select: { title: true } } },
+    })
+  );
+  if (meetGreets.length === 0) return [];
+
+  // Article は非保護テーブルなので素の prisma でよいが、**MeetGreet を条件に混ぜない**
+  // (保護テーブルなので app.clearance 無しのサブクエリは 0 行になり、
+  // `meetGreet: null` が常に真になって絞り込みが効かない)。
+  // 既に使われている記事は withSession で引いた ID で外す
+  const linkedArticleIds = new Set(
+    (
+      await withSession(user, (tx) =>
+        tx.meetGreet.findMany({
+          where: { articleId: { not: null } },
+          select: { articleId: true },
+        })
+      )
+    ).flatMap((m) => (m.articleId ? [m.articleId] : []))
+  );
+  const articles = (
+    await prisma.article.findMany({
+      where: { type: "event" },
+      select: { id: true, title: true, shortId: true, frontmatterExtra: true },
+    })
+  ).filter((a) => !linkedArticleIds.has(a.id));
+  const byDossier = new Map<string, (typeof articles)[number]>();
+  for (const a of articles) {
+    const extra = a.frontmatterExtra;
+    const id =
+      extra && typeof extra === "object" && !Array.isArray(extra)
+        ? (extra as { dossier?: { id?: unknown } }).dossier?.id
+        : undefined;
+    if (typeof id === "string" && !byDossier.has(id)) byDossier.set(id, a);
+  }
+
+  const out: ArticleLinkCandidate[] = [];
+  for (const mg of meetGreets) {
+    const art = byDossier.get(mg.dossierId);
+    if (!art) continue;
+    out.push({
+      meetGreetId: mg.id,
+      date: mg.date,
+      dossierTitle: mg.dossier?.title ?? "",
+      articleId: art.id,
+      articleTitle: art.title,
+      articleShortId: art.shortId,
+    });
+  }
+  return out.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+}
+
+/** 選んだ候補の記事を MeetGreet に紐づける */
+export async function linkArticles(
+  user: ActingUser,
+  meetGreetIds: string[]
+): Promise<{ linked: number; failed: { title: string; error: string }[] }> {
+  const wanted = new Set(meetGreetIds);
+  if (wanted.size === 0) return { linked: 0, failed: [] };
+
+  const candidates = (await listArticleLinkCandidates(user)).filter((c) => wanted.has(c.meetGreetId));
+  let linked = 0;
+  const failed: { title: string; error: string }[] = [];
+  for (const c of candidates) {
+    try {
+      await withClearance(user.clearance, (tx) =>
+        tx.meetGreet.update({ where: { id: c.meetGreetId }, data: { articleId: c.articleId } })
+      );
+      linked++;
+    } catch (e) {
+      failed.push({ title: c.articleTitle, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  await logAudit({
+    actorId: user.id,
+    action: "meetgreet.article.link",
+    targetType: "MeetGreet",
+    targetId: "-",
+    metadata: { requested: wanted.size, linked, failed: failed.length },
+  });
+  return { linked, failed };
 }

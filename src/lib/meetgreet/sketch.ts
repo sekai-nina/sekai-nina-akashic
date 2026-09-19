@@ -211,8 +211,9 @@ async function callOpenAIEdits(
     console.error("[meetgreet/sketch] OpenAI error", res.status, json.error?.message);
     throw new SketchError(`画像生成に失敗しました (${res.status})`);
   }
-  // 利用量を /costs に自己申告する (画像 API は usage/completions に出ないので、
-  // 報告しないとどの機能の費用か分からないまま合計にだけ乗る)。失敗しても生成は止めない
+  // 利用量を /costs に自己申告する。画像 API も usage/completions には出る (2026-09-19 に実測) が、
+  // 向こうから分かるのは API キー単位までで、akashic のキーは他の機能と共用なので機能別には割れない。
+  // 失敗しても生成は止めない
   if (json.usage) {
     try {
       // **動的 import にする。** 静的に読むと、このモジュールを import するテストが

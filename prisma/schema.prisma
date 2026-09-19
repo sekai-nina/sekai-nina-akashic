@@ -182,6 +182,7 @@ model User {
   auditLogs           AuditLog[]
   apiKeys             ApiKey[]
   invitation          Invitation?
+  aiSettings          AiSetting[]
   createdInvitations  Invitation[]     @relation("InvitationCreatedBy")
   meetGreets          MeetGreet[]      @relation("MeetGreetCreatedBy")
   creditSnapshots     CreditSnapshot[] @relation("CreditSnapshotCreatedBy")
@@ -233,6 +234,7 @@ model Asset {
   relationsAsSource AssetRelation[] @relation("RelationSource")
   relationsAsTarget AssetRelation[] @relation("RelationTarget")
   articleSources    ArticleSource[]
+  anniversaries     Anniversary[]
 
   @@index([sha256])
   @@index([status])
@@ -796,8 +798,9 @@ model Article {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  sources   ArticleSource[]
-  meetGreet MeetGreet?
+  sources       ArticleSource[]
+  meetGreet     MeetGreet?
+  anniversaries Anniversary[]
 
   @@index([type])
   @@index([dirty])
@@ -967,6 +970,9 @@ model MeetGreet {
   single String          @default("")
   /// 回の呼び分け (「通常」「初回限定盤」「京都」など)。ドシエ / コレクションの名前に使うだけで記事には出ない
   label  String          @default("")
+  /// 会場の正式名称 (「幕張メッセ」など)。**リアルミーグリの記事タイトルに出る**。
+  /// label が短い通称 (幕張) なのに対し、こちらは表に出す名前。オンラインでは使わない
+  venue  String?
 
   classification ClearanceLevel @default(internal)
 
@@ -989,6 +995,15 @@ model MeetGreet {
   /// スケッチ生成時にプロンプト本体へ追記する、この回だけの指示
   extraSketchPrompt String  @default("")
 
+  /// 記事に**足さない**と決めたもののキー (#134)。
+  /// 追記は「記事の本文に無い = まだ足していない」としか判断できず、人が意図的に消したものを
+  /// 区別できない (X 側で削除されたレポを手で消しても、次の追記で復活する)。外したものを
+  /// ここに覚えて二度と提示しない。
+  /// 形式: `report:<statusId>` / `asset:<assetId>` / `tiktok:<videoId>` / `quote:<先頭行のハッシュ>`
+  /// (`20260920100000_meetgreet_article_exclusions` のコメントは report を URL と書いているが、
+  ///  実装は status ID。適用済み migration は書き換えられないのでここを正とする)
+  articleExclusions Json @default("[]")
+
   createdById String
   createdBy   User   @relation("MeetGreetCreatedBy", fields: [createdById], references: [id])
 
@@ -996,6 +1011,47 @@ model MeetGreet {
   updatedAt DateTime @updatedAt
 
   @@index([date])
+  @@index([classification])
+}
+
+// ---------------------------------------------------------------------------
+// 記念日 (/anniversaries)
+//
+// 坂井新奈が「初めて〇〇した日」。公開サイトの「今日は〇〇の日」と記念日ページの正で、
+// 366 日すべてを埋めるのが目標。ブログ / トークを読んでいる最中に「これ初〇〇だ」と
+// 気づいた場面で登録するので、出典アセットをその場で紐づけられるようにしてある。
+// 聖地 (Place) と同じく公開サイトはビルド時に API から取得する。
+// 出典アセットの本文は持たないが、機密のアセットから作った記念日が漏れないよう
+// 自前の classification で RLS を掛ける (保護テーブル)。
+// ---------------------------------------------------------------------------
+
+model Anniversary {
+  id          String @id @default(cuid())
+  /// 初めての日 (JST "YYYY-MM-DD")。MeetGreet.date と同じく文字列で持つ (TZ 事故回避)。
+  /// 月日は毎年の記念日、年は「〇年前」の計算に使う
+  date        String
+  /// 呼び名 (例: 初ブログの日)。公開サイトの「今日は〇〇の日」にそのまま出る
+  title       String
+  /// 何があったかの一文
+  description String @default("")
+
+  /// 出典アセット (ブログ / トーク等)。アセットページから登録すると自動で入る
+  assetId   String?
+  asset     Asset?   @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  /// 出典 URL。アセット化されていない公式ページ等に使う (assetId と併用可)
+  sourceUrl String?
+  /// 関連する公開記事。サイトの記念日からのリンク先
+  articleId String?
+  article   Article? @relation(fields: [articleId], references: [id], onDelete: SetNull)
+
+  classification ClearanceLevel @default(internal)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([date])
+  @@index([assetId])
+  @@index([articleId])
   @@index([classification])
 }
 
@@ -1073,12 +1129,20 @@ model LlmCostDaily {
 
 /// 観測した残高。入金したら「入金後の残高」を入れ直す (最新の 1 行が起点になる)
 model CreditSnapshot {
-  id         String      @id @default(cuid())
-  provider   LlmProvider
+  id          String      @id @default(cuid())
+  provider    LlmProvider
   /// その残高を目視した時刻
-  observedAt DateTime
-  balanceUsd Decimal     @db.Decimal(12, 2)
-  note       String      @default("")
+  observedAt  DateTime
+  /// 換算後の残高。社内の計算はすべてこれを使う
+  balanceUsd  Decimal     @db.Decimal(12, 2)
+  /// 目視した通貨での金額。Google Cloud の請求通貨が円のことがあるため原本を残す。
+  /// 既定値 0 は**マイグレーションとデプロイの間**に旧コードが書き込んでも 500 にしないための保険
+  amount      Decimal     @default(0) @db.Decimal(14, 2)
+  /// ISO 4217 (USD / JPY)
+  currency    String      @default("USD") @db.VarChar(3)
+  /// 1 USD が何単位か。balanceUsd = amount / unitsPerUsd (USD なら 1)
+  unitsPerUsd Decimal     @default(1) @db.Decimal(12, 4)
+  note        String      @default("")
 
   createdById String?
   createdBy   User?   @relation("CreditSnapshotCreatedBy", fields: [createdById], references: [id])
@@ -1127,4 +1191,23 @@ model AiQuestion {
   @@index([citationCount, askedAt])
   @@index([expiresAt])
   @@index([classification])
+}
+
+/// 案内AI「ふぃたん」の運転スイッチ。行は1つだけ（id = "singleton"）。
+///
+/// 止めたいときに、サイトを作り直さずに即座に止められるようにするためのもの。
+/// Worker がここを見に来る（短いキャッシュ付き）。Akashic が落ちていても
+/// Worker は最後に読めた値で動き続けるので、これが原因で AI が止まることはない。
+model AiSetting {
+  id      String  @id @default("singleton")
+  /// false にすると、回答を止めたうえでサイトから入口ごと消える
+  enabled Boolean @default(true)
+  /// 止めた理由。運用の記録用で、利用者には出さない
+  note    String  @default("")
+
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+  updatedBy   User?    @relation(fields: [updatedById], references: [id])
+
+  classification ClearanceLevel @default(internal)
 }

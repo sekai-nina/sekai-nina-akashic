@@ -21,6 +21,7 @@ import {
   Network,
   BarChart3,
   MapPin,
+  CalendarHeart,
   Twitter,
   Grid3x3,
   FileText,
@@ -29,6 +30,7 @@ import {
   Wallet,
   MessageCircleQuestion,
   Scissors,
+  Power,
 } from "lucide-react";
 import { QuickCreateModal } from "@/components/quick-create-modal";
 
@@ -45,6 +47,7 @@ const navItems = [
   { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/entities", label: "エンティティ", icon: Tag },
   { href: "/places", label: "聖地マップ", icon: MapPin },
+  { href: "/anniversaries", label: "記念日", icon: CalendarHeart },
   { href: "/dossiers", label: "特定支援", icon: FolderSearch },
   { href: "/clips", label: "クリップ", icon: Scissors },
   { href: "/articles", label: "記事", icon: FileText },
@@ -60,6 +63,7 @@ const navItems = [
 ];
 
 const adminItems = [
+  { href: "/admin/ai", label: "案内AI の運転", icon: Power },
   { href: "/costs", label: "コスト", icon: Wallet },
   { href: "/admin/users", label: "ユーザー管理", icon: Users },
   { href: "/admin/invitations", label: "招待管理", icon: UserPlus },

@@ -92,7 +92,28 @@ export const MAX_EXCERPTS_PER_APPLY = 50;
  */
 export const MAX_EXTERNAL_AI_CLEARANCE = "internal" as const;
 
-/** Json 列の sketchCandidates から key の配列を取り出す (中身を信用しない) */
-export function sketchCandidateKeys(value: unknown): string[] {
+/**
+ * 画面に並べる採用レポの上限 (#135)。
+ * 「どれが載るか」を確かめるためのものなので、全部出す必要はない (判定は /repo で行う)
+ */
+export const MAX_KEEP_TWEETS_SHOWN = 30;
+
+/**
+ * 素材候補に添える本文の長さ (#135)。
+ * トークは題だけだと何の話か分からないので数行ぶん見せる。全文は重いので切る
+ */
+export const CANDIDATE_TEXT_PREVIEW_CHARS = 240;
+
+/** Json 列 (sketchCandidates / articleExclusions) から文字列だけを取り出す (中身を信用しない) */
+export function jsonStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((k): k is string => typeof k === "string") : [];
 }
+
+/**
+ * **生成する記事の本文に載せてよい機密レベルの上限 (#109)。**
+ *
+ * `Article` は非保護テーブルで、本文 (引用・トーク名・画像名) は push でそのまま
+ * 公開リポジトリに載る。confidential 以上のアセットは本文にも出典にも出さない。
+ * 外部 AI に渡す上限 (`MAX_EXTERNAL_AI_CLEARANCE`) と同じ線引き。
+ */
+export const MAX_ARTICLE_CLEARANCE = "internal" as const;

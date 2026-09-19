@@ -68,6 +68,7 @@ const clearance = auth.clearance;
 - `Lens`, `DataSource`, `Coverage`, `LensItemCheck`
 - `ArticleSource`（`Article` 自体は公開記事のミラーなので非保護）
 - `MeetGreet`（ミーグリ記事ワークフロー。ドシエを include する読みは所有者判定が要るので `withSession`）
+- `Anniversary`（記念日。出典アセットの本文は持たないが、機密アセットから作った記念日が漏れないよう自前の classification で守る）
 
 `Article.dossierId`（素材ドシエ。#41）は非保護テーブルから保護テーブルへのポインタ。記事詳細で **ドシエ本体を出すときは `withSession` で引き直す**（private なドシエは所有者にしか見えない = 見えなければ出さない。ID があるからといって `prisma.dossier` を素で触らない）。書くときは `prisma.$executeRaw` で `dossierId` だけ更新する（`prisma.article.update` は `updatedAt` を進めて編集画面の楽観ロックを偽の衝突にする。push の出力にも影響しないので `dirty` も立てない）。
 
@@ -137,6 +138,11 @@ RLS があるので読み取り時は不要ですが、**書き込み時のク�
 | スケッチ生成（`src/lib/meetgreet/sketch.ts`） | ドシエで選んだ**画像**（Drive の原本を 1280px に縮小したもの）+ 基準スケッチ |
 
 **送ってよいのは `internal` 以下だけです** → `src/lib/meetgreet/config.ts` の `MAX_EXTERNAL_AI_CLEARANCE`。
+
+同じ理由で、**生成する記事の本文に載せてよいのも `internal` 以下だけ**です → `MAX_ARTICLE_CLEARANCE`。
+`Article` は非保護テーブルで、本文（引用・トーク名・画像名）は push でそのまま公開リポジトリに載ります。
+`confidential` 以上のアセットは本文にも出典にも出さず、落とした件数を画面に返して人が気づけるようにしています。
+出典は `applyArticleSource` を通すので、公開に落とせる機密レベルの制限（`maxClassification`）もそのまま効きます。
 `confidential` / `restricted` のアセットは候補にも出さず、ID を直接指定しても弾きます
 （`classificationFilter(MAX_EXTERNAL_AI_CLEARANCE)` を、抜粋・スケッチ双方のクエリに入れている）。
 

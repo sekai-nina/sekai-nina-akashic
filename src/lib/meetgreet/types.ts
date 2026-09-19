@@ -8,6 +8,12 @@
 
 import type { AssetKind } from "@prisma/client";
 
+/**
+ * 「足さない」と決めたものの種別 (#134)。
+ * `append.ts` ではなくここに置く (クライアント部品が使うため。冒頭の注意を参照)
+ */
+export type ExclusionKind = "quote" | "report" | "tiktok" | "talk" | "blogImage";
+
 /** スケッチの参照に使えるドシエ内の画像 */
 export interface SketchSourceAsset {
   id: string;
@@ -44,4 +50,31 @@ export interface ApplyExcerptInput {
   assetId: string;
   start: number;
   end: number;
+}
+
+/** 記事生成の種別 */
+export type ArticleMode = "create" | "append";
+
+/** 記事生成のプレビュー (画面が受け取る形) */
+export interface ArticlePreview {
+  mode: ArticleMode;
+  title: string;
+  /** 適用後の本文 */
+  body: string;
+  /** 本文の指紋。保存時に渡して、見せた内容と同じかを確かめる */
+  digest: string;
+  /** 追記のとき、増えた行の位置 (0 始まり) */
+  addedLines: number[];
+  /** 追加される出典 */
+  newSources: { sourceNo: number; label: string; url: string | null; assetId: string | null }[];
+  /** 機密レベルで本文に載せなかったアセットの数 */
+  droppedByClearance: number;
+  /** 足されるものの一覧。チェックを外したものは「今後足さない」として覚える (#134) */
+  additions: { key: string; kind: ExclusionKind; label: string }[];
+  /** 今「足さない」と覚えているもの。戻せるように見せる (#134) */
+  excluded: { key: string; label: string }[];
+  /** 何も増えない */
+  empty: boolean;
+  /** 既存記事がある場合の shortId */
+  shortId: string | null;
 }

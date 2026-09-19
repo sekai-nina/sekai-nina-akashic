@@ -28,6 +28,13 @@ describe("computeCostUsd", () => {
     expect(computeCostUsd("openai", "gpt-4o", { inputTokens: 0, outputTokens: 500_000 })).toBe(5);
   });
 
+  it("画像モデルは入力 $10 / 出力 $40 で見積もる", () => {
+    // 実測値。OpenAI の確定額 $0.9123 に対して +2.5% (画像入力単価に寄せているぶん高く出る)
+    expect(
+      computeCostUsd("openai", "gpt-image-1-2025-04-23", { inputTokens: 43_836, outputTokens: 12_416 }),
+    ).toBeCloseTo(0.935, 3);
+  });
+
   it("Anthropic のキャッシュ読み出しは入力の 1/10", () => {
     // claude-sonnet-4-6: input $3 → cached $0.30
     expect(

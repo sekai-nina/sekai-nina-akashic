@@ -5,6 +5,7 @@ import { LlmProvider } from "@prisma/client";
 import { requireRole } from "@/lib/auth/require-role";
 import { prisma } from "@/lib/db";
 import { ingestAllProviders } from "@/lib/costs/providers";
+import { DEFAULT_UNITS_PER_USD, formatMoney, isCurrency, toUsd } from "@/lib/costs/currency";
 import { logAudit } from "@/lib/domain/audit";
 
 export type CostActionState = { ok: true; message: string } | { ok: false; error: string };
@@ -17,7 +18,11 @@ export type CostActionState = { ok: true; message: string } | { ok: false; error
  */
 export async function addCreditSnapshotAction(input: {
   provider: string;
-  balanceUsd: string;
+  amount: string;
+  /** 目視した通貨 (USD / JPY)。省略時は USD */
+  currency?: string;
+  /** 1 USD が何単位か。省略時は通貨ごとの既定値 */
+  unitsPerUsd?: string;
   observedAt: string;
   note: string;
 }): Promise<CostActionState> {
@@ -26,9 +31,18 @@ export async function addCreditSnapshotAction(input: {
   if (!Object.values(LlmProvider).includes(input.provider as LlmProvider)) {
     return { ok: false, error: "プロバイダが不正です" };
   }
-  const balance = Number(input.balanceUsd);
-  if (!Number.isFinite(balance) || balance < 0) {
+  const currency = input.currency ?? "USD";
+  if (!isCurrency(currency)) return { ok: false, error: "通貨が不正です" };
+
+  const amount = Number(input.amount);
+  if (!Number.isFinite(amount) || amount < 0) {
     return { ok: false, error: "残高は 0 以上の数値で入れてください" };
+  }
+  const unitsPerUsd = input.unitsPerUsd ? Number(input.unitsPerUsd) : DEFAULT_UNITS_PER_USD[currency];
+  // **換算に失敗したら記録しない。** 0 で割った Infinity を残高に入れると判定ごと壊れる
+  const balance = toUsd(amount, unitsPerUsd);
+  if (balance == null) {
+    return { ok: false, error: "為替レートが不正です (1 USD = いくらかを正の数で入れてください)" };
   }
   // datetime-local はローカル (= 手元の端末) の壁時計。空なら今
   const observedAt = input.observedAt ? new Date(input.observedAt) : new Date();
@@ -41,6 +55,9 @@ export async function addCreditSnapshotAction(input: {
       data: {
         provider: input.provider as LlmProvider,
         balanceUsd: balance,
+        amount,
+        currency,
+        unitsPerUsd,
         observedAt,
         note: input.note.slice(0, 200),
         createdById: user.id,
@@ -55,10 +72,11 @@ export async function addCreditSnapshotAction(input: {
     action: "credit.snapshot",
     targetType: "CreditSnapshot",
     targetId: row.id,
-    metadata: { provider: input.provider, balanceUsd: balance },
+    metadata: { provider: input.provider, balanceUsd: balance, amount, currency, unitsPerUsd },
   });
   revalidatePath("/costs");
-  return { ok: true, message: `残高を記録しました ($${balance.toFixed(2)})` };
+  const shown = currency === "USD" ? `$${balance.toFixed(2)}` : `${formatMoney(amount, currency)} = $${balance.toFixed(2)}`;
+  return { ok: true, message: `残高を記録しました (${shown})` };
 }
 
 /** プロバイダから今すぐ取り込む。**admin のみ。** cron と同じ処理 */

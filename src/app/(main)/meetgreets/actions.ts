@@ -13,10 +13,16 @@ import {
   updateMeetGreet,
 } from "@/lib/domain/meetgreets";
 import { applyExcerpts, proposeExcerptsForDossier } from "@/lib/domain/meetgreet-excerpts";
-import { importMeetGreets } from "@/lib/domain/meetgreet-import";
+import { importMeetGreets, linkArticles } from "@/lib/domain/meetgreet-import";
+import {
+  previewMeetGreetArticle,
+  restoreMeetGreetExclusions,
+  saveMeetGreetArticle,
+} from "@/lib/domain/meetgreet-article-save";
 import { generateSketch, selectSketch } from "@/lib/domain/meetgreet-sketch";
 import {
   ApplyExcerptsSchema,
+  ExclusionKeysSchema,
   GenerateSketchSchema,
   MAX_MATERIALS_PER_APPLY,
   UpdateMeetGreetSchema,
@@ -187,6 +193,89 @@ export async function importMeetGreetsAction(dossierIds: string[]) {
   try {
     const result = await importMeetGreets(user, dossierIds);
     invalidateDossiers();
+    revalidatePath("/meetgreets");
+    revalidatePath("/meetgreets/import");
+    return { ok: true as const, ...result };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+// --- 記事の生成 (#109) ---
+
+export async function previewArticleAction(id: string, extraExclude: string[] = []) {
+  const user = await requireMember();
+  const parsed = ExclusionKeysSchema.safeParse(extraExclude);
+  if (!parsed.success) return { ok: false as const, error: formatZodError(parsed.error) };
+  try {
+    const keys = parsed.data;
+    const mg = await getMeetGreet(user, id);
+    if (!mg) throw new Error("見つかりません");
+    const preview = await previewMeetGreetArticle(user, { ...mg, format: mg.format }, keys);
+    return { ok: true as const, preview };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+/** 「今後足さない」を取り消す (#134) */
+export async function restoreExclusionsAction(id: string, keys: string[]) {
+  const user = await requireMember();
+  const parsed = ExclusionKeysSchema.safeParse(keys);
+  if (!parsed.success) return { ok: false as const, error: formatZodError(parsed.error) };
+  try {
+    const mg = await getMeetGreet(user, id);
+    if (!mg) throw new Error("見つかりません");
+    const restored = await restoreMeetGreetExclusions(user, { ...mg, format: mg.format }, parsed.data);
+    revalidatePath(`/meetgreets/${id}`);
+    return { ok: true as const, restored };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+export async function saveArticleAction(
+  id: string,
+  expectedDigest?: string,
+  exclude: string[] = []
+) {
+  const user = await requireMember();
+  const parsed = ExclusionKeysSchema.safeParse(exclude);
+  if (!parsed.success) return { ok: false as const, error: formatZodError(parsed.error) };
+  try {
+    const keys = parsed.data;
+    const mg = await getMeetGreet(user, id);
+    if (!mg) throw new Error("見つかりません");
+    const result = await saveMeetGreetArticle(
+      user,
+      { ...mg, format: mg.format },
+      expectedDigest,
+      keys
+    );
+    if (!result.ok) return { ok: false as const, error: result.error };
+    revalidatePath(`/meetgreets/${id}`);
+    revalidatePath("/meetgreets");
+    revalidatePath("/articles");
+    return {
+      ok: true as const,
+      mode: result.mode,
+      shortId: result.shortId,
+      added: result.added,
+      sources: result.sources,
+    };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+/** 過去の記事を MeetGreet に紐づける (#109) */
+export async function linkArticlesAction(meetGreetIds: string[]) {
+  const user = await requireMember();
+  if (meetGreetIds.length === 0 || meetGreetIds.length > 200) {
+    return { ok: false as const, error: "件数が不正です" };
+  }
+  try {
+    const result = await linkArticles(user, meetGreetIds);
     revalidatePath("/meetgreets");
     revalidatePath("/meetgreets/import");
     return { ok: true as const, ...result };

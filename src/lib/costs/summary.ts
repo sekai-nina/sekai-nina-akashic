@@ -1,3 +1,4 @@
+import type { Currency } from "./currency";
 import type { LlmProvider, StatusLevel } from "@prisma/client";
 import { addDaysToDateString } from "@/lib/utils";
 
@@ -140,6 +141,8 @@ export interface ProviderSummary {
   burnPerDay: number;
   balanceUsd: number | null;
   snapshotAt: Date | null;
+  /** 目視した通貨のままの残高。USD 以外で記録されたときに画面へ添える */
+  snapshotSource: { amount: number; currency: Currency; unitsPerUsd: number } | null;
   snapshotAgeDays: number | null;
   days: number | null;
   judgement: CreditJudgement;

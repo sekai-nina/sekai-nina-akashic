@@ -53,6 +53,11 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 | GET | `/places/:id` | read | 聖地詳細 |
 | PATCH | `/places/:id` | write | 聖地更新 |
 | DELETE | `/places/:id` | write | 聖地削除 |
+| GET | `/anniversaries` | read | 記念日（初めて〇〇した日）一覧と埋まった日数 |
+| POST | `/anniversaries` | write | 記念日作成 |
+| GET | `/anniversaries/:id` | read | 記念日詳細 |
+| PATCH | `/anniversaries/:id` | write | 記念日の部分更新 |
+| DELETE | `/anniversaries/:id` | write | 記念日削除 |
 | POST | `/upload` | write | ファイルアップロード |
 | GET | `/lenses` | read | 観点一覧 |
 | POST | `/lenses` | write | 観点作成 |
@@ -81,12 +86,13 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 | POST | `/meetgreets/:id/reports` | write | X レポの再収集 |
 | POST | `/meetgreets/:id/sketch` | write | 服装スケッチの候補を生成（作り直しも） |
 | POST | `/meetgreets/:id/sketch/select` | write | 候補の 1 枚を確定 |
+| POST | `/meetgreets/:id/article` | write | 記事を生成（既存があれば増えた分だけ追記） |
 
 ---
 
 ### 機密レベル (`classification`) の変更制限
 
-API キーからは **引き上げしかできない。** `PATCH /assets/:id` と `PATCH /places/:id` に現在より低い `classification` を渡すと `403 {"error":"Cannot lower classification (<現在> -> <指定>) via API key"}` を返す。
+API キーからは **引き上げしかできない。** `PATCH /assets/:id` / `PATCH /places/:id` / `PATCH /anniversaries/:id` に現在より低い `classification` を渡すと `403 {"error":"Cannot lower classification (<現在> -> <指定>) via API key"}` を返す。
 
 `assertClearance` は「自分のクリアランスより上を付ける」操作しか止めず、引き下げ (例: `restricted` → `public`) は素通りするため。API キーは MCP（LLM がツールを呼ぶ経路）と共通なので、アプリ層で塞いでいる。引き下げは画面から人間が行う。
 
@@ -470,6 +476,52 @@ API キーからは **引き上げしかできない。** `PATCH /assets/:id` �
 ### PATCH /places/:id
 
 渡したフィールドだけ更新する。`kind` / `area` は `null` で未設定に戻せる（`area` は空文字も未設定扱い）。`classification` は引き上げのみ（前述）。
+
+---
+
+## 記念日 (Anniversaries)
+
+坂井新奈が「初めて〇〇した日」。公開サイト（sekai-nina-site）のトップ「今日は〇〇の日」と記念日ページの正で、366 日すべてを埋めるのが目標。サイトはビルド時に `GET /anniversaries` を読む（聖地と同じ方式）。`classification` によるクリアランス制御を受ける（既定 `internal` = 公開サイトに出る。`confidential` 以上は出ない）。
+
+画面では、ブログ / トークのアセットページの「記念日に登録」から日付（`canonicalDate` の JST）と出典アセットが埋まった状態で登録する。
+
+### GET /anniversaries
+
+クリアランス内の記念日をすべて返す（ページングなし、**月日順**。同じ月日は年の古い順）。
+
+```json
+{
+  "items": [
+    {
+      "id": "cm...",
+      "date": "2025-04-10",
+      "monthDay": "04-10",
+      "title": "初ブログの日",
+      "description": "『一生一度の 坂井新奈』というタイトルでブログを初めて投稿した",
+      "source": { "url": "https://www.hinatazaka46.com/s/official/diary/detail/59569", "label": "坂井新奈ブログ「一生一度の坂井新奈」", "publisher": "日向坂46公式ブログ" },
+      "asset": { "id": "cm...", "title": "坂井新奈ブログ「一生一度の坂井新奈」", "kind": "text", "date": "2025-04-10" },
+      "article": { "id": "cm...", "shortId": "DhLvmF8", "path": "quote/ひなあい初登場時の自己紹介.md", "slug": null, "title": "ひなあい初登場時の自己紹介" },
+      "classification": "internal",
+      "createdAt": "...",
+      "updatedAt": "..."
+    }
+  ],
+  "filledDays": 10,
+  "totalDays": 366
+}
+```
+
+- `date` は JST の暦日文字列。`monthDay` が毎年の記念日、年は「〇年前」の計算に使う
+- `source` は手入力の `sourceUrl` があればそれ、無ければ出典アセットの `SourceRecord`（url / publisher）から平らにしたもの。どちらも無ければ `null`
+- `filledDays` は同じ月日を 1 と数えた埋まった日数（`items.length` とは違う）
+
+### POST /anniversaries
+
+**必須フィールド:** `date`（暦に実在する `YYYY-MM-DD`）, `title`（100 文字以内）。任意: `description`（1000 文字以内）, `assetId`（自分のクリアランスで見えるアセット）, `sourceUrl`（http(s)）, `articleId`（`Article.id`）, `classification`（既定 `internal`）。
+
+### PATCH /anniversaries/:id
+
+渡したフィールドだけ更新する。`assetId` / `sourceUrl` / `articleId` は `null` で外せる。`classification` は引き上げのみ（前述）。
 
 ---
 
@@ -951,6 +1003,7 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
       "format": "real",
       "single": "17thシングル「Kind of love」",
       "label": "京都",
+      "venue": "幕張メッセ",
       "classification": "internal",
       "dossier": {"id": "…", "title": "2026-08-01 京都リアミ", "itemCount": 18, "updatedAt": "…"},
       "dossierId": "…",
@@ -967,7 +1020,7 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 
 - `format` は `online` / `real`。記事のタイトル・地の文では「オンラインミーグリ / リアルミーグリ」（略称は使わない）
 - `date` は JST の暦日（`YYYY-MM-DD`）。ISO 日時ではない
-- `article` は記事生成（#109）後に埋まる。`sketch` はスケッチ生成（#108）後に埋まる
+- `article` は記事を作る / 紐づけると埋まる。`sketch` はスケッチ生成後に埋まる
 - **`dossier` は `null` になりうる。** ドシエは別テーブルで所有者・`viewMode` による RLS が別に効くので、所有者があとから `private` に戻したり機密を上げると、他の人には見えなくなる。ID は常に `dossierId` で返すので、`dossier` が `null` なら「ドシエが見えない」を表示する
 - `repoCollection` も `null` になりうる（収集を消した場合。`classification` は MeetGreet と同じ値で作られるので、通常は同じ人に見える）
 
@@ -1046,7 +1099,7 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 
 ### PATCH /meetgreets/:id
 
-`single` / `label` / `extraSketchPrompt` を部分更新（渡した項目だけ変わる）。`date` / `format` は変えられない（変えたければ作り直す。ドシエ・収集は残る）。更新項目が 1 つも無い（`{}`）なら 400。
+`single` / `label` / `venue` / `extraSketchPrompt` を部分更新（渡した項目だけ変わる）。`venue` は会場の正式名称（「幕張メッセ」）で、**リアルミーグリの記事タイトルに出る**（空文字で消す）。`label` は短い呼び分け（「通常」「京都」）でドシエ名・収集名に使うだけなので、記事には出ない。`date` / `format` は変えられない（変えたければ作り直す。ドシエ・収集は残る）。更新項目が 1 つも無い（`{}`）なら 400。
 
 **レスポンス:** 更新後の行（`GET /meetgreets` の 1 行と同じ形。`candidates` は付かない）。
 
@@ -1104,6 +1157,59 @@ keep / total は `GET /meetgreets/:id` の `repoCollection` で読む。判定�
 ```
 
 候補の 1 枚を確定して `sketchKey` にする（記事のサムネになる）。`sketch.candidates` に無い key は 400。**レスポンス:** 更新後の行。
+
+---
+
+### POST /meetgreets/:id/article
+
+ドシエと採用した X レポから記事を生成する。**既存の記事が紐づいていれば「増えた分だけ」追記**し、無ければ新規作成する。
+
+```json
+{"dryRun": true}
+```
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `dryRun` | boolean | | `true` なら書き込まず、適用後の本文と増える行だけ返す |
+| `expectedDigest` | string | | `dryRun` が返した `digest`。渡すと、組み立て直した結果が変わっていたら 409（見せた内容と別のものを保存しない） |
+| `exclude` | string[] | | **今後この回では足さない**ものの key（`dryRun` の `additions[].key`）。最大 200 件。`dryRun` と併せると「外した形」で本文を見せるだけ（覚えない）、保存では成功したときだけ覚える。**記事がまだ無い（`mode: "create"`）ときは 409**（フル生成に外す口が無いため） |
+| `restore` | string[] | | `exclude` の取り消し（`dryRun` の `excluded[].key`）。最大 200 件。**単独で送る**（`dryRun` / `exclude` / `expectedDigest` と併用すると 400。空配列でも単独でなければ 400） |
+
+**レスポンス（`dryRun: true`）:**
+
+```json
+{
+  "mode": "append",
+  "title": "2026年8月1日 リアルミーグリ（京都）",
+  "body": "…適用後の本文…",
+  "digest": "3f2a…",
+  "addedLines": [42],
+  "newSources": [{"sourceNo": 6, "label": "坂井新奈トーク 2026.8.3 12:00", "url": null, "date": "2026-08-03", "assetId": "…"}],
+  "droppedByClearance": 0,
+  "additions": [
+    {"key": "report:2083484444254752944", "kind": "report", "label": "レポ https://x.com/Ariorihaberi710/status/2083484444254752944"}
+  ],
+  "excluded": [{"key": "asset:cmf…", "label": "- 【トーク・動画】坂井新奈トーク 2026.8.3 12:00"}],
+  "empty": false,
+  "shortId": "0izz31T"
+}
+```
+
+**レスポンス（保存）:** `{"mode": "append", "shortId": "…", "added": 1, "sources": 1}`
+**レスポンス（`restore` のみ）:** `{"restored": 1}`
+
+- `mode` は `create` / `append`。**フル再生成は無い**（手で入れた `![rep]` や文面の調整を消すため。必要なら記事の編集画面から）
+- **追記は「純粋な追記」でなければ中止する**（既存行が 1 行でも消える形になったら 409）。脚注番号も既存のまま据え置き、新しい出典だけ末尾に採番する
+- **本文に載るのは `internal` 以下のアセットだけ。** `Article` は非保護テーブルで、本文は push でそのまま公開リポジトリに載るため。落とした件数は `droppedByClearance` で返す（[docs/security-dev.md](./security-dev.md)）
+- 出典は `applyArticleSource` と同じ経路で作られるので、公開に落とせる機密レベルの制限もそのまま効く
+- `additions[].kind` は `quote` / `report` / `tiktok` / `talk` / `blogImage`。`label` は画面に出す文で、**形は種別ごとに違う**（レポは URL、トーク・画像は本文に足す行そのもの）。機械で読むなら `key` を使う
+- **`mode: "create"` では `additions` / `excluded` はどちらも空。** 新規作成はフル生成で、外す仕組みが無い
+- **`additions` が「今回足すもの」、`excluded` が「足さないと覚えているもの」。** 追記は「本文に無い = まだ足していない」としか判断できないので、人が意図的に消したもの（X 側で消えたレポなど）を `exclude` で覚えさせないと、次の追記で復活する
+- **外したものの出典は作らない。** 本文に出ないのに `ArticleSource` が残ると、frontmatter に載って公開リポジトリに push されてしまう。ただし**効くのは「これから足すもの」だけ**で、すでに追記済みのものを後から外しても、そのとき作った出典は残る（手で本文の行を消した場合と同じ。取り下げは記事の編集画面から）
+- 記事のスナップショット（`frontmatterExtra.dossier`）は、`item_count` / `updated_at` が動いたときだけ書き換える。`synced_at` だけの差では `dirty` を立てない（push するものが無いのに「要反映」が残るため）
+- 生成しただけでは公開されない。`dirty` な記事になり、`/articles/push`（画面）で公開リポジトリに出る
+- **TikTok は短縮 URL を解決できたものだけ載せる。** 解決に失敗したものは落とす（短縮のままでは埋め込みにならず、video ID が無いので次の追記で重複するため）
+- TikTok の短縮 URL を解決するため外部に出る。数秒〜十数秒かかることがある
 
 ---
 
