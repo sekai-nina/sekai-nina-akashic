@@ -1,5 +1,5 @@
-import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
+import { authorizeCron } from "@/lib/cron/auth";
 import { evaluateAllChecks } from "@/lib/status/evaluate";
 import { countByLevel } from "@/lib/status/judge";
 
@@ -15,11 +15,8 @@ export const maxDuration = 60;
  * 手で叩くときも同じヘッダを付ける。
  */
 export async function GET(request: Request) {
-  const secret = process.env.CRON_SECRET?.trim();
-  if (!secret) return NextResponse.json({ error: "cron is not configured" }, { status: 503 });
-  if (!bearerMatches(request.headers.get("authorization"), secret)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const denied = authorizeCron(request);
+  if (denied) return denied;
 
   const result = await evaluateAllChecks({ notify: true });
   if (result.skipped) {
@@ -36,9 +33,3 @@ export async function GET(request: Request) {
   });
 }
 
-/** 長さが違えば即 false、同じなら定数時間で比較する */
-function bearerMatches(header: string | null, secret: string): boolean {
-  const expected = Buffer.from(`Bearer ${secret}`);
-  const actual = Buffer.from(header ?? "");
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
-}
