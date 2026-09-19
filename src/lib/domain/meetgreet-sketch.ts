@@ -5,6 +5,7 @@
  * 画像の取得・生成・R2 への保存は**トランザクションの外**で行う (数十秒かかるため)。
  */
 
+import { Prisma } from "@prisma/client";
 import { withClearance, withSession } from "@/lib/db";
 import { classificationFilter } from "@/lib/classification";
 import {
@@ -19,8 +20,10 @@ import {
   loadR2Image,
   type GeneratedSketch,
 } from "@/lib/meetgreet/sketch";
+import { cropsFromJson, withCrops, type CropMap, type CropRect } from "@/lib/meetgreet/crop";
 import type { SketchSourceAsset } from "@/lib/meetgreet/types";
 import { logAudit } from "./audit";
+import { getSketchSetting } from "./sketch-setting";
 import { MeetGreetInputError, type ActingUser } from "./meetgreets";
 
 /**
@@ -71,7 +74,14 @@ export interface GenerateSketchOptions {
  */
 export async function generateSketch(
   user: ActingUser,
-  meetGreet: { id: string; dossierId: string; extraSketchPrompt: string; sketchCandidates: unknown },
+  meetGreet: {
+    id: string;
+    dossierId: string;
+    extraSketchPrompt: string;
+    sketchCandidates: unknown;
+    /** 参照写真の切り抜き枠 (#136) */
+    sketchCrops: unknown;
+  },
   options: GenerateSketchOptions
 ): Promise<{ candidates: GeneratedSketch[]; usedPhotos: number }> {
   const ids = [...new Set(options.assetIds)];
@@ -103,21 +113,27 @@ export async function generateSketch(
   );
   if (assets.length === 0) throw new MeetGreetInputError("ドシエにある画像を選んでください");
 
-  const photos = (await Promise.all(assets.map((a) => loadAssetImage(a)))).filter(
-    (p): p is NonNullable<typeof p> => p !== null
-  );
+  // 切り抜き枠があれば、その範囲だけを送る (ツーショットで隣の人を拾わないように)
+  const crops = cropsFromJson(meetGreet.sketchCrops);
+  const photos = (
+    await Promise.all(assets.map((a) => loadAssetImage(a, crops[a.id])))
+  ).filter((p): p is NonNullable<typeof p> => p !== null);
   if (photos.length === 0) throw new MeetGreetInputError("参照画像を取得できませんでした");
 
   const revisionOf = options.revisionOf
     ? await loadR2Image(options.revisionOf, "previous-draft.png")
     : undefined;
 
+  // プロンプトと画風の見本は画面から直せる (#136)。未設定なら組み込みの既定
+  const setting = await getSketchSetting(user.clearance);
   const candidates = await generateSketches({
     meetGreetId: meetGreet.id,
     photos,
     extraPrompt: meetGreet.extraSketchPrompt,
     revisionOf,
     revisionNote: options.revisionNote,
+    basePrompt: setting.prompt,
+    styleReferenceKey: setting.styleReferenceKey,
   });
 
   // 同時に 2 回生成されても取りこぼさないよう、読み書きではなく jsonb の追記で足す
@@ -142,9 +158,63 @@ export async function generateSketch(
       photos: photos.length,
       generated: candidates.length,
       revision: !!options.revisionOf,
+      cropped: ids.filter((id) => crops[id]).length,
+      customPrompt: !setting.isDefaultPrompt,
+      customStyleReference: !setting.isDefaultStyleReference,
     },
   });
   return { candidates, usedPhotos: photos.length };
+}
+
+/**
+ * 参照写真の切り抜き枠を保存する (#136)。
+ *
+ * **このドシエにある画像だけ。** 任意のアセット ID で枠を溜められると、
+ * 生成のたびに読む Json が無関係なもので膨らむ。`null` を渡すと枠を外す。
+ */
+export async function saveSketchCrops(
+  user: ActingUser,
+  meetGreet: { id: string; dossierId: string; sketchCrops: unknown },
+  changes: Record<string, CropRect | null>
+): Promise<CropMap> {
+  const ids = Object.keys(changes);
+  if (ids.length === 0) return cropsFromJson(meetGreet.sketchCrops);
+  if (ids.length > MAX_SKETCH_SOURCES) {
+    throw new MeetGreetInputError(`一度に指定できるのは ${MAX_SKETCH_SOURCES} 枚までです`);
+  }
+
+  const known = await withSession(user, (tx) =>
+    tx.asset.findMany({
+      where: {
+        id: { in: ids },
+        kind: "image",
+        ...classificationFilter(MAX_EXTERNAL_AI_CLEARANCE),
+        dossierItems: { some: { dossierId: meetGreet.dossierId } },
+      },
+      select: { id: true },
+    })
+  );
+  const allowed = new Set(known.map((a) => a.id));
+  const unknown = ids.filter((id) => !allowed.has(id));
+  if (unknown.length > 0) {
+    throw new MeetGreetInputError("ドシエにある画像を選んでください");
+  }
+
+  const next = withCrops(cropsFromJson(meetGreet.sketchCrops), changes);
+  await withClearance(user.clearance, (tx) =>
+    tx.meetGreet.update({
+      where: { id: meetGreet.id },
+      data: { sketchCrops: next as unknown as Prisma.InputJsonValue },
+    })
+  );
+  await logAudit({
+    actorId: user.id,
+    action: "meetgreet.sketch.crop",
+    targetType: "MeetGreet",
+    targetId: meetGreet.id,
+    metadata: { set: ids.filter((id) => changes[id] !== null), cleared: ids.filter((id) => changes[id] === null) },
+  });
+  return next;
 }
 
 /** 候補の 1 枚を確定する (記事のサムネになる) */

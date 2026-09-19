@@ -5,14 +5,16 @@
  * OpenAI の画像編集 API (gpt-image-1) に渡し、候補を 2 枚作って R2 に置く。
  * 人が 1 枚選んで確定するか、修正指示を書いて作り直す。
  *
- * **基準スケッチは固定の 1 枚**（R2 の `STYLE_REFERENCE_KEY`）。直前の生成結果を参照し続けると
- * コピーのコピーで画風が少しずつずれていくため。差し替えは画面から行う。
+ * **基準スケッチは回をまたいで同じ 1 枚**（既定は R2 の `STYLE_REFERENCE_KEY`）。直前の生成結果を
+ * 参照し続けるとコピーのコピーで画風が少しずつずれていくため。差し替えとプロンプトの編集は
+ * `SketchSetting` に置いてあり、画面から行う (#136)。
  */
 
 import sharp from "sharp";
 import { downloadFromDrive, isDriveEnabled } from "@/lib/drive";
 import { getR2PublicUrl, isR2Configured, uploadToR2 } from "@/lib/r2";
 import { maxReferencePhotos, SKETCH_CANDIDATE_COUNT } from "./config";
+import { toPixelRect, type CropRect } from "./crop";
 import { buildSketchPrompt } from "./sketch-prompt";
 
 /** 画風の見本。回をまたいで固定で使う */
@@ -54,10 +56,17 @@ export class SketchConfigError extends Error {}
  * 参照用に縮小し、gpt-image-1 が受け取れる png / jpeg / webp に揃える。
  * HEIC など API が弾く形式も、ここで jpeg に倒して救う。
  */
-async function toReferenceImage(id: string, bytes: Buffer): Promise<SketchSourceImage | null> {
+async function toReferenceImage(
+  id: string,
+  bytes: Buffer,
+  crop?: CropRect
+): Promise<SketchSourceImage | null> {
   try {
     const meta = await sharp(bytes).metadata();
-    const pipeline = sharp(bytes).rotate().resize(REFERENCE_MAX_EDGE, REFERENCE_MAX_EDGE, {
+    // **切り抜きは縮小より先。** 割合は元画像に対するものなので、縮めた後に当てるとずれる。
+    // `rotate()` は Exif の向きを反映するので、寸法も反映後のもので測る
+    const source = crop ? await cropBytes(bytes, crop) : bytes;
+    const pipeline = sharp(source).rotate().resize(REFERENCE_MAX_EDGE, REFERENCE_MAX_EDGE, {
       fit: "inside",
       withoutEnlargement: true,
     });
@@ -82,23 +91,44 @@ async function toReferenceImage(id: string, bytes: Buffer): Promise<SketchSource
 }
 
 /**
+ * 割合の枠で切り抜く。切り出せないときは元のバイト列を返す
+ * (枠のせいで参照が 1 枚減るより、切らずに送るほうがまし)。
+ */
+async function cropBytes(bytes: Buffer, crop: CropRect): Promise<Buffer> {
+  try {
+    // Exif の向きを先に当ててから測る (縦横が入れ替わっている写真がある)
+    const upright = await sharp(bytes).rotate().toBuffer();
+    const meta = await sharp(upright).metadata();
+    const rect = toPixelRect(crop, meta.width ?? 0, meta.height ?? 0);
+    if (!rect) return bytes;
+    return await sharp(upright).extract(rect).toBuffer();
+  } catch {
+    return bytes;
+  }
+}
+
+/**
  * アセットの画像バイト列を取る。Drive に原本があればそれを、無ければ R2 のサムネイルを使う
  * (サムネイルは 640px なので、素材感やアクセサリーの再現は落ちる)。
  *
  * **1 枚取れなくても全体を落とさない。** Drive の 404 / 権限切れも、相対 URL の
  * サムネイル (`/api/...`) を掴んだときも null を返して次に進む。
  */
-export async function loadAssetImage(asset: {
-  id: string;
-  storageProvider: string;
-  storageKey: string | null;
-  thumbnailUrl: string | null;
-}): Promise<SketchSourceImage | null> {
+export async function loadAssetImage(
+  asset: {
+    id: string;
+    storageProvider: string;
+    storageKey: string | null;
+    thumbnailUrl: string | null;
+  },
+  /** 参照に使う範囲 (割合)。未指定なら画像全体 (#136) */
+  crop?: CropRect
+): Promise<SketchSourceImage | null> {
   if (asset.storageProvider === "gdrive" && asset.storageKey && isDriveEnabled()) {
     try {
       const bytes = await downloadFromDrive(asset.storageKey);
       if (bytes) {
-        const img = await toReferenceImage(asset.id, bytes);
+        const img = await toReferenceImage(asset.id, bytes, crop);
         if (img) return img;
       }
     } catch {
@@ -109,7 +139,9 @@ export async function loadAssetImage(asset: {
   if (asset.thumbnailUrl && /^https?:\/\//.test(asset.thumbnailUrl)) {
     try {
       const res = await fetch(asset.thumbnailUrl);
-      if (res.ok) return await toReferenceImage(asset.id, Buffer.from(await res.arrayBuffer()));
+      if (res.ok) {
+        return await toReferenceImage(asset.id, Buffer.from(await res.arrayBuffer()), crop);
+      }
     } catch {
       // ネットワークエラーも 1 枚落とすだけ
     }
@@ -251,6 +283,8 @@ export interface GenerateSketchInput {
   revisionNote?: string;
   count?: number;
   styleReferenceKey?: string;
+  /** 画面で編集されたプロンプト本体 (#136)。未指定なら組み込みの既定 */
+  basePrompt?: string;
 }
 
 export interface GeneratedSketch {
@@ -274,7 +308,7 @@ export async function generateSketches(input: GenerateSketchInput): Promise<Gene
 
   const styleReference = await loadStyleReference(input.styleReferenceKey);
 
-  let prompt = buildSketchPrompt(input.extraPrompt);
+  let prompt = buildSketchPrompt(input.extraPrompt, input.basePrompt);
   const photos = [...input.photos];
   if (input.revisionOf) {
     // 直したい候補を末尾の基準スケッチの手前に置き、どれを直すのかを本文でも伝える
