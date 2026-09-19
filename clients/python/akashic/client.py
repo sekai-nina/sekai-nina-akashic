@@ -45,6 +45,10 @@ class AkashicClient:
 
         # 検索
         results = client.search("坂井新奈", kind="image")
+
+        # ミーグリを作って X レポを集める
+        mg = client.create_meetgreet("2026-08-01", "real", single="17th…", label="京都")
+        client.fetch_meetgreet_reports(mg["id"])
     """
 
     def __init__(self, base_url: str, api_key: str, *, timeout: int = 30):
@@ -67,6 +71,7 @@ class AkashicClient:
         params: dict[str, Any] | None = None,
         data: dict[str, Any] | None = None,
         files: dict[str, Any] | None = None,
+        timeout: int | None = None,
     ) -> Any:
         url = f"{self._api_url}{path}"
         # params から None の値を除去
@@ -80,7 +85,7 @@ class AkashicClient:
             params=params,
             data=data,
             files=files,
-            timeout=self._timeout,
+            timeout=timeout if timeout is not None else self._timeout,
         )
         body = resp.json() if resp.content else None
         if resp.status_code >= 400:
@@ -282,6 +287,85 @@ class AkashicClient:
                 "page": page,
                 "perPage": per_page,
             },
+        )
+
+    # ------------------------------------------------------------------
+    # MeetGreets
+    # ------------------------------------------------------------------
+
+    def list_meetgreets(self) -> dict[str, Any]:
+        """ミーグリの一覧を取得する。"""
+        return self._request("GET", "/meetgreets")
+
+    def get_meetgreet(self, meetgreet_id: str) -> dict[str, Any]:
+        """ミーグリを ID で取得する。"""
+        return self._request("GET", f"/meetgreets/{meetgreet_id}")
+
+    def create_meetgreet(
+        self,
+        date: str,
+        format: str,
+        *,
+        single: str | None = None,
+        label: str | None = None,
+        classification: str | None = None,
+        dossier_id: str | None = None,
+        repo_collection_id: str | None = None,
+    ) -> dict[str, Any]:
+        """ミーグリを作る（素材置き場のドシエと X レポ収集も用意される）。
+
+        **同じ ``(date, format, label)`` の回が既にあれば、新しく作らずそれを返す。**
+        作成は数秒だが、タイムアウトして再送しても二重にはならない。
+
+        X レポの収集はここでは走らない。``fetch_meetgreet_reports`` を別に呼ぶ。
+
+        Args:
+            date: 開催日（JST の ``YYYY-MM-DD``）
+            format: ``"online"`` か ``"real"``
+            single: シングル名（記事の frontmatter に出る）
+            label: 回の呼び分け（``"通常"`` / ``"初限"`` / 会場名など）。
+                同じ日に 2 回あるときはここで分ける
+            classification: 機密レベル（既定 ``"internal"``）
+            dossier_id: 既にあるドシエを使う
+            repo_collection_id: 既にある X レポ収集を使う
+
+        Returns:
+            作ったミーグリ（``candidates`` に素材候補が付く）
+        """
+        payload: dict[str, Any] = {"date": date, "format": format}
+        if single is not None:
+            payload["single"] = single
+        if label is not None:
+            payload["label"] = label
+        if classification is not None:
+            payload["classification"] = classification
+        if dossier_id is not None:
+            payload["dossierId"] = dossier_id
+        if repo_collection_id is not None:
+            payload["repoCollectionId"] = repo_collection_id
+        return self._request("POST", "/meetgreets", json=payload)
+
+    def fetch_meetgreet_reports(
+        self, meetgreet_id: str, *, timeout: int = 180
+    ) -> dict[str, Any]:
+        """X レポを収集する（作成時には走らないので最初の 1 回もこれ）。
+
+        **数十秒かかる**（X API のページングと、取得した画像を 1 枚ずつ縮小して
+        R2 に上げるため。実測で最大 80 秒程度）。既定のタイムアウトでは足りないので、
+        この呼び出しだけ長めにしてある。Discord から呼ぶときは先に deferred ack すること。
+
+        X の recent search は **直近 7 日**しか遡れない。開催から日が経っている回は
+        ``fetched`` が 0 で返る。
+
+        Args:
+            meetgreet_id: ミーグリの ID
+            timeout: 秒。既定 180
+
+        Returns:
+            ``{"fetched": n, "added": n, "mediaSaved": n}``
+        """
+        return self._request(
+            "POST", f"/meetgreets/{meetgreet_id}/reports", timeout=timeout
         )
 
     # ------------------------------------------------------------------
