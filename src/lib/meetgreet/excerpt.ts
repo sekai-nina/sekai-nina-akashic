@@ -16,8 +16,22 @@ import type { ExcerptProposal } from "./types";
  * 原文どおりの部分文字列を返させる仕事なので、**安いモデルに落とさないこと。**
  * `locateExcerpt` は言い換えを黙って捨てるので、モデルが弱いと
  * 「候補が見つかりませんでした」に化けるだけで、劣化が画面から見えない。
+ *
+ * 実ブログ 6 本 (8,118 字) で 2 回ずつ測って決めた (2026-09-20)。
+ * 「返した件数 → そのうち原文どおりだった件数」が劣化の指標:
+ *
+ * | モデル | 返した → 原文どおり | 位置が確定した提案 | 6 本ぶんの費用 |
+ * |---|---|---|---|
+ * | gpt-4.1 (旧) | 10→10 / 11→11 (100%) | 10, 11 件 | $0.033 |
+ * | gpt-5.6-terra | 10→10 / 10→10 (100%) | 10, 10 件 | $0.051 |
+ * | gpt-5.6-luna | 17→14 (82%) / 15→14 (93%) | 14, 14 件 | $0.007 |
+ * | **gpt-5.4-mini** | 15→14 (93%) / 13→13 (100%) | **14, 13 件** | $0.016 |
+ *
+ * gpt-5.4-mini を採った。**使える候補がむしろ増えて** (10-11 件 → 13-14 件)、
+ * 費用は半分以下になる。luna は 1/5 の値段だが言い換えが 2 割混じる回がある。
+ * terra は旧と同等だが高い。
  */
-const OPENAI_MODEL = "gpt-4.1";
+const OPENAI_MODEL = "gpt-5.4-mini";
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 
 /** 1 本のブログから提案する抜粋の上限 */
@@ -181,7 +195,8 @@ export async function proposeExcerpts(
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
       model: OPENAI_MODEL,
-      temperature: 0,
+      // temperature は送らない (gpt-5 系は指定すると 400)。毎回同じ提案にはならなくなるが、
+      // どのみち人が選んでから入れるので、決定性より原文一致率を取る
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         {
