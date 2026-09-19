@@ -66,6 +66,7 @@ export const EXPECTED_JOBS: { key: string; name: string; group: CheckGroup }[] =
   { key: "bot.talk_monitor.blog", name: "bot: トーク監視 (ブログ言及)", group: "collect" },
   { key: "bot.site_watch", name: "bot: 公式サイト監視", group: "collect" },
   { key: "bot.youtube_watch", name: "bot: YouTube 監視", group: "collect" },
+  { key: "cron.x_mentions", name: "X 言及監視 (日次)", group: "collect" },
   { key: "bot.discovery", name: "bot: 今日の発見の抽出", group: "process" },
   { key: "worker.stats", name: "stats-worker (ダッシュボード集計)", group: "workers" },
   { key: "worker.drive_backup", name: "Drive バックアップ", group: "workers" },

@@ -31,6 +31,7 @@ import {
   MessageCircleQuestion,
   Scissors,
   Power,
+  Radar,
 } from "lucide-react";
 import { QuickCreateModal } from "@/components/quick-create-modal";
 
@@ -53,6 +54,7 @@ const navItems = [
   { href: "/articles", label: "記事", icon: FileText },
   { href: "/testimonials", label: "口コミ管理", icon: MessageCircle },
   { href: "/repo", label: "レポ収集", icon: Twitter },
+  { href: "/mentions", label: "X 言及監視", icon: Radar },
   { href: "/meetgreets", label: "ミーグリ", icon: Sparkles },
   { href: "/coverage", label: "収集カバレッジ", icon: Grid3x3 },
   { href: "/ai-questions", label: "案内AIへの質問", icon: MessageCircleQuestion },

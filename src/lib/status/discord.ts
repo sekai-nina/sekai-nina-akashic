@@ -67,12 +67,29 @@ export function formatNotification(lines: NotificationLine[], link: string = sta
 export async function postDiscord(content: string): Promise<void> {
   const url = process.env.DISCORD_STATUS_WEBHOOK_URL?.trim();
   if (!url) return;
+  await postDiscordWebhook(url, content);
+}
+
+/**
+ * 任意の Incoming Webhook に 1 メッセージを送る (/status 以外の通知先もここを通す)。
+ * メンションは一切鳴らさない。429 は Discord が返す retry_after だけ待って 1 回だけやり直す
+ * (webhook は 1 本あたり 2 秒に 5 件までで、続けて送るとすぐ当たる)。
+ */
+export async function postDiscordWebhook(url: string, content: string): Promise<void> {
   const trimmed = content.length > CONTENT_MAX_CHARS ? `${content.slice(0, CONTENT_MAX_CHARS)}\n…` : content;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content: trimmed, allowed_mentions: { parse: [] } }),
-    signal: AbortSignal.timeout(10_000),
-  });
+  const send = () =>
+    fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: trimmed, allowed_mentions: { parse: [] } }),
+      signal: AbortSignal.timeout(10_000),
+    });
+  let res = await send();
+  if (res.status === 429) {
+    const body = (await res.json().catch(() => ({}))) as { retry_after?: number };
+    const waitMs = Math.min(Math.max((body.retry_after ?? 1) * 1000, 500), 10_000);
+    await new Promise((r) => setTimeout(r, waitMs));
+    res = await send();
+  }
   if (!res.ok) throw new Error(`Discord webhook ${res.status}: ${(await res.text()).slice(0, 200)}`);
 }

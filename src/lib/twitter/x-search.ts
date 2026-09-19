@@ -152,6 +152,12 @@ interface XMedia {
   alt_text?: string;
 }
 
+export interface XSearchOptions {
+  /** この ID より新しいツイートだけ返す。start_time と同時に渡すと X API は since_id を優先する */
+  sinceId?: string;
+  bearerToken?: string;
+}
+
 /**
  * recent search を maxPages 分ページングして取得。
  * 写真は url、動画/GIF は preview_image_url（サムネ）を画像として扱う。
@@ -161,8 +167,9 @@ export async function xSearchRecent(
   startTime: string | null,
   endTime: string | null,
   maxPages: number,
-  bearerToken = process.env.X_BEARER_TOKEN ?? ""
+  opts: XSearchOptions = {}
 ): Promise<XTweet[]> {
+  const bearerToken = opts.bearerToken ?? process.env.X_BEARER_TOKEN ?? "";
   if (!bearerToken) {
     throw new XApiError(500, "X_BEARER_TOKEN が未設定です (.env を確認)");
   }
@@ -178,6 +185,7 @@ export async function xSearchRecent(
   };
   if (startTime) baseParams.start_time = startTime;
   if (endTime) baseParams.end_time = endTime;
+  if (opts.sinceId) baseParams.since_id = opts.sinceId;
 
   const tweets: XTweet[] = [];
   let nextToken: string | undefined;
