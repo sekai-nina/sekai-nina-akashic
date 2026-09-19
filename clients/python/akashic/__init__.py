@@ -1,3 +1,3 @@
-from akashic.client import AkashicClient
+from akashic.client import AkashicClient, AkashicError
 
-__all__ = ["AkashicClient"]
+__all__ = ["AkashicClient", "AkashicError"]
