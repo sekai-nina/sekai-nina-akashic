@@ -88,14 +88,30 @@ export const GenerateSketchSchema = z
     message: `作り直しのときの参照写真は ${maxReferencePhotos(true)} 枚までです`,
   });
 
+/**
+ * 除外キーの配列 (#134)。**Server Action も公開された口**なので同じものを通す
+ * (青天井だと `MeetGreet.articleExclusions` の Json 列が無制限に太る)
+ */
+export const ExclusionKeysSchema = z.array(z.string().min(1).max(200)).max(200);
+
 export const ArticleGenerateSchema = z
   .object({
     /** true なら書き込まず、適用後の本文と増える行だけ返す */
     dryRun: z.boolean().optional(),
     /** dryRun で受け取った digest。渡すと、組み立て直した結果が変わっていたら 409 */
     expectedDigest: z.string().min(1).optional(),
+    /** 「今後この回では足さない」と決めたもののキー (dryRun の additions[].key) */
+    exclude: ExclusionKeysSchema.optional(),
+    /** 「足さない」を取り消すキー (dryRun の excluded[].key)。単独で送る */
+    restore: ExclusionKeysSchema.optional(),
   })
-  .strict();
+  .strict()
+  // 取り消しは記事を触らない別の操作。同じ要求に混ぜると、先に取り消したぶん本文が変わって
+  // expectedDigest が必ず食い違う (= 何が起きたか分からない 409 になる)。
+  // **空配列も「混ぜた」と見なす** (`restore: []` が保存に化けるのを防ぐ)
+  .refine((v) => !(v.restore && (v.dryRun || v.exclude?.length || v.expectedDigest)), {
+    message: "restore は単独で指定してください",
+  });
 
 export const SelectSketchSchema = z.object({ key: z.string().min(1) }).strict();
 

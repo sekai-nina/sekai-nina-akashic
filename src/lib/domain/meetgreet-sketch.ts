@@ -11,7 +11,7 @@ import {
   MAX_SKETCH_SOURCES,
   maxReferencePhotos,
   MAX_EXTERNAL_AI_CLEARANCE,
-  sketchCandidateKeys,
+  jsonStringArray,
 } from "@/lib/meetgreet/config";
 import {
   generateSketches,
@@ -85,7 +85,7 @@ export async function generateSketch(
     );
   }
 
-  const known = sketchCandidateKeys(meetGreet.sketchCandidates);
+  const known = jsonStringArray(meetGreet.sketchCandidates);
   if (options.revisionOf && !known.includes(options.revisionOf)) {
     throw new MeetGreetInputError("作り直しの元にする候補が見つかりません");
   }
@@ -153,7 +153,7 @@ export async function selectSketch(
   meetGreet: { id: string; sketchCandidates: unknown },
   key: string
 ) {
-  if (!sketchCandidateKeys(meetGreet.sketchCandidates).includes(key)) {
+  if (!jsonStringArray(meetGreet.sketchCandidates).includes(key)) {
     throw new MeetGreetInputError("その候補は見つかりません");
   }
 

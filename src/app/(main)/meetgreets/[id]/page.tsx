@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getMeetGreet, listMaterialCandidates, meetGreetTitle } from "@/lib/domain/meetgreets";
 import { listSketchSources } from "@/lib/domain/meetgreet-sketch";
-import { sketchCandidateKeys } from "@/lib/meetgreet/config";
+import { jsonStringArray } from "@/lib/meetgreet/config";
 import { getR2PublicUrl } from "@/lib/r2";
 import { MATERIAL_WINDOW_DAYS, REPORT_WINDOW_DAYS, TALK_SUGGEST_DAYS } from "@/lib/meetgreet/config";
 import { formatDate } from "@/lib/utils";
@@ -39,7 +39,7 @@ export default async function MeetGreetDetailPage({ params }: Props) {
     listSketchSources(session.user, mg),
   ]);
   // 新しい候補を先に出す (作り直すほど古いものが上に溜まらないように)
-  const sketchCandidates = sketchCandidateKeys(mg.sketchCandidates)
+  const sketchCandidates = jsonStringArray(mg.sketchCandidates)
     .map((key) => ({ key, url: getR2PublicUrl(key) }))
     .reverse();
   const suggestedCount = candidates.reduce(

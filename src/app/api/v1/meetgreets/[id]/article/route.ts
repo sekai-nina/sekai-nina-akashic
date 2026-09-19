@@ -3,6 +3,7 @@ import { requireApiAuth } from "@/lib/api-auth";
 import { getMeetGreet, MeetGreetInputError } from "@/lib/domain/meetgreets";
 import {
   previewMeetGreetArticle,
+  restoreMeetGreetExclusions,
   saveMeetGreetArticle,
 } from "@/lib/domain/meetgreet-article-save";
 import { ArticleGenerateSchema } from "@/lib/meetgreet/api";
@@ -16,6 +17,7 @@ export const maxDuration = 120;
 /**
  * 記事を生成する。既存記事が紐づいていれば**増えた分だけ追記**、無ければ新規作成。
  * `dryRun: true` なら書き込まず、適用後の本文と増える行だけを返す。
+ * `restore` だけを送ると、「今後足さない」の取り消しだけを行う (記事は触らない)。
  */
 export async function POST(request: Request, { params }: Params) {
   const auth = await requireApiAuth(request, "write");
@@ -38,8 +40,21 @@ export async function POST(request: Request, { params }: Params) {
   if (!mg) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   try {
+    // **`?.length` で見ない。** `restore: []` が偽になって保存に落ちる
+    if (parsed.data.restore !== undefined) {
+      const restored = await restoreMeetGreetExclusions(
+        auth,
+        { ...mg, format: mg.format },
+        parsed.data.restore
+      );
+      return NextResponse.json({ restored });
+    }
     if (parsed.data.dryRun) {
-      const preview = await previewMeetGreetArticle(auth, { ...mg, format: mg.format });
+      const preview = await previewMeetGreetArticle(
+        auth,
+        { ...mg, format: mg.format },
+        parsed.data.exclude ?? []
+      );
       return NextResponse.json({
         mode: preview.mode,
         title: preview.title,
@@ -48,6 +63,8 @@ export async function POST(request: Request, { params }: Params) {
         addedLines: preview.addedLines,
         newSources: preview.newSources,
         droppedByClearance: preview.droppedByClearance,
+        additions: preview.additions,
+        excluded: preview.excluded,
         empty: preview.empty,
         shortId: preview.shortId,
       });
@@ -55,7 +72,8 @@ export async function POST(request: Request, { params }: Params) {
     const result = await saveMeetGreetArticle(
       auth,
       { ...mg, format: mg.format },
-      parsed.data.expectedDigest
+      parsed.data.expectedDigest,
+      parsed.data.exclude ?? []
     );
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: 409 });
     return NextResponse.json({

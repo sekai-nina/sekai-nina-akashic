@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { appendDiff, isPureAppend, planAppend, talkSortKeyFromLine, tiktokVideoId } from "./append";
+import {
+  appendDiff,
+  exclusionKey,
+  isPureAppend,
+  planAppend,
+  talkSortKeyFromLine,
+  tiktokVideoId,
+} from "./append";
 import type { ArticleParts, RenderedSource } from "./article";
 
 const EMPTY_PARTS: ArticleParts = {
@@ -125,7 +132,8 @@ describe("planAppend", () => {
     const base = "https://www.hinatazaka46.com/s/official/diary/manager/list?ima=0000";
     const p = planAppend({
       existingBody: "本文\n",
-      parts: EMPTY_PARTS,
+      // その出典を参照する画像を足す (参照が無い出典は作られない)
+      parts: { ...EMPTY_PARTS, blogImages: [{ assetId: "img", line: "- 【ひなたぼっこ日記・画像】写真^[1]" }] },
       sources: [
         { sourceNo: 1, label: "別の投稿", url: `${base}#article-70600`, date: null, assetId: "a2" },
       ],
@@ -136,6 +144,63 @@ describe("planAppend", () => {
     expect(p.newSources[0].sourceNo).toBe(4);
   });
 
+  it("同じレポが 2 表記で入っていても 1 本しか足さない", () => {
+    const p = planAppend({
+      existingBody: BODY,
+      parts: {
+        ...EMPTY_PARTS,
+        reports: ["https://x.com/a/status/9", "https://twitter.com/a/status/9?s=20"],
+      },
+      sources: [],
+      existingSources: [],
+    });
+    expect(p.added.reports).toBe(1);
+    expect(p.additions).toHaveLength(1);
+  });
+
+  it("先頭行が同じ抜粋は両方足すが、チェックは 1 つにまとめる", () => {
+    const parts: ArticleParts = {
+      ...EMPTY_PARTS,
+      quotes: [
+        {
+          sourceNo: 1,
+          label: "ブログ",
+          url: "https://example.com/1",
+          date: "2026-08-02",
+          excerpts: ["ありがとう\n楽しかった", "ありがとう\nまた会おうね"],
+        },
+      ],
+    };
+    const sources = [
+      { sourceNo: 1, label: "ブログ", url: "https://example.com/1", date: "2026-08-02", assetId: null },
+    ];
+    const p = planAppend({ existingBody: BODY, parts, sources, existingSources: [] });
+    expect(p.added.quotes).toBe(2);
+    expect(p.additions).toHaveLength(1);
+
+    // 外すと両方落ちる (= 出典も作らない)
+    const dropped = planAppend({
+      existingBody: BODY,
+      parts,
+      sources,
+      existingSources: [],
+      excluded: [p.additions[0].key],
+    });
+    expect(dropped.empty).toBe(true);
+    expect(dropped.newSources).toHaveLength(0);
+  });
+
+  it("足すものが無い出典は作らない (frontmatter に宙に浮く出典を残さない)", () => {
+    const p = planAppend({
+      existingBody: BODY,
+      parts: EMPTY_PARTS,
+      sources: [{ sourceNo: 1, label: "誰も参照しない", url: null, date: null, assetId: "zz" }],
+      existingSources: [],
+    });
+    expect(p.newSources).toHaveLength(0);
+    expect(p.empty).toBe(true);
+  });
+
   it("出典は末尾に採番し、既存の番号は振り直さない", () => {
     const sources: RenderedSource[] = [
       { sourceNo: 1, label: "既にあるブログ", url: "https://blog.example/1", date: "2026-08-03", assetId: "a1" },
@@ -143,12 +208,18 @@ describe("planAppend", () => {
     ];
     const p = planAppend({
       existingBody: BODY,
-      parts: EMPTY_PARTS,
+      // 新しいトークを足すので、その出典だけが採番される
+      parts: {
+        ...EMPTY_PARTS,
+        talks: [{ assetId: "a2", line: "- 【トーク・画像】新しいトーク^[2]", sortAt: null }],
+      },
       sources,
       existingSources: [{ sourceNo: 4, assetId: "a1", url: "https://blog.example/1" }],
     });
     expect(p.newSources).toHaveLength(1);
     expect(p.newSources[0]).toMatchObject({ sourceNo: 5, assetId: "a2" });
+    // 本文の脚注も 5 に読み替わる
+    expect(p.body).toContain("新しいトーク^[5]");
   });
 
   it("差し込む行の脚注番号は既存の採番に合わせて振り直す", () => {
@@ -197,6 +268,130 @@ describe("planAppend", () => {
       existingSources: [],
     });
     expect(p.added.tiktoks).toBe(0);
+  });
+});
+
+describe("足さないと決めたもの (#134)", () => {
+  // 実例: X 側で削除されたレポを人が記事から消したのに、追記が復活させようとした
+  const REPORT = "https://x.com/ccc/status/333";
+
+  it("除外したレポは提示されない", () => {
+    const before = plan({ reports: [REPORT] });
+    expect(before.added.reports).toBe(1);
+    expect(before.additions.map((a) => a.key)).toContain(exclusionKey("report", REPORT));
+
+    const after = planAppend({
+      existingBody: BODY,
+      parts: { ...EMPTY_PARTS, reports: [REPORT] },
+      sources: [],
+      existingSources: [],
+      excluded: [exclusionKey("report", REPORT)],
+    });
+    expect(after.added.reports).toBe(0);
+    expect(after.empty).toBe(true);
+    expect(after.body).toBe(BODY.replace(/\n+$/, "") + "\n");
+  });
+
+  it("URL の表記が違っても同じものとして除外される", () => {
+    const after = planAppend({
+      existingBody: BODY,
+      parts: { ...EMPTY_PARTS, reports: ["https://www.twitter.com/ccc/status/333?s=20"] },
+      sources: [],
+      existingSources: [],
+      excluded: [exclusionKey("report", REPORT)],
+    });
+    expect(after.added.reports).toBe(0);
+  });
+
+  it("除外したトーク・ブログ画像も提示されない (アセット単位)", () => {
+    const talkItem = { assetId: "t9", line: "- 【トーク・画像】坂井新奈トーク 2026.8.3 10:00^[9]", sortAt: null };
+    const imgItem = { assetId: "i9", line: "- 【ブログ・画像】写真 (1/2)^[1]" };
+    const before = plan({ talks: [talkItem], blogImages: [imgItem] });
+    expect(before.added.talks + before.added.blogImages).toBe(2);
+
+    const after = planAppend({
+      existingBody: BODY,
+      parts: { ...EMPTY_PARTS, talks: [talkItem], blogImages: [imgItem] },
+      sources: [],
+      existingSources: [],
+      excluded: [exclusionKey("talk", "t9"), exclusionKey("blogImage", "i9")],
+    });
+    expect(after.added.talks).toBe(0);
+    expect(after.added.blogImages).toBe(0);
+  });
+
+  it("除外していないものは残る", () => {
+    const p = planAppend({
+      existingBody: BODY,
+      parts: { ...EMPTY_PARTS, reports: [REPORT, "https://x.com/ddd/status/444"] },
+      sources: [],
+      existingSources: [],
+      excluded: [exclusionKey("report", REPORT)],
+    });
+    expect(p.added.reports).toBe(1);
+    expect(p.body).toContain("https://x.com/ddd/status/444");
+    expect(p.body).not.toContain(REPORT);
+  });
+
+  it("除外したものの出典を作らない (公開 frontmatter に残る漏れ)", () => {
+    // 本文から消えても ArticleSource が作られると、記事の frontmatter に載って
+    // 公開リポジトリに push される。#134 が防ごうとしている漏れそのもの
+    const talkItem = { assetId: "t9", line: "- 【トーク・画像】坂井新奈トーク 2026.8.3 10:00^[1]", sortAt: null };
+    const sources: RenderedSource[] = [
+      { sourceNo: 1, label: "坂井新奈トーク 2026.8.3 10:00", url: null, date: "2026-08-03", assetId: "t9" },
+    ];
+    const p = planAppend({
+      existingBody: BODY,
+      parts: { ...EMPTY_PARTS, talks: [talkItem] },
+      sources,
+      existingSources: [],
+      excluded: [exclusionKey("talk", "t9")],
+    });
+    expect(p.added.talks).toBe(0);
+    expect(p.newSources).toHaveLength(0);
+    expect(p.empty).toBe(true);
+  });
+
+  it("除外していない項目の出典は作る", () => {
+    const talkItem = { assetId: "t9", line: "- 【トーク・画像】坂井新奈トーク 2026.8.3 10:00^[1]", sortAt: null };
+    const sources: RenderedSource[] = [
+      { sourceNo: 1, label: "坂井新奈トーク 2026.8.3 10:00", url: null, date: "2026-08-03", assetId: "t9" },
+    ];
+    const p = planAppend({
+      existingBody: BODY,
+      parts: { ...EMPTY_PARTS, talks: [talkItem] },
+      sources,
+      existingSources: [],
+    });
+    expect(p.added.talks).toBe(1);
+    expect(p.newSources).toHaveLength(1);
+  });
+
+  it("additions には足すものだけが並ぶ", () => {
+    const p = plan({ reports: [REPORT] });
+    expect(p.additions).toHaveLength(1);
+    expect(p.additions[0]).toMatchObject({ kind: "report" });
+    expect(p.additions[0].label).toContain(REPORT);
+  });
+});
+
+describe("exclusionKey", () => {
+  it("種別ごとに前置きが変わる", () => {
+    expect(exclusionKey("report", "https://x.com/a/status/1")).toBe("report:1");
+    expect(exclusionKey("talk", "abc")).toBe("asset:abc");
+    expect(exclusionKey("blogImage", "abc")).toBe("asset:abc");
+    expect(exclusionKey("tiktok", "https://www.tiktok.com/@u/video/7123")).toBe("tiktok:7123");
+  });
+
+  it("レポは status ID で見る (ユーザー名が変わっても同じものと分かる)", () => {
+    const key = exclusionKey("report", "https://x.com/a/status/1");
+    expect(exclusionKey("report", "https://twitter.com/b/status/1?s=20")).toBe(key);
+    expect(exclusionKey("report", "https://www.x.com/a/status/2")).not.toBe(key);
+  });
+
+  it("抜粋は本文の指紋で見る (前後の空白は無視)", () => {
+    expect(exclusionKey("quote", " 同じ文章 ")).toBe(exclusionKey("quote", "同じ文章"));
+    expect(exclusionKey("quote", "別の文章")).not.toBe(exclusionKey("quote", "同じ文章"));
   });
 });
 
