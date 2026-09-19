@@ -26,6 +26,7 @@ import {
   FileText,
   Activity,
   Sparkles,
+  Wallet,
 } from "lucide-react";
 import { QuickCreateModal } from "@/components/quick-create-modal";
 
@@ -53,6 +54,7 @@ const navItems = [
 ];
 
 const adminItems = [
+  { href: "/costs", label: "コスト", icon: Wallet },
   { href: "/admin/users", label: "ユーザー管理", icon: Users },
   { href: "/admin/invitations", label: "招待管理", icon: UserPlus },
 ];

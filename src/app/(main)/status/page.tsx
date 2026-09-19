@@ -11,6 +11,7 @@ import {
   CHECK_GROUPS,
   CHECK_GROUP_LABELS,
   JOB_RUN_STATUS_LABELS,
+  STATUS_LEVEL_BADGE,
   STATUS_LEVEL_LABELS,
   formatDate,
   formatRelative,
@@ -21,10 +22,10 @@ import { CheckDetail } from "./check-detail";
 
 /** 状態のドットとバッジの色。他ページの状態バッジ (bg-*-100 text-*-700) に合わせる */
 const LEVEL_STYLE: Record<StatusLevel, { dot: string; badge: string }> = {
-  ok: { dot: "bg-emerald-500", badge: "bg-emerald-100 text-emerald-700" },
-  warn: { dot: "bg-amber-500", badge: "bg-amber-100 text-amber-700" },
-  error: { dot: "bg-red-500", badge: "bg-red-100 text-red-700" },
-  unknown: { dot: "bg-slate-300", badge: "bg-slate-100 text-slate-500" },
+  ok: { dot: "bg-emerald-500", badge: STATUS_LEVEL_BADGE.ok },
+  warn: { dot: "bg-amber-500", badge: STATUS_LEVEL_BADGE.warn },
+  error: { dot: "bg-red-500", badge: STATUS_LEVEL_BADGE.error },
+  unknown: { dot: "bg-slate-300", badge: STATUS_LEVEL_BADGE.unknown },
 };
 
 const JOB_RUN_STATUS_STYLE: Record<JobRunStatus, string> = {
@@ -59,9 +60,11 @@ export default async function StatusPage() {
     (acc, s) => (acc == null || s.evaluatedAt > acc ? s.evaluatedAt : acc),
     null,
   );
-  const counts = countByLevel(states.map((s) => s.status));
+  const counts = countByLevel(states.filter((s) => isAdmin || s.group !== "costs").map((s) => s.status));
 
-  const groups = CHECK_GROUPS.map((g) => ({
+  // コストの行は金額こそ出さないが admin 専用ページ (/costs) の話なので、一覧にも admin にだけ出す
+  const visibleGroups = isAdmin ? CHECK_GROUPS : CHECK_GROUPS.filter((g) => g !== "costs");
+  const groups = visibleGroups.map((g) => ({
     group: g,
     // 保存された行に定義順は無いので、グループ内は状態の悪い順 → key 順で並べる (目に付くものを上に)
     items: states

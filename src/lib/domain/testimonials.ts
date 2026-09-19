@@ -1,6 +1,7 @@
 import { prismaInternal, withClearance } from "@/lib/db";
 import { TestimonialCategory, TestimonialStatus } from "@prisma/client";
 import { searchMentions, MentionResult } from "./mentions";
+import { recordUsage } from "@/lib/costs/usage";
 
 const OPENAI_MODEL = "gpt-4o-mini";
 const BATCH_SIZE = 15;
@@ -149,6 +150,25 @@ async function callOpenAI(
   }
 
   const data = await response.json();
+
+  // 利用量を /costs に自己申告する。失敗しても抽出は止めない (集計より本処理が優先)
+  const usage = data.usage;
+  if (usage) {
+    try {
+      await recordUsage({
+        provider: "openai",
+        model: OPENAI_MODEL,
+        feature: "akashic.testimonials",
+        inputTokens: (usage.prompt_tokens ?? 0) - (usage.prompt_tokens_details?.cached_tokens ?? 0),
+        cachedInputTokens: usage.prompt_tokens_details?.cached_tokens ?? 0,
+        outputTokens: usage.completion_tokens ?? 0,
+        requests: 1,
+      });
+    } catch (e) {
+      console.warn(`[testimonials] 利用量の記録に失敗: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   const content = data.choices?.[0]?.message?.content;
   if (!content) return [];
 

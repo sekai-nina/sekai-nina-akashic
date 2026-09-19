@@ -5,6 +5,7 @@ import {
   TextType,
   type ArticleType,
   type JobRunStatus,
+  type LlmProvider,
   type MeetGreetFormat,
   type PlaceKind,
   type StatusLevel,
@@ -185,6 +186,14 @@ export const ARTICLE_FLAG_LABELS = {
   ongoing: "進行中",
 } as const;
 
+/** 状態バッジの配色。/status と /costs で共有する */
+export const STATUS_LEVEL_BADGE: Record<StatusLevel, string> = {
+  ok: "bg-emerald-100 text-emerald-700",
+  warn: "bg-amber-100 text-amber-700",
+  error: "bg-red-100 text-red-700",
+  unknown: "bg-slate-100 text-slate-500",
+};
+
 /** パイプライン監視 (/status) のチェック状態 */
 export const STATUS_LEVEL_LABELS: Record<StatusLevel, string> = {
   ok: "正常",
@@ -199,6 +208,7 @@ export const CHECK_GROUP_LABELS = {
   process: "加工",
   articles: "記事",
   workers: "外部ワーカー",
+  costs: "コスト",
   system: "akashic 自身",
 } as const;
 
@@ -206,6 +216,13 @@ export type CheckGroup = keyof typeof CHECK_GROUP_LABELS;
 
 /** グループの表示順 (= CHECK_GROUP_LABELS の定義順) */
 export const CHECK_GROUPS = Object.keys(CHECK_GROUP_LABELS) as CheckGroup[];
+
+/** LLM のプロバイダ */
+export const LLM_PROVIDER_LABELS: Record<LlmProvider, string> = {
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+  google: "Google (Gemini)",
+};
 
 /** ハートビート (JobRun) の結果 */
 export const JOB_RUN_STATUS_LABELS: Record<JobRunStatus, string> = {
