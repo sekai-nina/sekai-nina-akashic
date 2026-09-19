@@ -44,6 +44,7 @@ export async function POST(request: Request, { params }: Params) {
         mode: preview.mode,
         title: preview.title,
         body: preview.body,
+        digest: preview.digest,
         addedLines: preview.addedLines,
         newSources: preview.newSources,
         droppedByClearance: preview.droppedByClearance,
@@ -51,7 +52,11 @@ export async function POST(request: Request, { params }: Params) {
         shortId: preview.shortId,
       });
     }
-    const result = await saveMeetGreetArticle(auth, { ...mg, format: mg.format });
+    const result = await saveMeetGreetArticle(
+      auth,
+      { ...mg, format: mg.format },
+      parsed.data.expectedDigest
+    );
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: 409 });
     return NextResponse.json({
       mode: result.mode,

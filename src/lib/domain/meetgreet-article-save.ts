@@ -10,6 +10,7 @@
  * classification のガード (公開してよい機密レベルの上限) も効いたままになる。
  */
 
+import { createHash } from "node:crypto";
 import { ArticleType, Prisma } from "@prisma/client";
 import { prisma, withClearance } from "@/lib/db";
 import { todayJst } from "@/lib/utils";
@@ -21,6 +22,11 @@ import type { RenderedSource } from "@/lib/meetgreet/article";
 import type { ArticleMode, ArticlePreview } from "@/lib/meetgreet/types";
 
 export type { ArticleMode, ArticlePreview };
+
+/** プレビューした内容と保存する内容が同じかを見るための指紋 */
+export function bodyDigest(body: string): string {
+  return createHash("sha256").update(body).digest("hex").slice(0, 16);
+}
 import {
   addAssetToArticle,
   applyArticleSource,
@@ -63,6 +69,7 @@ export async function previewMeetGreetArticle(
       mode: "create",
       title: rendered.title,
       body: rendered.body,
+      digest: bodyDigest(rendered.body),
       addedLines: [],
       newSources: rendered.sources,
       droppedByClearance: rendered.droppedByClearance,
@@ -88,6 +95,7 @@ export async function previewMeetGreetArticle(
     mode: "append",
     title: rendered.title,
     body: plan.body,
+    digest: bodyDigest(plan.body),
     addedLines: appendDiff(article.body, plan.body).added,
     newSources: plan.newSources,
     droppedByClearance: rendered.droppedByClearance,
@@ -220,13 +228,24 @@ async function saveFrontmatterExtra(
 /** 生成結果を保存する。新規なら作成、既存なら追記 */
 export async function saveMeetGreetArticle(
   user: ActingUser,
-  meetGreet: MeetGreetForArticle
+  meetGreet: MeetGreetForArticle,
+  /** 画面が見せたプレビューの指紋。渡すと、組み立て直した結果が変わっていたら中止する */
+  expectedDigest?: string
 ): Promise<SaveArticleResult> {
   const actor: ArticleActor = { id: user.id };
   const rendered = await buildMeetGreetArticle(user, meetGreet);
 
+  const mismatch = (body: string) =>
+    expectedDigest !== undefined && bodyDigest(body) !== expectedDigest;
+
   // --- 新規作成 ---
   if (!meetGreet.articleId) {
+    if (mismatch(rendered.body)) {
+      return {
+        ok: false,
+        error: "内容が変わりました (素材が増減したか、TikTok の解決結果が変わりました)。もう一度差分を見てください",
+      };
+    }
     const today = todayJst();
     const created = await createArticle(
       {
@@ -258,6 +277,12 @@ export async function saveMeetGreetArticle(
 
     const articleId = created.article.id;
     const shortId = created.article.shortId;
+
+    // **先に紐づける。** 出典や本文の書き込みで落ちたとき、記事だけできて MeetGreet に
+    // 繋がっていないと、次の実行が path_exists で止まり手当てのしようがなくなる
+    await withClearance(user.clearance, (tx) =>
+      tx.meetGreet.update({ where: { id: meetGreet.id }, data: { articleId } })
+    );
 
     // 1. 出典を反映して番号を確定させる (本文はまだ空なので 1, 2, … と振られる)
     const applied = await applySources(
@@ -298,10 +323,6 @@ export async function saveMeetGreetArticle(
     }
 
     await saveFrontmatterExtra(articleId, rendered.frontmatterExtra as unknown as Record<string, unknown>);
-    // MeetGreet は保護テーブル。素の prisma だと無言で 0 行になり、紐づけが付かない
-    await withClearance(user.clearance, (tx) =>
-      tx.meetGreet.update({ where: { id: meetGreet.id }, data: { articleId } })
-    );
 
     await logAudit({
       actorId: user.id,
@@ -362,6 +383,13 @@ export async function saveMeetGreetArticle(
     return { ok: true, mode: "append", shortId: article.shortId, added: 0, sources: 0, failed: [] };
   }
 
+  if (mismatch(plan.body)) {
+    return {
+      ok: false,
+      error: "内容が変わりました (素材が増減したか、記事が他で編集されました)。もう一度差分を見てください",
+    };
+  }
+
   // **既存行が 1 行でも消えていたら適用しない。** 手で入れた ![rep] や文面の調整を守る最後の砦
   if (!isPureAppend(article.body, plan.body)) {
     return { ok: false, error: "既存の本文が変化するため中止しました (純粋な追記になりません)" };
@@ -389,7 +417,8 @@ export async function saveMeetGreetArticle(
       dateDisplay: article.dateDisplay,
       dateMode: article.dateMode,
       publishedAt: article.publishedAt,
-      articleUpdatedAt: article.articleUpdatedAt,
+      // 本文を直したら更新日を今日にする (記事編集の慣習に合わせる)
+      articleUpdatedAt: parseFrontmatterDate(todayJst()),
       draft: article.draft,
       unlisted: article.unlisted,
       ongoing: article.ongoing,

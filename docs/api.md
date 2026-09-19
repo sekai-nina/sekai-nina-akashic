@@ -1113,6 +1113,7 @@ keep / total は `GET /meetgreets/:id` の `repoCollection` で読む。判定�
 | フィールド | 型 | 必須 | 説明 |
 |---|---|---|---|
 | `dryRun` | boolean | | `true` なら書き込まず、適用後の本文と増える行だけ返す |
+| `expectedDigest` | string | | `dryRun` が返した `digest`。渡すと、組み立て直した結果が変わっていたら 409（見せた内容と別のものを保存しない） |
 
 **レスポンス（`dryRun: true`）:**
 
@@ -1121,6 +1122,7 @@ keep / total は `GET /meetgreets/:id` の `repoCollection` で読む。判定�
   "mode": "append",
   "title": "2026年8月1日 リアルミーグリ（京都）",
   "body": "…適用後の本文…",
+  "digest": "3f2a…",
   "addedLines": [42],
   "newSources": [{"sourceNo": 6, "label": "坂井新奈トーク 2026.8.3 12:00", "url": null, "date": "2026-08-03", "assetId": "…"}],
   "droppedByClearance": 0,
@@ -1136,6 +1138,7 @@ keep / total は `GET /meetgreets/:id` の `repoCollection` で読む。判定�
 - **本文に載るのは `internal` 以下のアセットだけ。** `Article` は非保護テーブルで、本文は push でそのまま公開リポジトリに載るため。落とした件数は `droppedByClearance` で返す（[docs/security-dev.md](./security-dev.md)）
 - 出典は `applyArticleSource` と同じ経路で作られるので、公開に落とせる機密レベルの制限もそのまま効く
 - 生成しただけでは公開されない。`dirty` な記事になり、`/articles/push`（画面）で公開リポジトリに出る
+- **TikTok は短縮 URL を解決できたものだけ載せる。** 解決に失敗したものは落とす（短縮のままでは埋め込みにならず、video ID が無いので次の追記で重複するため）
 - TikTok の短縮 URL を解決するため外部に出る。数秒〜十数秒かかることがある
 
 ---

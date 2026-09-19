@@ -175,6 +175,19 @@ describe("planAppend", () => {
     expect(isPureAppend(body, p.body)).toBe(true);
   });
 
+  it("本文末尾の空行を削らない (削ると永久に追記できなくなる)", () => {
+    // 編集画面で末尾に改行を 2 つ入れた記事。空行が消えると isPureAppend が false になり、
+    // 「既存の本文が変化するため中止しました」から抜け出せなくなる
+    const body = "本文\n\n";
+    const p = planAppend({
+      existingBody: body,
+      parts: { ...EMPTY_PARTS, reports: ["https://x.com/zzz/status/999"] },
+      sources: [],
+      existingSources: [],
+    });
+    expect(isPureAppend(body, p.body)).toBe(true);
+  });
+
   it("TikTok は video ID で突き合わせる (短縮 URL と解決済み URL の混在)", () => {
     const withTiktok = BODY + "\n### TikTok\n\n![](https://www.tiktok.com/@u/video/7123456789)\n";
     const p = planAppend({

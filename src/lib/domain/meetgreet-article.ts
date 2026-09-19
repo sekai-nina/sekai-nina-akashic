@@ -26,18 +26,22 @@ const PUBLISHABLE = new Set<string>(accessibleClassifications(MAX_ARTICLE_CLEARA
  * サイトの埋め込みは video ID を要るので、短縮のままだと埋め込みにならない
  * (generate.py の resolve_tiktok と同じ)。解決できなければ元の URL を返す。
  */
-export async function resolveTiktokUrl(url: string): Promise<string> {
+export async function resolveTiktokUrl(url: string): Promise<string | null> {
   if (url.includes("/video/")) return url.split("?")[0];
   try {
     const res = await fetch(url, {
+      method: "HEAD",
       redirect: "follow",
       headers: { "User-Agent": "Mozilla/5.0" },
       signal: AbortSignal.timeout(10_000),
     });
+    if (!res.ok) return null;
     const final = res.url;
-    return final.includes("/video/") ? final.split("?")[0] : url;
+    return final.includes("/video/") ? final.split("?")[0] : null;
   } catch {
-    return url; // 解決できなくても生成は止めない
+    // **解決できなければ載せない。** 短縮 URL のままでは埋め込みにならず、
+    // video ID が無いので次回の追記でも「既にある」と判定できず重複する
+    return null;
   }
 }
 
@@ -197,8 +201,11 @@ export async function buildMeetGreetArticle(
     });
   }
 
-  // TikTok は埋め込みに video ID が要るので、短縮 URL をここで解決しておく
-  const resolvedTiktoks = await Promise.all(tiktoks.map((u) => resolveTiktokUrl(u)));
+  // TikTok は埋め込みに video ID が要るので、短縮 URL をここで解決しておく。
+  // 解決できなかったものは落とす (重複追記を防ぐ。次回うまくいけば入る)
+  const resolvedTiktoks = (await Promise.all(tiktoks.map((u) => resolveTiktokUrl(u)))).filter(
+    (u): u is string => u !== null
+  );
 
   // keep を後ろに足す (ドシエに既にある URL は重複させない)。
   // RepoTweet は自前の機密を持たず収集の機密に従うので、ここで見る

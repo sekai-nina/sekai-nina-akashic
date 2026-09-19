@@ -36,13 +36,19 @@ function parseSections(body: string): Section[] {
   return sections;
 }
 
+/**
+ * 節を本文に戻す。**末尾の空行を削らない。**
+ * 削ると「既存の行が消えた」と判定され (isPureAppend)、本文末に空行が 2 つある記事は
+ * 永久に追記できなくなる。
+ */
 function toBody(sections: Section[]): string {
   const out: string[] = [];
   for (const s of sections) {
     if (s.heading) out.push(s.heading);
     out.push(...s.lines);
   }
-  return out.join("\n").replace(/\n+$/, "") + "\n";
+  const body = out.join("\n");
+  return body.endsWith("\n") ? body : `${body}\n`;
 }
 
 /** 末尾の空行を除いた位置 (= 追記する場所) */

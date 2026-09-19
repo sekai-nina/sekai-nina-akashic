@@ -51,9 +51,12 @@ export function ArticleStep({
   }
 
   function save() {
+    if (!preview) return;
     setMsg("保存中…");
+    const digest = preview.digest;
     startTransition(async () => {
-      const res = await saveArticleAction(meetGreetId).catch((e: unknown) => ({
+      // 見せた内容と保存する内容が食い違っていたら中止させる
+      const res = await saveArticleAction(meetGreetId, digest).catch((e: unknown) => ({
         ok: false as const,
         error: e instanceof Error ? e.message : "通信に失敗しました",
       }));

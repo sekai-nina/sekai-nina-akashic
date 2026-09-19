@@ -55,6 +55,8 @@ export interface ArticlePreview {
   title: string;
   /** 適用後の本文 */
   body: string;
+  /** 本文の指紋。保存時に渡して、見せた内容と同じかを確かめる */
+  digest: string;
   /** 追記のとき、増えた行の位置 (0 始まり) */
   addedLines: number[];
   /** 追加される出典 */

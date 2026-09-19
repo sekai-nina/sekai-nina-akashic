@@ -92,6 +92,8 @@ export const ArticleGenerateSchema = z
   .object({
     /** true なら書き込まず、適用後の本文と増える行だけ返す */
     dryRun: z.boolean().optional(),
+    /** dryRun で受け取った digest。渡すと、組み立て直した結果が変わっていたら 409 */
+    expectedDigest: z.string().min(1).optional(),
   })
   .strict();
 

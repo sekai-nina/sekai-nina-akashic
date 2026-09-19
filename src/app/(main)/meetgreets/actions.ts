@@ -210,12 +210,12 @@ export async function previewArticleAction(id: string) {
   }
 }
 
-export async function saveArticleAction(id: string) {
+export async function saveArticleAction(id: string, expectedDigest?: string) {
   const user = await requireMember();
   try {
     const mg = await getMeetGreet(user, id);
     if (!mg) throw new Error("見つかりません");
-    const result = await saveMeetGreetArticle(user, { ...mg, format: mg.format });
+    const result = await saveMeetGreetArticle(user, { ...mg, format: mg.format }, expectedDigest);
     if (!result.ok) return { ok: false as const, error: result.error };
     revalidatePath(`/meetgreets/${id}`);
     revalidatePath("/meetgreets");
