@@ -32,7 +32,7 @@ npx prisma migrate diff \
   --script
 ```
 
-**この出力をそのまま使わない。** schema 管理外の trgm インデックスを `DROP` しようとするので、**CREATE / ALTER の追加分だけを手で残し、`DROP INDEX` 行は捨てる**。
+**この出力をそのまま使わない。** schema 管理外の索引（pg_trgm / PGroonga の索引、`Dossier_clips_singleton` のような部分ユニーク索引）を `DROP` しようとするので、**CREATE / ALTER の追加分だけを手で残し、`DROP INDEX` 行は捨てる**。他ブランチが先に本番へ当てた migration の差分（`DROP TABLE` / `DROP COLUMN`）が混ざることもあるので、自分の schema 変更に対応する行だけを残す。
 
 ### 3. migration ファイルを手書きで作成
 
