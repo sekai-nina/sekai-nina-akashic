@@ -1,3 +1,4 @@
+import { isCurrency, type Currency } from "./currency";
 import { LlmProvider, type LlmUsageSource } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { addDaysToDateString, toJstDateOnly } from "@/lib/utils";
@@ -70,13 +71,41 @@ export async function getDailyCosts(since: Date): Promise<Map<LlmProvider, Daily
 }
 
 /** プロバイダごとの最新の残高スナップショット (全件は引かない) */
-export async function getLatestSnapshots(): Promise<Map<LlmProvider, { balanceUsd: number; observedAt: Date }>> {
+export interface LatestSnapshot {
+  balanceUsd: number;
+  observedAt: Date;
+  /** 目視した通貨のままの金額とレート */
+  amount: number;
+  currency: Currency;
+  unitsPerUsd: number;
+}
+
+export async function getLatestSnapshots(): Promise<Map<LlmProvider, LatestSnapshot>> {
   const rows = await prisma.creditSnapshot.findMany({
     distinct: ["provider"],
     orderBy: [{ provider: "asc" }, { observedAt: "desc" }],
-    select: { provider: true, balanceUsd: true, observedAt: true },
+    select: {
+      provider: true,
+      balanceUsd: true,
+      observedAt: true,
+      amount: true,
+      currency: true,
+      unitsPerUsd: true,
+    },
   });
-  return new Map(rows.map((r) => [r.provider, { balanceUsd: Number(r.balanceUsd), observedAt: r.observedAt }]));
+  return new Map(
+    rows.map((r) => [
+      r.provider,
+      {
+        balanceUsd: Number(r.balanceUsd),
+        observedAt: r.observedAt,
+        amount: Number(r.amount),
+        // 列は VARCHAR(3) なので、想定外の値が入っていても画面を壊さないよう USD に倒す
+        currency: isCurrency(r.currency) ? r.currency : "USD",
+        unitsPerUsd: Number(r.unitsPerUsd),
+      },
+    ]),
+  );
 }
 
 /**
@@ -150,6 +179,9 @@ export async function getProviderSummaries(now: Date = new Date()): Promise<Prov
       burnPerDay,
       balanceUsd,
       snapshotAt: snapshot?.observedAt ?? null,
+      snapshotSource: snapshot
+        ? { amount: snapshot.amount, currency: snapshot.currency, unitsPerUsd: snapshot.unitsPerUsd }
+        : null,
       snapshotAgeDays,
       days,
       judgement: judgeCredit({ balanceUsd, burnPerDay, snapshotAgeDays, days }),

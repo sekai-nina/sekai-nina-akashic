@@ -3,6 +3,12 @@
 import { useState, useTransition } from "react";
 import { Loader2, Plus, RefreshCw } from "lucide-react";
 import { LLM_PROVIDER_LABELS } from "@/lib/utils";
+import {
+  CURRENCIES,
+  CURRENCY_LABELS,
+  DEFAULT_UNITS_PER_USD,
+  type Currency,
+} from "@/lib/costs/currency";
 import type { LlmProvider } from "@prisma/client";
 import { addCreditSnapshotAction, ingestCostsNowAction, type CostActionState } from "./actions";
 
@@ -13,6 +19,9 @@ import { addCreditSnapshotAction, ingestCostsNowAction, type CostActionState } f
 export function SnapshotForm({ providers }: { providers: LlmProvider[] }) {
   const [provider, setProvider] = useState<string>(providers[0] ?? "openai");
   const [balance, setBalance] = useState("");
+  // Gemini は Google Cloud の請求通貨が円のことがある。見たままの額を入れてもらう
+  const [currency, setCurrency] = useState<Currency>("USD");
+  const [unitsPerUsd, setUnitsPerUsd] = useState(String(DEFAULT_UNITS_PER_USD.JPY));
   const [note, setNote] = useState("");
   const [observedAt, setObservedAt] = useState("");
   const [state, setState] = useState<CostActionState | null>(null);
@@ -22,7 +31,14 @@ export function SnapshotForm({ providers }: { providers: LlmProvider[] }) {
     e.preventDefault();
     if (isPending || !balance) return;
     startTransition(async () => {
-      const r = await addCreditSnapshotAction({ provider, balanceUsd: balance, observedAt, note });
+      const r = await addCreditSnapshotAction({
+        provider,
+        amount: balance,
+        currency,
+        unitsPerUsd: currency === "USD" ? "1" : unitsPerUsd,
+        observedAt,
+        note,
+      });
       setState(r);
       if (r.ok) {
         setBalance("");
@@ -38,6 +54,8 @@ export function SnapshotForm({ providers }: { providers: LlmProvider[] }) {
       <p className="text-xs text-slate-500 mb-3">
         各社のダッシュボードで見た残高をそのまま入れてください。入金したら「入金後の残高」を入れ直します。
         以降の支出はこの行を起点に引かれます。
+        <span className="font-medium">円で表示される場合は通貨を JPY にしてください</span>
+        （社内の集計は USD なので、レートで換算して保存します）。
       </p>
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex flex-col gap-1">
@@ -55,7 +73,7 @@ export function SnapshotForm({ providers }: { providers: LlmProvider[] }) {
           </select>
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-xs text-slate-500">残高 (USD)</span>
+          <span className="text-xs text-slate-500">残高</span>
           <input
             type="number"
             step="0.01"
@@ -66,6 +84,33 @@ export function SnapshotForm({ providers }: { providers: LlmProvider[] }) {
             className="border border-slate-300 rounded px-2 py-1.5 text-sm w-32"
           />
         </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-slate-500">通貨</span>
+          <select
+            value={currency}
+            onChange={(e) => setCurrency(e.target.value as Currency)}
+            className="border border-slate-300 rounded px-2 py-1.5 text-sm"
+          >
+            {CURRENCIES.map((c) => (
+              <option key={c} value={c}>
+                {CURRENCY_LABELS[c]}
+              </option>
+            ))}
+          </select>
+        </label>
+        {currency !== "USD" && (
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-slate-500">1 USD = ? {currency}</span>
+            <input
+              type="number"
+              step="0.01"
+              min="0.01"
+              value={unitsPerUsd}
+              onChange={(e) => setUnitsPerUsd(e.target.value)}
+              className="border border-slate-300 rounded px-2 py-1.5 text-sm w-28"
+            />
+          </label>
+        )}
         <label className="flex flex-col gap-1">
           <span className="text-xs text-slate-500">観測日時 (空なら今)</span>
           <input

@@ -1055,7 +1055,15 @@ model CreditSnapshot {
   provider   LlmProvider
   /// その残高を目視した時刻
   observedAt DateTime
+  /// 換算後の残高。社内の計算はすべてこれを使う
   balanceUsd Decimal     @db.Decimal(12, 2)
+  /// 目視した通貨での金額。Google Cloud の請求通貨が円のことがあるため原本を残す。
+  /// 既定値 0 は**マイグレーションとデプロイの間**に旧コードが書き込んでも 500 にしないための保険
+  amount      Decimal @default(0) @db.Decimal(14, 2)
+  /// ISO 4217 (USD / JPY)
+  currency    String  @default("USD") @db.VarChar(3)
+  /// 1 USD が何単位か。balanceUsd = amount / unitsPerUsd (USD なら 1)
+  unitsPerUsd Decimal @default(1) @db.Decimal(12, 4)
   note       String      @default("")
 
   createdById String?
