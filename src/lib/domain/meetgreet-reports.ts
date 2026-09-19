@@ -38,7 +38,9 @@ export interface MeetGreetKeeps {
 
 export async function listMeetGreetKeeps(
   user: ActingUser,
-  meetGreet: { repoCollectionId: string | null }
+  meetGreet: { repoCollectionId: string | null; classification: string },
+  /** 採用の総数。`getMeetGreet` が数えたものを使う (ここで数え直すと画面に 2 つの数が出る) */
+  keepCount: number
 ): Promise<MeetGreetKeeps | null> {
   const collectionId = meetGreet.repoCollectionId;
   if (!collectionId) return null;
@@ -51,27 +53,27 @@ export async function listMeetGreetKeeps(
     });
     if (!collection) return null;
 
-    const [rows, total] = await Promise.all([
-      tx.repoTweet.findMany({
-        where: { collectionId, status: "keep" },
-        orderBy: { tweetedAt: "asc" },
-        take: MAX_KEEP_TWEETS_SHOWN,
-        select: {
-          id: true,
-          url: true,
-          authorName: true,
-          authorUsername: true,
-          text: true,
-          tweetedAt: true,
-          media: { select: { id: true, imageKey: true, remoteUrl: true, altText: true } },
-        },
-      }),
-      tx.repoTweet.count({ where: { collectionId, status: "keep" } }),
-    ]);
+    const rows = await tx.repoTweet.findMany({
+      where: { collectionId, status: "keep" },
+      orderBy: { tweetedAt: "asc" },
+      take: MAX_KEEP_TWEETS_SHOWN,
+      select: {
+        id: true,
+        url: true,
+        authorName: true,
+        authorUsername: true,
+        text: true,
+        tweetedAt: true,
+        media: { select: { id: true, imageKey: true, remoteUrl: true, altText: true } },
+      },
+    });
 
     return {
-      total,
-      publishable: PUBLISHABLE.has(collection.classification),
+      total: keepCount,
+      // **器の機密も見る。** 収集が公開してよくても、ミーグリ自体が confidential なら
+      // 記事の組み立てが入口で止まる (`buildMeetGreetArticle`)
+      publishable:
+        PUBLISHABLE.has(collection.classification) && PUBLISHABLE.has(meetGreet.classification),
       tweets: rows.map((t) => ({
         id: t.id,
         url: t.url,

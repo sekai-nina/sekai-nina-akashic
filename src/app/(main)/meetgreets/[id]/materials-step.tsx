@@ -1,9 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
-import { Check, ChevronDown, ChevronRight, FileText, Image as ImageIcon, Video } from "lucide-react";
-import type { AssetKind } from "@prisma/client";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { Check, ChevronDown, ChevronRight, Image as ImageIcon, Video } from "lucide-react";
 import type { CandidateAsset, CandidateGroup } from "@/lib/meetgreet/candidates";
 import { MATERIAL_WINDOW_DAYS } from "@/lib/meetgreet/config";
 import { formatDate, MEETGREET_CANDIDATE_GROUP_LABELS } from "@/lib/utils";
@@ -16,6 +15,9 @@ import { Lightbox } from "./lightbox";
  * **中身を見て判断できることを優先する (#135)。** 題だけでは何のトークか分からないので
  * 本文の頭を出し、画像は並べて大きく見せる。チェックの付いていないテキストは数が多いので
  * 畳み、何も勧めていないグループ (別の話題のブログなど) はグループごと畳む。
+ *
+ * **反映するのは画面に出ているものだけ。** 畳んだ先のチェックは消さずに取っておくが、
+ * 送らない (見えないものが黙ってドシエに入るのを防ぐ。開き直せばまた対象に戻る)。
  */
 export function MaterialsStep({ meetGreetId, groups }: { meetGreetId: string; groups: CandidateGroup[] }) {
   const router = useRouter();
@@ -24,31 +26,71 @@ export function MaterialsStep({ meetGreetId, groups }: { meetGreetId: string; gr
   const [expandedText, setExpandedText] = useState<Set<string>>(new Set());
   const [showAllText, setShowAllText] = useState<Set<string>>(new Set());
   const [zoom, setZoom] = useState<{ url: string; title: string } | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(() => suggestedIds(groups));
+  const [closed, setClosed] = useState<Set<string>>(() => uninterestingKeys(groups));
 
-  const initial = useMemo(
-    () => new Set(groups.flatMap((g) => g.assets.filter((a) => a.suggested).map((a) => a.id))),
+  /**
+   * 候補の顔ぶれ。**これが変わったときだけ**チェックと畳みを組み直す。
+   * `groups` は RSC のたびに別のオブジェクトになるので、それを見て組み直すと
+   * 「再収集」など無関係な `router.refresh()` で手で付けたチェックが飛ぶ
+   */
+  const signature = useMemo(
+    () => groups.flatMap((g) => g.assets.map((a) => `${a.id}:${a.inDossier ? 1 : 0}`)).join(","),
     [groups]
   );
-  const [selected, setSelected] = useState<Set<string>>(initial);
-  // 反映して router.refresh() した後は候補の inDossier が変わる。チェックを入れ直す
-  useEffect(() => setSelected(initial), [initial]);
+  const seen = useRef<{ signature: string; ids: Set<string> } | null>(null);
+  useEffect(() => {
+    const prev = seen.current;
+    if (prev?.signature === signature) return;
+    const ids = new Set(groups.flatMap((g) => g.assets.map((a) => a.id)));
+    seen.current = { signature, ids };
+    if (!prev) return; // 初期値は useState の初期化で入れている
 
-  // 何も勧めておらず、ドシエにも入っていないグループは畳んでおく
-  const initialClosed = useMemo(
-    () =>
-      new Set(
-        groups
-          .filter((g) => g.assets.every((a) => !a.suggested && !a.inDossier))
-          .map((g) => g.key)
-      ),
-    [groups]
-  );
-  const [closed, setClosed] = useState<Set<string>>(initialClosed);
-  useEffect(() => setClosed(initialClosed), [initialClosed]);
+    setSelected((chosen) => {
+      const next = new Set<string>();
+      for (const g of groups) {
+        for (const a of g.assets) {
+          if (a.inDossier) continue; // 入ったものは外す
+          // 手で触ったチェックは残す。新しく出てきた候補だけおすすめに従う
+          if (prev.ids.has(a.id) ? chosen.has(a.id) : a.suggested) next.add(a.id);
+        }
+      }
+      return next;
+    });
+    // 新しく出てきたグループだけ畳む (開いたまま見ていたものを閉じ直さない)
+    const fresh = uninterestingKeys(groups.filter((g) => g.assets.every((a) => !prev.ids.has(a.id))));
+    if (fresh.size > 0) setClosed((c) => new Set([...c, ...fresh]));
+  }, [signature, groups]);
 
-  const selectable = groups.flatMap((g) => g.assets.filter((a) => !a.inDossier));
+  /** 表示の状態をグループごとに 1 回だけ決める (反映対象もここから採る) */
+  const views = groups.map((g) => {
+    const isClosed = closed.has(g.key);
+    // チェックの付いていないテキストは数が多いので畳む (画像は常に出す)
+    const hidden =
+      showAllText.has(g.key) || isClosed
+        ? []
+        : g.assets.filter((a) => a.kind === "text" && !a.suggested && !a.inDossier);
+    const hiddenIds = new Set(hidden.map((a) => a.id));
+    const visible = isClosed ? [] : g.assets.filter((a) => !hiddenIds.has(a.id));
+    const visibleIds = visible.filter((a) => !a.inDossier).map((a) => a.id);
+    const allIds = g.assets.filter((a) => !a.inDossier).map((a) => a.id);
+    return {
+      g,
+      isClosed,
+      hiddenCount: hidden.length,
+      canShowAll: showAllText.has(g.key) || hidden.length > 0,
+      texts: visible.filter((a) => a.kind === "text"),
+      media: visible.filter((a) => a.kind !== "text"),
+      visibleIds,
+      /** 畳んだ先に残っているチェック (件数にだけ出す) */
+      parked: allIds.filter((id) => !visibleIds.includes(id) && selected.has(id)).length,
+      onCount: visibleIds.filter((id) => selected.has(id)).length,
+    };
+  });
+
   // 送るのは「まだドシエに無く、いま画面に出ていてチェックされているもの」だけ
-  const targetIds = selectable.filter((a) => selected.has(a.id)).map((a) => a.id);
+  const targetIds = views.flatMap((v) => v.visibleIds.filter((id) => selected.has(id)));
+  const parkedTotal = views.reduce((n, v) => n + v.parked, 0);
 
   function toggle(id: string) {
     setSelected((s) => {
@@ -61,8 +103,8 @@ export function MaterialsStep({ meetGreetId, groups }: { meetGreetId: string; gr
 
   /** 畳んでいる行は選ばない (見えないものが黙って追加されるのを防ぐ) */
   function toggleGroup(ids: string[]) {
-    const allOn = ids.length > 0 && ids.every((id) => selected.has(id));
     setSelected((s) => {
+      const allOn = ids.length > 0 && ids.every((id) => s.has(id));
       const next = new Set(s);
       for (const id of ids) {
         if (allOn) next.delete(id);
@@ -72,11 +114,13 @@ export function MaterialsStep({ meetGreetId, groups }: { meetGreetId: string; gr
     });
   }
 
-  function toggleIn(set: Set<string>, key: string, put: (s: Set<string>) => void) {
-    const next = new Set(set);
-    if (next.has(key)) next.delete(key);
-    else next.add(key);
-    put(next);
+  function toggleIn(put: (fn: (s: Set<string>) => Set<string>) => void, key: string) {
+    put((s) => {
+      const next = new Set(s);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }
 
   function apply() {
@@ -107,40 +151,28 @@ export function MaterialsStep({ meetGreetId, groups }: { meetGreetId: string; gr
   return (
     <div>
       <div className="divide-y divide-slate-100 border border-slate-200 rounded-md">
-        {groups.map((g) => {
-          const isClosed = closed.has(g.key);
-          // チェックの付いていないテキストは数が多いので畳む (画像は常に出す)
-          const hidden =
-            showAllText.has(g.key) || isClosed
-              ? []
-              : g.assets.filter((a) => a.kind === "text" && !a.suggested && !a.inDossier);
-          const hiddenIds = new Set(hidden.map((a) => a.id));
-          const visible = isClosed ? [] : g.assets.filter((a) => !hiddenIds.has(a.id));
-          const texts = visible.filter((a) => a.kind === "text");
-          const media = visible.filter((a) => a.kind !== "text");
-          const ids = visible.filter((a) => !a.inDossier).map((a) => a.id);
-          const onCount = ids.filter((id) => selected.has(id)).length;
-
+        {views.map((v) => {
+          const g = v.g;
           return (
             <div key={g.key}>
               <div className="flex items-center gap-2 px-3 py-2 bg-slate-50">
                 <button
                   type="button"
-                  onClick={() => toggleIn(closed, g.key, setClosed)}
-                  className="text-slate-400 hover:text-slate-700 shrink-0"
-                  aria-expanded={!isClosed}
-                  aria-label={`${groupName(g)} を${isClosed ? "開く" : "畳む"}`}
+                  onClick={() => toggleIn(setClosed, g.key)}
+                  className="-m-1.5 p-1.5 text-slate-400 hover:text-slate-700 shrink-0"
+                  aria-expanded={!v.isClosed}
+                  aria-label={`${groupName(g)} を${v.isClosed ? "開く" : "畳む"}`}
                 >
-                  {isClosed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                  {v.isClosed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
                 </button>
-                {ids.length > 0 && (
+                {v.visibleIds.length > 0 && (
                   <input
                     type="checkbox"
-                    checked={onCount === ids.length}
+                    checked={v.onCount === v.visibleIds.length}
                     ref={(el) => {
-                      if (el) el.indeterminate = onCount > 0 && onCount < ids.length;
+                      if (el) el.indeterminate = v.onCount > 0 && v.onCount < v.visibleIds.length;
                     }}
-                    onChange={() => toggleGroup(ids)}
+                    onChange={() => toggleGroup(v.visibleIds)}
                     aria-label={`${groupName(g)} をまとめてチェック`}
                   />
                 )}
@@ -163,37 +195,43 @@ export function MaterialsStep({ meetGreetId, groups }: { meetGreetId: string; gr
                     本文にミーグリの話
                   </span>
                 )}
-                <span className="ml-auto text-xs text-slate-400 tabular-nums shrink-0">
-                  {isClosed ? `${g.assets.length} 件` : `${onCount}/${ids.length}`}
+                <span className="ml-auto text-xs text-slate-500 tabular-nums shrink-0">
+                  {v.isClosed ? `${g.assets.length} 件` : `${v.onCount}/${v.visibleIds.length}`}
+                  {v.parked > 0 && (
+                    <span className="ml-1 text-amber-700">
+                      (チェック {v.parked} 件は畳んでいるので反映しません)
+                    </span>
+                  )}
                 </span>
               </div>
 
-              {!isClosed && (
+              {!v.isClosed && (
                 <>
-                  {texts.length > 0 && (
+                  {v.texts.length > 0 && (
                     <ul className="divide-y divide-slate-50">
-                      {texts.map((a) => (
+                      {v.texts.map((a) => (
                         <TextRow
                           key={a.id}
                           asset={a}
                           checked={selected.has(a.id)}
                           onToggle={() => toggle(a.id)}
                           expanded={expandedText.has(a.id)}
-                          onExpand={() => toggleIn(expandedText, a.id, setExpandedText)}
+                          onExpand={() => toggleIn(setExpandedText, a.id)}
                           showTime={g.kind === "talk"}
                         />
                       ))}
                     </ul>
                   )}
 
-                  {media.length > 0 && (
+                  {v.media.length > 0 && (
                     <ul className="grid grid-cols-[repeat(auto-fill,minmax(7rem,1fr))] gap-2 p-3">
-                      {media.map((a) => (
+                      {v.media.map((a) => (
                         <MediaTile
                           key={a.id}
                           asset={a}
                           checked={selected.has(a.id)}
                           onToggle={() => toggle(a.id)}
+                          showTime={g.kind === "talk"}
                           onZoom={() =>
                             a.thumbnailUrl && setZoom({ url: a.thumbnailUrl, title: a.title })
                           }
@@ -202,14 +240,16 @@ export function MaterialsStep({ meetGreetId, groups }: { meetGreetId: string; gr
                     </ul>
                   )}
 
-                  {hidden.length > 0 && (
+                  {v.canShowAll && (
                     <div className="px-3 py-1.5">
                       <button
                         type="button"
-                        onClick={() => toggleIn(showAllText, g.key, setShowAllText)}
+                        onClick={() => toggleIn(setShowAllText, g.key)}
                         className="text-xs text-slate-500 hover:text-slate-800 underline underline-offset-2"
                       >
-                        ミーグリの話が見つからなかったテキストも表示 ({hidden.length} 件)
+                        {showAllText.has(g.key)
+                          ? "ミーグリの話が見つからなかったテキストを隠す"
+                          : `ミーグリの話が見つからなかったテキストも表示 (${v.hiddenCount} 件)`}
                       </button>
                     </div>
                   )}
@@ -220,7 +260,7 @@ export function MaterialsStep({ meetGreetId, groups }: { meetGreetId: string; gr
         })}
       </div>
 
-      <div className="mt-3 flex items-center gap-3">
+      <div className="mt-3 flex items-center gap-3 flex-wrap">
         <button
           type="button"
           onClick={apply}
@@ -234,14 +274,27 @@ export function MaterialsStep({ meetGreetId, groups }: { meetGreetId: string; gr
             {msg}
           </span>
         )}
+        {parkedTotal > 0 && (
+          <span className="text-xs text-amber-700">
+            畳んでいるグループのチェック {parkedTotal} 件は反映しません（開くと対象に戻ります）
+          </span>
+        )}
       </div>
 
-      <Lightbox
-        src={zoom?.url ?? null}
-        alt={zoom?.title ?? ""}
-        onClose={() => setZoom(null)}
-      />
+      <Lightbox src={zoom?.url ?? null} alt={zoom?.title ?? ""} onClose={() => setZoom(null)} />
     </div>
+  );
+}
+
+/** 初期チェック */
+function suggestedIds(groups: CandidateGroup[]): Set<string> {
+  return new Set(groups.flatMap((g) => g.assets.filter((a) => a.suggested).map((a) => a.id)));
+}
+
+/** 何も勧めておらず、ドシエにも入っていない = 最初から畳んでおくグループ */
+function uninterestingKeys(groups: CandidateGroup[]): Set<string> {
+  return new Set(
+    groups.filter((g) => g.assets.every((a) => !a.suggested && !a.inDossier)).map((g) => g.key)
   );
 }
 
@@ -272,20 +325,25 @@ function TextRow({
         ) : (
           <input
             type="checkbox"
+            id={`mat-${asset.id}`}
             className="mt-1 shrink-0"
             checked={checked}
             onChange={onToggle}
-            aria-label={asset.title}
           />
         )}
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
-            <span
-              className={"text-sm truncate " + (asset.inDossier ? "text-slate-400" : "text-slate-800")}
+            {/* 題まで当たり判定にする (13px のチェックボックスだけだと押しにくい) */}
+            <label
+              htmlFor={asset.inDossier ? undefined : `mat-${asset.id}`}
+              className={
+                "text-sm truncate " +
+                (asset.inDossier ? "text-slate-400" : "text-slate-800 cursor-pointer")
+              }
             >
               {asset.title}
-            </span>
-            <span className="ml-auto text-xs text-slate-400 shrink-0">
+            </label>
+            <span className="ml-auto text-xs text-slate-500 shrink-0">
               {asset.canonicalDate ? formatDate(asset.canonicalDate, showTime) : ""}
             </span>
           </div>
@@ -311,11 +369,13 @@ function MediaTile({
   checked,
   onToggle,
   onZoom,
+  showTime,
 }: {
   asset: CandidateAsset;
   checked: boolean;
   onToggle: () => void;
   onZoom: () => void;
+  showTime: boolean;
 }) {
   const Icon = asset.kind === "video" ? Video : ImageIcon;
   return (
@@ -329,17 +389,29 @@ function MediaTile({
             aria-label={`${asset.title} を拡大`}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={asset.thumbnailUrl} alt={asset.title} className="w-full h-full object-cover" />
+            <img
+              src={asset.thumbnailUrl}
+              alt={asset.title}
+              className="w-full h-full object-cover"
+              loading="lazy"
+              decoding="async"
+            />
           </button>
         ) : (
           <span className="flex w-full aspect-square items-center justify-center rounded-md bg-slate-100 text-slate-400">
             <Icon size={20} />
           </span>
         )}
-        <span className="absolute top-1 left-1 rounded bg-white/90 p-1 leading-none shadow-sm">
+        {/* チェックは画像の上に重ねる。押しやすいよう余白ごと当たり判定にする */}
+        <label
+          className={
+            "absolute top-1 left-1 flex h-7 w-7 items-center justify-center rounded bg-white/90 shadow-sm " +
+            (asset.inDossier ? "" : "cursor-pointer")
+          }
+        >
           {asset.inDossier ? (
             <>
-              <Check size={13} className="text-emerald-600" aria-hidden />
+              <Check size={14} className="text-emerald-600" aria-hidden />
               <span className="sr-only">{asset.title} はドシエに追加済み</span>
             </>
           ) : (
@@ -351,7 +423,7 @@ function MediaTile({
               aria-label={asset.title}
             />
           )}
-        </span>
+        </label>
         {asset.kind === "video" && (
           <span className="absolute top-1 right-1 rounded bg-slate-900/70 p-1 leading-none text-white">
             <Video size={12} aria-hidden />
@@ -360,11 +432,20 @@ function MediaTile({
         )}
       </div>
       <p
-        className={"mt-1 text-[11px] leading-tight line-clamp-2 " + (asset.inDossier ? "text-slate-400" : "text-slate-600")}
+        className={
+          "mt-1 text-[11px] leading-tight line-clamp-2 " +
+          (asset.inDossier ? "text-slate-400" : "text-slate-600")
+        }
         title={asset.title}
       >
         {asset.title}
       </p>
+      {asset.canonicalDate && (
+        // 同じ題のスクショが並ぶので、時刻が無いと見分けられない
+        <p className="text-[11px] text-slate-400 tabular-nums">
+          {formatDate(asset.canonicalDate, showTime)}
+        </p>
+      )}
     </li>
   );
 }

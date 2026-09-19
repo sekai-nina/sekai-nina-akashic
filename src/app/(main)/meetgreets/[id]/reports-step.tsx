@@ -68,7 +68,7 @@ export function ReportsStep({
 
       {keeps && !keeps.publishable && keeps.total > 0 && (
         <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-          この収集は機密レベルが高いため、採用にしても記事の本文には載りません（記事は公開リポジトリに push されるため）。
+          機密レベルが高いため、採用にしても記事の本文には載りません（記事は公開リポジトリに push されるため）。収集かミーグリの機密レベルを下げてください。
         </p>
       )}
 
@@ -89,15 +89,15 @@ export function ReportsStep({
               <li key={t.id} className="p-3">
                 <div className="flex items-baseline gap-2 flex-wrap text-xs">
                   <span className="font-semibold text-slate-800">{t.authorName}</span>
-                  <span className="text-slate-400">@{t.authorUsername}</span>
+                  <span className="text-slate-500">@{t.authorUsername}</span>
                   {t.tweetedAt && (
-                    <span className="text-slate-400">· {formatDate(t.tweetedAt, true)}</span>
+                    <span className="text-slate-500">· {formatDate(t.tweetedAt, true)}</span>
                   )}
                   <a
                     href={t.url}
                     target="_blank"
                     rel="noreferrer"
-                    className="ml-auto inline-flex items-center gap-1 text-slate-400 hover:text-slate-700"
+                    className="ml-auto inline-flex items-center gap-1 text-slate-500 hover:text-slate-800"
                   >
                     X で開く <ExternalLink size={11} />
                   </a>
@@ -113,7 +113,7 @@ export function ReportsStep({
                       <li key={m.id}>
                         <button
                           type="button"
-                          onClick={() => setZoom({ url: m.url, alt: m.altText || t.text })}
+                          onClick={() => setZoom({ url: m.url, alt: m.altText })}
                           className="block w-full aspect-square rounded-md overflow-hidden bg-slate-100 cursor-zoom-in"
                           aria-label={`${t.authorName} の写真を拡大`}
                         >
@@ -123,6 +123,7 @@ export function ReportsStep({
                             alt={m.altText}
                             className="w-full h-full object-cover"
                             loading="lazy"
+                            decoding="async"
                           />
                         </button>
                       </li>

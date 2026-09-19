@@ -213,6 +213,15 @@ describe("classifyCandidates", () => {
     expect(by.get("img")).toBeNull();
   });
 
+  it("絵文字を割らない (サロゲートペアの途中で切らない)", () => {
+    // ちょうど境界で切れる長さにして、壊れた文字が出ないことを見る
+    const text = "あ".repeat(CANDIDATE_TEXT_PREVIEW_CHARS - 1) + "🎂🎂";
+    const groups = classifyCandidates([{ ...blogText, text }], opts());
+    const preview = groups[0].assets[0].textPreview!;
+    expect(preview).not.toContain("\uFFFD");
+    expect(preview.endsWith("🎂…")).toBe(true);
+  });
+
   it("並びは ブログ (日付順) → 運営ブログ → トーク → その他", () => {
     const groups = classifyCandidates(
       [
