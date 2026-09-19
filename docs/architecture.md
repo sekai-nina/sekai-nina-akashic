@@ -83,6 +83,15 @@ Asset は元データの管理単位、AssetText はそこから抽出・付与�
 
 `DossierItem` は `kind` で `asset_ref` / `external_link` / `external_image` を切り替える。**意図的に `@@unique([dossierId, assetId])` を持たない** —— 同一アセットを抜粋ごとに複数回追加できるようにするため。
 
+### クリップはドシエの一種（#41）
+
+「面白いが記事はまだ決まっていない」抜粋を溜める場所（`/clips`）は、新モデルではなく **`Dossier.kind = clips` の共有ドシエ 1 本** にした。編集の流れが「アセット → クリップ → 集めてドシエ → ドシエから記事」の一本道で、クリップの唯一の出口がドシエだから。
+
+- 「これとこれで 1 記事」= 選んだ `DossierItem` の `dossierId` を新規 / 既存ドシエへ付け替える。抜粋・メモ・ID がそのまま残るので、ドシエ → 記事の生成で出典に遡れる
+- `ArticleSource.articleId` を nullable にする案（Issue 当初）は、クリップが記事に直接行かないので捨てた。`DossierItem.dossierId` を nullable にする案は、RLS が親ドシエの owner / editMode に全依存していてポリシー 4 本を書き直すことになるので捨てた
+- 記事にクリップを足す = **その記事の素材ドシエ**（`Article.dossierId`）へ移す。既存記事のドシエは `pnpm cli:backfill-article-dossiers` が出典アセットから作る（旧ワークフローの `frontmatterExtra.dossier.id` があればそれにリンク）。ドシエ → 記事への反映（出典の追加）は別 Issue で、それまでは記事詳細の「記事に紐づけ」も併用する
+- 「どこをクリップしたか」は `excerptStart / End`（`AssetText.content` の添字）。範囲選択フローターは DOM の選択位置を content の添字に直して送り、貼り付けた引用は `locateExcerpt` で本文から探す。どちらも本文と一致しなければ位置は保存しない（ズレた範囲を色付けするより出さない）
+
 ### 収集カバレッジ
 
 `Coverage` = `Lens`（観点）× `DataSource`（情報源）のマトリクス。`LensItemCheck` のアイテムは `DataSource.itemRule` から SourceRecord / Asset を**導出**する（実体化しない）。詳細は `docs/coverage-design.md`。

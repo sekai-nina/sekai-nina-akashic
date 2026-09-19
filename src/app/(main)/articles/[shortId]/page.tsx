@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { countArticlesLinkingTo, getArticleByShortId, getArticleTitleIndex } from "@/lib/domain/articles";
+import { getDossierSummary } from "@/lib/domain/dossiers";
 import {
   ARTICLE_FLAG_LABELS,
   ARTICLE_TYPE_LABELS,
@@ -15,6 +16,7 @@ import { FootnoteAuditWarnings } from "./footnote-audit-warnings";
 import { ApplySource } from "./apply-source";
 import { RemoveSource } from "./remove-source";
 import { UnpushedBadge } from "./unpushed-badge";
+import { ArticleDossier } from "./article-dossier";
 import { renderArticleBody } from "@/lib/articles/render";
 import "../article-content.css";
 import "katex/dist/katex.min.css";
@@ -49,6 +51,11 @@ export default async function ArticleDetailPage({
   ]);
   if (!article) notFound();
   const canEdit = ["admin", "member"].includes(session.user.role);
+
+  // 素材ドシエ (#41)。Dossier は所有者判定のある保護テーブルなので withSession で引き直す。
+  // private にされていて見えなければ null (= 無いのと同じ表示にはせず、作るボタンも出さない)
+  const dossierId = article.dossierId;
+  const dossier = dossierId ? await getDossierSummary(session.user, dossierId) : null;
 
   const tags = Array.isArray(article.tags) ? (article.tags as unknown[]).map(String) : [];
   const extraKeys = frontmatterExtraKeys(article);
@@ -128,6 +135,16 @@ export default async function ArticleDetailPage({
                 {t}
               </span>
             ))}
+          </div>
+        )}
+        {(dossier || !dossierId) && (
+          <div className="mt-3">
+            <ArticleDossier
+              articleId={article.id}
+              shortId={article.shortId}
+              dossier={dossier ? { id: dossier.id, title: dossier.title, itemCount: dossier._count.items } : null}
+              canEdit={canEdit}
+            />
           </div>
         )}
       </div>

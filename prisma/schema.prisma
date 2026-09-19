@@ -106,6 +106,15 @@ enum DossierAccessMode {
   clearance
 }
 
+/// ドシエの役割 (#41)。
+/// - general: 通常のドシエ (特定支援・記事の素材)
+/// - clips: 「クリップ」プール。**全体で 1 本だけ** (部分ユニーク索引 `Dossier_clips_singleton` で担保)。
+///   記事未定の抜粋をここに溜め、あとから別ドシエへ移す。削除・アクセス設定の変更は domain で拒否する
+enum DossierKind {
+  general
+  clips
+}
+
 enum DossierItemKind {
   asset_ref
   external_link
@@ -164,19 +173,20 @@ model User {
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
 
-  createdAssets      Asset[]          @relation("AssetCreatedBy")
-  updatedAssets      Asset[]          @relation("AssetUpdatedBy")
-  assetTexts         AssetText[]      @relation("AssetTextCreatedBy")
-  annotations        Annotation[]     @relation("AnnotationCreatedBy")
-  dossiers           Dossier[]
-  auditLogs          AuditLog[]
-  apiKeys            ApiKey[]
-  invitation         Invitation?
-  aiSettings         AiSetting[]
-  sketchSettings     SketchSetting[] @relation("SketchSettingUpdatedBy")
-  createdInvitations Invitation[]     @relation("InvitationCreatedBy")
-  meetGreets         MeetGreet[]      @relation("MeetGreetCreatedBy")
-  creditSnapshots    CreditSnapshot[] @relation("CreditSnapshotCreatedBy")
+  createdAssets       Asset[]          @relation("AssetCreatedBy")
+  updatedAssets       Asset[]          @relation("AssetUpdatedBy")
+  assetTexts          AssetText[]      @relation("AssetTextCreatedBy")
+  annotations         Annotation[]     @relation("AnnotationCreatedBy")
+  dossiers            Dossier[]
+  dossierItemsCreated DossierItem[]    @relation("DossierItemCreatedBy")
+  auditLogs           AuditLog[]
+  apiKeys             ApiKey[]
+  invitation          Invitation?
+  aiSettings          AiSetting[]
+  sketchSettings      SketchSetting[]  @relation("SketchSettingUpdatedBy")
+  createdInvitations  Invitation[]     @relation("InvitationCreatedBy")
+  meetGreets          MeetGreet[]      @relation("MeetGreetCreatedBy")
+  creditSnapshots     CreditSnapshot[] @relation("CreditSnapshotCreatedBy")
 }
 
 model Asset {
@@ -336,6 +346,7 @@ model Dossier {
   classification ClearanceLevel    @default(internal)
   viewMode       DossierAccessMode @default(private)
   editMode       DossierAccessMode @default(private)
+  kind           DossierKind       @default(general)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -343,10 +354,13 @@ model Dossier {
   items           DossierItem[]
   placeCandidates DossierPlaceCandidate[]
   meetGreet       MeetGreet?
+  /// このドシエを素材にした記事 (`Article.dossierId`)。1 本のドシエから複数記事を許す
+  articles        Article[]
 
   @@index([ownerId])
   @@index([classification])
   @@index([updatedAt])
+  @@index([kind])
 }
 
 model DossierItem {
@@ -376,6 +390,10 @@ model DossierItem {
   excerptStart Int?
   excerptEnd   Int?
 
+  /// 入れた人 (#41)。クリップの一覧で「自分のだけ」に絞るため。#41 以前の行は null
+  createdById String?
+  createdBy   User?   @relation("DossierItemCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -384,6 +402,7 @@ model DossierItem {
   // be added to a dossier multiple times, once per excerpt (range selection).
   @@index([dossierId])
   @@index([assetId])
+  @@index([createdById])
 }
 
 model DossierPlaceCandidate {
@@ -771,6 +790,12 @@ model Article {
   lastSyncedAt DateTime?
   lastPushedAt DateTime?
 
+  /// 素材ドシエ (#41)。クリップを「この記事に足す」ときの移動先。akashic 内部のリンクで
+  /// frontmatter には出さない (旧ワークフローの `frontmatterExtra.dossier` はそのまま残す)。
+  /// ドシエが消えたら null に戻る
+  dossierId String?
+  dossier   Dossier? @relation(fields: [dossierId], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -781,6 +806,7 @@ model Article {
   @@index([type])
   @@index([dirty])
   @@index([publishedAt])
+  @@index([dossierId])
 }
 
 /// 記事とアセットの紐づけ。記事 frontmatter の source[] 1 要素に対応する。
@@ -1109,20 +1135,20 @@ model LlmCostDaily {
 
 /// 観測した残高。入金したら「入金後の残高」を入れ直す (最新の 1 行が起点になる)
 model CreditSnapshot {
-  id         String      @id @default(cuid())
-  provider   LlmProvider
+  id          String      @id @default(cuid())
+  provider    LlmProvider
   /// その残高を目視した時刻
-  observedAt DateTime
+  observedAt  DateTime
   /// 換算後の残高。社内の計算はすべてこれを使う
-  balanceUsd Decimal     @db.Decimal(12, 2)
+  balanceUsd  Decimal     @db.Decimal(12, 2)
   /// 目視した通貨での金額。Google Cloud の請求通貨が円のことがあるため原本を残す。
   /// 既定値 0 は**マイグレーションとデプロイの間**に旧コードが書き込んでも 500 にしないための保険
-  amount      Decimal @default(0) @db.Decimal(14, 2)
+  amount      Decimal     @default(0) @db.Decimal(14, 2)
   /// ISO 4217 (USD / JPY)
-  currency    String  @default("USD") @db.VarChar(3)
+  currency    String      @default("USD") @db.VarChar(3)
   /// 1 USD が何単位か。balanceUsd = amount / unitsPerUsd (USD なら 1)
-  unitsPerUsd Decimal @default(1) @db.Decimal(12, 4)
-  note       String      @default("")
+  unitsPerUsd Decimal     @default(1) @db.Decimal(12, 4)
+  note        String      @default("")
 
   createdById String?
   createdBy   User?   @relation("CreditSnapshotCreatedBy", fields: [createdById], references: [id])
@@ -1196,9 +1222,9 @@ model AiSetting {
 /// プロンプトと画風の見本を画面から直せるようにするためのもので、
 /// 空なら組み込みの既定 (`src/lib/meetgreet/sketch-prompt.ts` / `STYLE_REFERENCE_KEY`) を使う
 model SketchSetting {
-  id String @id @default("singleton")
+  id                String @id @default("singleton")
   /// プロンプト本体。空文字なら組み込みの既定
-  prompt String @default("")
+  prompt            String @default("")
   /// 画風の見本の R2 key。空文字なら組み込みの既定
   styleReferenceKey String @default("")
 

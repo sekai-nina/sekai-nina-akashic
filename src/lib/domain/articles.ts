@@ -1,7 +1,9 @@
-import { withClearance, prisma } from "@/lib/db";
+import { withClearance, withSession, prisma } from "@/lib/db";
 import { accessibleClassifications, assertClearance, isAboveClearance } from "@/lib/classification";
 import { logAudit } from "@/lib/domain/audit";
+import { createDossier, deleteDossier } from "@/lib/domain/dossiers";
 import { nextSortOrder, nextSourceNo } from "@/lib/articles/apply";
+import { paragraphsCiting } from "@/lib/articles/footnotes";
 import {
   deriveArticlePath,
   generateShortId,
@@ -225,6 +227,146 @@ export async function getArticleTitleIndex(): Promise<Map<string, string>> {
   // 同名タイトルは先勝ち。どちらに飛ぶかは曖昧だが、決め打ちで安定させる
   for (const r of rows) if (r.title && !map.has(r.title)) map.set(r.title, r.shortId);
   return map;
+}
+
+export interface ArticleReferenceForAsset {
+  sourceId: string;
+  status: ArticleSourceStatus;
+  sourceNo: number | null;
+  excerpt: string;
+  article: { shortId: string; title: string; path: string };
+  /** 本文でこの出典を参照している段落 (applied のみ。まだ本文に ^[n] が無ければ空) */
+  paragraphs: string[];
+}
+
+/**
+ * あるアセットを出典にしている記事と、その記述 (#41)。
+ *
+ * アセット詳細に出して「ここはもう記事 X に書いた」を分からせ、同じ箇所を重ねて
+ * クリップしないようにする。ArticleSource は保護テーブルなので RLS 下で引く
+ * (見えない紐づけは出ない)。unresolved は assetId が無いのでここには来ない。
+ */
+export async function listArticleReferencesForAsset(
+  assetId: string,
+  clearance: string
+): Promise<ArticleReferenceForAsset[]> {
+  const rows = await withClearance(clearance, (tx) =>
+    tx.articleSource.findMany({
+      where: { assetId },
+      orderBy: [{ article: { title: "asc" } }, { sourceNo: "asc" }, { createdAt: "asc" }],
+      select: {
+        id: true,
+        status: true,
+        sourceNo: true,
+        excerpt: true,
+        article: { select: { id: true, shortId: true, title: true, path: true } },
+      },
+    })
+  );
+  // 本文は段落を切り出す applied の記事だけ、記事ごとに 1 回引く (行ごとに body を運ばない)。
+  // Article は非保護なので素の prisma でよい
+  const bodyIds = [
+    ...new Set(
+      rows.filter((r) => r.status === ArticleSourceStatus.applied && r.sourceNo != null).map((r) => r.article.id)
+    ),
+  ];
+  const bodies = new Map(
+    bodyIds.length
+      ? (await prisma.article.findMany({ where: { id: { in: bodyIds } }, select: { id: true, body: true } })).map(
+          (a) => [a.id, a.body] as const
+        )
+      : []
+  );
+  return rows.map((r) => ({
+    sourceId: r.id,
+    status: r.status,
+    sourceNo: r.sourceNo,
+    excerpt: r.excerpt,
+    article: { shortId: r.article.shortId, title: r.article.title, path: r.article.path },
+    paragraphs:
+      r.status === ArticleSourceStatus.applied && r.sourceNo != null
+        ? paragraphsCiting(bodies.get(r.article.id) ?? "", r.sourceNo)
+        : [],
+  }));
+}
+
+// ============================================================
+// 素材ドシエ (#41)
+// ============================================================
+
+/** 入力起因の失敗。画面にそのまま出してよい文言 */
+export class ArticleDossierError extends Error {}
+
+/**
+ * 記事に対応する素材ドシエを返す。無ければ作ってリンクする。
+ *
+ * クリップを「この記事に足す」= その記事のドシエへ移す、なので記事にはドシエが要る。
+ * 既存記事は `pnpm cli:backfill-article-dossiers` が作るが、出典の無い記事 (下書き等) と
+ * それ以降に作られた記事はここで初めて作る。
+ *
+ * - 共有設定は view / edit とも `clearance` (誰でも足せる素材置き場なので private にしない)
+ * - `Article.dossierId` は素の SQL で書く。`prisma.article.update` だと `updatedAt` が進み、
+ *   編集画面を開いている人の楽観ロックが偽の衝突になる。push の出力にも影響しないので
+ *   `dirty` / `editedAt` も立てない
+ * - 同時に 2 人が押しても 1 本だけ残す: `dossierId IS NULL` のときだけ書き、負けた側は
+ *   作ったドシエを消して勝った側のリンクを返す
+ */
+export async function ensureArticleDossier(
+  user: { id: string; role: string; clearance: string },
+  articleId: string
+): Promise<{ dossierId: string; created: boolean }> {
+  // Article は非保護テーブル。MeetGreet も所有者判定は無い (classification のみ) が
+  // 保護テーブルなので、ここは withSession で読む
+  const article = await withSession(user, (tx) =>
+    tx.article.findUnique({
+      where: { id: articleId },
+      select: { id: true, title: true, path: true, dossierId: true, meetGreet: { select: { dossierId: true } } },
+    })
+  );
+  if (!article) throw new ArticleDossierError("記事が見つかりません");
+  if (article.dossierId) return linkedDossier(user, article.dossierId);
+
+  // ミーグリ記事は回の素材ドシエ (MeetGreet.dossierId) がそのまま素材ドシエ。二重に作らない
+  if (article.meetGreet?.dossierId) {
+    await prisma.$executeRaw`
+      UPDATE "Article" SET "dossierId" = ${article.meetGreet.dossierId}
+      WHERE "id" = ${article.id} AND "dossierId" IS NULL`;
+    return linkedDossier(user, article.meetGreet.dossierId);
+  }
+
+  const dossier = await createDossier(user, {
+    title: article.title || article.path,
+    summary: `記事 ${article.path} の素材`,
+    viewMode: "clearance",
+    editMode: "clearance",
+  });
+  const linked = await prisma.$executeRaw`
+    UPDATE "Article" SET "dossierId" = ${dossier.id}
+    WHERE "id" = ${article.id} AND "dossierId" IS NULL`;
+  if (linked === 0) {
+    // 先を越された。自分のは空なので消して、勝った側を返す
+    await deleteDossier(user, dossier.id);
+    const again = await prisma.article.findUnique({ where: { id: articleId }, select: { dossierId: true } });
+    if (!again?.dossierId) throw new ArticleDossierError("素材ドシエを作れませんでした。再読み込みしてください");
+    return linkedDossier(user, again.dossierId);
+  }
+  await logAudit({
+    actorId: user.id,
+    action: "article.dossier.link",
+    targetType: "Article",
+    targetId: article.id,
+    metadata: { dossierId: dossier.id, created: true },
+  });
+  return { dossierId: dossier.id, created: true };
+}
+
+/** リンク済みのドシエがこの人に見えるか。見えない (private にされた等) なら勝手に作り直さない */
+async function linkedDossier(user: { id: string; clearance: string }, dossierId: string) {
+  const visible = await withSession(user, (tx) =>
+    tx.dossier.findUnique({ where: { id: dossierId }, select: { id: true } })
+  );
+  if (!visible) throw new ArticleDossierError("この記事の素材ドシエはあなたには見えません");
+  return { dossierId: visible.id, created: false };
 }
 
 export interface AddAssetToArticleInput {

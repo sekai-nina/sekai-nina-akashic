@@ -110,6 +110,18 @@ export const getCachedInboxCount = (clearance: ClearanceLevel) =>
     { tags: [CACHE_TAGS.assets], revalidate: 30 }
   )();
 
+// サイドバーの「クリップ」バッジ (#41)。プールは viewMode = clearance なので
+// app.user_id 無し (withClearance) でも RLS が通る。見えないクリアランスでは 0 になる
+export const getCachedClipCount = (clearance: ClearanceLevel) =>
+  unstable_cache(
+    () =>
+      withClearance(clearance, (tx) =>
+        tx.dossierItem.count({ where: { dossier: { kind: "clips" } } })
+      ),
+    [`clip-count-${clearance}`],
+    { tags: [CACHE_TAGS.dossiers], revalidate: 30 }
+  )();
+
 // Entity には実質的な RLS が無いため、クリアランスで見えない聖地エンティティを
 // アプリ層で落とす (詳細は entityClearanceWhere の JSDoc)。キャッシュキーは
 // クリアランス別にする — getCachedPlaces と同じ方式。

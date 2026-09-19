@@ -976,6 +976,13 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 
 ---
 
+## ドシエ (Dossiers)
+
+`GET /dossiers`（一覧）と `GET /dossiers/:id`（詳細。アイテムのテキスト・出典・エンティティ込み）。RLS は所有者と `viewMode` で決まる（`withSession`）。
+
+- **`GET /dossiers` にはクリップのプール（`kind = clips` のドシエ、#41）は出ない。** 記事未定の抜粋の置き場で、画面の `/clips` 専用。`GET /dossiers/:id` は id を直接指定すれば返す（RLS 内なので可視性は変わらない）
+- `POST /dossiers/:id/external-image` はプールには使えない（400）
+
 ## ミーグリ記事ワークフロー (MeetGreets)
 
 ミーグリ 1 回分の記事を作る手順（素材のドシエ → X レポ → スケッチ → 記事）を akashic で完結させるための器（設計は #106）。1 回のミーグリにつき 1 行で、素材置き場の `Dossier`（1:1、作成時に自動生成）・X レポの `RepoCollection`・生成した `Article` を束ねる。Discord bot はここを叩いて「確認はこちら」のリンクを返す想定。

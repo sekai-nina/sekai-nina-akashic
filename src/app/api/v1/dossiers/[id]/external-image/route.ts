@@ -28,11 +28,15 @@ export async function POST(
   const access = await withSession(session.user, (tx) =>
     tx.dossier.findUnique({
       where: { id: dossierId },
-      select: { ownerId: true, classification: true, viewMode: true, editMode: true },
+      select: { ownerId: true, classification: true, viewMode: true, editMode: true, kind: true },
     })
   );
   if (!access) {
     return NextResponse.json({ error: "Dossier not found" }, { status: 404 });
+  }
+  // クリップのプールには外部画像を入れない (#41。プールはアセットの抜粋だけ)
+  if (access.kind === "clips") {
+    return NextResponse.json({ error: "クリップのプールには追加できません" }, { status: 400 });
   }
   if (!canEditDossier(session.user, access)) {
     return NextResponse.json({ error: "Insufficient permission" }, { status: 403 });

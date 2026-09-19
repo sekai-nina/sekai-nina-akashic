@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { ArrowLeft, MapPin } from "lucide-react";
-import { notFound } from "next/navigation";
+import { ArrowLeft, FileText, MapPin } from "lucide-react";
+import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { getDossier } from "@/lib/domain/dossiers";
+import { getDossier, getDossierKind } from "@/lib/domain/dossiers";
 import { canEditDossier, canManageDossier } from "@/lib/auth/dossier-permissions";
 import { formatDate } from "@/lib/utils";
 import { getR2PublicUrl } from "@/lib/r2";
@@ -23,6 +23,10 @@ export default async function DossierDetailPage({ params }: DossierDetailProps) 
   const session = await auth();
   if (!session?.user) notFound();
 
+  // クリップのプールは専用画面で扱う (#41)。ここで開くと削除・共有設定のボタンが出てしまう。
+  // アイテム全件を読む前に kind だけ見る
+  if ((await getDossierKind(session.user, id)) === "clips") redirect("/clips");
+
   const dossier = await getDossier(session.user, id);
   if (!dossier) notFound();
 
@@ -37,7 +41,18 @@ export default async function DossierDetailPage({ params }: DossierDetailProps) 
 
       <DossierHeader dossier={dossier} editable={editable} manageable={manageable} />
 
-      <div className="mt-3 flex justify-end">
+      <div className="mt-3 flex items-center justify-end gap-3 flex-wrap">
+        {dossier.articles.length > 0 && (
+          <p className="mr-auto text-xs text-slate-600 flex items-center gap-1.5 flex-wrap">
+            <FileText className="h-3.5 w-3.5 text-indigo-600" />
+            このドシエからの記事:
+            {dossier.articles.map((a) => (
+              <Link key={a.shortId} href={`/articles/${a.shortId}`} className="text-indigo-700 hover:underline">
+                {a.title || a.path}
+              </Link>
+            ))}
+          </p>
+        )}
         <CopyYamlButton yaml={exportDossierToYaml(dossier)} />
       </div>
 

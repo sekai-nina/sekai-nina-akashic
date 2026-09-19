@@ -2,7 +2,7 @@ import { getCachedEntities } from "@/lib/cache";
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import type { ClearanceLevel } from "@prisma/client";
-import { ENTITY_TYPE_LABELS } from "@/lib/utils";
+import { ENTITY_TYPE_BADGE, ENTITY_TYPE_LABELS } from "@/lib/utils";
 import Link from "next/link";
 
 export default async function EntitiesPage() {
@@ -15,13 +15,7 @@ export default async function EntitiesPage() {
     entityTypes.map((t) => [t, entities.filter((e) => e.type === t)])
   );
 
-  const typeColors: Record<string, string> = {
-    person: "bg-purple-100 text-purple-800 border-purple-200",
-    place: "bg-green-100 text-green-800 border-green-200",
-    source: "bg-orange-100 text-orange-800 border-orange-200",
-    event: "bg-blue-100 text-blue-800 border-blue-200",
-    tag: "bg-slate-100 text-slate-700 border-slate-200",
-  };
+  const typeColors = ENTITY_TYPE_BADGE;
 
   return (
     <div className="max-w-4xl mx-auto">

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   auditFootnotes,
   footnoteRefsInBody,
+  paragraphsCiting,
   parseBodySegments,
   wikiLinkTargetsInBody,
 } from "./footnotes";
@@ -160,5 +161,43 @@ describe("Obsidian のエスケープされたパイプ", () => {
   it("エスケープされていても broken 扱いにしない", () => {
     const r = auditFootnotes("[[ハリー・ポッターが好き\\|ハリー・ポッター]]", [], new Set(["ハリー・ポッターが好き"]));
     expect(r.brokenLinks).toEqual([]);
+  });
+});
+
+describe("paragraphsCiting", () => {
+  it("脚注を含む段落だけを、マーカーを外して返す", () => {
+    const body = "導入。\n\n髪を切った^[1]。\n\n別の話^[2]。";
+    expect(paragraphsCiting(body, 1)).toEqual(["髪を切った。"]);
+  });
+
+  it("番号の前方一致で誤ヒットしない", () => {
+    expect(paragraphsCiting("A^[1]\n\nB^[12]", 1)).toEqual(["A"]);
+    expect(paragraphsCiting("A^[1]\n\nB^[12]", 12)).toEqual(["B"]);
+  });
+
+  it("同じ番号を 2 段落が参照していれば両方返す", () => {
+    expect(paragraphsCiting("A^[3]\n\nB^[3]", 3)).toEqual(["A", "B"]);
+  });
+
+  it("wikilink・強調・見出し・リンク・画像を読める文にする", () => {
+    const body = "## 見出し^[1]\n\n- **太字**と[[記事|表示]]と[リンク](http://x)と![img](http://y)^[1]";
+    expect(paragraphsCiting(body, 1)).toEqual(["見出し", "太字と表示とリンクと"]);
+  });
+
+  it("表の行も 1 段落として拾う", () => {
+    const body = "| 項目 | 値 |\n|---|---|\n| 身長 | 160^[4] |";
+    expect(paragraphsCiting(body, 4)).toEqual(["項目 値\n身長 160"]);
+  });
+
+  it("脚注の直後に数字が続いても拾う", () => {
+    expect(paragraphsCiting("2023年^[1]12月に更新", 1)).toEqual(["2023年12月に更新"]);
+  });
+
+  it("CRLF の本文でも段落に分かれる", () => {
+    expect(paragraphsCiting("a\r\n\r\nb^[1]\r\n\r\nc", 1)).toEqual(["b"]);
+  });
+
+  it("無ければ空", () => {
+    expect(paragraphsCiting("本文", 1)).toEqual([]);
   });
 });

@@ -1,9 +1,12 @@
 import { withClearance, withSession } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { listEditableDossiers } from "@/lib/domain/dossiers";
-import { listArticlesForPicker } from "@/lib/domain/articles";
+import { listArticlesForPicker, listArticleReferencesForAsset } from "@/lib/domain/articles";
+import { excerptOf, listClipsForAsset } from "@/lib/domain/clips";
 import { AddToDossier } from "@/components/add-to-dossier";
 import { AddToArticle } from "@/components/add-to-article";
+import { ClipButton } from "@/components/clip-dialog";
+import { AssetReferencesPanel } from "./references-panel";
 import {
   addEntityToAsset,
   addAssetText,
@@ -32,7 +35,7 @@ import { AnniversaryLink } from "./anniversary-link";
 import { listAnniversariesForAsset } from "@/lib/domain/anniversaries";
 import { ParentAssets, ChildAssets } from "./related-assets";
 import { SubGraph } from "./sub-graph";
-import { TextsSection } from "./texts-section";
+import { TextsSection, type TextRange } from "./texts-section";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { entityClearanceWhere } from "@/lib/domain/entities";
@@ -214,7 +217,9 @@ export default async function AssetDetailPage({
 
   // カバレッジパネル（v2.4）: このアセットが属するカバレッジアイテムの逆引き＋アクティブ観点
   // ハイライト語彙（?hl=nina 時のみ）も並列で取得
-  const canEditCoverage = ["admin", "member"].includes(session.user.role);
+  const isEditor = ["admin", "member"].includes(session.user.role);
+  const canEditCoverage = isEditor;
+  const canClip = isEditor;
   const [coverageItems, activeLenses, ninaTerms] = await Promise.all([
     findItemsForAsset(id, userClearance),
     listLenses(userClearance, false), // active のみ
@@ -242,7 +247,25 @@ export default async function AssetDetailPage({
   const dossierIdsContaining = dossiersContainingAsset.map((r) => r.dossierId);
 
   // 記事の紐づけ先候補。Article は非保護なので withClearance を通さない。
-  const pickerArticles = await listArticlesForPicker();
+  // クリップ (#41) と「記事での参照」もここで引く
+  const [pickerArticles, clips, articleRefs] = await Promise.all([
+    listArticlesForPicker(),
+    listClipsForAsset(session.user, id),
+    listArticleReferencesForAsset(id, userClearance),
+  ]);
+  // クリップ済みの範囲を本文上に色付けする。DossierItem は textType しか持たないので、
+  // 同じ type のテキストのうち抜粋と実際に一致するものに当てる (本文が編集されて
+  // 一致しなくなったものは出さず、「位置未確定」扱いにする)
+  const clipRanges: Record<string, TextRange[]> = {};
+  const locatedClipIds = new Set<string>();
+  for (const c of clips) {
+    const { excerptStart: start, excerptEnd: end, excerptType } = c;
+    if (start == null || end == null || !excerptType) continue;
+    const text = asset.texts.find((t) => t.textType === excerptType && excerptOf(t.content, start, end) === c.excerpt);
+    if (!text) continue;
+    (clipRanges[text.id] ??= []).push({ id: c.id, start, end });
+    locatedClipIds.add(c.id);
+  }
 
   const isImage = asset.kind === "image";
   let previewUrl = asset.thumbnailUrl;
@@ -337,6 +360,7 @@ export default async function AssetDetailPage({
             defaultLabel={asset.title || ""}
             variant="button"
           />
+          {canClip && <ClipButton assetId={asset.id} hasTexts={asset.texts.length > 0} />}
           <CopySourceRef
             assetId={asset.id}
             title={asset.title || "(無題)"}
@@ -405,6 +429,8 @@ export default async function AssetDetailPage({
                 embeddedImages={embeddedImages}
                 editableDossiers={editableDossiers}
                 articles={pickerArticles}
+                canClip={canClip}
+                clipRanges={clipRanges}
                 highlightTerms={hlNina ? ninaTerms : []}
               />
               <div className="bg-white border border-slate-200 rounded-lg p-5 mt-4">
@@ -590,6 +616,22 @@ export default async function AssetDetailPage({
 
           {/* Status */}
           <StatusWorkflow assetId={id} initialStatus={asset.status} />
+
+          {/* 記事での参照 + クリップ (#41): 「ここはもう記事に書いた / 取ってある」を見せる */}
+          {(articleRefs.length > 0 || clips.length > 0) && (
+            <AssetReferencesPanel
+              references={articleRefs}
+              clips={clips.map((c) => ({
+                id: c.id,
+                note: c.note,
+                excerpt: c.excerpt,
+                located: locatedClipIds.has(c.id),
+                createdAt: c.createdAt.toISOString(),
+                createdBy: c.createdBy?.name ?? null,
+              }))}
+              canEdit={canClip}
+            />
+          )}
 
           {/* Coverage panel (v2.4): 所属カバレッジアイテムへの観点チェック */}
           {coverageItems.length > 0 && activeLenses.length > 0 && (

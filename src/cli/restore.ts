@@ -242,6 +242,9 @@ async function main() {
           classification: (d.classification as "public" | "internal" | "confidential" | "restricted") ?? "internal",
           viewMode: (d.viewMode as "private" | "clearance") ?? "private",
           editMode: (d.editMode as "private" | "clearance") ?? "private",
+          // kind を落とすとクリップのプールが普通のドシエとして復元され、次のクリップで
+          // プールがもう 1 本できる (#41)
+          kind: (d.kind as "general" | "clips") ?? "general",
           createdAt: new Date(d.createdAt as string),
           updatedAt: new Date(d.updatedAt as string),
           items: {
@@ -258,6 +261,7 @@ async function main() {
               excerptType: (item.excerptType as never) || null,
               excerptStart: (item.excerptStart as number) ?? null,
               excerptEnd: (item.excerptEnd as number) ?? null,
+              createdById: (item.createdById as string) || null,
               sortOrder: (item.sortOrder as number) || 0,
               createdAt: new Date(item.createdAt as string),
               updatedAt: new Date((item.updatedAt as string) ?? (item.createdAt as string)),
