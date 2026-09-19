@@ -69,6 +69,23 @@ const clearance = auth.clearance;
 - `ArticleSource`（`Article` 自体は公開記事のミラーなので非保護）
 - `MeetGreet`（ミーグリ記事ワークフロー。ドシエを include する読みは所有者判定が要るので `withSession`）
 
+`Article.dossierId`（素材ドシエ。#41）は非保護テーブルから保護テーブルへのポインタ。記事詳細で **ドシエ本体を出すときは `withSession` で引き直す**（private なドシエは所有者にしか見えない = 見えなければ出さない。ID があるからといって `prisma.dossier` を素で触らない）。書くときは `prisma.$executeRaw` で `dossierId` だけ更新する（`prisma.article.update` は `updatedAt` を進めて編集画面の楽観ロックを偽の衝突にする。push の出力にも影響しないので `dirty` も立てない）。
+
+### クリップ（`/clips`、#41）
+
+クリップ（記事未定の抜粋）は新しいテーブルではなく、**`kind = clips` の共有ドシエ 1 本の `DossierItem`**。RLS / GRANT / バックアップは Dossier 系がそのまま効く。
+
+- プールは `viewMode` / `editMode` とも `clearance`、`internal`。クリアランスが足りる全員に見え、admin / member が書ける。public クリアランスにはプール自体が見えない（`findClipPool` が null）
+- 全体で 1 本なのは部分ユニーク索引 `Dossier_clips_singleton`（Prisma は表現できないので `migrate diff` が `DROP` を提案しても捨てる。trgm / pgroonga と同じ扱い）
+- 「ドシエにまとめる」= `DossierItem.dossierId` の付け替え。`dossieritem_update` ポリシーは USING が移動元・WITH CHECK が移動先のドシエを評価するので、**移動先の編集権限が無い付け替えは RLS でも止まる**（アプリ層の `requireEditAccess` と二重）
+- **classification がプール（internal）より上のアセットはクリップできない**（`createClip`）。`DossierItem` の抜粋文はドシエの classification で見えるので、confidential の本文が internal の人に漏れる。これは既存の「ドシエに追加」にも無い検査なので、一般のドシエでは引き続き入れる人の責任
+- プールは `listDossiers` / `listEditableDossiers` / ミーグリのドシエ候補から除外し、`updateDossier` / `deleteDossier` は `kind = clips` を拒否する（削除すると全員のクリップが消える。所有者にも許さない）。`/dossiers/[id]` は `/clips` へ redirect
+- **`requireEditAccess` はプールを既定で拒否する。** ピッカーが隠していても Server Action の `dossierId` はクライアント入力なので、ここで止めないと「ドシエに追加」でプールに任意のアセットを入れられる（= `createClip` の classification 検査を素通りする）。プール内アイテムのメモ編集・削除だけ `allowClipPool: true` で通す。外部画像 API（`/api/v1/dossiers/:id/external-image`）と `createMeetGreet` も `kind` を見て拒否する
+- 移動（`moveClips`）も移動先ドシエの classification とアセットの classification を突き合わせる。RLS の WITH CHECK はドシエしか見ないので、internal の抜粋を public のドシエへ移すと下位に見える。見えないアセット（後から機密が上がったもの）のクリップも移せない
+- **アセットの機密を後から上げても、プールに入っている抜粋は消えない**（DossierItem の RLS は親ドシエしか見ない）。一般のドシエと同じ穴だが、プールは全員共有なので範囲が広い。機密を上げるときはプール（と各ドシエ）の抜粋を手で確認する
+- バックアップ/リストア: `backup.ts` は全列を書くが、`restore.ts` は列を列挙して書くので **`Dossier.kind` と `DossierItem.createdById` を落とさないこと**（落とすとリストア後にプールが普通のドシエになり、次のクリップでプールが 2 本目できる）。`Article.dossierId` は Article がバックアップ対象外なので、リストア後は `pnpm cli:backfill-article-dossiers` で張り直す
+- サイドバーの件数バッジは `getCachedClipCount(clearance)`（`withClearance`。`app.user_id` 無しでも `viewMode = clearance` のプールは RLS が通る）
+
 **非保護テーブルを足したら `REVOKE ALL ON TABLE "<Table>" FROM anon, authenticated;` を migration に書く。** Supabase は public スキーマの全テーブルに `anon` / `authenticated` への DML を既定で与え、PostgREST (`/rest/v1/<table>`) がそれを外に出す。保護テーブルが守られているのは RLS が `TO app_runtime` のポリシーしか持たないからで、権限のためではない。
 
 既存分は `20260919020000_revoke_anon_on_unprotected`（`Job` / `JobRun` / `StatusCheckState` / `LlmUsageDaily` / `LlmCostDaily` / `CreditSnapshot`）と `20260919030000_revoke_anon_on_article`（`Article`）で塞いだ。**現在 RLS 非対象のテーブルはすべて PostgREST から閉じている**ので、足すときに書き忘れるとそこだけ穴になる。akashic の supabase クライアント（`src/lib/supabase/*`）は auth 専用でテーブルを触らないため、剥がしてもアプリには影響しない。
