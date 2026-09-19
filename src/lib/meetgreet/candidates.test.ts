@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { classifyCandidates, classifyGroupKind, type CandidateAssetInput } from "./candidates";
+import { CANDIDATE_TEXT_PREVIEW_CHARS } from "./config";
 
 // canonicalDate の規約: JST 深夜 = 前日 15:00 UTC
 const jst = (ymd: string, hm = "00:00") => new Date(`${ymd}T${hm}:00+09:00`);
@@ -188,6 +189,28 @@ describe("classifyCandidates", () => {
       opts({ inDossier: new Set(["t-next"]) })
     );
     expect(groups[0].assets[0]).toMatchObject({ inDossier: true, suggested: false });
+  });
+
+  it("本文の頭を添える (題だけでは何の話か分からないため)", () => {
+    const long = "あ".repeat(CANDIDATE_TEXT_PREVIEW_CHARS + 50);
+    const groups = classifyCandidates(
+      [
+        { ...blogText, text: "今日は\n\n\nミーグリでした" },
+        { ...blogText, id: "long", text: long },
+        { ...blogText, id: "blank", text: "   \n  " },
+        asset({ id: "img", source: { url: BLOG_URL, title: "" } }),
+      ],
+      opts()
+    );
+    const by = new Map(groups[0].assets.map((a) => [a.id, a.textPreview]));
+    // 空行は詰める (2 行ぶんの枠に収まる情報を増やす)
+    expect(by.get("blog-text")).toBe("今日は\nミーグリでした");
+    // 長い本文は切って … を付ける
+    expect(by.get("long")).toHaveLength(CANDIDATE_TEXT_PREVIEW_CHARS + 1);
+    expect(by.get("long")?.endsWith("…")).toBe(true);
+    // 空白だけ / 本文を持たないものは null
+    expect(by.get("blank")).toBeNull();
+    expect(by.get("img")).toBeNull();
   });
 
   it("並びは ブログ (日付順) → 運営ブログ → トーク → その他", () => {

@@ -14,7 +14,7 @@
 
 import type { AssetKind } from "@prisma/client";
 import { jstDayString } from "@/lib/utils";
-import { MEETGREET_KEYWORDS, TALK_SUGGEST_DAYS } from "./config";
+import { CANDIDATE_TEXT_PREVIEW_CHARS, MEETGREET_KEYWORDS, TALK_SUGGEST_DAYS } from "./config";
 
 export type CandidateGroupKind = "blog" | "staff" | "talk" | "other";
 
@@ -41,6 +41,11 @@ export interface CandidateAsset {
   inDossier: boolean;
   /** 初期チェック */
   suggested: boolean;
+  /**
+   * 本文の頭 (#135)。題だけでは何の話か分からないので画面に出す。
+   * 本文を持たないもの (画像・動画) は null
+   */
+  textPreview: string | null;
 }
 
 export interface CandidateGroup {
@@ -142,6 +147,7 @@ export function classifyCandidates(
         thumbnailUrl: a.thumbnailUrl,
         inDossier: opts.inDossier.has(a.id),
         suggested: suggested && !opts.inDossier.has(a.id),
+        textPreview: previewOf(a.text),
       };
     });
 
@@ -163,6 +169,16 @@ export function classifyCandidates(
     return dx < dy ? -1 : dx > dy ? 1 : 0;
   });
   return groups;
+}
+
+/** 本文の頭を数行ぶん。空行を詰めて 1 行の無駄を減らす */
+function previewOf(text: string | null): string | null {
+  if (!text) return null;
+  const body = text.replace(/\r\n?/g, "\n").replace(/\n{2,}/g, "\n").trim();
+  if (body.length === 0) return null;
+  return body.length > CANDIDATE_TEXT_PREVIEW_CHARS
+    ? `${body.slice(0, CANDIDATE_TEXT_PREVIEW_CHARS)}…`
+    : body;
 }
 
 function byDateThenTitle(a: CandidateAssetInput, b: CandidateAssetInput): number {
