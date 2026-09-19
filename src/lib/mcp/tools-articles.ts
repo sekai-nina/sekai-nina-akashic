@@ -2,9 +2,16 @@ import * as z from "zod";
 import { $Enums } from "@prisma/client";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { API_APPLY_MAX_CLASSIFICATION } from "@/lib/articles/apply";
+import { ArticleCreateSchema } from "@/lib/articles/create";
 import { ArticleEditPatchSchema, UpdatedAtSchema, hasPatchFields, parseUpdatedAt } from "@/lib/articles/patch";
 import { toArticleDetail, toArticleSummary } from "@/lib/domain/article-api";
-import { applyArticleSource, getArticleByShortId, listArticles, patchArticle } from "@/lib/domain/articles";
+import {
+  applyArticleSource,
+  createArticle,
+  getArticleByShortId,
+  listArticles,
+  patchArticle,
+} from "@/lib/domain/articles";
 import { ARTICLE_TYPE_LABELS, describeEnum } from "@/lib/utils";
 import { logMcpToolCall } from "./audit";
 import { fail, ok, toToolError } from "./result";
@@ -19,6 +26,7 @@ import type { ToolContext } from "./tools";
  *   3. akashic_apply_article_source で先に脚注番号を採る (公開判断。internal 以下のみ)
  *   4. 返った sourceNo で本文に ^[n] を書き、akashic_update_article { body, updatedAt } で保存する
  * 3 → 4 の順にするのは、途中で止まっても本文に宛先の無い脚注が残らないようにするため。
+ * 記事を起こすところから任せるときは、先に akashic_create_article (draft で作られる) を挟む。
  *
  * 記事ページは cookie 依存の動的描画でサーバ側キャッシュが無く、ここからはブラウザの Router Cache も
  * 消せないので revalidate はしない (Server Action 側だけ)。監査ログは domain が `article.*` を書き、
@@ -94,6 +102,68 @@ export function registerArticleReadTools(server: McpServer, { user }: ToolContex
 }
 
 export function registerArticleWriteTools(server: McpServer, { user }: ToolContext) {
+  server.registerTool(
+    "akashic_create_article",
+    {
+      title: "記事の作成",
+      description:
+        "記事を新規作成する。title と type が必須で、shortId と path (<type>/<title>.md) はサーバが採番する。" +
+        "省略時は draft: true (公開サイトの記事ページに出ない。ファイル自体は次の push で公開リポジトリに載るので、"
+        + "公開できない内容は本文に書かないこと)、publishedAt / articleUpdatedAt は今日 (JST)。" +
+        "同じ path の記事があればエラーで既存の shortId を返すので、そちらを akashic_update_article で更新する。" +
+        "出典は作成時には付かない (紐づけは画面から)。返った updatedAt を続く更新に渡す。",
+      inputSchema: ArticleCreateSchema,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    },
+    async (args) => {
+      try {
+        const result = await createArticle(args, { id: user.id, apiKeyId: user.apiKeyId });
+        if (!result.ok) {
+          switch (result.reason) {
+            case "invalid":
+              return fail("入力に誤りがあります。", { reason: result.reason, fieldErrors: result.errors });
+            case "invalid_path":
+              return fail(result.error, { reason: result.reason, fieldErrors: { title: result.error } });
+            case "path_exists":
+              return fail(
+                `同じ path の記事が既にあります (${result.path}、タイトル「${result.existingTitle}」)。再試行せず、` +
+                  "同じ題材ならその shortId を akashic_update_article で更新し、別の記事ならタイトルを変えてください。",
+                {
+                  reason: result.reason,
+                  path: result.path,
+                  shortId: result.existingShortId,
+                  title: result.existingTitle,
+                }
+              );
+            case "path_exists_upstream":
+              return fail(
+                `公開リポジトリに同じ path のファイル (${result.path}) がありますが、akashic にまだ取り込まれていません。` +
+                  "このまま作ると取り込みが止まるので作成しません。別のタイトルにするか、人に取り込み (cli:import-articles) を依頼してください。",
+                { reason: result.reason, path: result.path }
+              );
+          }
+        }
+
+        const article = result.article;
+        await logMcpToolCall({
+          user,
+          tool: "create_article",
+          targetType: "Article",
+          targetId: article.shortId,
+          args: { path: article.path, title: article.title, type: article.type },
+        });
+        return ok({
+          ...toArticleDetail(article),
+          hint:
+            `作成しました (draft=${article.draft})。本文を直すときは akashic_update_article に ` +
+            `updatedAt=${article.updatedAt.toISOString()} を渡してください。出典の紐づけと draft の解除は人が画面で行います。`,
+        });
+      } catch (err) {
+        return toToolError(err, "記事の作成に失敗しました。");
+      }
+    }
+  );
+
   server.registerTool(
     "akashic_update_article",
     {
