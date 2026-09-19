@@ -121,13 +121,13 @@ export function Sidebar({ user }: SidebarProps) {
       {/* サイドバー本体 */}
       <aside
         className={`
-          fixed md:static z-50 top-0 left-0 h-full w-56
+          fixed md:static z-50 top-0 left-0 h-dvh md:h-full w-56
           flex flex-col border-r border-slate-200 bg-white
           transition-transform duration-200 ease-in-out
           ${open ? "translate-x-0" : "-translate-x-full"} md:translate-x-0
         `}
       >
-        <div className="border-b border-slate-200 px-4 py-3 flex items-center gap-2.5">
+        <div className="shrink-0 border-b border-slate-200 px-4 py-3 flex items-center gap-2.5">
           <img src="/icon-96.jpg" alt="" className="w-8 h-8 rounded-md" />
           <div>
             <h1 className="text-sm font-bold tracking-tight leading-tight">Akashic</h1>
@@ -135,10 +135,10 @@ export function Sidebar({ user }: SidebarProps) {
           </div>
         </div>
         {/* New asset (desktop only — mobile uses floating FAB) */}
-        <div className="hidden md:block px-3 py-2 border-b border-slate-200">
+        <div className="hidden md:block shrink-0 px-3 py-2 border-b border-slate-200">
           <QuickCreateModal />
         </div>
-        <nav className="flex-1 space-y-1 px-2 py-3">
+        <nav className="flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-1 px-2 py-3">
           {navItems.map((item) => {
             const active = "exact" in item && item.exact
               ? pathname === item.href
@@ -185,7 +185,7 @@ export function Sidebar({ user }: SidebarProps) {
             </>
           )}
         </nav>
-        <div className="border-t border-slate-200 px-4 py-3">
+        <div className="shrink-0 border-t border-slate-200 px-4 py-3">
           <div className="flex items-center gap-2">
             {user.avatarUrl ? (
               <img src={user.avatarUrl} alt="" className="w-6 h-6 rounded-full" />
