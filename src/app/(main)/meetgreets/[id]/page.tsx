@@ -8,6 +8,7 @@ import { getSketchSetting } from "@/lib/domain/sketch-setting";
 import { listSketchSources } from "@/lib/domain/meetgreet-sketch";
 import { jsonStringArray } from "@/lib/meetgreet/config";
 import { cropsFromJson } from "@/lib/meetgreet/crop";
+import { refsFromJson } from "@/lib/meetgreet/sketch-refs";
 import { getR2PublicUrl } from "@/lib/r2";
 import { MATERIAL_WINDOW_DAYS, REPORT_WINDOW_DAYS, TALK_SUGGEST_DAYS } from "@/lib/meetgreet/config";
 import { formatDate } from "@/lib/utils";
@@ -174,6 +175,7 @@ export default async function MeetGreetDetailPage({ params, searchParams }: Prop
           selectedKey={mg.sketchKey}
           extraPrompt={mg.extraSketchPrompt}
           crops={cropsFromJson(mg.sketchCrops)}
+          refs={refsFromJson(mg.sketchRefs).map((r) => ({ ...r, url: getR2PublicUrl(r.key) }))}
           styleReference={{
             url: sketchSetting.styleReferenceUrl,
             isDefault: sketchSetting.isDefaultStyleReference,

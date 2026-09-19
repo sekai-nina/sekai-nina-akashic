@@ -166,6 +166,27 @@ export async function loadR2Image(key: string, filename: string): Promise<Sketch
 }
 
 /**
+ * その回だけの参考画像を R2 から取る (#159)。
+ *
+ * アップロード時に正立・縮小済みなので、ここでは切り抜きだけ当てる。
+ * 取れなければ null (1 枚落とすだけで生成は続ける)。**切り抜けなかったときは落とす** —
+ * 枠があるのに全体を送ると、隣の人ごと外部に出てしまう。
+ */
+export async function loadR2Reference(
+  key: string,
+  crop?: CropRect
+): Promise<SketchSourceImage | null> {
+  try {
+    const img = await loadR2Image(key, `${key.split("/").pop() ?? "ref"}`);
+    if (!crop) return img;
+    const cut = await cropBytes(img.bytes, crop);
+    return cut === null ? null : { ...img, bytes: cut };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 基準スケッチを R2 から取る。
  *
  * **差し替えた見本が引けなければ既定に落とす。** 消された / key を打ち間違えた設定 1 つで

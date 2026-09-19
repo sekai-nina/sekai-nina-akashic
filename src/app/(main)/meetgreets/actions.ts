@@ -156,7 +156,7 @@ export async function applyExcerptsAction(id: string, inputs: ApplyExcerptInput[
 
 export async function generateSketchAction(
   id: string,
-  options: { assetIds: string[]; revisionOf?: string; revisionNote?: string }
+  options: { assetIds: string[]; refKeys?: string[]; revisionOf?: string; revisionNote?: string }
 ) {
   const user = await requireMember();
   const parsed = GenerateSketchSchema.safeParse(options);

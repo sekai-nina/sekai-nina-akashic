@@ -7,7 +7,7 @@
 
 import { Prisma } from "@prisma/client";
 import { withClearance, withSession } from "@/lib/db";
-import { classificationFilter } from "@/lib/classification";
+import { accessibleClassifications, classificationFilter } from "@/lib/classification";
 import {
   MAX_SKETCH_SOURCES,
   maxReferencePhotos,
@@ -18,9 +18,17 @@ import {
   generateSketches,
   loadAssetImage,
   loadR2Image,
+  loadR2Reference,
   type GeneratedSketch,
 } from "@/lib/meetgreet/sketch";
 import { cropsFromJson, withCrops, type CropMap, type CropRect } from "@/lib/meetgreet/crop";
+import { deleteFromR2 } from "@/lib/r2";
+import {
+  isRefKeyOf,
+  refsFromJson,
+  MAX_SKETCH_REFS,
+  type SketchRef,
+} from "@/lib/meetgreet/sketch-refs";
 import type { SketchSourceAsset } from "@/lib/meetgreet/types";
 import { logAudit } from "./audit";
 import { getSketchSetting } from "./sketch-setting";
@@ -61,6 +69,8 @@ export async function listSketchSources(
 
 export interface GenerateSketchOptions {
   assetIds: string[];
+  /** その回だけの参考画像 (#159)。`sketchRefs` の key */
+  refKeys?: string[];
   /** 作り直すときの元候補 (R2 key) */
   revisionOf?: string;
   revisionNote?: string;
@@ -79,15 +89,35 @@ export async function generateSketch(
     dossierId: string;
     extraSketchPrompt: string;
     sketchCandidates: unknown;
+    /** その回だけの参考画像 (#159) */
+    sketchRefs: unknown;
+    /** 外部 AI に出してよい回か見る (#159) */
+    classification: string;
     /** 参照写真の切り抜き枠 (#136) */
     sketchCrops: unknown;
   },
   options: GenerateSketchOptions
 ): Promise<{ candidates: GeneratedSketch[]; usedPhotos: number }> {
+  // **ミーグリ自身の機密も見る (#159)。** アップロードした参考画像にはアセット側の
+  // 検査が無いので、ここが唯一の歯止めになる。生成したスケッチは公開 URL の R2 に置かれる
+  const allowed: readonly string[] = accessibleClassifications(MAX_EXTERNAL_AI_CLEARANCE);
+  if (!allowed.includes(meetGreet.classification)) {
+    throw new MeetGreetInputError(
+      "この回は機密レベルが高いため、外部 AI でスケッチを作れません"
+    );
+  }
+
   const ids = [...new Set(options.assetIds)];
+  const refKeys = [...new Set(options.refKeys ?? [])];
+  const knownRefs = refsFromJson(meetGreet.sketchRefs).map((r) => r.key);
+  const unknownRef = refKeys.find((k) => !knownRefs.includes(k));
+  if (unknownRef) throw new MeetGreetInputError("参考画像が見つかりません");
+
   const limit = maxReferencePhotos(!!options.revisionOf);
-  if (ids.length === 0) throw new MeetGreetInputError("参照にする写真を選んでください");
-  if (ids.length > limit) {
+  if (ids.length + refKeys.length === 0) {
+    throw new MeetGreetInputError("参照にする写真を選んでください");
+  }
+  if (ids.length + refKeys.length > limit) {
     throw new MeetGreetInputError(
       options.revisionOf
         ? `作り直しでは直す候補の 1 枚を使うので、参照にできる写真は ${limit} 枚までです`
@@ -95,8 +125,8 @@ export async function generateSketch(
     );
   }
 
-  const known = jsonStringArray(meetGreet.sketchCandidates);
-  if (options.revisionOf && !known.includes(options.revisionOf)) {
+  const knownCandidates = jsonStringArray(meetGreet.sketchCandidates);
+  if (options.revisionOf && !knownCandidates.includes(options.revisionOf)) {
     throw new MeetGreetInputError("作り直しの元にする候補が見つかりません");
   }
 
@@ -111,12 +141,18 @@ export async function generateSketch(
       select: { id: true, storageProvider: true, storageKey: true, thumbnailUrl: true },
     })
   );
-  if (assets.length === 0) throw new MeetGreetInputError("ドシエにある画像を選んでください");
+  if (assets.length === 0 && refKeys.length === 0) {
+    throw new MeetGreetInputError("ドシエにある画像を選んでください");
+  }
 
-  // 切り抜き枠があれば、その範囲だけを送る (ツーショットで隣の人を拾わないように)
+  // 切り抜き枠があれば、その範囲だけを送る (ツーショットで隣の人を拾わないように)。
+  // アップロードした参考画像も同じ枠の仕組みに乗る (キーは R2 key)
   const crops = cropsFromJson(meetGreet.sketchCrops);
   const photos = (
-    await Promise.all(assets.map((a) => loadAssetImage(a, crops[a.id])))
+    await Promise.all([
+      ...assets.map((a) => loadAssetImage(a, crops[a.id])),
+      ...refKeys.map((k) => loadR2Reference(k, crops[k])),
+    ])
   ).filter((p): p is NonNullable<typeof p> => p !== null);
   if (photos.length === 0) throw new MeetGreetInputError("参照画像を取得できませんでした");
 
@@ -155,6 +191,7 @@ export async function generateSketch(
     targetId: meetGreet.id,
     metadata: {
       requested: ids.length,
+      refs: refKeys.length,
       photos: photos.length,
       generated: candidates.length,
       revision: !!options.revisionOf,
@@ -167,6 +204,80 @@ export async function generateSketch(
 }
 
 /**
+ * その回だけの参考画像を覚える (#159)。R2 への保存は呼び出し側 (API route) が済ませている。
+ *
+ * **この回の置き場の key しか受け取らない。** R2 の任意のオブジェクトを参照に仕立てられると、
+ * 見えないはずの画像を外部 AI に送る口になる (基準スケッチの差し替えと同じ考え方)。
+ */
+export async function addSketchRef(
+  user: ActingUser,
+  meetGreet: { id: string; sketchRefs: unknown },
+  ref: SketchRef
+): Promise<SketchRef[]> {
+  if (!isRefKeyOf(meetGreet.id, ref.key)) {
+    throw new MeetGreetInputError("この回の参考画像ではありません");
+  }
+  const current = refsFromJson(meetGreet.sketchRefs);
+  if (current.length >= MAX_SKETCH_REFS) {
+    throw new MeetGreetInputError(`参考画像は ${MAX_SKETCH_REFS} 枚までです`);
+  }
+  const next = [...current.filter((r) => r.key !== ref.key), ref];
+  await withClearance(user.clearance, (tx) =>
+    tx.meetGreet.update({
+      where: { id: meetGreet.id },
+      data: { sketchRefs: next as unknown as Prisma.InputJsonValue },
+    })
+  );
+  await logAudit({
+    actorId: user.id,
+    action: "meetgreet.sketch.ref.add",
+    targetType: "MeetGreet",
+    targetId: meetGreet.id,
+    metadata: { key: ref.key, name: ref.name },
+  });
+  return next;
+}
+
+/** 参考画像を消す (#159)。R2 の実体も消す */
+export async function removeSketchRef(
+  user: ActingUser,
+  meetGreet: { id: string; sketchRefs: unknown; sketchCrops: unknown },
+  key: string
+): Promise<SketchRef[]> {
+  const current = refsFromJson(meetGreet.sketchRefs);
+  if (!current.some((r) => r.key === key)) {
+    throw new MeetGreetInputError("参考画像が見つかりません");
+  }
+  const next = current.filter((r) => r.key !== key);
+  // 枠も一緒に落とす (宙に浮いた枠が Json に残り続けないように)
+  const crops = withCrops(cropsFromJson(meetGreet.sketchCrops), { [key]: null });
+  await withClearance(user.clearance, (tx) =>
+    tx.meetGreet.update({
+      where: { id: meetGreet.id },
+      data: {
+        sketchRefs: next as unknown as Prisma.InputJsonValue,
+        sketchCrops: crops as unknown as Prisma.InputJsonValue,
+      },
+    })
+  );
+  // **R2 の実体は DB の更新が済んでから消す。** 先に消すと、更新に失敗したときに
+  // 一覧には残っているのに開けない参考画像になる
+  try {
+    await deleteFromR2(key);
+  } catch {
+    // 実体が消えなくても一覧から外れていればよい (次の生成では使われない)
+  }
+  await logAudit({
+    actorId: user.id,
+    action: "meetgreet.sketch.ref.remove",
+    targetType: "MeetGreet",
+    targetId: meetGreet.id,
+    metadata: { key },
+  });
+  return next;
+}
+
+/**
  * 参照写真の切り抜き枠を保存する (#136)。
  *
  * **このドシエにある画像だけ。** 任意のアセット ID で枠を溜められると、
@@ -174,7 +285,7 @@ export async function generateSketch(
  */
 export async function saveSketchCrops(
   user: ActingUser,
-  meetGreet: { id: string; dossierId: string; sketchCrops: unknown },
+  meetGreet: { id: string; dossierId: string; sketchCrops: unknown; sketchRefs: unknown },
   changes: Record<string, CropRect | null>
 ): Promise<CropMap> {
   const ids = Object.keys(changes);
@@ -183,8 +294,10 @@ export async function saveSketchCrops(
     throw new MeetGreetInputError(`一度に指定できるのは ${MAX_SKETCH_SOURCES} 枚までです`);
   }
 
-  // **消す指定はドシエの中身を見ない。** ドシエから外した画像の枠が永久に消せなくなる
-  const setIds = ids.filter((id) => changes[id] !== null);
+  // **消す指定はドシエの中身を見ない。** ドシエから外した画像の枠が永久に消せなくなる。
+  // その回の参考画像 (#159) はアセットではないので、ここで先に外しておく
+  const refKeys = new Set(refsFromJson(meetGreet.sketchRefs).map((r) => r.key));
+  const setIds = ids.filter((id) => changes[id] !== null && !refKeys.has(id));
   const known = await withSession(user, (tx) =>
     tx.asset.findMany({
       where: {
