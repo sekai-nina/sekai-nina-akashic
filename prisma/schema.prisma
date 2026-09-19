@@ -164,16 +164,17 @@ model User {
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
 
-  createdAssets      Asset[]      @relation("AssetCreatedBy")
-  updatedAssets      Asset[]      @relation("AssetUpdatedBy")
-  assetTexts         AssetText[]  @relation("AssetTextCreatedBy")
-  annotations        Annotation[] @relation("AnnotationCreatedBy")
+  createdAssets      Asset[]          @relation("AssetCreatedBy")
+  updatedAssets      Asset[]          @relation("AssetUpdatedBy")
+  assetTexts         AssetText[]      @relation("AssetTextCreatedBy")
+  annotations        Annotation[]     @relation("AnnotationCreatedBy")
   dossiers           Dossier[]
   auditLogs          AuditLog[]
   apiKeys            ApiKey[]
   invitation         Invitation?
-  createdInvitations Invitation[] @relation("InvitationCreatedBy")
-  meetGreets         MeetGreet[]  @relation("MeetGreetCreatedBy")
+  aiSettings         AiSetting[]
+  createdInvitations Invitation[]     @relation("InvitationCreatedBy")
+  meetGreets         MeetGreet[]      @relation("MeetGreetCreatedBy")
   creditSnapshots    CreditSnapshot[] @relation("CreditSnapshotCreatedBy")
 }
 
@@ -1002,9 +1003,9 @@ enum LlmUsageSource {
 
 /// 日次 × プロバイダ × モデル × 機能のトークン集計 (自己申告 / プロバイダの usage API)
 model LlmUsageDaily {
-  id   String      @id @default(cuid())
+  id       String      @id @default(cuid())
   /// JST の暦日 (UTC 深夜で保持する。他の date-only 列と同じ扱い)
-  date DateTime    @db.Date
+  date     DateTime    @db.Date
   provider LlmProvider
   model    String
   /// 呼び出し元の識別子 (akashic.testimonials / bot.discovery / worker.fitan_site など)。
@@ -1030,13 +1031,13 @@ model LlmUsageDaily {
 
 /// 日次 × プロバイダの確定コスト (プロバイダの costs API 由来)
 model LlmCostDaily {
-  id       String      @id @default(cuid())
-  date     DateTime    @db.Date
-  provider LlmProvider
+  id        String      @id @default(cuid())
+  date      DateTime    @db.Date
+  provider  LlmProvider
   /// USD。プロバイダが返した金額をそのまま入れる
-  amountUsd Decimal    @db.Decimal(12, 6)
+  amountUsd Decimal     @db.Decimal(12, 6)
   /// 取り込み元の説明 (openai:costs / anthropic:cost_report)
-  source    String     @default("")
+  source    String      @default("")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1101,4 +1102,23 @@ model AiQuestion {
   @@index([citationCount, askedAt])
   @@index([expiresAt])
   @@index([classification])
+}
+
+/// 案内AI「ふぃたん」の運転スイッチ。行は1つだけ（id = "singleton"）。
+///
+/// 止めたいときに、サイトを作り直さずに即座に止められるようにするためのもの。
+/// Worker がここを見に来る（短いキャッシュ付き）。Akashic が落ちていても
+/// Worker は最後に読めた値で動き続けるので、これが原因で AI が止まることはない。
+model AiSetting {
+  id      String  @id @default("singleton")
+  /// false にすると、回答を止めたうえでサイトから入口ごと消える
+  enabled Boolean @default(true)
+  /// 止めた理由。運用の記録用で、利用者には出さない
+  note    String  @default("")
+
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+  updatedBy   User?    @relation(fields: [updatedById], references: [id])
+
+  classification ClearanceLevel @default(internal)
 }
