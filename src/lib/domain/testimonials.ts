@@ -2,6 +2,7 @@ import { prismaInternal, withClearance } from "@/lib/db";
 import { TestimonialCategory, TestimonialStatus } from "@prisma/client";
 import { searchMentions, MentionResult } from "./mentions";
 import { recordUsage } from "@/lib/costs/usage";
+import { normalizeTrait, splitTraits } from "./testimonial-traits";
 
 /**
  * 口コミ抽出のモデル。
@@ -64,10 +65,37 @@ const SYSTEM_PROMPT = `あなたは日向坂46のメンバーのブログから�
 - performance: ダンス・歌・パフォーマンス・スキル
 - relationship: 他メンバーとの仲の良さ・慕われ方・愛されエピソード
 
+**trait(言われ方)の付け方:**
+- 短いキーワード1つ（例: 優しい, 可愛い, しっかり者, 方向音痴）。文にしない。「〜な性格」「〜な存在」のような言い回しにしない
+- 後述の「既存のキーワード」と同じ意味なら、必ずその表記をそのまま使う（可愛らしい→可愛い、愛されエピソード→愛されている のような表記ゆれを作らない）
+- どれにも当てはまらないときだけ新しいキーワードを付ける
+
 重要:
 - 入力の各ブロック [N] に対して、必ず1つの結果をindex=Nとして返してください。スキップしないでください。
 - quoteは原文からそのまま抜き出してください。複数箇所を「...」で繋いだり要約したりしないでください。
 - 1つのブロックから複数読み取れる場合でも、最も口コミとして印象的な1つだけをquoteとして選んでください。`;
+
+/** プロンプトに載せる既存 trait の上限。承認済みの多い順 */
+const TRAIT_VOCABULARY_LIMIT = 40;
+
+/**
+ * 承認済み口コミの trait を多い順に集める。抽出プロンプトに渡して表記ゆれを防ぐ。
+ * 却下分は語彙に入れない（却下された言い方を LLM に勧めない）
+ */
+async function loadTraitVocabulary(entityId: string): Promise<string[]> {
+  const rows = await prismaInternal.testimonial.findMany({
+    where: { entityId, status: "approved" },
+    select: { trait: true },
+  });
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    for (const t of splitTraits(normalizeTrait(row.trait))) counts.set(t, (counts.get(t) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ja"))
+    .slice(0, TRAIT_VOCABULARY_LIMIT)
+    .map(([t]) => t);
+}
 
 const RESPONSE_SCHEMA = {
   name: "testimonial_extraction",
@@ -83,7 +111,7 @@ const RESPONSE_SCHEMA = {
             index: { type: "number", description: "入力ブロックの [N] の番号" },
             is_personality: { type: "boolean" },
             quote: { type: "string", description: "口コミに該当する部分のみ原文から抜粋。100文字以内" },
-            trait: { type: "string", description: "キーワード。例: 優しい, しなやかなダンス, 先輩・同期に可愛がられる" },
+            trait: { type: "string", description: "言われ方のキーワード1つ。既存のキーワードと同じ意味ならその表記を使う。例: 優しい, 可愛い, しなやかなダンス" },
             category: { type: "string", enum: ["personality", "performance", "relationship"] },
             confidence: { type: "number", description: "0-1" },
           },
@@ -97,11 +125,18 @@ const RESPONSE_SCHEMA = {
   },
 };
 
-function buildUserPrompt(blocks: { index: number; text: string; speaker: string }[]): string {
+function buildUserPrompt(
+  blocks: { index: number; text: string; speaker: string }[],
+  vocabulary: string[]
+): string {
   const items = blocks.map(
     (b) => `[${b.index}] (by ${b.speaker})\n${b.text}`
   );
-  return `以下の${blocks.length}個のテキストブロックを分析してください:\n\n${items.join("\n\n---\n\n")}`;
+  // 語彙は user 側に付ける（system プロンプトは固定のままキャッシュを効かせる）
+  const vocab = vocabulary.length
+    ? `既存のキーワード（同じ意味ならこの表記を使う）: ${vocabulary.join(", ")}\n\n`
+    : "";
+  return `${vocab}以下の${blocks.length}個のテキストブロックを分析してください:\n\n${items.join("\n\n---\n\n")}`;
 }
 
 function parseSpeakerFromLinkedEntities(linkedEntities: string): string {
@@ -136,7 +171,8 @@ function mapCategory(cat: string): TestimonialCategory {
 }
 
 async function callOpenAI(
-  blocks: { index: number; text: string; speaker: string }[]
+  blocks: { index: number; text: string; speaker: string }[],
+  vocabulary: string[]
 ): Promise<(ExtractionResult & { index: number })[]> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("OPENAI_API_KEY not set");
@@ -152,7 +188,7 @@ async function callOpenAI(
       // temperature は送らない。gpt-5 系は指定すると 400 で落ちる
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: buildUserPrompt(blocks) },
+        { role: "user", content: buildUserPrompt(blocks, vocabulary) },
       ],
       response_format: {
         type: "json_schema",
@@ -397,6 +433,9 @@ export async function extractTestimonials(options: ExtractOptions): Promise<{
   let extracted = 0;
   let skipped = 0;
 
+  // 既存の言われ方を LLM に見せて、同じ意味は同じ表記に寄せさせる
+  const vocabulary = toProcess.length > 0 ? await loadTraitVocabulary(entityId) : [];
+
   // Process in batches
   for (let i = 0; i < toProcess.length; i += BATCH_SIZE) {
     const batch = toProcess.slice(i, i + BATCH_SIZE);
@@ -406,7 +445,7 @@ export async function extractTestimonials(options: ExtractOptions): Promise<{
       speaker: w.speaker,
     }));
 
-    const results = await callOpenAI(blocks);
+    const results = await callOpenAI(blocks, vocabulary);
 
     for (const result of results) {
       if (!result.is_personality || result.confidence < 0.4) {
@@ -443,7 +482,7 @@ export async function extractTestimonials(options: ExtractOptions): Promise<{
             assetId: window.assetId,
             entityId,
             quote,
-            trait: result.trait || "",
+            trait: normalizeTrait(result.trait || ""),
             category: mapCategory(result.category),
             speakerName: window.speaker,
             sourceUrl: window.sourceUrl,
