@@ -170,6 +170,36 @@ export interface FeatureBreakdownRow {
   costUsd: number | null;
 }
 
+export interface FeatureTotalRow {
+  feature: string;
+  provider: LlmProvider;
+  source: LlmUsageSource;
+  requests: number;
+  costUsd: number | null;
+}
+
+/**
+ * 機能ごとの合計 (直近 `HISTORY_DAYS` 日)。「何にいくらかかったか」の一次回答。
+ * **自己申告とプロバイダ由来は分けたまま**足さない (同じ利用が両方に出る)。
+ */
+export async function getFeatureTotals(now: Date = new Date()): Promise<FeatureTotalRow[]> {
+  const since = jstDateOnlyToColumn(addDaysToDateString(toJstDateOnly(now)!, -HISTORY_DAYS));
+  const rows = await prisma.llmUsageDaily.groupBy({
+    by: ["feature", "provider", "source"],
+    where: { date: { gte: since } },
+    _sum: { requests: true, costUsd: true },
+  });
+  return rows
+    .map((r) => ({
+      feature: r.feature,
+      provider: r.provider,
+      source: r.source,
+      requests: r._sum.requests ?? 0,
+      costUsd: r._sum.costUsd == null ? null : Number(r._sum.costUsd),
+    }))
+    .sort((a, b) => (b.costUsd ?? 0) - (a.costUsd ?? 0));
+}
+
 /** 機能 × モデルの内訳 (直近 `HISTORY_DAYS` 日)。金額の降順 */
 export async function getFeatureBreakdown(now: Date = new Date()): Promise<FeatureBreakdownRow[]> {
   // DATE 列に実時刻を当てると当日の時刻ぶんだけ窓がずれる (一番古い日が出たり消えたりする)

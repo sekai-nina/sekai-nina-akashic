@@ -2,6 +2,7 @@ import type { LlmProvider, LlmUsageSource } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { addDaysToDateString, isValidDateString, toJstDateOnly } from "@/lib/utils";
+import { FEATURE_PATTERN } from "./keys";
 import { computeCostUsd } from "./pricing";
 import { jstDateOnlyToColumn } from "./summary";
 
@@ -11,11 +12,11 @@ import { jstDateOnlyToColumn } from "./summary";
  * LlmUsageDaily は非保護テーブルなので素の `prisma`。
  */
 
-/** 呼び出し元の識別子。`<出所>.<機能>` で揃える (akashic.testimonials / bot.discovery など) */
-export const FEATURE_PATTERN = /^[a-z0-9][a-z0-9_.:-]{0,63}$/;
-
 /** INT4 の上限に収める (超えると Postgres が out of range で落ちる) */
-const TOKEN_MAX = 2_000_000_000;
+export const TOKEN_MAX = 2_000_000_000;
+
+/** プロバイダ由来の値も丸める。1 行が INT4 を超えると createMany ごと落ちて内訳が止まる */
+const clampToken = (n: number): number => Math.min(Math.max(Math.trunc(n), 0), TOKEN_MAX);
 
 /** 遡って報告してよい日数。これより古い / 未来の日付は受け取らない */
 export const BACKDATE_MAX_DAYS = 90;
@@ -41,6 +42,8 @@ export const UsageReportSchema = z
   .strict();
 
 export type UsageReport = z.infer<typeof UsageReportSchema>;
+
+export { FEATURE_PATTERN };
 
 export { jstDateOnlyToColumn };
 
@@ -148,10 +151,10 @@ export async function replaceProviderUsage(
         model: r.model,
         feature: r.feature,
         source: "provider" as const,
-        inputTokens: r.inputTokens,
-        cachedInputTokens: r.cachedInputTokens,
-        outputTokens: r.outputTokens,
-        requests: r.requests,
+        inputTokens: clampToken(r.inputTokens),
+        cachedInputTokens: clampToken(r.cachedInputTokens),
+        outputTokens: clampToken(r.outputTokens),
+        requests: clampToken(r.requests),
         costUsd: computeCostUsd(provider, r.model, r),
       })),
     });

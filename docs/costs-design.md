@@ -7,9 +7,10 @@
 | 呼び手 | プロバイダ / モデル | 用途 | 自己申告の `feature` |
 |---|---|---|---|
 | akashic `src/lib/domain/testimonials.ts` | OpenAI `gpt-4o-mini` | 口コミ抽出 | `akashic.testimonials` |
-| bot `blog_watch/discovery.py` | OpenAI `gpt-5.4-mini` | 今日の発見の抽出 | `bot.discovery`（PR2） |
-| bot `ocr/ai_provider.py` | OpenAI `gpt-5.2` | 画像 OCR | `bot.ocr`（PR2） |
-| bot `github_sync/ai/openai_impl.py` | OpenAI `gpt-4o` | メッセージ解析 | `bot.github_sync`（PR2） |
+| akashic `src/lib/meetgreet/sketch.ts` | OpenAI `gpt-image-1` | ミーグリのスケッチ生成 | `akashic.meetgreet_sketch` |
+| bot `blog_watch/discovery.py` | OpenAI `gpt-5.4-mini` | 今日の発見の抽出 | `bot.discovery` |
+| bot `ocr/ai_provider.py` | OpenAI `gpt-5.2` | 画像 OCR | `bot.ocr` |
+| bot `github_sync/ai/openai_impl.py` | OpenAI `gpt-4o` | メッセージ解析 | `bot.github_sync` |
 | sekai-nina-ai-worker | Gemini `gemini-3.1-flash-lite` / `gemini-embedding-2` | サイトのふぃたん | `worker.fitan_site`（PR3） |
 | office-nitan | Anthropic `claude-sonnet-4-6`（Claude Code） | Discord のふぃたん | 改修せず、Anthropic の API 側で捕捉 |
 
@@ -32,7 +33,24 @@
 
 Admin キー（`OPENAI_ADMIN_KEY` / `ANTHROPIC_ADMIN_KEY`）は**通常の API キーとは別物**。未設定ならそのプロバイダは黙ってスキップし、`/costs` に警告を出す。
 
-`ANTHROPIC_KEY_FEATURES` に `{"apikey_01...": "nitan.discord"}` の JSON を置くと、Anthropic の内訳のキー ID を機能名に読み替える（ふぃたん Discord と手元の Claude Code を分けるため）。未設定なら `anthropic:<key id>` のまま出る。
+### キー別の内訳（#125）
+
+両社とも **`api_key_id` × `model` でトークンを引ける**ので、用途ごとにキーを分けていればプロバイダ側だけで内訳が出る。
+
+| プロバイダ | 内訳 | 金額 |
+|---|---|---|
+| OpenAI | `usage/completions` を `group_by[]=api_key_id&group_by[]=model` | `costs` は**キー単位に割れない**（プロジェクト単位まで）。金額は日次合計を正とし、内訳はトークンから単価表で推定する |
+| Anthropic | `usage_report/messages` を同上 | 同上（`cost_report` は description / workspace 単位） |
+
+キー ID → 名前は各社の Admin API から自動で引く（OpenAI は `projects` → `api_keys`、Anthropic は `organizations/api_keys`）。`feature` は `openai:<キー名>` の形に均す（`src/lib/costs/keys.ts`）。**環境変数で上書きした値も同じ形に均す**（REST の検証を通らない経路なので、素通しにすると `POST /api/v1/usage` なら 400 になる値が列に入る）。
+
+**キー名を引けなかった回は内訳の取り込みを見送る**（金額は取り込む）。見送らないと一時的な 429 や権限の欠落で `openai:key_abc123` に化け、名前で入った過去の行と 2 行に割れる（取り込み直すのは直近 3 日ぶんだけなので最大 30 日残る）。
+
+キーの指定が無い呼び出し（コンソールやプレイグラウンド）は `openai:console` / `anthropic:console` にまとめる。
+
+優先順位は **環境変数の対応表 > プロバイダのキー名 > キー ID**。キー名が用途を表していないとき（「key1」「個人用」など）に `OPENAI_KEY_FEATURES` / `ANTHROPIC_KEY_FEATURES` で上書きできる。引けなくても ID のまま出す（黙って落とさない）。
+
+**キー別だけでは足りない。** bot は今日の発見 / OCR / github_sync の 3 機能で 1 本の OpenAI キーを共有しているので、機能ごとの内訳は自己申告（sekai-nina-discord-bot#33）でしか出ない。両方を突き合わせて見る。
 
 ## 2. データモデル（非保護、素の `prisma`）
 
@@ -75,6 +93,7 @@ USD / 100 万トークン。**自己申告の換算にだけ使う**（確定金
 
 - プロバイダ別カード: 今月の支出 / 1 日あたり / 推定残高 / 残り日数 / 残高を記録した日時
 - 日次の推移（30 日）
+- 何にかかっているか（機能ごとの合計、30 日）
 - 機能 × モデルの内訳（30 日、金額の降順）
 - 残高スナップショットの入力フォーム + 「今すぐ取り込む」
 - Admin キー未設定・単価表に無いモデルの警告
@@ -89,7 +108,8 @@ Vercel Cron が 1 日 1 回 `GET /api/cron/costs` を呼ぶ（`CRON_SECRET`、`/
 |---|---|
 | `OPENAI_ADMIN_KEY` | OpenAI の組織 Admin キー。未設定なら OpenAI の確定額を取り込まない |
 | `ANTHROPIC_ADMIN_KEY` | Anthropic の Admin キー（`sk-ant-admin...`）。同上 |
-| `ANTHROPIC_KEY_FEATURES` | `api_key_id` → 機能名の JSON（任意） |
+| `ANTHROPIC_KEY_FEATURES` | `api_key_id` → 機能名の JSON（任意。キー名が用途を表していないときだけ） |
+| `OPENAI_KEY_FEATURES` | 同上（OpenAI） |
 
 ## 7.5. 権限（PostgREST から見えないようにする）
 
@@ -103,6 +123,8 @@ RLS を張らない非保護テーブルにはその守りが無いため、`202
 
 - Gemini は確定額を取り込めない。サイトのふぃたんの自己申告（PR3）だけが頼りで、無料枠の範囲内かどうかは AI Studio の画面で見るしかない
 - office-nitan（Claude Code）は自己申告しない。Anthropic の確定額には出るが、内訳は `api_key_id` 単位までしか分からない
+- **プロバイダ由来の内訳はチャット補完だけ。** OpenAI の `usage/completions` に出ない用途（画像生成 `gpt-image-1` など）はキー別の内訳に出ない。ミーグリのスケッチ生成は自己申告（`akashic.meetgreet_sketch`）で埋めているが、**画像の単価は単価表に入れていない**ので「価格未登録」として出る（トークン単価がモダリティ別で、雑に入れると誤った金額になるため）。金額はプロバイダの合計に含まれている
+- **金額をプロジェクト / キー単位には割らない。** `LlmCostDaily` は日 × プロバイダで一意。割るにはスキーマ変更が要るうえ、bot の 3 機能は同じキーなので結局分離できない。金額は合計を正とし、内訳はトークン × 単価表の推定で見る
 - 為替は扱わない（すべて USD）
 - **プロバイダ由来の「日」は UTC 日**（両社ともバケットを UTC 深夜で切る）。JST 09:00〜翌 09:00 にあたるので、自己申告（true JST）とは最大 9 時間ずれる。月末の端数が動く程度なので日次の推移とバーンレートの用途では許容している
 - 機能 × モデルの内訳は**自己申告とプロバイダ由来を足し合わせない**（同じ利用が両方に出る）。画面では「出どころ」列で分けている

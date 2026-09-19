@@ -6,6 +6,7 @@ import {
   type ArticleType,
   type JobRunStatus,
   type LlmProvider,
+  type LlmUsageSource,
   type MeetGreetFormat,
   type PlaceKind,
   type StatusLevel,
@@ -222,6 +223,12 @@ export const LLM_PROVIDER_LABELS: Record<LlmProvider, string> = {
   openai: "OpenAI",
   anthropic: "Anthropic",
   google: "Google (Gemini)",
+};
+
+/** LLM の利用量の出どころ */
+export const LLM_USAGE_SOURCE_LABELS: Record<LlmUsageSource, string> = {
+  reported: "自己申告",
+  provider: "プロバイダ",
 };
 
 /** ハートビート (JobRun) の結果 */

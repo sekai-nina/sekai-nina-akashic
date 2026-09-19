@@ -2,8 +2,9 @@ import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { ingestAllProviders } from "@/lib/costs/providers";
 
-// プロバイダ 2 社 × 3 リクエスト (各 15 秒でタイムアウト) + 書き込み。余裕を持たせる
-export const maxDuration = 120;
+// プロバイダ 2 社 ×「コスト + 内訳 + キー名 (プロジェクト数ぶん、並列)」。
+// 1 リクエスト 15 秒でタイムアウトするので、直列に数本並んでも収まる長さにしておく
+export const maxDuration = 180;
 
 /** 確定遅れに備えて毎回さかのぼって上書きする日数 */
 const INGEST_DAYS = 3;

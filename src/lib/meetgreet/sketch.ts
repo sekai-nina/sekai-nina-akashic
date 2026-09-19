@@ -160,6 +160,8 @@ export async function padToCardAspect(png: Buffer): Promise<Buffer> {
 
 interface OpenAIImageResponse {
   data?: { b64_json?: string }[];
+  /** gpt-image-1 はトークン課金なので利用量が返る (/costs への自己申告に使う) */
+  usage?: { input_tokens?: number; output_tokens?: number };
   error?: { message?: string };
 }
 
@@ -209,6 +211,26 @@ async function callOpenAIEdits(
     console.error("[meetgreet/sketch] OpenAI error", res.status, json.error?.message);
     throw new SketchError(`画像生成に失敗しました (${res.status})`);
   }
+  // 利用量を /costs に自己申告する (画像 API は usage/completions に出ないので、
+  // 報告しないとどの機能の費用か分からないまま合計にだけ乗る)。失敗しても生成は止めない
+  if (json.usage) {
+    try {
+      // **動的 import にする。** 静的に読むと、このモジュールを import するテストが
+      // @/lib/db を巻き込み、DATABASE_URL の無い CI で PrismaClient の生成に失敗する
+      const { recordUsage } = await import("@/lib/costs/usage");
+      await recordUsage({
+        provider: "openai",
+        model: OPENAI_IMAGE_MODEL,
+        feature: "akashic.meetgreet_sketch",
+        inputTokens: json.usage.input_tokens ?? 0,
+        outputTokens: json.usage.output_tokens ?? 0,
+        requests: 1,
+      });
+    } catch (e) {
+      console.warn(`[meetgreet/sketch] 利用量の記録に失敗: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   const images = (json.data ?? [])
     .map((d) => d.b64_json)
     .filter((b): b is string => !!b)
