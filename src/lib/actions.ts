@@ -13,6 +13,7 @@ import { backupAssetToDrive } from "@/lib/drive";
 import { createAssetRelation, deleteAssetRelation } from "@/lib/domain/relations";
 import { assertClearance } from "@/lib/classification";
 import { requireRole } from "@/lib/auth/require-role";
+import { normalizeTrait } from "@/lib/domain/testimonial-traits";
 
 /** Verify the calling user has clearance to access the given asset. */
 async function requireClearanceForAsset(assetId: string, user: { clearance: string }) {
@@ -556,6 +557,22 @@ export async function updateTestimonialCategory(id: string, category: string) {
   );
 
   revalidatePath("/testimonials");
+}
+
+/** trait(言われ方)を手で直す。表記ゆれは保存前に寄せる(testimonial-traits.ts) */
+export async function updateTestimonialTrait(id: string, trait: string) {
+  const user = await requireRole(["admin", "member"]);
+  const normalized = normalizeTrait(trait);
+
+  await withClearance(user.clearance, (tx) =>
+    tx.testimonial.update({
+      where: { id },
+      data: { trait: normalized },
+    })
+  );
+
+  revalidatePath("/testimonials");
+  return normalized;
 }
 
 // ========== Invitations ==========

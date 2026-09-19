@@ -1,7 +1,7 @@
 "use client";
 
-import { useOptimistic, useTransition } from "react";
-import { reviewTestimonial, updateTestimonialCategory } from "@/lib/actions";
+import { useOptimistic, useRef, useState, useTransition } from "react";
+import { reviewTestimonial, updateTestimonialCategory, updateTestimonialTrait } from "@/lib/actions";
 
 interface Testimonial {
   id: string;
@@ -40,7 +40,56 @@ function blogHrefWithScroll(url: string, quote: string): string {
 
 type OptimisticAction =
   | { type: "status"; id: string; status: string }
-  | { type: "category"; id: string; category: string };
+  | { type: "category"; id: string; category: string }
+  | { type: "trait"; id: string; trait: string };
+
+/**
+ * trait(言われ方)のピル。クリックで入力欄になり、Enter / フォーカスを外すと保存。Esc で戻す。
+ * サイトの「よく言われること」はこの文字列をそのまま数えるので、表記ゆれを手で直せるようにしておく。
+ */
+function TraitPill({ trait, onSave }: { trait: string; onSave: (trait: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(trait);
+  // Enter で保存した直後に blur も走るので、二重に保存しない
+  const done = useRef(false);
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => { setDraft(trait); done.current = false; setEditing(true); }}
+        title="クリックして言われ方を直す"
+        className={`text-xs px-2 py-0.5 rounded-full ${
+          trait ? "bg-blue-50 text-blue-700 hover:bg-blue-100" : "bg-slate-50 text-slate-400 hover:bg-slate-100"
+        }`}
+      >
+        {trait || "言われ方なし"}
+      </button>
+    );
+  }
+
+  const commit = () => {
+    if (done.current) return;
+    done.current = true;
+    setEditing(false);
+    if (draft.trim() !== trait) onSave(draft.trim());
+  };
+
+  return (
+    <input
+      autoFocus
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") commit();
+        if (e.key === "Escape") { done.current = true; setDraft(trait); setEditing(false); }
+      }}
+      placeholder="優しい, 可愛い"
+      className="text-xs px-2 py-0.5 rounded-full border border-blue-300 bg-white text-blue-700 w-40 outline-none"
+    />
+  );
+}
 
 export function TestimonialList({ items }: { items: Testimonial[] }) {
   const [isPending, startTransition] = useTransition();
@@ -52,6 +101,9 @@ export function TestimonialList({ items }: { items: Testimonial[] }) {
       }
       if (action.type === "category") {
         return current.map((t) => (t.id === action.id ? { ...t, category: action.category } : t));
+      }
+      if (action.type === "trait") {
+        return current.map((t) => (t.id === action.id ? { ...t, trait: action.trait } : t));
       }
       return current;
     }
@@ -68,6 +120,13 @@ export function TestimonialList({ items }: { items: Testimonial[] }) {
     updateOptimistic({ type: "category", id, category });
     startTransition(async () => {
       await updateTestimonialCategory(id, category);
+    });
+  }
+
+  function handleTrait(id: string, trait: string) {
+    updateOptimistic({ type: "trait", id, trait });
+    startTransition(async () => {
+      await updateTestimonialTrait(id, trait);
     });
   }
 
@@ -101,11 +160,7 @@ export function TestimonialList({ items }: { items: Testimonial[] }) {
                     </option>
                   ))}
                 </select>
-                {t.trait && (
-                  <span className="text-xs px-2 py-0.5 bg-blue-50 rounded-full text-blue-700">
-                    {t.trait}
-                  </span>
-                )}
+                <TraitPill trait={t.trait} onSave={(trait) => handleTrait(t.id, trait)} />
                 <span className="text-xs text-slate-400">
                   — {t.speakerName}
                 </span>
