@@ -78,6 +78,10 @@ export interface CreateMeetGreetInput {
   single?: string;
   label?: string;
   classification?: ClearanceLevel;
+  /** 既にあるドシエを使う (未指定なら新しく作る) */
+  dossierId?: string;
+  /** 既にある X レポ収集を使う (未指定なら新しく作る) */
+  repoCollectionId?: string;
 }
 
 export type ReportFetchOutcome =
@@ -88,18 +92,21 @@ export type ReportFetchOutcome =
 export class MeetGreetInputError extends Error {}
 
 /**
- * 起点。ドシエ (誰でも編集できるよう clearance モード) と X レポ収集を作って紐づけ、
- * 収集を 1 回走らせる。
+ * 起点。ドシエと X レポ収集を用意して紐づける。
  *
- * 3 つの作成は **1 トランザクション**にまとめる (途中で落ちたときに名前だけ同じドシエ・
- * 収集が孤児として残るのを防ぐ)。X API と R2 への書き込みはトランザクションの外
- * (15,000ms の上限に当たるため)。X の失敗 (7 日より前の日付・レート制限等) は作成の
- * 失敗にしない (= 画面・REST から再収集できる)。
+ * **X の収集は走らせない。** 収集するかどうかは別の判断なので、X レポのステップから
+ * 明示的に実行する (作成のたびに 40〜80 秒待たされ、X API の枠を使ってしまっていた #118)。
+ *
+ * `dossierId` / `repoCollectionId` を渡すと**既にあるものを使う**。`/meetgreets` を作る
+ * 前から手で作っていたドシエ・収集を拾い直すのに使う。
+ *
+ * 作成は **1 トランザクション**にまとめる (途中で落ちたときに名前だけ同じドシエ・収集が
+ * 孤児として残るのを防ぐ)。
  */
 export async function createMeetGreet(
   user: ActingUser,
   input: CreateMeetGreetInput
-): Promise<{ id: string; fetch: ReportFetchOutcome }> {
+): Promise<{ id: string }> {
   if (!isValidDateString(input.date)) {
     throw new MeetGreetInputError("date は暦に実在する YYYY-MM-DD で指定してください");
   }
@@ -110,34 +117,56 @@ export async function createMeetGreet(
   const groups = reportTagGroups(input.format);
 
   const created = await withSession(user, async (tx) => {
-    const dossier = await tx.dossier.create({
-      data: {
-        ownerId: user.id,
-        title: dossierTitleFor(naming),
-        summary: `${meetGreetTitle(naming)}の記事素材`,
-        classification,
-        // 作成者以外も素材を足せるようにする (ドシエ既定の private では bot も触れない)
-        viewMode: "clearance",
-        editMode: "clearance",
-      },
-      select: { id: true },
-    });
-    const collection = await tx.repoCollection.create({
-      data: {
-        name: collectionNameFor(naming),
-        groups: groups as unknown as Prisma.InputJsonValue,
-        groupOp: "or",
-        query: buildQuery(groups, "or", true, true, ""),
-        startDate: input.date,
-        endDate: addDaysToDateString(input.date, REPORT_WINDOW_DAYS),
-        excludeRetweets: true,
-        langJa: true,
-        extra: "",
-        // MeetGreet と同じ機密にする (既定の internal のままだと上位機密の回の名前が /repo に出る)
-        classification,
-      },
-      select: { id: true },
-    });
+    // 既にあるものを使う場合は、見えること・まだ他の回に使われていないことを確かめる
+    if (input.dossierId) {
+      const found = await tx.dossier.findUnique({
+        where: { id: input.dossierId },
+        select: { id: true, meetGreet: { select: { id: true } } },
+      });
+      if (!found) throw new MeetGreetInputError("指定されたドシエが見つかりません");
+      if (found.meetGreet) throw new MeetGreetInputError("そのドシエは別のミーグリに使われています");
+    }
+    if (input.repoCollectionId) {
+      const found = await tx.repoCollection.findUnique({
+        where: { id: input.repoCollectionId },
+        select: { id: true, meetGreet: { select: { id: true } } },
+      });
+      if (!found) throw new MeetGreetInputError("指定された X レポ収集が見つかりません");
+      if (found.meetGreet) throw new MeetGreetInputError("その収集は別のミーグリに使われています");
+    }
+
+    const dossier = input.dossierId
+      ? { id: input.dossierId }
+      : await tx.dossier.create({
+          data: {
+            ownerId: user.id,
+            title: dossierTitleFor(naming),
+            summary: `${meetGreetTitle(naming)}の記事素材`,
+            classification,
+            // 作成者以外も素材を足せるようにする (ドシエ既定の private では bot も触れない)
+            viewMode: "clearance",
+            editMode: "clearance",
+          },
+          select: { id: true },
+        });
+    const collection = input.repoCollectionId
+      ? { id: input.repoCollectionId }
+      : await tx.repoCollection.create({
+          data: {
+            name: collectionNameFor(naming),
+            groups: groups as unknown as Prisma.InputJsonValue,
+            groupOp: "or",
+            query: buildQuery(groups, "or", true, true, ""),
+            startDate: input.date,
+            endDate: addDaysToDateString(input.date, REPORT_WINDOW_DAYS),
+            excludeRetweets: true,
+            langJa: true,
+            extra: "",
+            // MeetGreet と同じ機密にする (既定の internal のままだと上位機密の回の名前が /repo に出る)
+            classification,
+          },
+          select: { id: true },
+        });
     const meetGreet = await tx.meetGreet.create({
       data: {
         date: input.date,
@@ -164,11 +193,11 @@ export async function createMeetGreet(
       format: input.format,
       dossierId: created.dossierId,
       collectionId: created.collectionId,
+      linkedExisting: !!(input.dossierId || input.repoCollectionId),
     },
   });
 
-  const fetch = await safeFetch(created.collectionId, user.clearance);
-  return { id: created.meetGreetId, fetch };
+  return { id: created.meetGreetId };
 }
 
 async function safeFetch(collectionId: string, clearance: string): Promise<ReportFetchOutcome> {

@@ -11,11 +11,8 @@ import { MeetGreetInputError } from "@/lib/domain/meetgreets";
 import { CreateMeetGreetSchema, projectCandidates, projectMeetGreet } from "@/lib/meetgreet/api";
 import { formatZodError } from "@/lib/zod-error";
 
-/**
- * X の収集 (画像を 1 枚ずつ R2 に載せる) で 1 分を超えることがある。
- * Discord bot はこの所要時間を見越して deferred ack してから呼ぶこと。
- */
-export const maxDuration = 300;
+/** 作成自体は速い。X の収集は POST /meetgreets/:id/reports で明示的に行う */
+export const maxDuration = 60;
 
 export async function GET(request: Request) {
   const auth = await requireApiAuth(request, "read");
@@ -26,9 +23,9 @@ export async function GET(request: Request) {
 }
 
 /**
- * 起点。ドシエと X レポ収集を自動で作り、収集を 1 回走らせ、素材候補まで返す
- * (Discord bot はこれ 1 回で「確認はこちら」を返せる)。
- * X の収集失敗は 201 のまま `fetch.ok = false` で知らせる (再収集は POST /meetgreets/:id/reports)。
+ * 起点。ドシエと X レポ収集を用意して紐づけ、素材候補まで返す。
+ * **X の収集は走らせない** (POST /meetgreets/:id/reports で明示的に行う)。
+ * `dossierId` / `repoCollectionId` を渡すと既にあるものを使う。
  */
 export async function POST(request: Request) {
   const auth = await requireApiAuth(request, "write");
@@ -66,11 +63,7 @@ export async function POST(request: Request) {
   const candidates = await listMaterialCandidates(auth, mg);
 
   return NextResponse.json(
-    {
-      ...projectMeetGreet(mg),
-      fetch: created.fetch,
-      candidates: projectCandidates(candidates),
-    },
+    { ...projectMeetGreet(mg), candidates: projectCandidates(candidates) },
     { status: 201 }
   );
 }

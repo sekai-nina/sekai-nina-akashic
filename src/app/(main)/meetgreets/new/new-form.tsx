@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import type { MeetGreetFormat } from "@prisma/client";
+import type { LinkableDossier } from "@/lib/domain/meetgreet-import";
 import { MEETGREET_FORMAT_LABELS } from "@/lib/utils";
 import { createMeetGreetAction } from "../actions";
 
@@ -10,7 +11,13 @@ const inputCls =
   "w-full px-3 py-2 rounded-md border border-slate-200 bg-white text-sm text-slate-900 outline-none focus:border-slate-400";
 const labelCls = "block text-xs text-slate-500 mt-3 mb-1";
 
-export function NewMeetGreetForm({ defaultDate }: { defaultDate: string }) {
+export function NewMeetGreetForm({
+  defaultDate,
+  dossiers,
+}: {
+  defaultDate: string;
+  dossiers: LinkableDossier[];
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
@@ -19,15 +26,23 @@ export function NewMeetGreetForm({ defaultDate }: { defaultDate: string }) {
   const [format, setFormat] = useState<MeetGreetFormat>("online");
   const [single, setSingle] = useState("");
   const [label, setLabel] = useState("");
+  // 空文字 = 新しく作る
+  const [dossierId, setDossierId] = useState("");
 
   function handleCreate() {
     if (!date) {
       setMsg("日付を入力してください");
       return;
     }
-    setMsg("作成中… (X の収集も走るので少し待ちます)");
+    setMsg("作成中…");
     startTransition(async () => {
-      const res = await createMeetGreetAction({ date, format, single, label });
+      const res = await createMeetGreetAction({
+        date,
+        format,
+        single,
+        label,
+        ...(dossierId ? { dossierId } : {}),
+      });
       if (!res.ok) {
         setMsg(`エラー: ${res.error}`);
         return;
@@ -88,6 +103,29 @@ export function NewMeetGreetForm({ defaultDate }: { defaultDate: string }) {
         onChange={(e) => setLabel(e.target.value)}
         placeholder="通常"
       />
+
+      <label className={labelCls} htmlFor="mg-dossier">
+        素材のドシエ
+      </label>
+      <select
+        id="mg-dossier"
+        className={inputCls}
+        value={dossierId}
+        onChange={(e) => setDossierId(e.target.value)}
+      >
+        <option value="">新しく作る</option>
+        {dossiers.map((d) => (
+          <option key={d.id} value={d.id}>
+            {d.title}（素材 {d.itemCount} 件）
+          </option>
+        ))}
+      </select>
+      {dossierId && (
+        <p className="text-[11px] text-slate-400 mt-1">
+          既存のドシエを使います。ドシエ名は変わりません。X レポ収集は新しく作られます
+          （まとめて取り込むなら「過去のドシエを取り込む」のほうが早いです）。
+        </p>
+      )}
 
       <div className="mt-5 flex items-center gap-3">
         <button

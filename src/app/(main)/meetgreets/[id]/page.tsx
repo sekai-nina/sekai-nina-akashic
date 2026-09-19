@@ -111,11 +111,16 @@ export default async function MeetGreetDetailPage({ params }: Props) {
         }
       >
         <p className="text-xs text-slate-500 mb-3">
-          収集は作成時に 1 回走っています (X の recent search は直近 7 日まで)。
-          {REPORT_WINDOW_DAYS === 1 ? "翌日" : `${REPORT_WINDOW_DAYS} 日後`}
-          以降の投稿を拾うときや、作成時に失敗したときは再収集してください。採用にしたツイートは記事生成がそのまま読みます。
+          {mg.repoCollection?.lastFetchedAt
+            ? `${REPORT_WINDOW_DAYS === 1 ? "翌日" : `${REPORT_WINDOW_DAYS} 日後`}以降の投稿を拾うときは再収集してください。`
+            : "まだ収集していません。X の recent search は直近 7 日までなので、開催から日が経っている回は取得できません。"}
+          採用にしたツイートは記事生成がそのまま読みます。
         </p>
-        <ReportsStep meetGreetId={mg.id} hasCollection={!!mg.repoCollectionId} />
+        <ReportsStep
+          meetGreetId={mg.id}
+          hasCollection={!!mg.repoCollectionId}
+          fetched={!!mg.repoCollection?.lastFetchedAt}
+        />
       </StepCard>
 
       {/* 3. スケッチ */}
