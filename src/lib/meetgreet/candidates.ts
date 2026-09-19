@@ -14,7 +14,7 @@
 
 import type { AssetKind } from "@prisma/client";
 import { jstDayString } from "@/lib/utils";
-import { MEETGREET_KEYWORDS, TALK_SUGGEST_DAYS } from "./config";
+import { CANDIDATE_TEXT_PREVIEW_CHARS, MEETGREET_KEYWORDS, TALK_SUGGEST_DAYS } from "./config";
 
 export type CandidateGroupKind = "blog" | "staff" | "talk" | "other";
 
@@ -41,6 +41,11 @@ export interface CandidateAsset {
   inDossier: boolean;
   /** 初期チェック */
   suggested: boolean;
+  /**
+   * 本文の頭 (#135)。題だけでは何の話か分からないので画面に出す。
+   * 本文を持たないもの (画像・動画) は null
+   */
+  textPreview: string | null;
 }
 
 export interface CandidateGroup {
@@ -142,6 +147,7 @@ export function classifyCandidates(
         thumbnailUrl: a.thumbnailUrl,
         inDossier: opts.inDossier.has(a.id),
         suggested: suggested && !opts.inDossier.has(a.id),
+        textPreview: previewOf(a.text),
       };
     });
 
@@ -163,6 +169,23 @@ export function classifyCandidates(
     return dx < dy ? -1 : dx > dy ? 1 : 0;
   });
   return groups;
+}
+
+/** 本文の頭を数行ぶん。空行を詰めて 1 行の無駄を減らす */
+function previewOf(text: string | null): string | null {
+  if (!text) return null;
+  // 整形は頭だけに掛ける (ブログ本文や書き起こし全文に正規表現を通さない)。
+  // 空行を詰めるぶん縮むので、余裕を持って多めに取る
+  const head = text.slice(0, CANDIDATE_TEXT_PREVIEW_CHARS * 3);
+  const body = head.replace(/\r\n?/g, "\n").replace(/\n{2,}/g, "\n").trim();
+  if (body.length === 0) return null;
+  if (body.length <= CANDIDATE_TEXT_PREVIEW_CHARS && head.length === text.length) return body;
+  // **絵文字を割らない。** `slice` は UTF-16 単位なので、サロゲートペアの途中で
+  // 切ると � になる (アイドルのブログは絵文字が多い)
+  const chars = [...body].slice(0, CANDIDATE_TEXT_PREVIEW_CHARS);
+  return chars.length < [...body].length || head.length < text.length
+    ? `${chars.join("")}…`
+    : body;
 }
 
 function byDateThenTitle(a: CandidateAssetInput, b: CandidateAssetInput): number {

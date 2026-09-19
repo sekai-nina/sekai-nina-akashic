@@ -92,6 +92,18 @@ export const MAX_EXCERPTS_PER_APPLY = 50;
  */
 export const MAX_EXTERNAL_AI_CLEARANCE = "internal" as const;
 
+/**
+ * 画面に並べる採用レポの上限 (#135)。
+ * 「どれが載るか」を確かめるためのものなので、全部出す必要はない (判定は /repo で行う)
+ */
+export const MAX_KEEP_TWEETS_SHOWN = 30;
+
+/**
+ * 素材候補に添える本文の長さ (#135)。
+ * トークは題だけだと何の話か分からないので数行ぶん見せる。全文は重いので切る
+ */
+export const CANDIDATE_TEXT_PREVIEW_CHARS = 240;
+
 /** Json 列 (sketchCandidates / articleExclusions) から文字列だけを取り出す (中身を信用しない) */
 export function jsonStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((k): k is string => typeof k === "string") : [];
