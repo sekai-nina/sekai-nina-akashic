@@ -93,6 +93,8 @@ const clearance = auth.clearance;
 
 既存分は `20260919020000_revoke_anon_on_unprotected`（`Job` / `JobRun` / `StatusCheckState` / `LlmUsageDaily` / `LlmCostDaily` / `CreditSnapshot`）と `20260919030000_revoke_anon_on_article`（`Article`）で塞いだ。**現在 RLS 非対象のテーブルはすべて PostgREST から閉じている**ので、足すときに書き忘れるとそこだけ穴になる。akashic の supabase クライアント（`src/lib/supabase/*`）は auth 専用でテーブルを触らないため、剥がしてもアプリには影響しない。
 
+`Announcement`（お知らせ `/announcements`）は公開サイトに出すための文章しか持たないので非保護（`Article` と同じ扱い。`20260920180000_announcement` で REVOKE 済み）。書けるのは admin / member（Server Action は `requireRole`、REST は write キー）。
+
 `LlmUsageDaily` / `LlmCostDaily` / `CreditSnapshot`（コスト管理 `/costs`）も非保護。金額とトークン数しか持たないが、**画面と Server Action は admin のみ**に絞る（口座の残高なので member / viewer には見せない）。`/status` のコストのチェックも admin にだけ表示し、Discord に流れる要約には金額を入れない。
 
 `Job` / `JobRun` / `StatusCheckState`（パイプライン監視 `/status`）は件数・時刻・メッセージしか持たない運用情報なので非保護。評価 (`src/lib/status/checks.ts`) は cron がセッション外で走らせるため保護テーブルを `prismaInternal` で数えるが、結果はログイン済み全員に見えるので **`detail` に写す名前・タイトルは `internal` 以下の行に限る**（`STATUS_VISIBLE_CLEARANCE`。今日の発見の SQL は `classificationFilterSql("internal")`、鮮度チェックは public / internal の `DataSource` だけ）。confidential 以上は件数にも入れない。本文は出さない（リンク先は各ページの RLS で守られる）。
