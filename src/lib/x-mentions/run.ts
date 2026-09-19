@@ -76,15 +76,27 @@ export function isMentionDiscordConfigured(): boolean {
   return !!process.env.DISCORD_MENTION_WEBHOOK_URL?.trim();
 }
 
-export async function runMentionWatch(now: Date = new Date()): Promise<RunResult> {
+export interface RunOptions {
+  now?: Date;
+  /**
+   * since_id を無視して、この日数ぶん遡って取り直す (recent search の上限 7 日まで)。
+   * 初回に 24 時間より前を拾いたいときの「過去 7 日を取り直す」用。すでに保存済みのヒットは
+   * unique で二度入らないので、何度押しても Discord に同じものは流れない
+   */
+  lookbackDays?: number;
+}
+
+export async function runMentionWatch(opts: RunOptions = {}): Promise<RunResult> {
+  const now = opts.now ?? new Date();
   const startedAt = now;
+  const lookbackMs = opts.lookbackDays ? Math.min(opts.lookbackDays * 24 * 60 * 60 * 1000, RECENT_WINDOW_MS) : null;
   const setting = await prismaInternal.xMentionSetting.findUnique({ where: { id: SETTING_ID } });
   const excluded = setting?.excludedUsernames ?? [];
   const watches = await prismaInternal.xMentionWatch.findMany({ where: { enabled: true }, orderBy: { createdAt: "asc" } });
 
   const results: WatchRunResult[] = [];
   for (const watch of watches) {
-    results.push(await runOneWatch(watch, excluded, now));
+    results.push(await runOneWatch(watch, excluded, now, lookbackMs));
   }
 
   const { notified, remaining, notifyError } = await notifyPending();
@@ -122,7 +134,15 @@ export async function runMentionWatch(now: Date = new Date()): Promise<RunResult
 }
 
 /** 監視語ごとの取得範囲。since_id か時間窓のどちらか一方 (X API は両方を受け付けない) */
-function searchRange(watch: XMentionWatch, now: Date): { sinceId?: string; start: string | null } {
+function searchRange(
+  watch: XMentionWatch,
+  now: Date,
+  lookbackMs: number | null = null
+): { sinceId?: string; start: string | null } {
+  // 取り直し: since_id を無視して指定日数ぶんの時間窓
+  if (lookbackMs !== null) {
+    return { start: clampRecentWindow(new Date(now.getTime() - lookbackMs).toISOString(), null).start };
+  }
   const idAt = tweetIdTimestampMs(watch.lastTweetId);
   if (watch.lastTweetId && idAt !== null && now.getTime() - idAt <= SINCE_ID_MAX_AGE_MS) {
     return { sinceId: watch.lastTweetId, start: null };
@@ -136,12 +156,17 @@ function searchRange(watch: XMentionWatch, now: Date): { sinceId?: string; start
 }
 
 /** 1 監視語ぶん。X API の失敗は lastError に残して結果で返す (throw しない) */
-async function runOneWatch(watch: XMentionWatch, excluded: string[], now: Date): Promise<WatchRunResult> {
+async function runOneWatch(
+  watch: XMentionWatch,
+  excluded: string[],
+  now: Date,
+  lookbackMs: number | null
+): Promise<WatchRunResult> {
   const base = { watchId: watch.id, query: watch.query };
   const { query } = buildMentionQuery(watch.query, excluded);
 
   try {
-    let range = searchRange(watch, now);
+    let range = searchRange(watch, now, lookbackMs);
     let tweets;
     try {
       tweets = await xSearchRecent(query, range.start, null, MAX_PAGES, { sinceId: range.sinceId });
