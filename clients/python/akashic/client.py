@@ -72,6 +72,7 @@ class AkashicClient:
         data: dict[str, Any] | None = None,
         files: dict[str, Any] | None = None,
         timeout: int | None = None,
+        with_status: bool = False,
     ) -> Any:
         url = f"{self._api_url}{path}"
         # params から None の値を除去
@@ -90,7 +91,7 @@ class AkashicClient:
         body = resp.json() if resp.content else None
         if resp.status_code >= 400:
             raise AkashicError(resp.status_code, body)
-        return body
+        return (body, resp.status_code) if with_status else body
 
     # ------------------------------------------------------------------
     # Assets
@@ -330,7 +331,9 @@ class AkashicClient:
             repo_collection_id: 既にある X レポ収集を使う
 
         Returns:
-            作ったミーグリ（``candidates`` に素材候補が付く）
+            作ったミーグリ（``candidates`` に素材候補が付く）。
+            **``reused`` はクライアントが足すキー**で、既にあった回が返ってきたか
+            （HTTP 200）新しく作られたか（201）を表す。API の応答そのものには入っていない
         """
         payload: dict[str, Any] = {"date": date, "format": format}
         if single is not None:
@@ -343,7 +346,10 @@ class AkashicClient:
             payload["dossierId"] = dossier_id
         if repo_collection_id is not None:
             payload["repoCollectionId"] = repo_collection_id
-        return self._request("POST", "/meetgreets", json=payload)
+        body, status = self._request(
+            "POST", "/meetgreets", json=payload, with_status=True
+        )
+        return {**body, "reused": status == 200}
 
     def fetch_meetgreet_reports(
         self, meetgreet_id: str, *, timeout: int = 180
