@@ -8,12 +8,17 @@
 import { withSession } from "@/lib/db";
 import { getR2PublicUrl } from "@/lib/r2";
 import { toJstDateOnly, todayJst } from "@/lib/utils";
+import { accessibleClassifications } from "@/lib/classification";
+import { MAX_ARTICLE_CLEARANCE } from "@/lib/meetgreet/config";
 import {
   renderMeetGreetArticle,
   type ArticleAssetInput,
   type RenderedArticle,
 } from "@/lib/meetgreet/article";
 import type { ActingUser } from "./meetgreets";
+
+/** 本文に載せてよい機密レベル */
+const PUBLISHABLE = new Set<string>(accessibleClassifications(MAX_ARTICLE_CLEARANCE));
 
 /** X の URL を比べるための正規化 (クエリ・末尾スラッシュ・ホストの揺れを吸収) */
 export function normalizeTweetUrl(url: string): string {
@@ -72,7 +77,7 @@ export async function buildMeetGreetArticle(
     sketchKey: string | null;
   },
   options: BuildArticleOptions = {}
-): Promise<RenderedArticle> {
+): Promise<RenderedArticle & { droppedByClearance: number }> {
   const includeKeeps = options.includeKeeps ?? true;
 
   const data = await withSession(user, async (tx) => {
@@ -96,6 +101,7 @@ export async function buildMeetGreetArticle(
                 kind: true,
                 title: true,
                 canonicalDate: true,
+                classification: true,
                 sourceRecords: {
                   select: { sourceKind: true, title: true, url: true, publishedAt: true },
                   orderBy: [{ createdAt: "asc" }, { id: "asc" }],
@@ -122,6 +128,7 @@ export async function buildMeetGreetArticle(
 
   // アセットを 1 件にまとめる (同じアセットが抜粋ごとに複数 item になる)
   const assets = new Map<string, ArticleAssetInput>();
+  const dropped = new Set<string>();
   const reports: string[] = [];
   const tiktoks: string[] = [];
   let dossierThumb: string | null = null;
@@ -145,6 +152,11 @@ export async function buildMeetGreetArticle(
     }
     const a = item.asset;
     if (!a) continue;
+    // 本文は公開リポジトリに載るので、上位機密のアセットは載せない
+    if (!PUBLISHABLE.has(a.classification)) {
+      dropped.add(a.id);
+      continue;
+    }
     const src = a.sourceRecords[0];
     const existing = assets.get(a.id);
     if (existing) {
@@ -183,7 +195,8 @@ export async function buildMeetGreetArticle(
     reports.push(t.url);
   }
 
-  return renderMeetGreetArticle({
+  return {
+    ...renderMeetGreetArticle({
     date: meetGreet.date,
     format: meetGreet.format,
     // 会場は正式名称を優先し、無ければ呼び分け (幕張 など) で代用する
@@ -199,5 +212,7 @@ export async function buildMeetGreetArticle(
       itemCount: data.dossier._count.items,
     },
     today: options.today ?? todayJst(),
-  });
+    }),
+    droppedByClearance: dropped.size,
+  };
 }
