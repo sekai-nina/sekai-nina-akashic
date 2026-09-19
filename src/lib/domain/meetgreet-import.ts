@@ -13,6 +13,7 @@ import { parseDossierTitle, parseSingleFromCollectionName } from "@/lib/meetgree
 import type { MeetGreetFormat } from "@prisma/client";
 import { logAudit } from "./audit";
 import { createMeetGreet, type ActingUser } from "./meetgreets";
+import { NOT_CLIP_POOL } from "./dossiers";
 
 export interface ImportCandidate {
   dossierId: string;
@@ -33,8 +34,8 @@ export async function listImportCandidates(user: ActingUser): Promise<ImportCand
   return withSession(user, async (tx) => {
     const [dossiers, collections, counts] = await Promise.all([
       tx.dossier.findMany({
-        // 既に取り込み済みのものは出さない (何度実行してもよい)
-        where: { meetGreet: null },
+        // 既に取り込み済みのものは出さない (何度実行してもよい)。クリップのプールも対象外 (#41)
+        where: { meetGreet: null, ...NOT_CLIP_POOL },
         select: { id: true, title: true, _count: { select: { items: true } } },
       }),
       tx.repoCollection.findMany({
@@ -92,7 +93,8 @@ export interface LinkableDossier {
 export async function listLinkableDossiers(user: ActingUser): Promise<LinkableDossier[]> {
   const rows = await withSession(user, (tx) =>
     tx.dossier.findMany({
-      where: { meetGreet: null },
+      // クリップのプールは選ばせない (#41)。記事の素材ドシエも回の素材ではないので除く
+      where: { meetGreet: null, articles: { none: {} }, ...NOT_CLIP_POOL },
       orderBy: [{ title: "desc" }],
       take: 200,
       select: { id: true, title: true, _count: { select: { items: true } } },

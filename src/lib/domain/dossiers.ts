@@ -1,8 +1,9 @@
-import type {
-  ClearanceLevel,
-  DossierAccessMode,
-  DossierItemKind,
-  TextType,
+import {
+  DossierKind,
+  type ClearanceLevel,
+  type DossierAccessMode,
+  type DossierItemKind,
+  type TextType,
 } from "@prisma/client";
 import { withSession } from "@/lib/db";
 import { canEditDossier, canManageDossier } from "@/lib/auth/dossier-permissions";
@@ -14,6 +15,13 @@ interface ActingUser {
   role: string;
   clearance: string;
 }
+
+/**
+ * クリップのプール (`kind = clips`) は一覧・ピッカーに出さない。
+ * プールは `/clips` が専用の画面で、通常のドシエとして触らせると
+ * 「ドシエに追加」でプールに入れたり、プールを削除したりできてしまう (#41)。
+ */
+export const NOT_CLIP_POOL = { kind: { not: DossierKind.clips } } as const;
 
 export interface CreateDossierInput {
   title: string;
@@ -34,10 +42,15 @@ export interface UpdateDossierInput {
 export async function listDossiers(user: ActingUser) {
   return withSession(user, (tx) =>
     tx.dossier.findMany({
+      where: NOT_CLIP_POOL,
       orderBy: { updatedAt: "desc" },
       include: {
         owner: { select: { id: true, name: true, avatarUrl: true } },
-        _count: { select: { items: true, placeCandidates: true } },
+        _count: { select: { items: true, placeCandidates: true, articles: true } },
+        // 記事の素材ドシエか (一覧で「記事」バッジと記事名検索に使う)。#41 のバックフィルで
+        // 記事 1 本につき 1 ドシエ作るので、通常のドシエと見分けられるようにする。
+        // 件数は _count で数える (take で切ると 4 本以上のとき数が合わない)
+        articles: { select: { shortId: true, title: true }, take: 3 },
       },
     })
   );
@@ -46,10 +59,14 @@ export async function listDossiers(user: ActingUser) {
 /**
  * List dossiers the user can EDIT (owner OR editMode='clearance' & clearance meets classification).
  * Used to populate the AddToDossier picker.
+ *
+ * `withArticles` を付けると素材ドシエの記事タイトルも返す (`/clips` の移動先ピッカーが
+ * 記事名で探せるように)。/search 等の汎用ピッカーは使わないので既定では引かない。
  */
-export async function listEditableDossiers(user: ActingUser) {
+export async function listEditableDossiers(user: ActingUser, opts?: { withArticles?: boolean }) {
   const all = await withSession(user, (tx) =>
     tx.dossier.findMany({
+      where: NOT_CLIP_POOL,
       orderBy: { updatedAt: "desc" },
       select: {
         id: true,
@@ -58,10 +75,27 @@ export async function listEditableDossiers(user: ActingUser) {
         classification: true,
         viewMode: true,
         editMode: true,
+        ...(opts?.withArticles ? { articles: { select: { shortId: true, title: true }, take: 3 } } : {}),
       },
     })
   );
   return all.filter((d) => canEditDossier(user, d));
+}
+
+/** ドシエの種別だけ引く (詳細ページがプールを /clips へ逃がすとき、アイテム全件を読む前に見る) */
+export async function getDossierKind(user: ActingUser, id: string): Promise<DossierKind | null> {
+  const row = await withSession(user, (tx) => tx.dossier.findUnique({ where: { id }, select: { kind: true } }));
+  return row?.kind ?? null;
+}
+
+/** 記事詳細の「素材ドシエ」表示用。private なドシエは所有者にしか見えない (= null) */
+export async function getDossierSummary(user: ActingUser, id: string) {
+  return withSession(user, (tx) =>
+    tx.dossier.findUnique({
+      where: { id },
+      select: { id: true, title: true, _count: { select: { items: true } } },
+    })
+  );
 }
 
 export async function getDossier(user: ActingUser, id: string) {
@@ -70,6 +104,8 @@ export async function getDossier(user: ActingUser, id: string) {
       where: { id },
       include: {
         owner: { select: { id: true, name: true, avatarUrl: true } },
+        // このドシエを素材にした記事 (#41)。Article は非保護なので RLS で落ちない
+        articles: { select: { shortId: true, title: true, path: true }, orderBy: { title: "asc" } },
         items: {
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
           include: {
@@ -190,14 +226,26 @@ async function loadAccessFields(user: ActingUser, id: string) {
   return withSession(user, (tx) =>
     tx.dossier.findUnique({
       where: { id },
-      select: { ownerId: true, classification: true, viewMode: true, editMode: true },
+      select: { ownerId: true, classification: true, viewMode: true, editMode: true, kind: true },
     })
   );
+}
+
+/**
+ * クリップのプールは書き換え・削除させない。
+ * 共有設定を private にすると他の人のクリップが見えなくなり、削除すると
+ * 全員のクリップが消える。所有者 (= 最初にクリップした人) にも許さない
+ */
+function assertNotClipPool(access: { kind: DossierKind }) {
+  if (access.kind === DossierKind.clips) {
+    throw new Error("クリップのプールは変更・削除できません");
+  }
 }
 
 export async function updateDossier(user: ActingUser, id: string, input: UpdateDossierInput) {
   const access = await loadAccessFields(user, id);
   if (!access) throw new Error("Dossier not found");
+  assertNotClipPool(access);
   const isOwner = canManageDossier(user, access);
   const aclChanging =
     input.classification !== undefined ||
@@ -237,6 +285,7 @@ export async function updateDossier(user: ActingUser, id: string, input: UpdateD
 export async function deleteDossier(user: ActingUser, id: string) {
   const access = await loadAccessFields(user, id);
   if (!access) throw new Error("Dossier not found");
+  assertNotClipPool(access);
   if (!canManageDossier(user, access)) {
     throw new Error("Only the owner can delete a dossier");
   }
@@ -253,16 +302,31 @@ export async function deleteDossier(user: ActingUser, id: string) {
 // Items
 // ============================================================
 
-async function requireEditAccess(user: ActingUser, dossierId: string) {
+/**
+ * 編集権限の確認。
+ *
+ * **クリップのプールは既定で拒否する。** UI のピッカーはプールを隠しているが、Server Action の
+ * `dossierId` はクライアント入力なので、ここで止めないと「ドシエに追加」でプールに任意の
+ * アセットを入れられる (= `createClip` の classification 検査を素通りする)。プール内の
+ * アイテム操作 (メモ編集・削除) だけ `allowClipPool` で通す
+ */
+export async function requireEditAccess(
+  user: ActingUser,
+  dossierId: string,
+  opts?: { allowClipPool?: boolean }
+) {
   const access = await loadAccessFields(user, dossierId);
   if (!access) throw new Error("Dossier not found");
+  if (!opts?.allowClipPool && access.kind === DossierKind.clips) {
+    throw new Error("クリップのプールには直接追加できません (アセット詳細の「クリップ」から)");
+  }
   if (!canEditDossier(user, access)) {
     throw new Error("Insufficient permission to edit this dossier");
   }
   return access;
 }
 
-async function nextSortOrder(
+export async function nextSortOrder(
   tx: Parameters<Parameters<typeof withSession>[1]>[0],
   dossierId: string
 ): Promise<number> {
@@ -322,6 +386,7 @@ export async function addAssetItem(user: ActingUser, dossierId: string, input: A
         excerptType: input.excerptType ?? null,
         excerptStart: input.excerptStart ?? null,
         excerptEnd: input.excerptEnd ?? null,
+        createdById: user.id,
         sortOrder,
       },
     });
@@ -359,6 +424,7 @@ export async function addExternalLinkItem(
         externalUrl: input.url,
         caption: input.caption ?? "",
         note: input.note ?? "",
+        createdById: user.id,
         sortOrder,
       },
     });
@@ -397,6 +463,7 @@ export async function addExternalImageItem(
         externalImageThumbKey: input.thumbKey ?? null,
         caption: input.caption ?? "",
         note: input.note ?? "",
+        createdById: user.id,
         sortOrder,
       },
     });
@@ -429,7 +496,8 @@ export async function updateDossierItem(
     tx.dossierItem.findUnique({ where: { id: itemId }, select: { dossierId: true } })
   );
   if (!item) throw new Error("Dossier item not found");
-  await requireEditAccess(user, item.dossierId);
+  // クリップ (プールのアイテム) のメモ編集もここを通る
+  await requireEditAccess(user, item.dossierId, { allowClipPool: true });
 
   const updated = await withSession(user, (tx) =>
     tx.dossierItem.update({
@@ -458,7 +526,7 @@ export async function removeDossierItem(user: ActingUser, itemId: string) {
     tx.dossierItem.findUnique({ where: { id: itemId }, select: { dossierId: true } })
   );
   if (!item) throw new Error("Dossier item not found");
-  await requireEditAccess(user, item.dossierId);
+  await requireEditAccess(user, item.dossierId, { allowClipPool: true });
 
   await withSession(user, (tx) => tx.dossierItem.delete({ where: { id: itemId } }));
   await logAudit({

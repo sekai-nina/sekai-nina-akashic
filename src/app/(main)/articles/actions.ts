@@ -3,7 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { redirect, RedirectType } from "next/navigation";
 import { requireRole } from "@/lib/auth/require-role";
-import { addAssetToArticle, applyArticleSource, removeArticleSource } from "@/lib/domain/articles";
+import {
+  addAssetToArticle,
+  applyArticleSource,
+  ArticleDossierError,
+  ensureArticleDossier,
+  removeArticleSource,
+} from "@/lib/domain/articles";
+import { invalidateDossiers } from "@/lib/cache";
 import { toTextType } from "@/lib/utils";
 
 /**
@@ -88,4 +95,34 @@ export async function applyArticleSourceAction(
   // 一覧・詳細・push 画面の「未 push」表示をまとめて更新する (監査ログは domain が書く)
   revalidatePath("/articles", "layout");
   redirect(`/articles/${shortId}?applied=${result.sourceNo}`, RedirectType.replace);
+}
+
+export type EnsureArticleDossierResult =
+  | { ok: true; dossierId: string; created: boolean }
+  | { ok: false; error: string };
+
+/**
+ * 記事の素材ドシエを作ってリンクする (#41)。既にあればそれを返す。
+ * クリップを「この記事に足す」ときの移動先になる。
+ *
+ * 入力起因の失敗は state で返す (本番の Server Action は throw した文言を伏せるので、
+ * 画面に出したい文言は返り値で運ぶ)。
+ */
+export async function ensureArticleDossierAction(
+  articleId: string,
+  shortId: string
+): Promise<EnsureArticleDossierResult> {
+  const user = await requireRole(["admin", "member"]);
+  try {
+    const result = await ensureArticleDossier(user, articleId);
+    if (result.created) {
+      invalidateDossiers();
+      revalidatePath("/dossiers");
+      revalidatePath(`/articles/${shortId}`);
+    }
+    return { ok: true, ...result };
+  } catch (e) {
+    if (e instanceof ArticleDossierError) return { ok: false, error: e.message };
+    throw e;
+  }
 }

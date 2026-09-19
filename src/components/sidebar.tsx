@@ -28,11 +28,14 @@ import {
   Sparkles,
   Wallet,
   MessageCircleQuestion,
+  Scissors,
 } from "lucide-react";
 import { QuickCreateModal } from "@/components/quick-create-modal";
 
 interface SidebarProps {
   user: { name: string; role: string; avatarUrl?: string | null };
+  /** クリップ (#41) の件数。プールが見えないクリアランスでは 0 */
+  clipCount?: number;
 }
 
 const navItems = [
@@ -43,6 +46,7 @@ const navItems = [
   { href: "/entities", label: "エンティティ", icon: Tag },
   { href: "/places", label: "聖地マップ", icon: MapPin },
   { href: "/dossiers", label: "特定支援", icon: FolderSearch },
+  { href: "/clips", label: "クリップ", icon: Scissors },
   { href: "/articles", label: "記事", icon: FileText },
   { href: "/testimonials", label: "口コミ管理", icon: MessageCircle },
   { href: "/repo", label: "レポ収集", icon: Twitter },
@@ -61,7 +65,7 @@ const adminItems = [
   { href: "/admin/invitations", label: "招待管理", icon: UserPlus },
 ];
 
-export function Sidebar({ user }: SidebarProps) {
+export function Sidebar({ user, clipCount = 0 }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -161,6 +165,11 @@ export function Sidebar({ user }: SidebarProps) {
               >
                 <item.icon size={16} />
                 {item.label}
+                {item.href === "/clips" && clipCount > 0 && (
+                  <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-sky-100 text-sky-700 tabular-nums">
+                    {clipCount}
+                  </span>
+                )}
               </Link>
             );
           })}

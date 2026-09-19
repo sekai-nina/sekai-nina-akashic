@@ -16,9 +16,19 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/**
+ * 本文中の画像プレースホルダ `{{IMG:<assetId>}}`。取り込み時に本文へ埋め込まれ、
+ * 表示側 (`RichTextContent`) が画像に置き換える。検索・抜粋では文字列として除く
+ */
+export const IMG_PLACEHOLDER_RE = /\{\{IMG:[a-zA-Z0-9_-]+\}\}/g;
+
+/** 画像プレースホルダを除いた文字列 (抜粋・クリップの保存形) */
+export function stripImagePlaceholders(text: string): string {
+  return text.replace(IMG_PLACEHOLDER_RE, "");
+}
+
 export function normalizeText(text: string): string {
-  return text
-    .replace(/\{\{IMG:[a-zA-Z0-9_-]+\}\}/g, "")
+  return stripImagePlaceholders(text)
     .toLowerCase()
     .normalize("NFKC")
     .replace(/[\s\u3000]+/g, " ")
@@ -108,6 +118,15 @@ export const ENTITY_TYPE_LABELS: Record<string, string> = {
   source: "出典",
   event: "イベント",
   tag: "タグ",
+};
+
+/** エンティティ種別のチップ配色 (一覧・詳細・クリップで共通) */
+export const ENTITY_TYPE_BADGE: Record<string, string> = {
+  person: "bg-purple-100 text-purple-800 border-purple-200",
+  place: "bg-green-100 text-green-800 border-green-200",
+  source: "bg-orange-100 text-orange-800 border-orange-200",
+  event: "bg-blue-100 text-blue-800 border-blue-200",
+  tag: "bg-slate-100 text-slate-700 border-slate-200",
 };
 
 // 表記は sekai-nina-site の聖地マップ (src/utils/places.ts KIND_LABELS) に合わせる。

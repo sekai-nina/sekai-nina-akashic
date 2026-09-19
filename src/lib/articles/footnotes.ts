@@ -154,3 +154,51 @@ export function auditFootnotes(
       : [],
   };
 }
+
+/**
+ * 脚注 `^[n]` を含む段落を、読める文にして返す。
+ *
+ * アセット詳細の「記事での参照」で使う (#41): そのアセットを出典にしている記述が
+ * 記事のどこかを、記事を開かずに分かるようにする。段落は空行区切り。
+ * 見出し・箇条書き・表の行もそれぞれ 1 段落として扱う (出典は表の中にも付く)。
+ *
+ * 表示用なので Markdown は軽く剥がすだけ: 脚注マーカー、`[[タイトル|表示]]`、
+ * 強調、見出しの `#`、画像、リンクの URL 部分。完全な変換は `render.ts` の仕事
+ */
+export function paragraphsCiting(body: string, num: number): string[] {
+  // `]` が続くので `^[1]` が `^[12]` に当たることはない (先読みは不要。付けると `^[1]12月` を落とす)
+  const marker = new RegExp(`\\^\\[${num}\\]`);
+  const out: string[] = [];
+  // 取り込み直後の CRLF 本文も 1 段落に潰さない
+  for (const block of body.split(/\r?\n[ \t]*\r?\n/)) {
+    if (!marker.test(block)) continue;
+    const text = stripInlineMarkdown(block);
+    if (text) out.push(text);
+  }
+  return out;
+}
+
+function stripInlineMarkdown(block: string): string {
+  return (
+    block
+      // 脚注マーカー
+      .replace(FOOTNOTE_RE, "")
+      // 画像は残しても読めない
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+      // [[タイトル|表示]] → 表示 (無ければタイトル)
+      .replace(WIKILINK_RE, (_m, target: string, label?: string) => (label ?? "").trim() || normalizeTarget(target))
+      // [表示](url) → 表示
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+      // 見出し・引用・箇条書きの行頭記号
+      .replace(/^[ \t]*(?:#{1,6}[ \t]+|>[ \t]?|[-*+][ \t]+|\d+\.[ \t]+)/gm, "")
+      // 強調
+      .replace(/\*\*([^*]+)\*\*/g, "$1")
+      .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1$2")
+      .split("\n")
+      // 表: 罫線行 (`|---|:--|` のような行) だけ落とし、セル区切りを空白にする
+      .filter((line) => !(/^[ \t]*\|?[-:| \t]+\|?[ \t]*$/.test(line) && line.includes("-")))
+      .map((line) => line.replace(/^[ \t]*\|/, "").replace(/\|[ \t]*$/, "").replace(/[ \t]*\|[ \t]*/g, " ").trim())
+      .filter((line) => line !== "")
+      .join("\n")
+  );
+}
