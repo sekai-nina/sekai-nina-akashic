@@ -107,9 +107,7 @@ export default async function AiQuestionsPage({
                 </div>
                 <p className="text-sm text-slate-600 mt-1 whitespace-pre-wrap">{item.answer}</p>
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                  {citations.length === 0 ? (
-                    <span className="rounded bg-amber-100 text-amber-800 px-2 py-0.5">出典なし</span>
-                  ) : (
+                  {citations.length > 0 ? (
                     citations.map((c) => (
                       <a
                         key={c.url}
@@ -121,6 +119,11 @@ export default async function AiQuestionsPage({
                         {c.title}
                       </a>
                     ))
+                  ) : item.citationCount > 0 ? (
+                    // KV から取り込んだ古い質問。件数だけ残っていて、どの記事かは分からない
+                    <span className="text-slate-400">出典 {item.citationCount} 件（内訳なし）</span>
+                  ) : (
+                    <span className="rounded bg-amber-100 text-amber-800 px-2 py-0.5">出典なし</span>
                   )}
                   {item.cached && <span className="text-slate-400">キャッシュ</span>}
                   {item.origin && <span className="text-slate-400">{item.origin}</span>}
