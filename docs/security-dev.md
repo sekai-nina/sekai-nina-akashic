@@ -69,6 +69,10 @@ const clearance = auth.clearance;
 - `ArticleSource`（`Article` 自体は公開記事のミラーなので非保護）
 - `MeetGreet`（ミーグリ記事ワークフロー。ドシエを include する読みは所有者判定が要るので `withSession`）
 
+**非保護テーブルを足したら `REVOKE ALL ON TABLE "<Table>" FROM anon, authenticated;` を migration に書く。** Supabase は public スキーマの全テーブルに `anon` / `authenticated` への DML を既定で与え、PostgREST (`/rest/v1/<table>`) がそれを外に出す。保護テーブルが守られているのは RLS が `TO app_runtime` のポリシーしか持たないからで、権限のためではない（`20260919020000_revoke_anon_on_unprotected` で実際に塞いだ）。
+
+`LlmUsageDaily` / `LlmCostDaily` / `CreditSnapshot`（コスト管理 `/costs`）も非保護。金額とトークン数しか持たないが、**画面と Server Action は admin のみ**に絞る（口座の残高なので member / viewer には見せない）。`/status` のコストのチェックも admin にだけ表示し、Discord に流れる要約には金額を入れない。
+
 `Job` / `JobRun` / `StatusCheckState`（パイプライン監視 `/status`）は件数・時刻・メッセージしか持たない運用情報なので非保護。評価 (`src/lib/status/checks.ts`) は cron がセッション外で走らせるため保護テーブルを `prismaInternal` で数えるが、結果はログイン済み全員に見えるので **`detail` に写す名前・タイトルは `internal` 以下の行に限る**（`STATUS_VISIBLE_CLEARANCE`。今日の発見の SQL は `classificationFilterSql("internal")`、鮮度チェックは public / internal の `DataSource` だけ）。confidential 以上は件数にも入れない。本文は出さない（リンク先は各ページの RLS で守られる）。
 
 ## 新しいテーブルを追加するとき

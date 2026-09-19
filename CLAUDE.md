@@ -131,7 +131,7 @@ src/
 └── middleware.ts
 ```
 
-主要ページ: `/search`（既定）, `/gallery`, `/assets`, `/inbox`, `/entities`, `/places`（聖地マップ）, `/dossiers`（特定支援）, `/testimonials`, `/repo`, `/meetgreets`（ミーグリ記事ワークフロー）, `/coverage`, `/graph`, `/analysis`, `/dashboard`, `/status`（パイプライン監視）, `/admin/*`
+主要ページ: `/search`（既定）, `/gallery`, `/assets`, `/inbox`, `/entities`, `/places`（聖地マップ）, `/dossiers`（特定支援）, `/testimonials`, `/repo`, `/meetgreets`（ミーグリ記事ワークフロー）, `/coverage`, `/graph`, `/analysis`, `/dashboard`, `/status`（パイプライン監視）, `/costs`（LLM コスト・admin のみ）, `/admin/*`
 
 ## コード規約
 
@@ -147,7 +147,7 @@ src/
 
 ## データモデル
 
-`prisma/schema.prisma`（29 モデル）。`Asset` がハブ。
+`prisma/schema.prisma`（32 モデル）。`Asset` がハブ。
 
 - `Entity` は `type`（person/place/source/event/tag）で 1 テーブル統合、`@@unique([type, canonicalName])`
 - `DossierItem` は `kind` で `asset_ref` / `external_link` / `external_image` の多態。**意図的に `@@unique([dossierId, assetId])` を持たない**（同一アセットを抜粋ごとに複数回追加できる）
@@ -172,7 +172,7 @@ src/
 | Cloudflare R2 | サムネイル等 | S3 互換。`isR2Configured()` で任意化 |
 | Google Drive | 画像ソース | OAuth2（個人）/ サービスアカウント（共有ドライブ）の 2 方式 |
 | X (Twitter) | recent search | 有料プラン必須 |
-| OpenAI | 口コミ抽出（Structured Outputs） | |
+| OpenAI | 口コミ抽出（Structured Outputs） | 利用量は `/costs` に自己申告する |
 
 環境変数は `.env.example` 参照。必須は `DATABASE_URL` / `DIRECT_URL` / `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` / `SUPABASE_SECRET_KEY`。
 
@@ -182,7 +182,7 @@ src/
 
 - **Web: Vercel**。`vercel.json` で **region `hnd1` 固定**（Supabase ap-northeast-1 とのコロケーション。既定の iad1 だとページ読み込みが 5-8 秒かかった）
 - **CI**: `.github/workflows/ci.yml` が push to `main` で `pnpm typecheck` を回すだけ（Discord bot は撤去済み）
-- **Vercel Cron**: `vercel.json` の `*/15 * * * *` が `GET /api/cron/status` を呼ぶ（`CRON_SECRET` 必須。未設定なら 503 で何もしない）
+- **Vercel Cron**: `vercel.json` の `*/15 * * * *` が `GET /api/cron/status`、`0 3 * * *`（UTC = 12:00 JST）が `GET /api/cron/costs` を呼ぶ（どちらも `CRON_SECRET` 必須。未設定なら 503 で何もしない）
 - `instrumentation.ts` が起動時に Prisma を事前接続（pooler の ~800ms コールドコネクト回避）
 
 ## ドキュメント
@@ -194,6 +194,7 @@ src/
 | `docs/mcp.md` | MCP サーバー（`/api/mcp`）の仕様と設計判断 |
 | `docs/coverage-design.md` | 収集カバレッジ設計書 |
 | `docs/status-design.md` | パイプライン監視（`/status`・ハートビート API・Cron 評価・Discord 通知）設計書 |
+| `docs/costs-design.md` | LLM コスト管理（`/costs`・利用量の自己申告・プロバイダ取り込み・残クレジット判定）設計書 |
 | `docs/security.md` / `docs/security-admin.md` | 非エンジニア / 管理者向け |
 | `docs/architecture.md` | 設計の「なぜ」（RLS を中心に据えた理由、Asset/AssetText の分離、PGroonga 採用の理由） |
 

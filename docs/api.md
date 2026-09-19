@@ -72,6 +72,7 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 | PATCH | `/articles/:shortId` | write | 記事の部分更新（`updatedAt` 必須の楽観ロック） |
 | POST | `/articles/:shortId/sources/:sourceId/apply` | write | 紐づけを反映済みにする（公開判断。internal 以下のみ） |
 | POST | `/jobs/:key/runs` | write | ハートビート（bot / ワーカーのジョブが実行結果を報告する） |
+| POST | `/usage` | write | LLM の利用量の自己申告（トークン数を送ると akashic が金額に換算する） |
 | GET | `/meetgreets` | read | ミーグリ（記事ワークフロー）一覧と進み具合 |
 | POST | `/meetgreets` | write | ミーグリ作成（ドシエと X レポ収集を自動作成し収集を 1 回実行、素材候補を返す） |
 | GET | `/meetgreets/:id` | read | ミーグリ詳細 + 素材候補 |
@@ -1140,6 +1141,46 @@ bot や外部ワーカーの各ジョブが実行ごとに結果を報告し、a
 ```
 
 `recorded` は履歴行を作ったかどうか（上のまとめ規則で作らなかったときは `false`）。
+
+### POST /usage
+
+LLM の利用量を報告する。akashic が単価表で USD に換算し、**日次 × プロバイダ × モデル × 機能**に積む（設計は `docs/costs-design.md`）。
+
+```json
+{
+  "provider": "openai",
+  "model": "gpt-5.4-mini",
+  "feature": "bot.discovery",
+  "inputTokens": 741,
+  "cachedInputTokens": 0,
+  "outputTokens": 47,
+  "requests": 1
+}
+```
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `provider` | `"openai"` / `"anthropic"` / `"google"` | ✓ | |
+| `model` | string (≤100) | ✓ | API に渡したモデル名そのまま。日付サフィックスや `models/` 接頭辞が付いていてもよい |
+| `feature` | string | ✓ | 呼び出し元。`^[a-z0-9][a-z0-9_.:-]{0,63}$`。`<出所>.<機能>` で揃える（`bot.discovery` / `worker.fitan_site`） |
+| `inputTokens` | integer ≥ 0 | | キャッシュ読み出しを**含まない**入力 |
+| `cachedInputTokens` | integer ≥ 0 | | キャッシュから読んだ入力（安い単価で換算する） |
+| `outputTokens` | integer ≥ 0 | | |
+| `requests` | integer ≥ 0 | | 省略時は 1。まとめて報告するときだけ指定する |
+| `date` | `YYYY-MM-DD` | | **JST の暦日**。省略時は今日。過去分をまとめて入れるときだけ指定 |
+
+未知のフィールドは 400（strict）。
+
+- **同じ日・同じモデル・同じ機能への報告は足し込まれる**（1 回ごとに送ってよい）
+- **単価表（`src/lib/costs/pricing.ts`）に無いモデルは金額を出さず、トークンだけ記録する。** 応答の `unpriced` が `true` になり、`/costs` に「価格未登録」として出る（黙って 0 円にはしない）
+- 報告の失敗で呼び出し側の本処理を止めないこと（集計より本処理が優先）
+- 監査ログには残さない
+
+**レスポンス:**
+
+```json
+{"date": "2026-09-19", "costUsd": 0.000139, "unpriced": false}
+```
 
 ---
 
