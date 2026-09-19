@@ -1,11 +1,18 @@
 import { redirect } from "next/navigation";
 import { LlmProvider } from "@prisma/client";
 import { auth } from "@/lib/auth";
-import { getFeatureBreakdown, getProviderSummaries, HISTORY_DAYS, ALL_PROVIDERS } from "@/lib/costs/report";
+import {
+  getFeatureBreakdown,
+  getFeatureTotals,
+  getProviderSummaries,
+  HISTORY_DAYS,
+  ALL_PROVIDERS,
+} from "@/lib/costs/report";
 import { isAnthropicAdminConfigured, isOpenAiAdminConfigured } from "@/lib/costs/providers";
 import { CREDIT_WARN_DAYS, fillMissingDays } from "@/lib/costs/summary";
 import {
   LLM_PROVIDER_LABELS,
+  LLM_USAGE_SOURCE_LABELS,
   STATUS_LEVEL_BADGE,
   STATUS_LEVEL_LABELS,
   addDaysToDateString,
@@ -36,7 +43,12 @@ export default async function CostsPage() {
   if (session.user.role !== "admin") redirect("/dashboard");
 
   const now = new Date();
-  const [summaries, breakdown] = await Promise.all([getProviderSummaries(now), getFeatureBreakdown(now)]);
+  const [summaries, totals, breakdown] = await Promise.all([
+    getProviderSummaries(now),
+    getFeatureTotals(now),
+    getFeatureBreakdown(now),
+  ]);
+  const maxFeatureUsd = Math.max(0.000001, ...totals.map((t) => t.costUsd ?? 0));
   // グラフの横軸を 3 プロバイダで揃える (記録の無い日は 0 で埋める)
   const today = toJstDateOnly(now)!;
   const chartFrom = addDaysToDateString(today, -HISTORY_DAYS + 1);
@@ -136,6 +148,44 @@ export default async function CostsPage() {
       </section>
 
       <section className="mb-6">
+        <h2 className="text-sm font-semibold text-slate-700 mb-1">何にかかっているか（{HISTORY_DAYS} 日）</h2>
+        <p className="text-xs text-slate-500 mb-2">
+          機能ごとの合計。
+          <span className="font-medium">「自己申告」と「プロバイダ」は同じ利用を別の見方で数えているので足し合わせないでください</span>
+          （自己申告は呼び出し側が報告した機能単位、プロバイダは API キー単位。キーを共有している機能は
+          プロバイダ側では分かれません）。
+        </p>
+        {totals.length === 0 ? (
+          <p className="text-sm text-slate-400 py-6 text-center bg-white border border-slate-200 rounded-lg">
+            まだ記録がありません
+          </p>
+        ) : (
+          <div className="bg-white border border-slate-200 rounded-lg divide-y divide-slate-100">
+            {totals.map((t) => (
+              <div key={`${t.provider}-${t.feature}-${t.source}`} className="px-4 py-2">
+                <div className="flex items-baseline gap-2 text-sm">
+                  <span className="font-mono text-xs">{t.feature}</span>
+                  <span className="text-[11px] text-slate-400">
+                    {LLM_PROVIDER_LABELS[t.provider]} · {LLM_USAGE_SOURCE_LABELS[t.source]}
+                    {t.requests > 0 && ` · ${t.requests.toLocaleString("ja-JP")} 回`}
+                  </span>
+                  <span className="ml-auto font-medium">
+                    {t.costUsd == null ? <span className="text-amber-700 text-xs">価格未登録</span> : usd(t.costUsd, 4)}
+                  </span>
+                </div>
+                <div className="mt-1 h-1.5 bg-slate-100 rounded-sm overflow-hidden">
+                  <div
+                    className="h-full bg-slate-400"
+                    style={{ width: `${Math.max(1, ((t.costUsd ?? 0) / maxFeatureUsd) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="mb-6">
         <h2 className="text-sm font-semibold text-slate-700 mb-1">機能 × モデルの内訳（{HISTORY_DAYS} 日）</h2>
         <p className="text-xs text-slate-500 mb-2">
           自己申告とプロバイダの usage API から。
@@ -165,7 +215,7 @@ export default async function CostsPage() {
                   <tr key={`${r.provider}-${r.feature}-${r.model}-${r.source}`} className="border-b border-slate-50 last:border-0">
                     <td className="px-4 py-1.5 font-mono text-xs">{r.feature}</td>
                     <td className="px-4 py-1.5 font-mono text-xs text-slate-500">{r.model}</td>
-                    <td className="px-4 py-1.5 text-xs text-slate-400">{r.source === "reported" ? "自己申告" : "プロバイダ"}</td>
+                    <td className="px-4 py-1.5 text-xs text-slate-400">{LLM_USAGE_SOURCE_LABELS[r.source]}</td>
                     <td className="px-4 py-1.5 text-right text-slate-500">{r.requests.toLocaleString("ja-JP")}</td>
                     <td className="px-4 py-1.5 text-right text-slate-500">{r.inputTokens.toLocaleString("ja-JP")}</td>
                     <td className="px-4 py-1.5 text-right text-slate-500">{r.outputTokens.toLocaleString("ja-JP")}</td>
