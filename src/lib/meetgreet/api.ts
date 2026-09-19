@@ -5,9 +5,15 @@
 
 import { z } from "zod";
 import { isValidDateString } from "@/lib/utils";
-import { MAX_EXCERPTS_PER_APPLY, MAX_REFERENCE_PHOTOS, maxReferencePhotos } from "./config";
+import {
+  MAX_EXCERPTS_PER_APPLY,
+  MAX_REFERENCE_PHOTOS,
+  MAX_SKETCH_SOURCES,
+  maxReferencePhotos,
+} from "./config";
 import type { MeetGreetSummary, MeetGreetDetail } from "@/lib/domain/meetgreets";
 import type { CandidateGroup } from "./candidates";
+import { MIN_FRACTION } from "./crop";
 import { getR2PublicUrl } from "@/lib/r2";
 
 /** 作り直しの指示の長さ */
@@ -93,6 +99,31 @@ export const GenerateSketchSchema = z
  * (青天井だと `MeetGreet.articleExclusions` の Json 列が無制限に太る)
  */
 export const ExclusionKeysSchema = z.array(z.string().min(1).max(200)).max(200);
+
+/**
+ * 参照写真の切り抜き枠 (#136)。`{ "<assetId>": {x,y,w,h} | null }`。
+ * 値は**画像に対する割合 (0〜1)**。null は枠を外す = 画像全体を使う
+ */
+export const SketchCropsSchema = z
+  .record(
+    z.string().min(1).max(64),
+    z
+      .object({
+        x: z.number().min(0).max(1),
+        y: z.number().min(0).max(1),
+        w: z.number().min(MIN_FRACTION).max(1),
+        h: z.number().min(MIN_FRACTION).max(1),
+      })
+      .strict()
+      // 画像の外にはみ出す枠は受け取らない (丸めのぶんだけ許す)
+      .refine((c) => c.x + c.w <= 1.0001 && c.y + c.h <= 1.0001, {
+        message: "切り抜きの範囲が画像の外にはみ出しています",
+      })
+      .nullable()
+  )
+  .refine((m) => Object.keys(m).length <= MAX_SKETCH_SOURCES, {
+    message: `一度に指定できるのは ${MAX_SKETCH_SOURCES} 枚までです`,
+  });
 
 export const ArticleGenerateSchema = z
   .object({

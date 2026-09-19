@@ -109,8 +109,10 @@ export const SKETCH_PROMPT = `添付した複数枚の画像のうち、最後�
 元写真の雰囲気は参考にしてよいですが、ポーズや構図をそのまま写したようには見せず、服装説明用に再構成されたイラストとして仕上げてください。`;
 
 /** 回ごとの追加指示を足した最終プロンプト */
-export function buildSketchPrompt(extra: string): string {
+export function buildSketchPrompt(extra: string, base: string = SKETCH_PROMPT): string {
+  // base は画面で編集された文面 (#136)。未設定ならこのファイルの既定
+  const body = base.trim() || SKETCH_PROMPT;
   const trimmed = extra.trim();
-  if (!trimmed) return SKETCH_PROMPT;
-  return `${SKETCH_PROMPT}\n\n今回の追加指示（上記より優先）：\n${trimmed}`;
+  if (!trimmed) return body;
+  return `${body}\n\n今回の追加指示（上記より優先）：\n${trimmed}`;
 }

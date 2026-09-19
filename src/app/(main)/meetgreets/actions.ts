@@ -19,9 +19,10 @@ import {
   restoreMeetGreetExclusions,
   saveMeetGreetArticle,
 } from "@/lib/domain/meetgreet-article-save";
-import { generateSketch, selectSketch } from "@/lib/domain/meetgreet-sketch";
+import { generateSketch, saveSketchCrops, selectSketch } from "@/lib/domain/meetgreet-sketch";
 import {
   ApplyExcerptsSchema,
+  SketchCropsSchema,
   ExclusionKeysSchema,
   GenerateSketchSchema,
   MAX_MATERIALS_PER_APPLY,
@@ -165,6 +166,25 @@ export async function generateSketchAction(
     const { candidates } = await generateSketch(user, mg, parsed.data);
     revalidatePath(`/meetgreets/${id}`);
     return { ok: true as const, candidates };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+/** 参照写真の切り抜き枠を保存する (#136)。値が null なら枠を外す */
+export async function saveSketchCropsAction(
+  id: string,
+  changes: Record<string, { x: number; y: number; w: number; h: number } | null>
+) {
+  const user = await requireMember();
+  const parsed = SketchCropsSchema.safeParse(changes);
+  if (!parsed.success) return { ok: false as const, error: formatZodError(parsed.error) };
+  try {
+    const mg = await getMeetGreet(user, id);
+    if (!mg) throw new Error("見つかりません");
+    const crops = await saveSketchCrops(user, mg, parsed.data);
+    revalidatePath(`/meetgreets/${id}`);
+    return { ok: true as const, crops };
   } catch (e) {
     return { ok: false as const, error: errorMessage(e) };
   }

@@ -4,8 +4,10 @@ import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getMeetGreet, listMaterialCandidates, meetGreetTitle } from "@/lib/domain/meetgreets";
 import { listMeetGreetKeeps } from "@/lib/domain/meetgreet-reports";
+import { getSketchSetting } from "@/lib/domain/sketch-setting";
 import { listSketchSources } from "@/lib/domain/meetgreet-sketch";
 import { jsonStringArray } from "@/lib/meetgreet/config";
+import { cropsFromJson } from "@/lib/meetgreet/crop";
 import { getR2PublicUrl } from "@/lib/r2";
 import { MATERIAL_WINDOW_DAYS, REPORT_WINDOW_DAYS, TALK_SUGGEST_DAYS } from "@/lib/meetgreet/config";
 import { formatDate } from "@/lib/utils";
@@ -35,10 +37,11 @@ export default async function MeetGreetDetailPage({ params }: Props) {
   const mg = await getMeetGreet(session.user, id);
   if (!mg) notFound();
 
-  const [candidates, sketchSources, keeps] = await Promise.all([
+  const [candidates, sketchSources, keeps, sketchSetting] = await Promise.all([
     listMaterialCandidates(session.user, mg),
     listSketchSources(session.user, mg),
     listMeetGreetKeeps(session.user, mg, mg.reports?.keep ?? 0),
+    getSketchSetting(),
   ]);
   // 新しい候補を先に出す (作り直すほど古いものが上に溜まらないように)
   const sketchCandidates = jsonStringArray(mg.sketchCandidates)
@@ -159,6 +162,12 @@ export default async function MeetGreetDetailPage({ params }: Props) {
           candidates={sketchCandidates}
           selectedKey={mg.sketchKey}
           extraPrompt={mg.extraSketchPrompt}
+          crops={cropsFromJson(mg.sketchCrops)}
+          styleReference={{
+            url: sketchSetting.styleReferenceUrl,
+            isDefault: sketchSetting.isDefaultStyleReference,
+            canEdit: session.user.role === "admin",
+          }}
         />
       </StepCard>
 

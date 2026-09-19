@@ -2,10 +2,17 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { Check, Sparkles } from "lucide-react";
+import { Check, Crop, Sparkles } from "lucide-react";
 import type { SketchCandidate, SketchSourceAsset } from "@/lib/meetgreet/types";
+import type { CropMap, CropRect } from "@/lib/meetgreet/crop";
 import { maxReferencePhotos } from "@/lib/meetgreet/config";
-import { generateSketchAction, selectSketchAction, updateMeetGreetAction } from "../actions";
+import {
+  generateSketchAction,
+  saveSketchCropsAction,
+  selectSketchAction,
+  updateMeetGreetAction,
+} from "../actions";
+import { CropEditor } from "./crop-editor";
 
 interface Props {
   meetGreetId: string;
@@ -13,6 +20,10 @@ interface Props {
   candidates: SketchCandidate[];
   selectedKey: string | null;
   extraPrompt: string;
+  /** 参照写真の切り抜き枠 (#136) */
+  crops: CropMap;
+  /** 画風の見本。何を参考にしているかを見せる (#136) */
+  styleReference: { url: string | null; isDefault: boolean; canEdit: boolean };
 }
 
 const textareaCls =
@@ -22,10 +33,19 @@ const textareaCls =
  * スケッチの生成。ドシエの画像から参照を選び、候補を 2 枚作って 1 枚を確定する。
  * 気に入らなければ候補を 1 枚選んで修正指示を書き、それを元に作り直す。
  */
-export function SketchStep({ meetGreetId, sources, candidates, selectedKey, extraPrompt }: Props) {
+export function SketchStep({
+  meetGreetId,
+  sources,
+  candidates,
+  selectedKey,
+  extraPrompt,
+  crops,
+  styleReference,
+}: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
+  const [cropping, setCropping] = useState<SketchSourceAsset | null>(null);
 
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [extra, setExtra] = useState(extraPrompt);
@@ -97,6 +117,27 @@ export function SketchStep({ meetGreetId, sources, candidates, selectedKey, extr
     });
   }
 
+  /** 切り抜き枠を保存する。`null` で枠を外す */
+  function saveCrop(assetId: string, rect: CropRect | null) {
+    setMsg(rect ? "切り抜きを保存中…" : "切り抜きを外しています…");
+    startTransition(async () => {
+      const res = await saveSketchCropsAction(meetGreetId, { [assetId]: rect }).catch(
+        (e: unknown) => ({
+          ok: false as const,
+          error: e instanceof Error ? e.message : "通信に失敗しました",
+        })
+      );
+      if (!res.ok) {
+        setMsg(`エラー: ${res.error}`);
+        return;
+      }
+      setMsg(rect ? "切り抜きを保存しました" : "切り抜きを外しました");
+      setCropping(null);
+      // 枠は生成のときにサーバーが読む。画面の表示も合わせ直す
+      router.refresh();
+    });
+  }
+
   function select(key: string) {
     startTransition(async () => {
       const res = await selectSketchAction(meetGreetId, key).catch((e: unknown) => ({
@@ -128,8 +169,9 @@ export function SketchStep({ meetGreetId, sources, candidates, selectedKey, extr
         <ul className="grid grid-cols-3 sm:grid-cols-5 gap-2" role="group" aria-label="参照にする写真">
           {sources.map((a) => {
             const on = picked.has(a.id);
+            const crop = crops[a.id];
             return (
-              <li key={a.id}>
+              <li key={a.id} className="relative">
                 <button
                   type="button"
                   onClick={() => togglePhoto(a.id)}
@@ -149,10 +191,56 @@ export function SketchStep({ meetGreetId, sources, candidates, selectedKey, extr
                     </span>
                   )}
                 </button>
+                {a.thumbnailUrl && (
+                  <button
+                    type="button"
+                    onClick={() => setCropping(a)}
+                    disabled={pending}
+                    aria-label={`${a.title} を切り抜く`}
+                    title={crop ? "切り抜き済み（押すと直せます）" : "切り抜く"}
+                    className={
+                      "absolute bottom-1 right-1 inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] shadow-sm disabled:opacity-50 " +
+                      (crop
+                        ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                        : "bg-white/90 text-slate-600 hover:bg-white")
+                    }
+                  >
+                    <Crop size={10} aria-hidden />
+                    {crop ? "済" : ""}
+                  </button>
+                )}
               </li>
             );
           })}
         </ul>
+      </div>
+
+      <div className="flex items-start gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+        {styleReference.url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={styleReference.url}
+            alt="画風の見本"
+            className="w-24 shrink-0 rounded border border-slate-200 bg-white"
+          />
+        ) : (
+          <span className="flex h-16 w-24 shrink-0 items-center justify-center rounded border border-slate-200 bg-white text-[10px] text-slate-400">
+            見本なし
+          </span>
+        )}
+        <div className="min-w-0 text-xs text-slate-600">
+          <p className="font-medium text-slate-700">画風の見本</p>
+          <p className="mt-0.5 leading-relaxed">
+            毎回この 1 枚を参考に描かせています（直前の結果を参照し続けると、コピーのコピーで
+            画風がずれていくため）。
+            {styleReference.isDefault ? "いまは既定の見本です。" : "差し替え済みの見本です。"}
+          </p>
+          {styleReference.canEdit && (
+            <a href="/admin/sketch" className="mt-1 inline-block text-slate-500 hover:underline">
+              見本とプロンプトを変える
+            </a>
+          )}
+        </div>
       </div>
 
       <div>
@@ -203,6 +291,20 @@ export function SketchStep({ meetGreetId, sources, candidates, selectedKey, extr
         </button>
         {msg && <span className="text-xs text-slate-500">{msg}</span>}
       </div>
+
+      {cropping && (
+        <CropEditor
+          // **サムネイルではなく、サーバーが実際に切る画像**の上で枠を引く
+          // (サムネイルは出どころで向きが変わり、座標系が揃わない)
+          src={`/api/meetgreets/${meetGreetId}/sketch-reference/${cropping.id}`}
+          title={cropping.title}
+          value={crops[cropping.id] ?? null}
+          saving={pending}
+          onSave={(rect) => saveCrop(cropping.id, rect)}
+          onClear={() => saveCrop(cropping.id, null)}
+          onClose={() => setCropping(null)}
+        />
+      )}
 
       {candidates.length > 0 && (
         <div>
