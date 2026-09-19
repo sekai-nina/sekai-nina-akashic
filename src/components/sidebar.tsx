@@ -26,6 +26,7 @@ import {
   FileText,
   Activity,
   Sparkles,
+  MessageCircleQuestion,
 } from "lucide-react";
 import { QuickCreateModal } from "@/components/quick-create-modal";
 
@@ -46,6 +47,7 @@ const navItems = [
   { href: "/repo", label: "レポ収集", icon: Twitter },
   { href: "/meetgreets", label: "ミーグリ", icon: Sparkles },
   { href: "/coverage", label: "収集カバレッジ", icon: Grid3x3 },
+  { href: "/ai-questions", label: "案内AIへの質問", icon: MessageCircleQuestion },
   { href: "/graph", label: "グラフ", icon: Network },
   { href: "/analysis", label: "テキスト分析", icon: BarChart3 },
   { href: "/dashboard", label: "ダッシュボード", icon: LayoutDashboard },
