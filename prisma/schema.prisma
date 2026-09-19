@@ -967,6 +967,13 @@ model MeetGreet {
   /// スケッチ生成時にプロンプト本体へ追記する、この回だけの指示
   extraSketchPrompt String  @default("")
 
+  /// 記事に**足さない**と決めたもののキー (#134)。
+  /// 追記は「記事の本文に無い = まだ足していない」としか判断できず、人が意図的に消したものを
+  /// 区別できない (X 側で削除されたレポを手で消しても、次の追記で復活する)。外したものを
+  /// ここに覚えて二度と提示しない。
+  /// 形式: `report:<正規化 URL>` / `asset:<assetId>` / `tiktok:<videoId>` / `quote:<ハッシュ>`
+  articleExclusions Json @default("[]")
+
   createdById String
   createdBy   User   @relation("MeetGreetCreatedBy", fields: [createdById], references: [id])
 
