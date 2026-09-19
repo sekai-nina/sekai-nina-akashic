@@ -78,6 +78,8 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 | PATCH | `/meetgreets/:id` | write | シングル名・呼び分け・スケッチ追加指示の更新 |
 | POST | `/meetgreets/:id/materials` | write | 素材候補のチェック結果をドシエに反映 |
 | POST | `/meetgreets/:id/reports` | write | X レポの再収集 |
+| POST | `/meetgreets/:id/sketch` | write | 服装スケッチの候補を生成（作り直しも） |
+| POST | `/meetgreets/:id/sketch/select` | write | 候補の 1 枚を確定 |
 
 ---
 
@@ -926,6 +928,8 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 
 `MeetGreet` は保護テーブル（`classification`、既定 `internal`）。一覧・詳細は API キーの持ち主の clearance で見える行だけ。
 
+「本人の感想」の抜粋提案（ドシエのブログ本文から該当箇所を LLM に選ばせる）は**画面だけ**の機能で API は無い。公開サイトに載る引用文なので、人が範囲を確認してからドシエに入れる前提のため。
+
 ### GET /meetgreets
 
 日付降順の一覧。各行に進み具合（ドシエの件数 / keep 件数 / スケッチ有無 / 記事有無）が付く。
@@ -1051,6 +1055,39 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 X レポを再収集する（作成時に失敗したとき、翌日以降の投稿を拾うとき）。ボディ無し。成功で `{"fetched": n, "added": n, "mediaSaved": n}`。収集が紐づいていなければ 409、X API 側の失敗（トークン未設定・レート制限・7 日より前の日付）は 502。**`POST /meetgreets` と同じく数十秒かかる。**
 
 keep / total は `GET /meetgreets/:id` の `repoCollection` で読む。判定（keep / reject）自体の API は無い（画面 `/repo/:id` で人が行う）。
+
+---
+
+### POST /meetgreets/:id/sketch
+
+その日の服装スケッチ（記事のサムネ / OGP 画像）の候補を生成する。ドシエに入っている写真を参照に、シリーズの画風をそろえるための**基準スケッチ**を添えて OpenAI の画像編集 API（`gpt-image-1`）に投げる。
+
+```json
+{"assetIds": ["…", "…"], "revisionOf": "meetgreet/…/sketch/1789…-0.png", "revisionNote": "袖のふくらみをもっと大きく"}
+```
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `assetIds` | string[] | ✓ | 参照にする画像。**ドシエに入っている画像に限る**（1〜15 枚） |
+| `revisionOf` | string | | 作り直しの元にする候補の key（`sketch.candidates[].key`）。渡すとその画像も参照に足す |
+| `revisionNote` | string (≤2000) | | 作り直しの指示 |
+
+**レスポンス:** `{"candidates": [{"key": "…", "url": "https://…"}, …]}`（既定 2 枚）。`sketch.candidates` には追記され、過去の候補は消えない。確定するまで `sketchKey` は変わらない。
+
+- **1 回あたり 1 分前後かかる**（実測: 参照 2 枚 + 基準スケッチで 59 秒）。`POST /meetgreets` と同じく bot は deferred ack してから呼ぶ
+- 回ごとの追加指示（どの髪型を中央にするか等）は `PATCH /meetgreets/:id` の `extraSketchPrompt` に入れておく。生成のたびにプロンプトの末尾に足される
+- 参照は **16 枚まで**という API の制限があり、最後の 1 枚を基準スケッチに使うので写真は 15 枚まで
+- 画像は Drive に原本があればそれを、無ければ R2 の 640px サムネイルを使う
+- 生成は `1536x1024` で行い、**左右に白を足して 1.91:1（1956x1024）にする**。`gpt-image-1` が出せるのは 1024x1024 / 1536x1024 / 1024x1536 の 3 つだけで 1.91:1 を直接出せないため。上下を切ると頭や補助スケッチが欠けるので、描かれたものが減らない白埋めにしている
+- 入力が不正なら 400、生成・保存の失敗（OpenAI / R2）は 502
+
+### POST /meetgreets/:id/sketch/select
+
+```json
+{"key": "meetgreet/…/sketch/1789…-0.png"}
+```
+
+候補の 1 枚を確定して `sketchKey` にする（記事のサムネになる）。`sketch.candidates` に無い key は 400。**レスポンス:** 更新後の行。
 
 ---
 
