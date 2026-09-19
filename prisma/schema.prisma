@@ -187,6 +187,7 @@ model User {
   sketchSettings      SketchSetting[]   @relation("SketchSettingUpdatedBy")
   createdInvitations  Invitation[]      @relation("InvitationCreatedBy")
   meetGreets          MeetGreet[]       @relation("MeetGreetCreatedBy")
+  lives               Live[]            @relation("LiveCreatedBy")
   creditSnapshots     CreditSnapshot[]  @relation("CreditSnapshotCreatedBy")
   instaWatchTargets InstaWatchTarget[] @relation("InstaWatchTargetUpdatedBy")
   instaAccounts InstaAccount[] @relation("InstaAccountUpdatedBy")
@@ -285,6 +286,7 @@ model Entity {
   assets       AssetEntity[]
   testimonials Testimonial[]
   place        Place?
+  lives        Live[]
 
   @@unique([type, canonicalName])
 }
@@ -359,6 +361,7 @@ model Dossier {
   meetGreet       MeetGreet?
   /// このドシエを素材にした記事 (`Article.dossierId`)。1 本のドシエから複数記事を許す
   articles        Article[]
+  live            Live?
 
   @@index([ownerId])
   @@index([classification])
@@ -588,6 +591,7 @@ model RepoCollection {
 
   tweets    RepoTweet[]
   meetGreet MeetGreet?
+  live      Live?
 
   @@index([classification])
 }
@@ -804,6 +808,7 @@ model Article {
 
   sources       ArticleSource[]
   meetGreet     MeetGreet?
+  live          Live?
   anniversaries Anniversary[]
 
   @@index([type])
@@ -1033,6 +1038,130 @@ model MeetGreet {
   @@unique([date, format, label])
   @@index([date])
   @@index([classification])
+}
+
+// ---------------------------------------------------------------------------
+// ライブ (公演) 記事ワークフロー (/lives) (#148)
+//
+// ミーグリ (MeetGreet) と同じ形で、1 つのライブ (ツアー) につき 1 行。素材置き場の Dossier・
+// X レポの RepoCollection・生成した Article を束ね、公演 (LivePerformance) と披露曲 (LiveSong →
+// Song) を持つ。記事は「1 記事 = 1 ライブ」で、公演は本文の表になる。
+//
+// Live / LivePerformance / LiveSong は保護テーブル (Live は classification の direct-classification
+// RLS、子 2 つは親 Live の classification に従う)。Song は曲名しか持たない非保護テーブル。
+// ---------------------------------------------------------------------------
+
+model Live {
+  id   String @id @default(cuid())
+  /// ライブ名 (例: 日向坂46 ARENA TOUR 2025「MONSTER GROOVE」)。記事のタイトル・ドシエ名・収集名になる
+  name String
+  /// 補足 (「セットリスト違いの A / B パターン」等)。記事の公演の章の頭に出す
+  note String @default("")
+
+  /// 同名の event エンティティ。作成時に選ぶか同名で作る。このエンティティが付いたアセットも素材候補に出す
+  entityId String?
+  entity   Entity? @relation(fields: [entityId], references: [id], onDelete: SetNull)
+
+  classification ClearanceLevel @default(internal)
+
+  /// 素材置き場。作成時に自動で作る (1:1)。ドシエが消えたらこの行も消す
+  dossierId String  @unique
+  dossier   Dossier @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+
+  /// X レポの収集。作成時に自動で作る。コレクションだけ消しても行は残す
+  repoCollectionId String?         @unique
+  repoCollection   RepoCollection? @relation(fields: [repoCollectionId], references: [id], onDelete: SetNull)
+
+  /// 生成した記事 (PR3 で埋まる)
+  articleId String?  @unique
+  article   Article? @relation(fields: [articleId], references: [id], onDelete: SetNull)
+
+  /// X レポ収集のハッシュタグ (string[])。坂井新奈 AND 各タグ、タグ間は OR。空なら坂井新奈だけ
+  reportTags Json @default("[]")
+
+  /// スケッチ候補の R2 key の配列 (PR2 で使う)
+  sketchCandidates  Json    @default("[]")
+  /// 確定したスケッチの R2 key。記事のサムネになる
+  sketchKey         String?
+  /// スケッチ生成時にプロンプト本体へ追記する、このライブだけの指示
+  extraSketchPrompt String  @default("")
+
+  /// 記事に足さないと決めたもののキー (MeetGreet.articleExclusions と同じ形式)
+  articleExclusions Json @default("[]")
+
+  createdById String
+  createdBy   User   @relation("LiveCreatedBy", fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  performances LivePerformance[]
+  songs        LiveSong[]
+
+  @@index([classification])
+  @@index([entityId])
+}
+
+/// 公演 1 回分。ツアーなら日付 × 会場ごとに 1 行 (昼 / 夜は label で分ける)
+model LivePerformance {
+  id     String @id @default(cuid())
+  liveId String
+  live   Live   @relation(fields: [liveId], references: [id], onDelete: Cascade)
+
+  /// 公演日 (JST "YYYY-MM-DD")。MeetGreet.date と同じく文字列で持つ (TZ 事故回避)
+  date  String
+  venue String @default("")
+  /// 「昼公演」「夜公演」など同日の呼び分け
+  label String @default("")
+  /// 備考 (「アンコールに JOYFUL LOVE を追加」等)。記事の表の備考列に出る
+  note  String @default("")
+
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  songs LiveSong[]
+
+  @@index([liveId])
+  @@index([date])
+}
+
+/// 曲のマスタ。公演フォームの入力から find-or-create で増える (表記揺れは人が直す)
+model Song {
+  id        String   @id @default(cuid())
+  title     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  liveSongs LiveSong[]
+}
+
+enum LiveSongRole {
+  /// 披露曲
+  performed
+  /// センター曲 (坂井新奈がセンターを務めた曲)
+  center
+}
+
+/// ライブ / 公演と曲の紐づけ。**performanceId が null ならライブ共通の披露曲**、
+/// あれば公演限定の追加曲またはセンター曲
+model LiveSong {
+  id     String @id @default(cuid())
+  liveId String
+  live   Live   @relation(fields: [liveId], references: [id], onDelete: Cascade)
+
+  performanceId String?
+  performance   LivePerformance? @relation(fields: [performanceId], references: [id], onDelete: Cascade)
+
+  songId String
+  song   Song   @relation(fields: [songId], references: [id], onDelete: Restrict)
+
+  role      LiveSongRole @default(performed)
+  sortOrder Int          @default(0)
+
+  @@index([liveId])
+  @@index([performanceId])
+  @@index([songId])
 }
 
 // ---------------------------------------------------------------------------
