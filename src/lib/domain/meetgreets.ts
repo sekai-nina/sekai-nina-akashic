@@ -10,7 +10,8 @@
  * 所有者判定 (app.user_id) が要るので読み書きとも withSession で行う。
  */
 
-import type { ClearanceLevel, MeetGreetFormat, Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import type { ClearanceLevel, MeetGreetFormat } from "@prisma/client";
 import { prisma, withClearance, withSession, type TransactionClient } from "@/lib/db";
 import { assertClearance } from "@/lib/classification";
 import { canEditDossier } from "@/lib/auth/dossier-permissions";
@@ -106,7 +107,7 @@ export class MeetGreetInputError extends Error {}
 export async function createMeetGreet(
   user: ActingUser,
   input: CreateMeetGreetInput
-): Promise<{ id: string }> {
+): Promise<{ id: string; reused: boolean }> {
   if (!isValidDateString(input.date)) {
     throw new MeetGreetInputError("date は暦に実在する YYYY-MM-DD で指定してください");
   }
@@ -115,7 +116,41 @@ export async function createMeetGreet(
 
   const naming = { ...input, single: input.single?.trim(), label: input.label?.trim() };
   const groups = reportTagGroups(input.format);
+  const label = naming.label ?? "";
 
+  // **同じ回が既にあればそれを返す (#112)。** 作成は X の収集込みで数十秒かかることがあり、
+  // bot がタイムアウトして再送するとドシエ・収集が二重にできていた。
+  // 競合で擦り抜けた分は `@@unique([date, format, label])` が止め、下の catch で拾う
+  const existing = await findSameMeetGreet(user, input.date, input.format, label);
+  if (existing) return { id: assertReusable(existing, input), reused: true };
+
+  let created: { id: string };
+  try {
+    created = await createInTransaction(user, input, naming, groups, classification);
+  } catch (e) {
+    // 同時に 2 本走ったとき。@@unique が止めてくれるので、既にできたほうを返す
+    if (isDuplicateMeetGreet(e)) {
+      const again = await findSameMeetGreet(user, input.date, input.format, label);
+      if (again) return { id: assertReusable(again, input), reused: true };
+      // **見えない回とぶつかった。** 自分より上の機密で同じ回が作られている。
+      // Prisma の文面をそのまま出すと「その日に何かある」と分かってしまうし、
+      // 500 のままだと bot が永久に再送するので、入力の問題として返す
+      throw new MeetGreetInputError(
+        "この日付・形式・呼び分けでは作成できません。呼び分け (label) を変えてください"
+      );
+    }
+    throw e;
+  }
+  return { id: created.id, reused: false };
+}
+
+async function createInTransaction(
+  user: ActingUser,
+  input: CreateMeetGreetInput,
+  naming: MeetGreetNaming,
+  groups: ReturnType<typeof reportTagGroups>,
+  classification: ClearanceLevel
+): Promise<{ id: string }> {
   const created = await withSession(user, async (tx) => {
     // 既にあるものを使う場合は、見えること・まだ他の回に使われていないことを確かめる
     if (input.dossierId) {
@@ -376,17 +411,27 @@ export async function updateMeetGreet(user: ActingUser, id: string, input: Updat
   const fields = Object.keys(input).filter((k) => input[k as keyof UpdateMeetGreetInput] !== undefined);
   if (fields.length === 0) throw new MeetGreetInputError("更新項目がありません");
 
-  const row = await withClearance(user.clearance, (tx) =>
-    tx.meetGreet.update({
-      where: { id },
-      data: {
-        ...(input.single !== undefined ? { single: input.single.trim() } : {}),
-        ...(input.label !== undefined ? { label: input.label.trim() } : {}),
-        ...(input.venue !== undefined ? { venue: input.venue.trim() || null } : {}),
-        ...(input.extraSketchPrompt !== undefined ? { extraSketchPrompt: input.extraSketchPrompt } : {}),
-      },
-    })
-  );
+  // label は `@@unique([date, format, label])` の一部。同じ日の別の回とぶつかると
+  // P2002 が上がるので、生の Prisma エラーを画面 / REST に出さない (#112)
+  let row;
+  try {
+    row = await withClearance(user.clearance, (tx) =>
+      tx.meetGreet.update({
+        where: { id },
+        data: {
+          ...(input.single !== undefined ? { single: input.single.trim() } : {}),
+          ...(input.label !== undefined ? { label: input.label.trim() } : {}),
+          ...(input.venue !== undefined ? { venue: input.venue.trim() || null } : {}),
+          ...(input.extraSketchPrompt !== undefined ? { extraSketchPrompt: input.extraSketchPrompt } : {}),
+        },
+      })
+    );
+  } catch (e) {
+    if (isDuplicateMeetGreet(e)) {
+      throw new MeetGreetInputError("その呼び分けは同じ日の別の回で使われています");
+    }
+    throw e;
+  }
   await logAudit({
     actorId: user.id,
     action: "meetgreet.update",
@@ -398,10 +443,21 @@ export async function updateMeetGreet(user: ActingUser, id: string, input: Updat
 }
 
 /**
- * MeetGreet の行だけを消す。自動で作ったドシエ / X レポ収集は残す
+ * MeetGreet の行だけを消す。**自動で作ったドシエ / X レポ収集・記事は残す**
  * (= それぞれの画面から消せる。素材が入ったあとに巻き込んで消さない)。
+ *
+ * **消せるのは作成者か admin だけ (#112)。** ドシエの削除が所有者だけ
+ * (`canManageDossier`) なのに、ミーグリは誰でも消せて非対称だった。
+ * 消すとスケッチ・切り抜き枠・記事の紐づけ・除外リストがまとめて消える。
  */
 export async function deleteMeetGreet(user: ActingUser, id: string) {
+  const row = await withClearance(user.clearance, (tx) =>
+    tx.meetGreet.findUnique({ where: { id }, select: { createdById: true } })
+  );
+  if (!row) throw new MeetGreetInputError("見つかりません");
+  if (user.role !== "admin" && row.createdById !== user.id) {
+    throw new MeetGreetInputError("この回を消せるのは作った人か管理者だけです");
+  }
   await withClearance(user.clearance, (tx) => tx.meetGreet.delete({ where: { id } }));
   await logAudit({
     actorId: user.id,
@@ -412,6 +468,58 @@ export async function deleteMeetGreet(user: ActingUser, id: string) {
 }
 
 // --- 素材候補 ---
+
+interface SameMeetGreet {
+  id: string;
+  dossierId: string;
+  repoCollectionId: string | null;
+}
+
+/** `@@unique([date, format, label])` に当たったか (他の unique と区別する) */
+function isDuplicateMeetGreet(e: unknown): boolean {
+  if (!(e instanceof Prisma.PrismaClientKnownRequestError) || e.code !== "P2002") return false;
+  const target = e.meta?.target;
+  const fields = Array.isArray(target) ? target.map(String) : [String(target ?? "")];
+  return fields.some((f) => f.includes("date")) || fields.some((f) => f.includes("date_format_label"));
+}
+
+/** 同じ (date, format, label) の回を探す。見えない (クリアランス) なら null */
+async function findSameMeetGreet(
+  user: ActingUser,
+  date: string,
+  format: MeetGreetFormat,
+  label: string
+): Promise<SameMeetGreet | null> {
+  const row = await withClearance(user.clearance, (tx) =>
+    tx.meetGreet.findUnique({
+      where: { date_format_label: { date, format, label } },
+      select: { id: true, dossierId: true, repoCollectionId: true },
+    })
+  );
+  return row ?? null;
+}
+
+/**
+ * 既にある回を再利用してよいか。
+ *
+ * **「紐づけたいドシエ / 収集」を指定してきたのに別物を返さない。** 再送の取りこぼしを
+ * 拾うのが目的なので、何も指定していない (= 同じ要求の再送) ときだけ黙って返す。
+ * 指定があるのに食い違うなら、取り込みが「成功したのに紐づいていない」状態になるので断る
+ * (一括取り込みはここで失敗として数える)。
+ */
+function assertReusable(existing: SameMeetGreet, input: CreateMeetGreetInput): string {
+  if (input.dossierId && input.dossierId !== existing.dossierId) {
+    throw new MeetGreetInputError(
+      "同じ日・形式・呼び分けの回が既にあります (別のドシエが紐づいています)。呼び分け (label) を変えてください"
+    );
+  }
+  if (input.repoCollectionId && input.repoCollectionId !== existing.repoCollectionId) {
+    throw new MeetGreetInputError(
+      "同じ日・形式・呼び分けの回が既にあります (別の X 収集が紐づいています)。呼び分け (label) を変えてください"
+    );
+  }
+  return existing.id;
+}
 
 /**
  * 当日〜 +MATERIAL_WINDOW_DAYS 日の、本人 (坂井新奈) が付いたアセットを候補にする。

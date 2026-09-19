@@ -26,6 +26,9 @@ export async function GET(request: Request) {
  * 起点。ドシエと X レポ収集を用意して紐づけ、素材候補まで返す。
  * **X の収集は走らせない** (POST /meetgreets/:id/reports で明示的に行う)。
  * `dossierId` / `repoCollectionId` を渡すと既にあるものを使う。
+ *
+ * **同じ (date, format, label) の回が既にあればそれを返す (200)。** 作成は数十秒かかる
+ * ことがあり、bot がタイムアウトして再送するとドシエ・収集が二重にできていた (#112)。
  */
 export async function POST(request: Request) {
   const auth = await requireApiAuth(request, "write");
@@ -64,6 +67,7 @@ export async function POST(request: Request) {
 
   return NextResponse.json(
     { ...projectMeetGreet(mg), candidates: projectCandidates(candidates) },
-    { status: 201 }
+    // 作ったなら 201、既にあったものを返すなら 200 (呼び出し側が二重作成に気づける)
+    { status: created.reused ? 200 : 201 }
   );
 }

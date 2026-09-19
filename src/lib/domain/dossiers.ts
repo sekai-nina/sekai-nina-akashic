@@ -289,7 +289,21 @@ export async function deleteDossier(user: ActingUser, id: string) {
   if (!canManageDossier(user, access)) {
     throw new Error("Only the owner can delete a dossier");
   }
-  await withSession(user, (tx) => tx.dossier.delete({ where: { id } }));
+  // **ミーグリの素材置き場は先に回のほうを消してもらう (#112)。** 回はスケッチ・
+  // 切り抜き枠・記事の紐づけ・除外リストを持っていて、ここで巻き添えにすると戻せない
+  // (DB 側も Restrict で止まるが、生の外部キー違反を画面に出さない)
+  await withSession(user, async (tx) => {
+    const meetGreet = await tx.meetGreet.findUnique({
+      where: { dossierId: id },
+      select: { date: true },
+    });
+    if (meetGreet) {
+      throw new Error(
+        `${meetGreet.date} のミーグリで使われているドシエです。先にミーグリのほうを削除してください`
+      );
+    }
+    await tx.dossier.delete({ where: { id } });
+  });
   await logAudit({
     actorId: user.id,
     action: "dossier.delete",

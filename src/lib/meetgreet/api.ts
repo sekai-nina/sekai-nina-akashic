@@ -3,6 +3,13 @@
  * 画面 (Server Actions) とは別経路だが domain 関数は同じものを呼ぶ。
  */
 
+/**
+ * **射影の置き場について (#112)。**
+ *
+ * 記事は `src/lib/domain/article-api.ts` に置いてある (REST と MCP が同じ形を使うため)。
+ * ミーグリは MCP ツールを持たないので、REST だけが使うものとしてここに置いたままにする。
+ * MCP ツールを足すときに `domain/` へ移す。
+ */
 import { z } from "zod";
 import { isValidDateString } from "@/lib/utils";
 import {

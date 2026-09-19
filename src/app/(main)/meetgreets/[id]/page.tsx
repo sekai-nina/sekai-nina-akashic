@@ -20,6 +20,8 @@ import { SketchStep } from "./sketch-step";
 
 interface Props {
   params: Promise<{ id: string }>;
+  /** `?reused=1` は「同じ回が既にあったので開き直した」(#112) */
+  searchParams: Promise<{ reused?: string }>;
 }
 
 /** X レポの収集は最大 90 秒ほどかかる (画像を 1 枚ずつ R2 に載せるため) */
@@ -29,8 +31,9 @@ export const maxDuration = 300;
  * ミーグリ 1 回分の進行画面。素材 → レポ → スケッチ → 記事 を縦に並べる。
  * ドシエ / /repo / 記事の中身はそれぞれの画面で扱い、ここからはリンクする。
  */
-export default async function MeetGreetDetailPage({ params }: Props) {
+export default async function MeetGreetDetailPage({ params, searchParams }: Props) {
   const { id } = await params;
+  const { reused } = await searchParams;
   const session = await auth();
   if (!session?.user) notFound();
 
@@ -58,6 +61,12 @@ export default async function MeetGreetDetailPage({ params }: Props) {
       <Link href="/meetgreets" className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600">
         <ArrowLeft size={14} /> ミーグリ一覧へ
       </Link>
+
+      {reused === "1" && (
+        <p className="mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+          同じ日・形式・呼び分けの回が既にあったので、新しく作らずこちらを開きました。別の回として作るなら、呼び分け (label) を変えてください。
+        </p>
+      )}
 
       <div className="mt-2 mb-6">
         <h1 className="text-2xl font-bold text-slate-900">{meetGreetTitle(mg)}</h1>

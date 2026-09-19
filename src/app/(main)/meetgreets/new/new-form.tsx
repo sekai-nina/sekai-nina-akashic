@@ -47,7 +47,8 @@ export function NewMeetGreetForm({
         setMsg(`エラー: ${res.error}`);
         return;
       }
-      router.push(`/meetgreets/${res.id}`);
+      // 遷移すると setMsg は読めないので、開いた先で知らせる
+      router.push(`/meetgreets/${res.id}${res.reused ? "?reused=1" : ""}`);
     });
   }
 
