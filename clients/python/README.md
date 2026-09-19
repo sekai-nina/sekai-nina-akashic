@@ -61,7 +61,16 @@ for item in results["items"]:
 # エンティティ
 entity = client.create_entity("tag", "ブログ")
 entities = client.search_entities("坂井")
+
+# ミーグリ（作成 → X レポ収集）
+mg = client.create_meetgreet(
+    "2026-08-01", "real", single="17thシングル「Kind of love」", label="京都"
+)
+# 同じ (date, format, label) が既にあれば、新しく作らずそれが返る
+client.fetch_meetgreet_reports(mg["id"])  # 数十秒かかる
 ```
+
+素材の反映・スケッチ・記事の生成は Akashic の画面（`/meetgreets/<id>`）で行う。
 
 ## API ドキュメント
 
