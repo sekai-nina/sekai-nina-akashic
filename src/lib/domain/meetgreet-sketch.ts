@@ -109,7 +109,10 @@ export async function generateSketch(
 
   const ids = [...new Set(options.assetIds)];
   const refKeys = [...new Set(options.refKeys ?? [])];
-  const knownRefs = refsFromJson(meetGreet.sketchRefs).map((r) => r.key);
+  // 置き場も一緒に確かめる (同上。外部 AI に送る口なので二重に見る)
+  const knownRefs = refsFromJson(meetGreet.sketchRefs)
+    .map((r) => r.key)
+    .filter((k) => isRefKeyOf(meetGreet.id, k));
   const unknownRef = refKeys.find((k) => !knownRefs.includes(k));
   if (unknownRef) throw new MeetGreetInputError("参考画像が見つかりません");
 
@@ -141,7 +144,8 @@ export async function generateSketch(
       select: { id: true, storageProvider: true, storageKey: true, thumbnailUrl: true },
     })
   );
-  if (assets.length === 0 && refKeys.length === 0) {
+  // 指定したのに 1 枚も取れないのは、機密かドシエ外を選んでいる。黙って残りで作らない
+  if (ids.length > 0 && assets.length === 0) {
     throw new MeetGreetInputError("ドシエにある画像を選んでください");
   }
 
@@ -217,17 +221,24 @@ export async function addSketchRef(
   if (!isRefKeyOf(meetGreet.id, ref.key)) {
     throw new MeetGreetInputError("この回の参考画像ではありません");
   }
-  const current = refsFromJson(meetGreet.sketchRefs);
-  if (current.length >= MAX_SKETCH_REFS) {
-    throw new MeetGreetInputError(`参考画像は ${MAX_SKETCH_REFS} 枚までです`);
-  }
-  const next = [...current.filter((r) => r.key !== ref.key), ref];
-  await withClearance(user.clearance, (tx) =>
-    tx.meetGreet.update({
+  // **読み直してから足す。** 2 枚同時に上げると、古いスナップショットで書き戻して
+  // 先に入ったほうが一覧から消える (R2 の実体だけ残って誰も参照しない)
+  const next = await withClearance(user.clearance, async (tx) => {
+    const row = await tx.meetGreet.findUnique({
       where: { id: meetGreet.id },
-      data: { sketchRefs: next as unknown as Prisma.InputJsonValue },
-    })
-  );
+      select: { sketchRefs: true },
+    });
+    const current = refsFromJson(row?.sketchRefs);
+    if (current.length >= MAX_SKETCH_REFS) {
+      throw new MeetGreetInputError(`参考画像は ${MAX_SKETCH_REFS} 枚までです`);
+    }
+    const merged = [...current.filter((r) => r.key !== ref.key), ref];
+    await tx.meetGreet.update({
+      where: { id: meetGreet.id },
+      data: { sketchRefs: merged as unknown as Prisma.InputJsonValue },
+    });
+    return merged;
+  });
   await logAudit({
     actorId: user.id,
     action: "meetgreet.sketch.ref.add",
@@ -247,6 +258,11 @@ export async function removeSketchRef(
   const current = refsFromJson(meetGreet.sketchRefs);
   if (!current.some((r) => r.key === key)) {
     throw new MeetGreetInputError("参考画像が見つかりません");
+  }
+  // **Json 列の中身も信用しない。** いまの書き手は addSketchRef だけだが、
+  // 復元や手直しで別の key が入ると「バケットの任意のオブジェクトを消す」になる
+  if (!isRefKeyOf(meetGreet.id, key)) {
+    throw new MeetGreetInputError("この回の参考画像ではありません");
   }
   const next = current.filter((r) => r.key !== key);
   // 枠も一緒に落とす (宙に浮いた枠が Json に残り続けないように)

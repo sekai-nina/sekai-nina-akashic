@@ -121,7 +121,9 @@ export const ExclusionKeysSchema = z.array(z.string().min(1).max(200)).max(200);
  */
 export const SketchCropsSchema = z
   .record(
-    z.string().min(1).max(64),
+    // assetId (cuid) のほか、参考画像の R2 key も入る (#159)。
+    // `meetgreet/<cuid>/refs/<uuid>.webp` で 60 文字強になるので余裕を持たせる
+    z.string().min(1).max(200),
     z
       .object({
         x: z.number().min(0).max(1),

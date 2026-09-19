@@ -233,7 +233,13 @@ export function SketchStep({
                 >
                   {a.url ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={a.url} alt={a.title} className="w-full h-20 object-cover bg-slate-100" />
+                    <img
+                      src={a.url}
+                      alt={a.title}
+                      className="w-full h-20 object-cover bg-slate-100"
+                      loading="lazy"
+                      decoding="async"
+                    />
                   ) : (
                     <span className="flex h-20 items-center justify-center bg-slate-100 text-[10px] text-slate-400 px-1 text-center">
                       {a.title}
