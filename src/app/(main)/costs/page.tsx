@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
-import { LlmProvider } from "@prisma/client";
+import { ExternalLink } from "lucide-react";
+import { LlmProvider, type StatusLevel } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import {
   getFeatureBreakdown,
@@ -11,6 +12,7 @@ import {
 import { isAnthropicAdminConfigured, isOpenAiAdminConfigured } from "@/lib/costs/providers";
 import { CREDIT_WARN_DAYS, fillMissingDays } from "@/lib/costs/summary";
 import {
+  LLM_PROVIDER_BILLING_URLS,
   LLM_PROVIDER_LABELS,
   LLM_USAGE_SOURCE_LABELS,
   STATUS_LEVEL_BADGE,
@@ -24,6 +26,11 @@ import { SnapshotForm } from "./snapshot-form";
 
 // 集計は cron の取り込み結果を毎回読む
 export const dynamic = "force-dynamic";
+
+/** 補充を促す状態か (注意・異常のときだけボタンを強調する) */
+function needsTopUp(status: StatusLevel): boolean {
+  return status === "warn" || status === "error";
+}
 
 function usd(value: number | null | undefined, digits = 2): string {
   if (value == null) return "—";
@@ -118,6 +125,20 @@ export default async function CostsPage() {
                 "残高が未登録"
               )}
             </p>
+            {/* 補充はプロバイダの画面でしかできないので、判断した流れのまま飛べるようにする */}
+            <a
+              href={LLM_PROVIDER_BILLING_URLS[s.provider]}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`mt-3 inline-flex items-center gap-1 px-3 py-1.5 rounded text-sm font-medium ${
+                needsTopUp(s.judgement.status)
+                  ? "bg-slate-900 text-white hover:bg-slate-800"
+                  : "border border-slate-300 text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              補充する
+              <ExternalLink size={12} />
+            </a>
           </div>
         ))}
       </div>
