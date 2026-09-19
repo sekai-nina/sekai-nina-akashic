@@ -81,6 +81,7 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 | POST | `/meetgreets/:id/reports` | write | X レポの再収集 |
 | POST | `/meetgreets/:id/sketch` | write | 服装スケッチの候補を生成（作り直しも） |
 | POST | `/meetgreets/:id/sketch/select` | write | 候補の 1 枚を確定 |
+| POST | `/meetgreets/:id/article` | write | 記事を生成（既存があれば増えた分だけ追記） |
 
 ---
 
@@ -960,7 +961,7 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 
 - `format` は `online` / `real`。記事のタイトル・地の文では「オンラインミーグリ / リアルミーグリ」（略称は使わない）
 - `date` は JST の暦日（`YYYY-MM-DD`）。ISO 日時ではない
-- `article` は記事生成（#109）後に埋まる。`sketch` はスケッチ生成（#108）後に埋まる
+- `article` は記事を作る / 紐づけると埋まる。`sketch` はスケッチ生成後に埋まる
 - **`dossier` は `null` になりうる。** ドシエは別テーブルで所有者・`viewMode` による RLS が別に効くので、所有者があとから `private` に戻したり機密を上げると、他の人には見えなくなる。ID は常に `dossierId` で返すので、`dossier` が `null` なら「ドシエが見えない」を表示する
 - `repoCollection` も `null` になりうる（収集を消した場合。`classification` は MeetGreet と同じ値で作られるので、通常は同じ人に見える）
 
@@ -1097,6 +1098,44 @@ keep / total は `GET /meetgreets/:id` の `repoCollection` で読む。判定�
 ```
 
 候補の 1 枚を確定して `sketchKey` にする（記事のサムネになる）。`sketch.candidates` に無い key は 400。**レスポンス:** 更新後の行。
+
+---
+
+### POST /meetgreets/:id/article
+
+ドシエと採用した X レポから記事を生成する。**既存の記事が紐づいていれば「増えた分だけ」追記**し、無ければ新規作成する。
+
+```json
+{"dryRun": true}
+```
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `dryRun` | boolean | | `true` なら書き込まず、適用後の本文と増える行だけ返す |
+
+**レスポンス（`dryRun: true`）:**
+
+```json
+{
+  "mode": "append",
+  "title": "2026年8月1日 リアルミーグリ（京都）",
+  "body": "…適用後の本文…",
+  "addedLines": [42],
+  "newSources": [{"sourceNo": 6, "label": "坂井新奈トーク 2026.8.3 12:00", "url": null, "date": "2026-08-03", "assetId": "…"}],
+  "droppedByClearance": 0,
+  "empty": false,
+  "shortId": "0izz31T"
+}
+```
+
+**レスポンス（保存）:** `{"mode": "append", "shortId": "…", "added": 1, "sources": 1}`
+
+- `mode` は `create` / `append`。**フル再生成は無い**（手で入れた `![rep]` や文面の調整を消すため。必要なら記事の編集画面から）
+- **追記は「純粋な追記」でなければ中止する**（既存行が 1 行でも消える形になったら 409）。脚注番号も既存のまま据え置き、新しい出典だけ末尾に採番する
+- **本文に載るのは `internal` 以下のアセットだけ。** `Article` は非保護テーブルで、本文は push でそのまま公開リポジトリに載るため。落とした件数は `droppedByClearance` で返す（[docs/security-dev.md](./security-dev.md)）
+- 出典は `applyArticleSource` と同じ経路で作られるので、公開に落とせる機密レベルの制限もそのまま効く
+- 生成しただけでは公開されない。`dirty` な記事になり、`/articles/push`（画面）で公開リポジトリに出る
+- TikTok の短縮 URL を解決するため外部に出る。数秒〜十数秒かかることがある
 
 ---
 

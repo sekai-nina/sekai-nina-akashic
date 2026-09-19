@@ -71,8 +71,16 @@ export default async function MeetGreetsPage() {
                   <Step label="スケッチ" done={!!r.sketchKey} />
                   <Step
                     label="記事"
-                    done={!!r.article}
-                    detail={r.article ? (r.article.dirty ? "未 push" : "push 済み") : undefined}
+                    done={!!r.article && !r.needsSync}
+                    detail={
+                      r.article
+                        ? r.needsSync
+                          ? "要反映"
+                          : r.article.dirty
+                            ? "未 push"
+                            : "push 済み"
+                        : undefined
+                    }
                   />
                 </div>
               </Link>

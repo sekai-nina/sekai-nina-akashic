@@ -86,6 +86,13 @@ export const GenerateSketchSchema = z
     message: `作り直しのときの参照写真は ${maxReferencePhotos(true)} 枚までです`,
   });
 
+export const ArticleGenerateSchema = z
+  .object({
+    /** true なら書き込まず、適用後の本文と増える行だけ返す */
+    dryRun: z.boolean().optional(),
+  })
+  .strict();
+
 export const SelectSketchSchema = z.object({ key: z.string().min(1) }).strict();
 
 export function projectMeetGreet(mg: MeetGreetSummary | MeetGreetDetail) {

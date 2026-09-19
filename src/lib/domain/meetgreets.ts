@@ -11,7 +11,7 @@
  */
 
 import type { ClearanceLevel, MeetGreetFormat, Prisma } from "@prisma/client";
-import { withClearance, withSession, type TransactionClient } from "@/lib/db";
+import { prisma, withClearance, withSession, type TransactionClient } from "@/lib/db";
 import { assertClearance } from "@/lib/classification";
 import { canEditDossier } from "@/lib/auth/dossier-permissions";
 import {
@@ -262,6 +262,44 @@ async function keepCounts(tx: TransactionClient, collectionIds: string[]) {
   return counts;
 }
 
+
+/**
+ * 記事の frontmatter に書いてあるドシエのスナップショットと、いまのドシエを突き合わせて
+ * 「要反映」を判定する (sekai-nina-site の `pnpm check:dossiers` を akashic 側に持ってきたもの)。
+ *
+ * Article は非保護テーブルなので素の prisma でよい。
+ */
+async function loadNeedsSync(
+  articleIds: string[],
+  dossiers: Map<string, DossierBrief>,
+  dossierIdByArticleId: Map<string, string>
+): Promise<Set<string>> {
+  if (articleIds.length === 0) return new Set();
+  const rows = await prisma.article.findMany({
+    where: { id: { in: articleIds } },
+    select: { id: true, frontmatterExtra: true },
+  });
+  const stale = new Set<string>();
+  for (const row of rows) {
+    const extra = row.frontmatterExtra;
+    const snap =
+      extra && typeof extra === "object" && !Array.isArray(extra)
+        ? (extra as { dossier?: { item_count?: unknown; updated_at?: unknown } }).dossier
+        : undefined;
+    const dossierId = dossierIdByArticleId.get(row.id);
+    const current = dossierId ? dossiers.get(dossierId) : undefined;
+    if (!current) continue;
+    // スナップショットが無い記事は判定できないので「要反映」にしない (毎回出続けるのを避ける)
+    if (!snap) continue;
+    const countChanged =
+      typeof snap.item_count === "number" && snap.item_count !== current.itemCount;
+    const updatedChanged =
+      typeof snap.updated_at === "string" && new Date(snap.updated_at) < current.updatedAt;
+    if (countChanged || updatedChanged) stale.add(row.id);
+  }
+  return stale;
+}
+
 export async function listMeetGreets(user: ActingUser) {
   return withSession(user, async (tx) => {
     const rows = await tx.meetGreet.findMany({
@@ -272,10 +310,17 @@ export async function listMeetGreets(user: ActingUser) {
       loadDossiers(tx, rows.map((r) => r.dossierId)),
       keepCounts(tx, rows.flatMap((r) => (r.repoCollectionId ? [r.repoCollectionId] : []))),
     ]);
+    const needsSync = await loadNeedsSync(
+      rows.flatMap((r) => (r.articleId ? [r.articleId] : [])),
+      dossiers,
+      new Map(rows.flatMap((r) => (r.articleId ? [[r.articleId, r.dossierId] as const] : [])))
+    );
     return rows.map((r) => ({
       ...r,
       dossier: dossiers.get(r.dossierId) ?? null,
       reports: r.repoCollectionId ? (counts.get(r.repoCollectionId) ?? { keep: 0, total: 0 }) : null,
+      /** ドシエが記事より新しい = 追記すべきものがある */
+      needsSync: r.articleId ? needsSync.has(r.articleId) : false,
     }));
   });
 }
@@ -290,10 +335,16 @@ export async function getMeetGreet(user: ActingUser, id: string) {
       loadDossiers(tx, [row.dossierId]),
       keepCounts(tx, row.repoCollectionId ? [row.repoCollectionId] : []),
     ]);
+    const needsSync = await loadNeedsSync(
+      row.articleId ? [row.articleId] : [],
+      dossiers,
+      new Map(row.articleId ? [[row.articleId, row.dossierId] as const] : [])
+    );
     return {
       ...row,
       dossier: dossiers.get(row.dossierId) ?? null,
       reports: row.repoCollectionId ? (counts.get(row.repoCollectionId) ?? { keep: 0, total: 0 }) : null,
+      needsSync: row.articleId ? needsSync.has(row.articleId) : false,
     };
   });
 }

@@ -12,6 +12,7 @@ import { MetaForm } from "./meta-form";
 import { MaterialsStep } from "./materials-step";
 import { ExcerptStep } from "./excerpt-step";
 import { ReportsStep } from "./reports-step";
+import { ArticleStep } from "./article-step";
 import { SketchStep } from "./sketch-step";
 
 interface Props {
@@ -157,7 +158,11 @@ export default async function MeetGreetDetailPage({ params }: Props) {
         no={4}
         title="記事"
         done={!!mg.article}
-        summary={mg.article ? `${mg.article.title} (${mg.article.dirty ? "未 push" : "push 済み"})` : "未生成"}
+        summary={
+          mg.article
+            ? `${mg.article.title} (${mg.article.dirty ? "未 push" : "push 済み"}${mg.needsSync ? " · 要反映" : ""})`
+            : "未生成"
+        }
         action={
           mg.article ? (
             <Link href={`/articles/${mg.article.shortId}`} className={linkCls}>
@@ -166,9 +171,12 @@ export default async function MeetGreetDetailPage({ params }: Props) {
           ) : null
         }
       >
-        <p className="text-xs text-slate-400">
-          ドシエと採用したレポから記事を生成する機能は #109 で入ります。それまでは従来どおりローカルの dossier-to-meetgreet-article スキルで生成してください。
-        </p>
+        {mg.needsSync && (
+          <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-3">
+            記事を書いた後にドシエが変わっています。差分を見て追記してください。
+          </p>
+        )}
+        <ArticleStep meetGreetId={mg.id} hasArticle={!!mg.article} hasDossier={!!mg.dossier} />
       </StepCard>
     </div>
   );

@@ -13,7 +13,8 @@ import {
   updateMeetGreet,
 } from "@/lib/domain/meetgreets";
 import { applyExcerpts, proposeExcerptsForDossier } from "@/lib/domain/meetgreet-excerpts";
-import { importMeetGreets } from "@/lib/domain/meetgreet-import";
+import { importMeetGreets, linkArticles } from "@/lib/domain/meetgreet-import";
+import { previewMeetGreetArticle, saveMeetGreetArticle } from "@/lib/domain/meetgreet-article-save";
 import { generateSketch, selectSketch } from "@/lib/domain/meetgreet-sketch";
 import {
   ApplyExcerptsSchema,
@@ -187,6 +188,58 @@ export async function importMeetGreetsAction(dossierIds: string[]) {
   try {
     const result = await importMeetGreets(user, dossierIds);
     invalidateDossiers();
+    revalidatePath("/meetgreets");
+    revalidatePath("/meetgreets/import");
+    return { ok: true as const, ...result };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+// --- 記事の生成 (#109) ---
+
+export async function previewArticleAction(id: string) {
+  const user = await requireMember();
+  try {
+    const mg = await getMeetGreet(user, id);
+    if (!mg) throw new Error("見つかりません");
+    const preview = await previewMeetGreetArticle(user, { ...mg, format: mg.format });
+    return { ok: true as const, preview };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+export async function saveArticleAction(id: string) {
+  const user = await requireMember();
+  try {
+    const mg = await getMeetGreet(user, id);
+    if (!mg) throw new Error("見つかりません");
+    const result = await saveMeetGreetArticle(user, { ...mg, format: mg.format });
+    if (!result.ok) return { ok: false as const, error: result.error };
+    revalidatePath(`/meetgreets/${id}`);
+    revalidatePath("/meetgreets");
+    revalidatePath("/articles");
+    return {
+      ok: true as const,
+      mode: result.mode,
+      shortId: result.shortId,
+      added: result.added,
+      sources: result.sources,
+    };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+/** 過去の記事を MeetGreet に紐づける (#109) */
+export async function linkArticlesAction(meetGreetIds: string[]) {
+  const user = await requireMember();
+  if (meetGreetIds.length === 0 || meetGreetIds.length > 200) {
+    return { ok: false as const, error: "件数が不正です" };
+  }
+  try {
+    const result = await linkArticles(user, meetGreetIds);
     revalidatePath("/meetgreets");
     revalidatePath("/meetgreets/import");
     return { ok: true as const, ...result };

@@ -118,6 +118,11 @@ RLS があるので読み取り時は不要ですが、**書き込み時のク�
 | スケッチ生成（`src/lib/meetgreet/sketch.ts`） | ドシエで選んだ**画像**（Drive の原本を 1280px に縮小したもの）+ 基準スケッチ |
 
 **送ってよいのは `internal` 以下だけです** → `src/lib/meetgreet/config.ts` の `MAX_EXTERNAL_AI_CLEARANCE`。
+
+同じ理由で、**生成する記事の本文に載せてよいのも `internal` 以下だけ**です → `MAX_ARTICLE_CLEARANCE`。
+`Article` は非保護テーブルで、本文（引用・トーク名・画像名）は push でそのまま公開リポジトリに載ります。
+`confidential` 以上のアセットは本文にも出典にも出さず、落とした件数を画面に返して人が気づけるようにしています。
+出典は `applyArticleSource` を通すので、公開に落とせる機密レベルの制限（`maxClassification`）もそのまま効きます。
 `confidential` / `restricted` のアセットは候補にも出さず、ID を直接指定しても弾きます
 （`classificationFilter(MAX_EXTERNAL_AI_CLEARANCE)` を、抜粋・スケッチ双方のクエリに入れている）。
 
