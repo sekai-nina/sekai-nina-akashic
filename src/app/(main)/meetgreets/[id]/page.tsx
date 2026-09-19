@@ -3,6 +3,7 @@ import { ArrowLeft, ExternalLink } from "lucide-react";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getMeetGreet, listMaterialCandidates, meetGreetTitle } from "@/lib/domain/meetgreets";
+import { listMeetGreetKeeps } from "@/lib/domain/meetgreet-reports";
 import { listSketchSources } from "@/lib/domain/meetgreet-sketch";
 import { jsonStringArray } from "@/lib/meetgreet/config";
 import { getR2PublicUrl } from "@/lib/r2";
@@ -34,9 +35,10 @@ export default async function MeetGreetDetailPage({ params }: Props) {
   const mg = await getMeetGreet(session.user, id);
   if (!mg) notFound();
 
-  const [candidates, sketchSources] = await Promise.all([
+  const [candidates, sketchSources, keeps] = await Promise.all([
     listMaterialCandidates(session.user, mg),
     listSketchSources(session.user, mg),
+    listMeetGreetKeeps(session.user, mg),
   ]);
   // 新しい候補を先に出す (作り直すほど古いものが上に溜まらないように)
   const sketchCandidates = jsonStringArray(mg.sketchCandidates)
@@ -127,6 +129,7 @@ export default async function MeetGreetDetailPage({ params }: Props) {
           meetGreetId={mg.id}
           hasCollection={!!mg.repoCollectionId}
           fetched={!!mg.repoCollection?.lastFetchedAt}
+          keeps={keeps}
         />
       </StepCard>
 
