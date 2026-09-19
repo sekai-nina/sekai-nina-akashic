@@ -5,6 +5,7 @@
 
 import { z } from "zod";
 import { isValidDateString } from "@/lib/utils";
+import { MAX_REFERENCE_PHOTOS } from "./config";
 import type { MeetGreetSummary, MeetGreetDetail } from "@/lib/domain/meetgreets";
 import type { CandidateGroup } from "./candidates";
 import { getR2PublicUrl } from "@/lib/r2";
@@ -40,6 +41,17 @@ export const ApplyMaterialsSchema = z
     assetIds: z.array(z.string().min(1)).min(1).max(MAX_MATERIALS_PER_APPLY),
   })
   .strict();
+
+export const GenerateSketchSchema = z
+  .object({
+    assetIds: z.array(z.string().min(1)).min(1).max(MAX_REFERENCE_PHOTOS),
+    /** 作り直しの元にする候補の R2 key (sketch.candidates[].key) */
+    revisionOf: z.string().min(1).optional(),
+    revisionNote: z.string().max(2000).optional(),
+  })
+  .strict();
+
+export const SelectSketchSchema = z.object({ key: z.string().min(1) }).strict();
 
 export function projectMeetGreet(mg: MeetGreetSummary | MeetGreetDetail) {
   return {

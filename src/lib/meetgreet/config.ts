@@ -51,3 +51,16 @@ export function reportTagGroups(format: MeetGreetFormat): HashtagGroup[] {
   }
   return base;
 }
+
+// --- スケッチ生成 (#108) ---
+// **クライアント部品からも読むので、ここには重い依存を持ち込まない。**
+// 生成の実処理 (sharp / Drive / R2 / OpenAI) は src/lib/meetgreet/sketch.ts。
+
+/**
+ * gpt-image-1 が受け取れる入力は 16 枚まで。最後の 1 枚を基準スケッチに使うので、
+ * 参照写真はここまで。
+ */
+export const MAX_REFERENCE_PHOTOS = 15;
+
+/** 1 回の生成で作る候補の枚数 */
+export const SKETCH_CANDIDATE_COUNT = 2;

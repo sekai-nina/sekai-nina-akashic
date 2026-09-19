@@ -5,12 +5,17 @@ import type { MeetGreetFormat } from "@prisma/client";
 import { requireRole } from "@/lib/auth/require-role";
 import { invalidateDossiers } from "@/lib/cache";
 import {
+  applyExcerpts,
   applyMaterials,
   createMeetGreet,
   deleteMeetGreet,
+  generateSketch,
   getMeetGreet,
+  proposeExcerptsForDossier,
   refetchReports,
+  selectSketch,
   updateMeetGreet,
+  type ApplyExcerptInput,
 } from "@/lib/domain/meetgreets";
 import { MAX_MATERIALS_PER_APPLY } from "@/lib/meetgreet/api";
 
@@ -94,6 +99,65 @@ export async function deleteMeetGreetAction(id: string) {
   const user = await requireMember();
   try {
     await deleteMeetGreet(user, id);
+    revalidatePath("/meetgreets");
+    return { ok: true as const };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+// --- 抜粋の提案 / スケッチ (#108) ---
+
+export async function proposeExcerptsAction(id: string) {
+  const user = await requireMember();
+  try {
+    const mg = await getMeetGreet(user, id);
+    if (!mg) throw new Error("見つかりません");
+    const blogs = await proposeExcerptsForDossier(user, mg);
+    return { ok: true as const, blogs };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+export async function applyExcerptsAction(id: string, inputs: ApplyExcerptInput[]) {
+  const user = await requireMember();
+  try {
+    const mg = await getMeetGreet(user, id);
+    if (!mg) throw new Error("見つかりません");
+    const result = await applyExcerpts(user, mg, inputs);
+    invalidateDossiers();
+    revalidatePath(`/meetgreets/${id}`);
+    revalidatePath(`/dossiers/${mg.dossierId}`);
+    return { ok: true as const, ...result };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+export async function generateSketchAction(
+  id: string,
+  options: { assetIds: string[]; revisionOf?: string; revisionNote?: string }
+) {
+  const user = await requireMember();
+  try {
+    const mg = await getMeetGreet(user, id);
+    if (!mg) throw new Error("見つかりません");
+    const { candidates } = await generateSketch(user, mg, options);
+    revalidatePath(`/meetgreets/${id}`);
+    return { ok: true as const, candidates };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+export async function selectSketchAction(id: string, key: string) {
+  const user = await requireMember();
+  try {
+    const mg = await getMeetGreet(user, id);
+    if (!mg) throw new Error("見つかりません");
+    await selectSketch(user, mg, key);
+    revalidatePath(`/meetgreets/${id}`);
     revalidatePath("/meetgreets");
     return { ok: true as const };
   } catch (e) {

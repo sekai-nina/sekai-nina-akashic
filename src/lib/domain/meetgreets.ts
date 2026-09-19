@@ -24,10 +24,20 @@ import {
   MEETGREET_FORMAT_SHORT_LABELS,
 } from "@/lib/utils";
 import { buildQuery } from "@/lib/twitter/x-search";
+import { proposeExcerpts, type ExcerptProposal } from "@/lib/meetgreet/excerpt";
+import {
+  generateSketches,
+  loadAssetImage,
+  loadStyleReference,
+  SketchError,
+  type GeneratedSketch,
+} from "@/lib/meetgreet/sketch";
 import { fetchCollection, type FetchResult } from "./repo";
+import { addAssetItem } from "./dossiers";
 import { logAudit } from "./audit";
 import {
   MATERIAL_WINDOW_DAYS,
+  MAX_REFERENCE_PHOTOS,
   MEETGREET_PERSON_NAME,
   REPORT_WINDOW_DAYS,
   reportTagGroups,
@@ -487,4 +497,325 @@ export async function refetchReports(
 ): Promise<ReportFetchOutcome> {
   if (!meetGreet.repoCollectionId) return { ok: false, error: "X レポ収集が紐づいていません" };
   return safeFetch(meetGreet.repoCollectionId, user.clearance);
+}
+
+// --- 抜粋の提案 (#108) ---
+
+export interface BlogExcerptProposals {
+  assetId: string;
+  title: string;
+  url: string | null;
+  proposals: ExcerptProposal[];
+  /** 既にドシエに入っている抜粋 (start-end) */
+  existing: { start: number; end: number }[];
+}
+
+/** 本人ブログか (ひなたぼっこ日記は本人の感想ではないので対象外) */
+function isOwnBlogUrl(url: string | null | undefined): boolean {
+  return !!url && url.includes("/diary/detail/");
+}
+
+/**
+ * ドシエに入っている本人ブログの本文から「本人の感想」の抜粋案を出す。
+ *
+ * LLM に原文の部分文字列を返させ、`AssetText` 内の位置を確定したものだけを返す
+ * (言い換えられていたら採らない)。**この時点では DB に書かない。** 人が選んでから
+ * `applyExcerpts` で入れる。
+ */
+export async function proposeExcerptsForDossier(
+  user: ActingUser,
+  meetGreet: { date: string; format: MeetGreetFormat; dossierId: string }
+): Promise<BlogExcerptProposals[]> {
+  const blogs = await withSession(user, (tx) =>
+    tx.dossierItem.findMany({
+      where: { dossierId: meetGreet.dossierId, asset: { kind: "text" } },
+      select: {
+        excerpt: true,
+        excerptStart: true,
+        excerptEnd: true,
+        asset: {
+          select: {
+            id: true,
+            title: true,
+            sourceRecords: { select: { url: true }, take: 1, orderBy: { createdAt: "asc" } },
+            texts: {
+              where: { textType: "body" },
+              select: { content: true },
+              orderBy: { createdAt: "asc" },
+              take: 1,
+            },
+          },
+        },
+      },
+    })
+  );
+
+  // 同じアセットが抜粋ごとに複数 item を持つので、アセット単位にまとめる
+  const byAsset = new Map<
+    string,
+    { title: string; url: string | null; content: string; existing: { start: number; end: number }[] }
+  >();
+  for (const item of blogs) {
+    const a = item.asset;
+    if (!a) continue;
+    const url = a.sourceRecords[0]?.url ?? null;
+    if (!isOwnBlogUrl(url)) continue;
+    const content = a.texts[0]?.content;
+    if (!content) continue;
+    const entry = byAsset.get(a.id) ?? { title: a.title, url, content, existing: [] };
+    if (item.excerptStart != null && item.excerptEnd != null) {
+      entry.existing.push({ start: item.excerptStart, end: item.excerptEnd });
+    }
+    byAsset.set(a.id, entry);
+  }
+
+  const formatLabel = MEETGREET_FORMAT_LABELS[meetGreet.format];
+  const results: BlogExcerptProposals[] = [];
+  for (const [assetId, entry] of byAsset) {
+    const proposals = await proposeExcerpts(entry.content, {
+      date: meetGreet.date,
+      formatLabel,
+      blogTitle: entry.title,
+    });
+    // 既に同じ範囲が入っているものは出さない
+    const fresh = proposals.filter(
+      (p) => !entry.existing.some((e) => p.start < e.end && e.start < p.end)
+    );
+    results.push({ assetId, title: entry.title, url: entry.url, proposals: fresh, existing: entry.existing });
+  }
+  return results;
+}
+
+export interface ApplyExcerptInput {
+  assetId: string;
+  start: number;
+  end: number;
+}
+
+/**
+ * 選んだ抜粋をドシエに入れる。抜粋付きの item は 1 抜粋 = 1 item
+ * (`addAssetItem` は excerpt があるとき必ず新しい item を作る)。
+ * 本文は保存時に DB から切り出す (画面から渡された文字列を信じない)。
+ */
+export async function applyExcerpts(
+  user: ActingUser,
+  meetGreet: { id: string; dossierId: string },
+  inputs: ApplyExcerptInput[]
+): Promise<{ added: number; skipped: number }> {
+  if (inputs.length === 0) return { added: 0, skipped: 0 };
+
+  const assetIds = [...new Set(inputs.map((i) => i.assetId))];
+  const [texts, existing] = await withSession(user, (tx) =>
+    Promise.all([
+      tx.assetText.findMany({
+        where: { assetId: { in: assetIds }, textType: "body" },
+        select: { assetId: true, content: true },
+        orderBy: { createdAt: "asc" },
+      }),
+      tx.dossierItem.findMany({
+        where: { dossierId: meetGreet.dossierId, assetId: { in: assetIds }, NOT: { excerptStart: null } },
+        select: { assetId: true, excerptStart: true, excerptEnd: true },
+      }),
+    ])
+  );
+  const contentByAsset = new Map<string, string>();
+  for (const t of texts) if (!contentByAsset.has(t.assetId)) contentByAsset.set(t.assetId, t.content);
+
+  let added = 0;
+  let skipped = 0;
+  for (const input of inputs) {
+    const content = contentByAsset.get(input.assetId);
+    const valid =
+      content !== undefined &&
+      input.start >= 0 &&
+      input.end > input.start &&
+      input.end <= content.length;
+    const overlaps = existing.some(
+      (e) =>
+        e.assetId === input.assetId &&
+        e.excerptStart != null &&
+        e.excerptEnd != null &&
+        input.start < e.excerptEnd &&
+        e.excerptStart < input.end
+    );
+    if (!valid || overlaps) {
+      skipped++;
+      continue;
+    }
+    await addAssetItem(user, meetGreet.dossierId, {
+      assetId: input.assetId,
+      excerpt: content.slice(input.start, input.end),
+      excerptType: "body",
+      excerptStart: input.start,
+      excerptEnd: input.end,
+    });
+    added++;
+  }
+
+  await logAudit({
+    actorId: user.id,
+    action: "meetgreet.excerpts.apply",
+    targetType: "MeetGreet",
+    targetId: meetGreet.id,
+    metadata: { added, skipped, dossierId: meetGreet.dossierId },
+  });
+  return { added, skipped };
+}
+
+// --- スケッチ (#108) ---
+
+export interface SketchSourceAsset {
+  id: string;
+  title: string;
+  thumbnailUrl: string | null;
+  canonicalDate: string | null;
+}
+
+/** スケッチの参照に使えるドシエ内の画像 */
+export async function listSketchSources(
+  user: ActingUser,
+  meetGreet: { dossierId: string }
+): Promise<SketchSourceAsset[]> {
+  const items = await withSession(user, (tx) =>
+    tx.dossierItem.findMany({
+      where: { dossierId: meetGreet.dossierId, asset: { kind: "image" } },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+      select: {
+        asset: { select: { id: true, title: true, thumbnailUrl: true, canonicalDate: true } },
+      },
+    })
+  );
+  const seen = new Set<string>();
+  const out: SketchSourceAsset[] = [];
+  for (const it of items) {
+    const a = it.asset;
+    if (!a || seen.has(a.id)) continue;
+    seen.add(a.id);
+    out.push({
+      id: a.id,
+      title: a.title,
+      thumbnailUrl: a.thumbnailUrl,
+      canonicalDate: a.canonicalDate ? a.canonicalDate.toISOString() : null,
+    });
+  }
+  return out;
+}
+
+export interface GenerateSketchOptions {
+  assetIds: string[];
+  /** 作り直すときの元候補 (R2 key) */
+  revisionOf?: string;
+  revisionNote?: string;
+}
+
+/**
+ * 候補を生成して `sketchCandidates` に積む。確定はしない。
+ *
+ * 画像のダウンロード・生成・R2 への保存は**トランザクションの外**で行う
+ * (数十秒かかるので 15,000ms の上限に当たる)。
+ */
+export async function generateSketch(
+  user: ActingUser,
+  meetGreet: { id: string; dossierId: string; extraSketchPrompt: string; sketchCandidates: unknown },
+  options: GenerateSketchOptions
+): Promise<{ candidates: GeneratedSketch[] }> {
+  const ids = [...new Set(options.assetIds)];
+  if (ids.length === 0) throw new MeetGreetInputError("参照にする写真を選んでください");
+  if (ids.length > MAX_REFERENCE_PHOTOS) {
+    throw new MeetGreetInputError(`参照にできる写真は ${MAX_REFERENCE_PHOTOS} 枚までです`);
+  }
+
+  // ドシエに入っている画像だけを参照にする (任意のアセットを読ませない)
+  const assets = await withSession(user, (tx) =>
+    tx.asset.findMany({
+      where: {
+        id: { in: ids },
+        kind: "image",
+        dossierItems: { some: { dossierId: meetGreet.dossierId } },
+      },
+      select: {
+        id: true,
+        title: true,
+        storageProvider: true,
+        storageKey: true,
+        thumbnailUrl: true,
+        mimeType: true,
+      },
+    })
+  );
+  if (assets.length === 0) throw new MeetGreetInputError("ドシエにある画像を選んでください");
+
+  const photos = (await Promise.all(assets.map((a) => loadAssetImage(a)))).filter(
+    (p): p is NonNullable<typeof p> => p !== null
+  );
+  if (photos.length === 0) throw new SketchError("参照画像を取得できませんでした");
+
+  let revisionOf: Awaited<ReturnType<typeof loadStyleReference>> | undefined;
+  if (options.revisionOf) {
+    const known = Array.isArray(meetGreet.sketchCandidates)
+      ? (meetGreet.sketchCandidates as unknown[]).filter((k): k is string => typeof k === "string")
+      : [];
+    if (!known.includes(options.revisionOf)) {
+      throw new MeetGreetInputError("作り直しの元にする候補が見つかりません");
+    }
+    revisionOf = await loadStyleReference(options.revisionOf);
+  }
+
+  const candidates = await generateSketches({
+    meetGreetId: meetGreet.id,
+    photos,
+    extraPrompt: meetGreet.extraSketchPrompt,
+    revisionOf,
+    revisionNote: options.revisionNote,
+  });
+
+  await withClearance(user.clearance, async (tx) => {
+    const current = await tx.meetGreet.findUnique({
+      where: { id: meetGreet.id },
+      select: { sketchCandidates: true },
+    });
+    const existing = Array.isArray(current?.sketchCandidates)
+      ? (current!.sketchCandidates as unknown[]).filter((k): k is string => typeof k === "string")
+      : [];
+    await tx.meetGreet.update({
+      where: { id: meetGreet.id },
+      data: { sketchCandidates: [...existing, ...candidates.map((c) => c.key)] },
+    });
+  });
+
+  await logAudit({
+    actorId: user.id,
+    action: "meetgreet.sketch.generate",
+    targetType: "MeetGreet",
+    targetId: meetGreet.id,
+    metadata: {
+      photos: photos.length,
+      generated: candidates.length,
+      revision: !!options.revisionOf,
+    },
+  });
+  return { candidates };
+}
+
+/** 候補の 1 枚を確定する (記事のサムネになる) */
+export async function selectSketch(
+  user: ActingUser,
+  meetGreet: { id: string; sketchCandidates: unknown },
+  key: string
+) {
+  const known = Array.isArray(meetGreet.sketchCandidates)
+    ? (meetGreet.sketchCandidates as unknown[]).filter((k): k is string => typeof k === "string")
+    : [];
+  if (!known.includes(key)) throw new MeetGreetInputError("その候補は見つかりません");
+
+  await withClearance(user.clearance, (tx) =>
+    tx.meetGreet.update({ where: { id: meetGreet.id }, data: { sketchKey: key } })
+  );
+  await logAudit({
+    actorId: user.id,
+    action: "meetgreet.sketch.select",
+    targetType: "MeetGreet",
+    targetId: meetGreet.id,
+    metadata: { key },
+  });
 }
