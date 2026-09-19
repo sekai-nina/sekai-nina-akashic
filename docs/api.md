@@ -1114,8 +1114,8 @@ keep / total は `GET /meetgreets/:id` の `repoCollection` で読む。判定�
 |---|---|---|---|
 | `dryRun` | boolean | | `true` なら書き込まず、適用後の本文と増える行だけ返す |
 | `expectedDigest` | string | | `dryRun` が返した `digest`。渡すと、組み立て直した結果が変わっていたら 409（見せた内容と別のものを保存しない） |
-| `exclude` | string[] | | **今後この回では足さない**ものの key（`dryRun` の `additions[].key`）。保存が成功したときだけ覚える |
-| `restore` | string[] | | `exclude` の取り消し（`dryRun` の `excluded[].key`）。**単独で送る**（`dryRun` / `exclude` / `expectedDigest` と併用すると 400） |
+| `exclude` | string[] | | **今後この回では足さない**ものの key（`dryRun` の `additions[].key`）。最大 200 件。`dryRun` と併せると「外した形」で本文を見せるだけ（覚えない）、保存では成功したときだけ覚える。**記事がまだ無い（`mode: "create"`）ときは 409**（フル生成に外す口が無いため） |
+| `restore` | string[] | | `exclude` の取り消し（`dryRun` の `excluded[].key`）。最大 200 件。**単独で送る**（`dryRun` / `exclude` / `expectedDigest` と併用すると 400。空配列でも単独でなければ 400） |
 
 **レスポンス（`dryRun: true`）:**
 
@@ -1128,8 +1128,10 @@ keep / total は `GET /meetgreets/:id` の `repoCollection` で読む。判定�
   "addedLines": [42],
   "newSources": [{"sourceNo": 6, "label": "坂井新奈トーク 2026.8.3 12:00", "url": null, "date": "2026-08-03", "assetId": "…"}],
   "droppedByClearance": 0,
-  "additions": [{"key": "report:2083484444254752944", "kind": "report", "label": "レポ @Ariorihaberi710"}],
-  "excluded": [{"key": "asset:cmf…", "label": "トーク 2026.8.3 12:00"}],
+  "additions": [
+    {"key": "report:2083484444254752944", "kind": "report", "label": "レポ https://x.com/Ariorihaberi710/status/2083484444254752944"}
+  ],
+  "excluded": [{"key": "asset:cmf…", "label": "- 【トーク・動画】坂井新奈トーク 2026.8.3 12:00"}],
   "empty": false,
   "shortId": "0izz31T"
 }
@@ -1142,8 +1144,11 @@ keep / total は `GET /meetgreets/:id` の `repoCollection` で読む。判定�
 - **追記は「純粋な追記」でなければ中止する**（既存行が 1 行でも消える形になったら 409）。脚注番号も既存のまま据え置き、新しい出典だけ末尾に採番する
 - **本文に載るのは `internal` 以下のアセットだけ。** `Article` は非保護テーブルで、本文は push でそのまま公開リポジトリに載るため。落とした件数は `droppedByClearance` で返す（[docs/security-dev.md](./security-dev.md)）
 - 出典は `applyArticleSource` と同じ経路で作られるので、公開に落とせる機密レベルの制限もそのまま効く
+- `additions[].kind` は `quote` / `report` / `tiktok` / `talk` / `blogImage`。`label` は画面に出す文で、**形は種別ごとに違う**（レポは URL、トーク・画像は本文に足す行そのもの）。機械で読むなら `key` を使う
+- **`mode: "create"` では `additions` / `excluded` はどちらも空。** 新規作成はフル生成で、外す仕組みが無い
 - **`additions` が「今回足すもの」、`excluded` が「足さないと覚えているもの」。** 追記は「本文に無い = まだ足していない」としか判断できないので、人が意図的に消したもの（X 側で消えたレポなど）を `exclude` で覚えさせないと、次の追記で復活する
-- **外したものの出典は作らない。** 本文に出ないのに `ArticleSource` が残ると、frontmatter に載って公開リポジトリに push されてしまう
+- **外したものの出典は作らない。** 本文に出ないのに `ArticleSource` が残ると、frontmatter に載って公開リポジトリに push されてしまう。ただし**効くのは「これから足すもの」だけ**で、すでに追記済みのものを後から外しても、そのとき作った出典は残る（手で本文の行を消した場合と同じ。取り下げは記事の編集画面から）
+- 記事のスナップショット（`frontmatterExtra.dossier`）は、`item_count` / `updated_at` が動いたときだけ書き換える。`synced_at` だけの差では `dirty` を立てない（push するものが無いのに「要反映」が残るため）
 - 生成しただけでは公開されない。`dirty` な記事になり、`/articles/push`（画面）で公開リポジトリに出る
 - **TikTok は短縮 URL を解決できたものだけ載せる。** 解決に失敗したものは落とす（短縮のままでは埋め込みにならず、video ID が無いので次の追記で重複するため）
 - TikTok の短縮 URL を解決するため外部に出る。数秒〜十数秒かかることがある

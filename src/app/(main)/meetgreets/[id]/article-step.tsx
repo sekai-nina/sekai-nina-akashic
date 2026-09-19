@@ -25,15 +25,18 @@ export function ArticleStep({
   const [preview, setPreview] = useState<ArticlePreview | null>(null);
   /** 足すものにチェック。外したものは「今後足さない」として覚える (#134) */
   const [keep, setKeep] = useState<Set<string>>(new Set());
+  /** いま見せている本文に反映済みの「外すつもり」。チェックとズレたら見直しを促す */
+  const [previewed, setPreviewed] = useState<string[]>([]);
 
   if (!hasDossier) {
     return <p className="text-xs text-slate-400">ドシエが見えないため記事を作れません。</p>;
   }
 
-  function load() {
+  /** 差分を取り直す。`overlay` を渡すと、外すつもりのものを引いた本文で見せる */
+  function load(overlay: string[] = [], note?: string) {
     setMsg("組み立てています…");
     startTransition(async () => {
-      const res = await previewArticleAction(meetGreetId).catch((e: unknown) => ({
+      const res = await previewArticleAction(meetGreetId, overlay).catch((e: unknown) => ({
         ok: false as const,
         error: e instanceof Error ? e.message : "通信に失敗しました",
       }));
@@ -42,13 +45,25 @@ export function ArticleStep({
         return;
       }
       setPreview(res.preview);
-      setKeep(new Set(res.preview.additions.map((a) => a.key)));
+      setPreviewed(overlay);
+      // **チェックは引き継ぐ。** 取り消しのたびに全部チェックに戻ると、
+      // 外すつもりで外したものが黙って復活する
+      const dropped = new Set(overlay);
+      setKeep((prev) => {
+        const known = prev.size > 0 || dropped.size > 0;
+        return new Set(
+          res.preview.additions
+            .map((a) => a.key)
+            .filter((k) => (known ? prev.has(k) || !dropped.has(k) : true))
+        );
+      });
       setMsg(
-        res.preview.empty
-          ? "増えているものはありません"
-          : res.preview.mode === "create"
-            ? "新しい記事の本文です。確認して保存してください"
-            : `${res.preview.addedLines.length} 行増えます`
+        note ??
+          (res.preview.empty
+            ? "増えているものはありません"
+            : res.preview.mode === "create"
+              ? "新しい記事の本文です。確認して保存してください"
+              : `${res.preview.addedLines.length} 行増えます`)
       );
     });
   }
@@ -77,6 +92,7 @@ export function ArticleStep({
             : `${res.added} 行を追記しました（出典 +${res.sources}）${dropped}`
       );
       setPreview(null);
+      setPreviewed([]);
       router.refresh();
     });
   }
@@ -92,19 +108,28 @@ export function ArticleStep({
         setMsg(`エラー: ${res.error}`);
         return;
       }
+      if (res.restored === 0) {
+        // 別のタブで先に戻された等。黙って取り直すと「押したのに何も起きない」に見える
+        setMsg("すでに戻されていました");
+        return;
+      }
       // 戻したものが候補に出てくるので、差分を取り直す
-      load();
+      load(previewed, "戻しました");
     });
   }
 
   const added = new Set(preview?.addedLines ?? []);
+  /** チェックを外しているのに、いま見せている本文にはまだ入っているもの */
+  const unchecked = (preview?.additions ?? []).filter((a) => !keep.has(a.key)).map((a) => a.key);
+  const stale =
+    unchecked.length !== previewed.length || unchecked.some((k) => !previewed.includes(k));
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
-          onClick={load}
+          onClick={() => load()}
           disabled={pending}
           className="inline-flex items-center gap-1 h-8 px-3 rounded-md border border-slate-200 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
         >
@@ -120,7 +145,21 @@ export function ArticleStep({
             {preview.mode === "create" ? "この内容で作る" : "この差分を追記する"}
           </button>
         )}
-        {msg && <span className="text-xs text-slate-500">{msg}</span>}
+        {preview && stale && (
+          <button
+            type="button"
+            onClick={() => load(unchecked)}
+            disabled={pending}
+            className="h-8 px-3 rounded-md border border-slate-200 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            外した分を反映して見直す
+          </button>
+        )}
+        {msg && (
+          <span role="status" className="text-xs text-slate-500">
+            {msg}
+          </span>
+        )}
       </div>
 
       {preview && preview.droppedByClearance > 0 && (
@@ -151,7 +190,7 @@ export function ArticleStep({
                         return next;
                       })
                     }
-                    aria-label={a.label}
+                    disabled={pending}
                   />
                   <span className="text-xs text-slate-700 break-all">{a.label}</span>
                 </label>
@@ -169,13 +208,14 @@ export function ArticleStep({
           <ul className="rounded-md border border-slate-200 divide-y divide-slate-100">
             {preview.excluded.map((e) => (
               <li key={e.key} className="flex items-start gap-2 px-3 py-2">
-                <span className="text-xs text-slate-400 break-all flex-1 line-through">
+                <span className="text-xs text-slate-500 break-all flex-1 line-through">
                   {e.label}
                 </span>
                 <button
                   type="button"
                   onClick={() => restore(e.key)}
                   disabled={pending}
+                  aria-label={`${e.label} を戻す`}
                   className="shrink-0 h-6 px-2 rounded border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50 disabled:opacity-50"
                 >
                   戻す
@@ -196,6 +236,12 @@ export function ArticleStep({
               <span className="text-[11px] text-slate-500">出典 +{preview.newSources.length} 件</span>
             )}
           </div>
+          {stale && (
+            <p className="mb-1.5 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+              外した {unchecked.length} 件は、この本文にはまだ含まれています（保存時に除かれます）。
+              反映した形で見るには「外した分を反映して見直す」を押してください。
+            </p>
+          )}
           <div
             role="region"
             aria-label="生成した本文のプレビュー"

@@ -40,7 +40,8 @@ export async function POST(request: Request, { params }: Params) {
   if (!mg) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   try {
-    if (parsed.data.restore?.length) {
+    // **`?.length` で見ない。** `restore: []` が偽になって保存に落ちる
+    if (parsed.data.restore !== undefined) {
       const restored = await restoreMeetGreetExclusions(
         auth,
         { ...mg, format: mg.format },
@@ -49,7 +50,11 @@ export async function POST(request: Request, { params }: Params) {
       return NextResponse.json({ restored });
     }
     if (parsed.data.dryRun) {
-      const preview = await previewMeetGreetArticle(auth, { ...mg, format: mg.format });
+      const preview = await previewMeetGreetArticle(
+        auth,
+        { ...mg, format: mg.format },
+        parsed.data.exclude ?? []
+      );
       return NextResponse.json({
         mode: preview.mode,
         title: preview.title,

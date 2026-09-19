@@ -144,6 +144,52 @@ describe("planAppend", () => {
     expect(p.newSources[0].sourceNo).toBe(4);
   });
 
+  it("同じレポが 2 表記で入っていても 1 本しか足さない", () => {
+    const p = planAppend({
+      existingBody: BODY,
+      parts: {
+        ...EMPTY_PARTS,
+        reports: ["https://x.com/a/status/9", "https://twitter.com/a/status/9?s=20"],
+      },
+      sources: [],
+      existingSources: [],
+    });
+    expect(p.added.reports).toBe(1);
+    expect(p.additions).toHaveLength(1);
+  });
+
+  it("先頭行が同じ抜粋は両方足すが、チェックは 1 つにまとめる", () => {
+    const parts: ArticleParts = {
+      ...EMPTY_PARTS,
+      quotes: [
+        {
+          sourceNo: 1,
+          label: "ブログ",
+          url: "https://example.com/1",
+          date: "2026-08-02",
+          excerpts: ["ありがとう\n楽しかった", "ありがとう\nまた会おうね"],
+        },
+      ],
+    };
+    const sources = [
+      { sourceNo: 1, label: "ブログ", url: "https://example.com/1", date: "2026-08-02", assetId: null },
+    ];
+    const p = planAppend({ existingBody: BODY, parts, sources, existingSources: [] });
+    expect(p.added.quotes).toBe(2);
+    expect(p.additions).toHaveLength(1);
+
+    // 外すと両方落ちる (= 出典も作らない)
+    const dropped = planAppend({
+      existingBody: BODY,
+      parts,
+      sources,
+      existingSources: [],
+      excluded: [p.additions[0].key],
+    });
+    expect(dropped.empty).toBe(true);
+    expect(dropped.newSources).toHaveLength(0);
+  });
+
   it("足すものが無い出典は作らない (frontmatter に宙に浮く出典を残さない)", () => {
     const p = planAppend({
       existingBody: BODY,

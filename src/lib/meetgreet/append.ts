@@ -13,6 +13,7 @@ import {
   type ArticleParts,
   type RenderedSource,
 } from "./article";
+import type { ExclusionKind } from "./types";
 
 const H_QUOTES = "## 本人の感想（ブログより）";
 const H_REPORTS = "## ファンによるミーグリレポ";
@@ -152,8 +153,12 @@ export interface AppendPlan {
  *
  * 追記は「記事の本文に無い = まだ足していない」としか判断できないので、人が意図的に
  * 消したもの (X 側で削除されたレポなど) を外したことをここで覚える。
+ *
+ * **効くのは「これから足すもの」だけ。** 既に追記済みのものを後から外しても、そのとき
+ * 作った `ArticleSource` は残る (手で本文の行を消した場合も同じで、これは #134 以前からの
+ * 課題)。frontmatter から出典を取り下げるのは記事の編集画面から行う。
  */
-export type ExclusionKind = "quote" | "report" | "tiktok" | "talk" | "blogImage";
+export type { ExclusionKind } from "./types";
 
 /** 文字列の短い指紋 (FNV-1a)。抜粋のキーに使う */
 function fingerprint(text: string): string {
@@ -172,7 +177,9 @@ export function exclusionKey(kind: ExclusionKind, value: string): string {
     const id = value.match(/\/status\/(\d+)/)?.[1];
     return `report:${id ?? normalizeTweetUrl(value)}`;
   }
-  if (kind === "tiktok") return `tiktok:${tiktokVideoId(value) ?? normalizeTweetUrl(value)}`;
+  // video ID が取れない短縮 URL は記事に載らない (resolveTiktokUrl が落とす) ので、
+  // ここに来るのは本来 ID 付きだけ。念のため URL そのままで持つ
+  if (kind === "tiktok") return `tiktok:${tiktokVideoId(value) ?? value}`;
   // 抜粋は**先頭行**で見る。重複判定も先頭行なので identity を揃える
   // (下の行を直しただけで別キーになると、除外したはずの引用が復活する)
   if (kind === "quote") return `quote:${fingerprint(quoteHead(value))}`;
@@ -202,10 +209,19 @@ export function planAppend(input: {
   const excluded = new Set(input.excluded ?? []);
   const additions: AppendItem[] = [];
   /** 除外されていなければ一覧に足して true を返す */
+  const takenKeys = new Set<string>();
   const take = (kind: ExclusionKind, value: string, label: string): boolean => {
     const key = exclusionKey(kind, value);
     if (excluded.has(key)) return false;
-    additions.push({ key, kind, label });
+    const dup = takenKeys.has(key);
+    takenKeys.add(key);
+    // **キーが同じなら同じもの** — ドシエに同じレポが x.com と twitter.com の 2 表記で
+    // 入っていると、同じ行が 2 本並ぶ。落とす
+    if (dup && kind !== "quote") return false;
+    // 抜粋だけは別扱い。キーは**先頭行**の指紋なので、先頭行が同じ別の抜粋がありうる。
+    // 落とすと本文が欠けるので両方足し、チェックボックスは 1 つにまとめる
+    // (連動して見えるのを避ける。外せばどちらも足さない)
+    if (!dup) additions.push({ key, kind, label });
     return true;
   };
 
@@ -261,11 +277,11 @@ export function planAppend(input: {
     const n = footnoteOf(b.line);
     if (n !== null) neededSourceNos.add(n);
   }
-  const sourceByAssetId = new Map<string, RenderedSource>();
-  for (const s of input.sources) if (s.assetId) sourceByAssetId.set(s.assetId, s);
+  // トークも**本文の `^[n]` から引く** (画像と同じ)。assetId で引くと、突き合わせが
+  // 外れたときに行だけ出て宛先の無い脚注が残る
   for (const t of freshTalks) {
-    const s = sourceByAssetId.get(t.assetId);
-    if (s) neededSourceNos.add(s.sourceNo);
+    const n = footnoteOf(t.line);
+    if (n !== null) neededSourceNos.add(n);
   }
 
   const byAsset = new Map<string, number>();

@@ -8,6 +8,12 @@
 
 import type { AssetKind } from "@prisma/client";
 
+/**
+ * 「足さない」と決めたものの種別 (#134)。
+ * `append.ts` ではなくここに置く (クライアント部品が使うため。冒頭の注意を参照)
+ */
+export type ExclusionKind = "quote" | "report" | "tiktok" | "talk" | "blogImage";
+
 /** スケッチの参照に使えるドシエ内の画像 */
 export interface SketchSourceAsset {
   id: string;
@@ -64,7 +70,7 @@ export interface ArticlePreview {
   /** 機密レベルで本文に載せなかったアセットの数 */
   droppedByClearance: number;
   /** 足されるものの一覧。チェックを外したものは「今後足さない」として覚える (#134) */
-  additions: { key: string; kind: string; label: string }[];
+  additions: { key: string; kind: ExclusionKind; label: string }[];
   /** 今「足さない」と覚えているもの。戻せるように見せる (#134) */
   excluded: { key: string; label: string }[];
   /** 何も増えない */
