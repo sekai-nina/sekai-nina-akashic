@@ -994,6 +994,10 @@ model AiQuestion {
   cached        Boolean  @default(false)
   /// 質問元。本番とプレビューを混ぜて数えないため
   origin        String   @default("")
+  /// 会話の続きとして聞かれたか。
+  /// 「わたしも深大寺行ったことあるよ！」のような行が単独の質問に見えてしまうため、
+  /// 印だけ付ける。どの質問の続きなのかは保存しない（会話IDを持たないという約束を守る）
+  followUp      Boolean  @default(false)
 
   /// 他のテーブルと同じくクリアランスの RLS を掛ける。
   /// 中身は公開サイトへの質問なので internal で十分だが、素通しの穴を作らないために揃える
