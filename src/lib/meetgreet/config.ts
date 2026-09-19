@@ -56,11 +56,43 @@ export function reportTagGroups(format: MeetGreetFormat): HashtagGroup[] {
 // **クライアント部品からも読むので、ここには重い依存を持ち込まない。**
 // 生成の実処理 (sharp / Drive / R2 / OpenAI) は src/lib/meetgreet/sketch.ts。
 
+/** gpt-image-1 が 1 回に受け取れる画像の総数 */
+export const MAX_IMAGE_INPUTS = 16;
+
 /**
- * gpt-image-1 が受け取れる入力は 16 枚まで。最後の 1 枚を基準スケッチに使うので、
- * 参照写真はここまで。
+ * 参照にできる写真の枚数。基準スケッチで 1 枚使うので 15。
+ * **作り直しのときは直したい候補でもう 1 枚使う**ので、実際の上限は
+ * `maxReferencePhotos()` で出すこと (ここを直に使うと 17 枚送って API に弾かれる)。
  */
-export const MAX_REFERENCE_PHOTOS = 15;
+export const MAX_REFERENCE_PHOTOS = MAX_IMAGE_INPUTS - 1;
+
+/** 作り直しかどうかを踏まえた、参照写真の上限 */
+export function maxReferencePhotos(isRevision: boolean): number {
+  return MAX_REFERENCE_PHOTOS - (isRevision ? 1 : 0);
+}
 
 /** 1 回の生成で作る候補の枚数 */
 export const SKETCH_CANDIDATE_COUNT = 2;
+
+/** 参照に選べる画像の一覧の上限 (大きいドシエで画面が重くならないように) */
+export const MAX_SKETCH_SOURCES = 60;
+
+/** 1 回の提案で読むブログの本数の上限 (LLM 呼び出しが増え続けないように) */
+export const MAX_BLOGS_PER_PROPOSAL = 6;
+
+/** 1 回に反映できる抜粋の数 */
+export const MAX_EXCERPTS_PER_APPLY = 50;
+
+/**
+ * **OpenAI に送ってよい機密レベルの上限。**
+ *
+ * 抜粋の提案 (ブログ本文) とスケッチ生成 (画像) は、アセットの中身を外部の API に渡す。
+ * confidential 以上のものは外に出さない (MCP の `akashic_apply_article_source` が
+ * 公開判断を internal 以下に限っているのと同じ考え方)。詳細は docs/security-dev.md。
+ */
+export const MAX_EXTERNAL_AI_CLEARANCE = "internal" as const;
+
+/** Json 列の sketchCandidates から key の配列を取り出す (中身を信用しない) */
+export function sketchCandidateKeys(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((k): k is string => typeof k === "string") : [];
+}

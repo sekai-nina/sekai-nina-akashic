@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
-import { generateSketch, getMeetGreet, MeetGreetInputError } from "@/lib/domain/meetgreets";
+import { getMeetGreet, MeetGreetInputError } from "@/lib/domain/meetgreets";
+import { generateSketch } from "@/lib/domain/meetgreet-sketch";
 import { GenerateSketchSchema } from "@/lib/meetgreet/api";
-import { SketchError } from "@/lib/meetgreet/sketch";
+import { SketchConfigError, SketchError } from "@/lib/meetgreet/sketch";
 import { formatZodError } from "@/lib/zod-error";
 
 type Params = { params: Promise<{ id: string }> };
@@ -40,6 +41,8 @@ export async function POST(request: Request, { params }: Params) {
     if (e instanceof MeetGreetInputError) {
       return NextResponse.json({ error: e.message }, { status: 400 });
     }
+    // 設定漏れはこちら側の問題なので 500 (502 だと呼ばれてもいない上流のせいに見える)
+    if (e instanceof SketchConfigError) throw e;
     // 画像生成・R2 の失敗は上流の問題
     if (e instanceof SketchError) {
       return NextResponse.json({ error: e.message }, { status: 502 });

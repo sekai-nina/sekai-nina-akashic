@@ -1,16 +1,16 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { Check, Sparkles } from "lucide-react";
-import type { SketchSourceAsset } from "@/lib/domain/meetgreets";
-import { MAX_REFERENCE_PHOTOS } from "@/lib/meetgreet/config";
+import type { SketchCandidate, SketchSourceAsset } from "@/lib/meetgreet/types";
+import { maxReferencePhotos } from "@/lib/meetgreet/config";
 import { generateSketchAction, selectSketchAction, updateMeetGreetAction } from "../actions";
 
 interface Props {
   meetGreetId: string;
   sources: SketchSourceAsset[];
-  candidates: { key: string; url: string }[];
+  candidates: SketchCandidate[];
   selectedKey: string | null;
   extraPrompt: string;
 }
@@ -32,7 +32,17 @@ export function SketchStep({ meetGreetId, sources, candidates, selectedKey, extr
   const [revisionOf, setRevisionOf] = useState<string | null>(null);
   const [revisionNote, setRevisionNote] = useState("");
 
-  const overLimit = picked.size > MAX_REFERENCE_PHOTOS;
+  // 作り直しでは直す候補で 1 枚使うので、写真の上限がその分下がる
+  const limit = maxReferencePhotos(!!revisionOf);
+  const sourceIds = useMemo(() => new Set(sources.map((a) => a.id)), [sources]);
+  // ドシエから外された画像が選ばれたままにならないようにする
+  useEffect(() => {
+    setPicked((s) => {
+      const next = new Set([...s].filter((id) => sourceIds.has(id)));
+      return next.size === s.size ? s : next;
+    });
+  }, [sourceIds]);
+  const overLimit = picked.size > limit;
 
   function togglePhoto(id: string) {
     setPicked((s) => {
@@ -49,17 +59,33 @@ export function SketchStep({ meetGreetId, sources, candidates, selectedKey, extr
       return;
     }
     if (overLimit) {
-      setMsg(`参照にできる写真は ${MAX_REFERENCE_PHOTOS} 枚までです`);
+      setMsg(
+        revisionOf
+          ? `作り直しでは直す候補で 1 枚使うので、写真は ${limit} 枚までです`
+          : `参照にできる写真は ${limit} 枚までです`
+      );
       return;
     }
     setMsg("生成中… 1 分ほどかかります");
     startTransition(async () => {
-      // 追加指示は生成の前に保存する (次回の生成にも効く)
-      if (extra !== extraPrompt) await updateMeetGreetAction(meetGreetId, { extraSketchPrompt: extra });
+      // 追加指示は生成の前に保存する。**失敗したら生成しない**
+      // (サーバーは保存済みの指示を読むので、古い内容で 1 分かけて作ってしまう)
+      if (extra !== extraPrompt) {
+        const saved = await updateMeetGreetAction(meetGreetId, { extraSketchPrompt: extra }).catch(
+          (e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : "保存に失敗しました" })
+        );
+        if (!saved.ok) {
+          setMsg(`追加指示を保存できませんでした: ${saved.error}`);
+          return;
+        }
+      }
       const res = await generateSketchAction(meetGreetId, {
         assetIds: [...picked],
         ...(revisionOf ? { revisionOf, revisionNote } : {}),
-      });
+      }).catch((e: unknown) => ({
+        ok: false as const,
+        error: e instanceof Error ? e.message : "通信に失敗しました",
+      }));
       if (!res.ok) {
         setMsg(`エラー: ${res.error}`);
         return;
@@ -73,8 +99,11 @@ export function SketchStep({ meetGreetId, sources, candidates, selectedKey, extr
 
   function select(key: string) {
     startTransition(async () => {
-      const res = await selectSketchAction(meetGreetId, key);
-      setMsg(res.ok ? "確定しました（記事のサムネになります）" : `エラー: ${res.error}`);
+      const res = await selectSketchAction(meetGreetId, key).catch((e: unknown) => ({
+        ok: false as const,
+        error: e instanceof Error ? e.message : "通信に失敗しました",
+      }));
+      setMsg(res.ok ? "確定しました (記事のサムネになります)" : `エラー: ${res.error}`);
       if (res.ok) router.refresh();
     });
   }
@@ -92,11 +121,11 @@ export function SketchStep({ meetGreetId, sources, candidates, selectedKey, extr
       <div>
         <div className="flex items-baseline justify-between mb-1.5">
           <span className="text-xs font-medium text-slate-600">
-            参照にする写真（{picked.size} / 最大 {MAX_REFERENCE_PHOTOS}）
+            参照にする写真 ({picked.size} / 最大 {limit})
           </span>
           <span className="text-[11px] text-slate-400">その日の服装・髪型が分かるものを選ぶ</span>
         </div>
-        <ul className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+        <ul className="grid grid-cols-3 sm:grid-cols-5 gap-2" role="group" aria-label="参照にする写真">
           {sources.map((a) => {
             const on = picked.has(a.id);
             return (
@@ -128,7 +157,7 @@ export function SketchStep({ meetGreetId, sources, candidates, selectedKey, extr
 
       <div>
         <label className="block text-xs font-medium text-slate-600 mb-1.5" htmlFor="mg-extra-prompt">
-          この回の追加指示（任意。どの髪型を中央にするか、配置の希望など）
+          この回の追加指示 (任意。どの髪型を中央にするか、配置の希望など)
         </label>
         <textarea
           id="mg-extra-prompt"
@@ -177,9 +206,11 @@ export function SketchStep({ meetGreetId, sources, candidates, selectedKey, extr
 
       {candidates.length > 0 && (
         <div>
-          <span className="block text-xs font-medium text-slate-600 mb-1.5">候補</span>
+          <span className="block text-xs font-medium text-slate-600 mb-1.5">
+            候補（新しい順）
+          </span>
           <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {candidates.map((c) => {
+            {candidates.map((c, i) => {
               const isSelected = c.key === selectedKey;
               return (
                 <li
@@ -191,7 +222,11 @@ export function SketchStep({ meetGreetId, sources, candidates, selectedKey, extr
                 >
                   <a href={c.url} target="_blank" rel="noreferrer">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={c.url} alt="スケッチ候補" className="w-full bg-white" />
+                    <img
+                      src={c.url}
+                      alt={`スケッチ候補 ${i + 1}${isSelected ? "（確定済み）" : ""}`}
+                      className="w-full bg-white"
+                    />
                   </a>
                   <div className="flex items-center gap-2 px-2 py-1.5 border-t border-slate-100">
                     {isSelected ? (

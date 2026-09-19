@@ -5,19 +5,23 @@ import type { MeetGreetFormat } from "@prisma/client";
 import { requireRole } from "@/lib/auth/require-role";
 import { invalidateDossiers } from "@/lib/cache";
 import {
-  applyExcerpts,
   applyMaterials,
   createMeetGreet,
   deleteMeetGreet,
-  generateSketch,
   getMeetGreet,
-  proposeExcerptsForDossier,
   refetchReports,
-  selectSketch,
   updateMeetGreet,
-  type ApplyExcerptInput,
 } from "@/lib/domain/meetgreets";
-import { MAX_MATERIALS_PER_APPLY } from "@/lib/meetgreet/api";
+import { applyExcerpts, proposeExcerptsForDossier } from "@/lib/domain/meetgreet-excerpts";
+import { generateSketch, selectSketch } from "@/lib/domain/meetgreet-sketch";
+import {
+  ApplyExcerptsSchema,
+  GenerateSketchSchema,
+  MAX_MATERIALS_PER_APPLY,
+  UpdateMeetGreetSchema,
+} from "@/lib/meetgreet/api";
+import { formatZodError } from "@/lib/zod-error";
+import type { ApplyExcerptInput } from "@/lib/meetgreet/types";
 
 const requireMember = () => requireRole(["admin", "member"]);
 
@@ -49,6 +53,8 @@ export async function updateMeetGreetAction(
   input: { single?: string; label?: string; extraSketchPrompt?: string }
 ) {
   const user = await requireMember();
+  const parsed = UpdateMeetGreetSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: formatZodError(parsed.error) };
   try {
     await updateMeetGreet(user, id, input);
     revalidatePath(`/meetgreets/${id}`);
@@ -122,10 +128,12 @@ export async function proposeExcerptsAction(id: string) {
 
 export async function applyExcerptsAction(id: string, inputs: ApplyExcerptInput[]) {
   const user = await requireMember();
+  const parsed = ApplyExcerptsSchema.safeParse({ inputs });
+  if (!parsed.success) return { ok: false as const, error: formatZodError(parsed.error) };
   try {
     const mg = await getMeetGreet(user, id);
     if (!mg) throw new Error("見つかりません");
-    const result = await applyExcerpts(user, mg, inputs);
+    const result = await applyExcerpts(user, mg, parsed.data.inputs);
     invalidateDossiers();
     revalidatePath(`/meetgreets/${id}`);
     revalidatePath(`/dossiers/${mg.dossierId}`);
@@ -140,10 +148,12 @@ export async function generateSketchAction(
   options: { assetIds: string[]; revisionOf?: string; revisionNote?: string }
 ) {
   const user = await requireMember();
+  const parsed = GenerateSketchSchema.safeParse(options);
+  if (!parsed.success) return { ok: false as const, error: formatZodError(parsed.error) };
   try {
     const mg = await getMeetGreet(user, id);
     if (!mg) throw new Error("見つかりません");
-    const { candidates } = await generateSketch(user, mg, options);
+    const { candidates } = await generateSketch(user, mg, parsed.data);
     revalidatePath(`/meetgreets/${id}`);
     return { ok: true as const, candidates };
   } catch (e) {

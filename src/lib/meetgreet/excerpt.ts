@@ -5,11 +5,18 @@
  * `DossierItem` の抜粋 (excerptStart / excerptEnd) の候補として返す。
  *
  * **公開サイトの引用になる文面なので、提案をそのまま採用はしない。** 画面でチェックして
- * ドシエに入れ、細かい範囲は既存の範囲選択 UI で直す前提。
+ * ドシエに入れ、細かい範囲は人が直す前提。
  *
  * 位置の確定 (`locateExcerpt`) は DB に触らない純粋関数なのでテストがある。
  */
 
+import type { ExcerptProposal } from "./types";
+
+/**
+ * 原文どおりの部分文字列を返させる仕事なので、**安いモデルに落とさないこと。**
+ * `locateExcerpt` は言い換えを黙って捨てるので、モデルが弱いと
+ * 「候補が見つかりませんでした」に化けるだけで、劣化が画面から見えない。
+ */
 const OPENAI_MODEL = "gpt-4.1";
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 
@@ -33,6 +40,7 @@ const SYSTEM_PROMPT = `あなたは日向坂46・坂井新奈のファンサイ�
 重要:
 - **必ず原文のままの連続した部分文字列を返してください。** 要約・言い換え・句読点の追加をしないでください
 - 離れた場所に複数ある場合は、それぞれを別の要素として返してください（間を「…」で繋がない）
+- **本文に現れる順に返してください**
 - 段落の途中で切らず、文の切れ目で始めて文の切れ目で終わらせてください
 - 該当する部分が無ければ空の配列を返してください`;
 
@@ -66,13 +74,6 @@ const RESPONSE_SCHEMA = {
   },
 };
 
-export interface ExcerptProposal {
-  text: string;
-  reason: string;
-  start: number;
-  end: number;
-}
-
 /** 改行・空白の揺れを吸収するため、比較用に空白を 1 つに潰す */
 function normalize(s: string): { text: string; map: number[] } {
   const chars: string[] = [];
@@ -101,18 +102,31 @@ function normalize(s: string): { text: string; map: number[] } {
  * LLM は原文どおりに返してくるとは限らない（改行が空白になる、前後の空白が落ちる等）ので、
  * まず素で探し、だめなら空白を潰した文字列どうしで探して元の位置に戻す。
  * 見つからなければ null（= 採用しない。ズレた範囲を引用するより出さないほうがよい）。
+ *
+ * `from` は探し始める位置。**同じ言い回しがブログ内で繰り返されることがある**ので、
+ * 呼び出し側は前の抜粋の終わりを渡して前から順に埋めていく（毎回 0 から探すと、
+ * 2 つめ以降が 1 つめと同じ場所に解決してしまう）。
  */
-export function locateExcerpt(content: string, quote: string): { start: number; end: number } | null {
+export function locateExcerpt(
+  content: string,
+  quote: string,
+  from = 0
+): { start: number; end: number } | null {
   const trimmed = quote.trim();
   if (!trimmed) return null;
 
-  const direct = content.indexOf(trimmed);
+  const direct = content.indexOf(trimmed, from);
   if (direct >= 0) return { start: direct, end: direct + trimmed.length };
 
   const haystack = normalize(content);
   const needle = normalize(trimmed);
   if (!needle.text) return null;
-  const at = haystack.text.indexOf(needle.text);
+
+  // from (元の添字) を正規化後の添字に直してから探す
+  let normFrom = 0;
+  while (normFrom < haystack.map.length && haystack.map[normFrom] < from) normFrom++;
+
+  const at = haystack.text.indexOf(needle.text, normFrom);
   if (at < 0) return null;
 
   const start = haystack.map[at];
@@ -121,15 +135,26 @@ export function locateExcerpt(content: string, quote: string): { start: number; 
   return { start, end };
 }
 
-/** 重なり合う提案を落とす（先に出たものを優先） */
+/**
+ * 重なり合う提案を落とす。
+ * **長いほうを残す**（短い一文が、それを含む長い振り返りを追い出さないように）。
+ */
 export function dropOverlapping(items: ExcerptProposal[]): ExcerptProposal[] {
-  const sorted = [...items].sort((a, b) => a.start - b.start);
+  const sorted = [...items].sort((a, b) => {
+    if (a.start !== b.start) return a.start - b.start;
+    return b.end - b.start - (a.end - a.start); // 同じ開始位置なら長いほうを先に
+  });
   const kept: ExcerptProposal[] = [];
   for (const it of sorted) {
-    if (kept.some((k) => it.start < k.end && k.start < it.end)) continue;
+    const clash = kept.findIndex((k) => it.start < k.end && k.start < it.end);
+    if (clash >= 0) {
+      // 後から来たほうが長ければ入れ替える
+      if (it.end - it.start > kept[clash].end - kept[clash].start) kept[clash] = it;
+      continue;
+    }
     kept.push(it);
   }
-  return kept;
+  return kept.sort((a, b) => a.start - b.start);
 }
 
 interface ChatResponse {
@@ -173,7 +198,9 @@ export async function proposeExcerpts(
 
   const json = (await res.json().catch(() => ({}))) as ChatResponse;
   if (!res.ok) {
-    throw new ExcerptError(`抜粋の提案に失敗しました (${res.status}): ${json.error?.message ?? "不明なエラー"}`);
+    // OpenAI の本文はキーの一部や組織 ID を含むことがあるので、そのまま画面に出さない
+    console.error("[meetgreet/excerpt] OpenAI error", res.status, json.error?.message);
+    throw new ExcerptError(`抜粋の提案に失敗しました (${res.status})`);
   }
   const raw = json.choices?.[0]?.message?.content;
   if (!raw) return [];
@@ -185,11 +212,16 @@ export async function proposeExcerpts(
     throw new ExcerptError("抜粋の提案を読み取れませんでした");
   }
 
+  // 本文に現れる順に返させているので、前の抜粋の終わりから探す
+  let cursor = 0;
   const located: ExcerptProposal[] = [];
   for (const e of parsed.excerpts ?? []) {
-    const pos = locateExcerpt(content, e.text);
-    if (!pos) continue; // 原文に無い = 言い換えられているので採らない
+    let pos = locateExcerpt(content, e.text, cursor);
+    // 順序が前後していたら先頭から探し直す (それでも無ければ言い換えなので捨てる)
+    if (!pos && cursor > 0) pos = locateExcerpt(content, e.text);
+    if (!pos) continue;
     located.push({ text: content.slice(pos.start, pos.end), reason: e.reason, ...pos });
+    cursor = Math.max(cursor, pos.end);
   }
   return dropOverlapping(located).slice(0, MAX_EXCERPTS_PER_BLOG);
 }

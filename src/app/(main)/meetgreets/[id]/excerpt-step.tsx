@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Wand2 } from "lucide-react";
-import type { BlogExcerptProposals } from "@/lib/domain/meetgreets";
+import type { BlogExcerptProposals } from "@/lib/meetgreet/types";
 import { applyExcerptsAction, proposeExcerptsAction } from "../actions";
 
 /**
@@ -23,7 +23,11 @@ export function ExcerptStep({ meetGreetId }: { meetGreetId: string }) {
   function propose() {
     setMsg("ブログ本文を読んでいます…");
     startTransition(async () => {
-      const res = await proposeExcerptsAction(meetGreetId);
+      // 長く待たせる処理なので、通信ごと落ちたときに固まったままにしない
+      const res = await proposeExcerptsAction(meetGreetId).catch((e: unknown) => ({
+        ok: false as const,
+        error: e instanceof Error ? e.message : "通信に失敗しました",
+      }));
       if (!res.ok) {
         setMsg(`エラー: ${res.error}`);
         return;
@@ -59,16 +63,20 @@ export function ExcerptStep({ meetGreetId }: { meetGreetId: string }) {
     }
     setMsg("反映中…");
     startTransition(async () => {
-      const res = await applyExcerptsAction(meetGreetId, inputs);
+      const res = await applyExcerptsAction(meetGreetId, inputs).catch((e: unknown) => ({
+        ok: false as const,
+        error: e instanceof Error ? e.message : "通信に失敗しました",
+      }));
       if (!res.ok) {
         setMsg(`エラー: ${res.error}`);
         return;
       }
       setMsg(
-        `${res.added} 件をドシエに入れました${res.skipped > 0 ? ` (${res.skipped} 件は既にある範囲)` : ""}`
+        `${res.added} 件をドシエに入れました${res.skipped > 0 ? ` (${res.skipped} 件は既にある範囲などで見送り)` : ""}`
       );
-      setBlogs(null);
+      // 入ったぶんだけチェックを外す。見送られたものは選び直せるよう候補は残す
       setPicked(new Set());
+      if (res.skipped === 0) setBlogs(null);
       router.refresh();
     });
   }
@@ -122,7 +130,6 @@ export function ExcerptStep({ meetGreetId }: { meetGreetId: string }) {
                                 return next;
                               })
                             }
-                            aria-label={p.text.slice(0, 40)}
                           />
                           <span className="min-w-0">
                             <span className="block text-sm text-slate-800 whitespace-pre-wrap">{p.text}</span>
@@ -147,7 +154,7 @@ export function ExcerptStep({ meetGreetId }: { meetGreetId: string }) {
               ドシエに入れる ({picked.size})
             </button>
             <span className="text-[11px] text-slate-400">
-              入れたあと、細かい範囲はドシエの画面で直せます
+              入れたあと、引用文はドシエの画面で直せます
             </span>
           </div>
         </div>

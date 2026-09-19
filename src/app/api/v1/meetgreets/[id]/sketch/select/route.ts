@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
-import { getMeetGreet, MeetGreetInputError, selectSketch } from "@/lib/domain/meetgreets";
+import { getMeetGreet, MeetGreetInputError } from "@/lib/domain/meetgreets";
+import { selectSketch } from "@/lib/domain/meetgreet-sketch";
 import { SelectSketchSchema, projectMeetGreet } from "@/lib/meetgreet/api";
 import { formatZodError } from "@/lib/zod-error";
 
