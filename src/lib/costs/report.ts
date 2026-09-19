@@ -2,9 +2,9 @@ import { LlmProvider, type LlmUsageSource } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { addDaysToDateString, toJstDateOnly } from "@/lib/utils";
 import { findPricing } from "./pricing";
-import { jstDateOnlyToColumn } from "./usage";
 import {
   SNAPSHOT_STALE_DAYS,
+  jstDateOnlyToColumn,
   burnRatePerDay,
   daysRemaining,
   estimateBalance,

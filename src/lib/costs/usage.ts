@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { addDaysToDateString, isValidDateString, toJstDateOnly } from "@/lib/utils";
 import { computeCostUsd } from "./pricing";
+import { jstDateOnlyToColumn } from "./summary";
 
 /**
  * 自己申告の利用量を受け取って日次に積む。REST (`POST /api/v1/usage`) と
@@ -41,10 +42,7 @@ export const UsageReportSchema = z
 
 export type UsageReport = z.infer<typeof UsageReportSchema>;
 
-/** JST の「YYYY-MM-DD」を DATE 列に入れる値 (UTC 00:00 格納規約) に直す */
-export function jstDateOnlyToColumn(dateOnly: string): Date {
-  return new Date(`${dateOnly}T00:00:00.000Z`);
-}
+export { jstDateOnlyToColumn };
 
 /** 日付が範囲外 (未来・古すぎる)。route が 400 にする */
 export class UsageDateError extends Error {}

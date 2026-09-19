@@ -22,6 +22,16 @@ export interface DailyCost {
   usd: number;
 }
 
+/**
+ * JST の「YYYY-MM-DD」を DATE 列に入れる値 (UTC 00:00 格納規約) に直す。
+ *
+ * **純粋関数なのでここに置く。** DB を触るモジュール (usage.ts) に置くと、これを使う
+ * テストが `@/lib/db` を読み込み、DATABASE_URL の無い CI で PrismaClient の生成に失敗する。
+ */
+export function jstDateOnlyToColumn(dateOnly: string): Date {
+  return new Date(`${dateOnly}T00:00:00.000Z`);
+}
+
 /** 「YYYY-MM-DD」どうしの日数差 (a から b まで、b は含めない) */
 function daysBetween(a: string, b: string): number {
   return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);

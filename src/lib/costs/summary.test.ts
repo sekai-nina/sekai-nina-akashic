@@ -5,12 +5,12 @@ import {
   daysRemaining,
   estimateBalance,
   fillMissingDays,
+  jstDateOnlyToColumn,
   judgeCredit,
   CREDIT_ERROR_DAYS,
   CREDIT_WARN_DAYS,
   SNAPSHOT_STALE_DAYS,
 } from "./summary";
-import { jstDateOnlyToColumn } from "./usage";
 
 describe("burnRatePerDay", () => {
   const today = "2026-09-19";
