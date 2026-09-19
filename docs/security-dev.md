@@ -68,6 +68,7 @@ const clearance = auth.clearance;
 - `Lens`, `DataSource`, `Coverage`, `LensItemCheck`
 - `ArticleSource`（`Article` 自体は公開記事のミラーなので非保護）
 - `MeetGreet`（ミーグリ記事ワークフロー。ドシエを include する読みは所有者判定が要るので `withSession`）
+- `Anniversary`（記念日。出典アセットの本文は持たないが、機密アセットから作った記念日が漏れないよう自前の classification で守る）
 
 **非保護テーブルを足したら `REVOKE ALL ON TABLE "<Table>" FROM anon, authenticated;` を migration に書く。** Supabase は public スキーマの全テーブルに `anon` / `authenticated` への DML を既定で与え、PostgREST (`/rest/v1/<table>`) がそれを外に出す。保護テーブルが守られているのは RLS が `TO app_runtime` のポリシーしか持たないからで、権限のためではない。
 

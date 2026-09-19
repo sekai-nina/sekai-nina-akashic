@@ -224,6 +224,7 @@ model Asset {
   relationsAsSource AssetRelation[] @relation("RelationSource")
   relationsAsTarget AssetRelation[] @relation("RelationTarget")
   articleSources    ArticleSource[]
+  anniversaries     Anniversary[]
 
   @@index([sha256])
   @@index([status])
@@ -772,8 +773,9 @@ model Article {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  sources   ArticleSource[]
-  meetGreet MeetGreet?
+  sources       ArticleSource[]
+  meetGreet     MeetGreet?
+  anniversaries Anniversary[]
 
   @@index([type])
   @@index([dirty])
@@ -983,6 +985,47 @@ model MeetGreet {
   updatedAt DateTime @updatedAt
 
   @@index([date])
+  @@index([classification])
+}
+
+// ---------------------------------------------------------------------------
+// 記念日 (/anniversaries)
+//
+// 坂井新奈が「初めて〇〇した日」。公開サイトの「今日は〇〇の日」と記念日ページの正で、
+// 366 日すべてを埋めるのが目標。ブログ / トークを読んでいる最中に「これ初〇〇だ」と
+// 気づいた場面で登録するので、出典アセットをその場で紐づけられるようにしてある。
+// 聖地 (Place) と同じく公開サイトはビルド時に API から取得する。
+// 出典アセットの本文は持たないが、機密のアセットから作った記念日が漏れないよう
+// 自前の classification で RLS を掛ける (保護テーブル)。
+// ---------------------------------------------------------------------------
+
+model Anniversary {
+  id          String @id @default(cuid())
+  /// 初めての日 (JST "YYYY-MM-DD")。MeetGreet.date と同じく文字列で持つ (TZ 事故回避)。
+  /// 月日は毎年の記念日、年は「〇年前」の計算に使う
+  date        String
+  /// 呼び名 (例: 初ブログの日)。公開サイトの「今日は〇〇の日」にそのまま出る
+  title       String
+  /// 何があったかの一文
+  description String @default("")
+
+  /// 出典アセット (ブログ / トーク等)。アセットページから登録すると自動で入る
+  assetId   String?
+  asset     Asset?   @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  /// 出典 URL。アセット化されていない公式ページ等に使う (assetId と併用可)
+  sourceUrl String?
+  /// 関連する公開記事。サイトの記念日からのリンク先
+  articleId String?
+  article   Article? @relation(fields: [articleId], references: [id], onDelete: SetNull)
+
+  classification ClearanceLevel @default(internal)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([date])
+  @@index([assetId])
+  @@index([articleId])
   @@index([classification])
 }
 

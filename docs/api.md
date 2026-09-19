@@ -53,6 +53,11 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 | GET | `/places/:id` | read | 聖地詳細 |
 | PATCH | `/places/:id` | write | 聖地更新 |
 | DELETE | `/places/:id` | write | 聖地削除 |
+| GET | `/anniversaries` | read | 記念日（初めて〇〇した日）一覧と埋まった日数 |
+| POST | `/anniversaries` | write | 記念日作成 |
+| GET | `/anniversaries/:id` | read | 記念日詳細 |
+| PATCH | `/anniversaries/:id` | write | 記念日の部分更新 |
+| DELETE | `/anniversaries/:id` | write | 記念日削除 |
 | POST | `/upload` | write | ファイルアップロード |
 | GET | `/lenses` | read | 観点一覧 |
 | POST | `/lenses` | write | 観点作成 |
@@ -87,7 +92,7 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 
 ### 機密レベル (`classification`) の変更制限
 
-API キーからは **引き上げしかできない。** `PATCH /assets/:id` と `PATCH /places/:id` に現在より低い `classification` を渡すと `403 {"error":"Cannot lower classification (<現在> -> <指定>) via API key"}` を返す。
+API キーからは **引き上げしかできない。** `PATCH /assets/:id` / `PATCH /places/:id` / `PATCH /anniversaries/:id` に現在より低い `classification` を渡すと `403 {"error":"Cannot lower classification (<現在> -> <指定>) via API key"}` を返す。
 
 `assertClearance` は「自分のクリアランスより上を付ける」操作しか止めず、引き下げ (例: `restricted` → `public`) は素通りするため。API キーは MCP（LLM がツールを呼ぶ経路）と共通なので、アプリ層で塞いでいる。引き下げは画面から人間が行う。
 
@@ -471,6 +476,52 @@ API キーからは **引き上げしかできない。** `PATCH /assets/:id` �
 ### PATCH /places/:id
 
 渡したフィールドだけ更新する。`kind` / `area` は `null` で未設定に戻せる（`area` は空文字も未設定扱い）。`classification` は引き上げのみ（前述）。
+
+---
+
+## 記念日 (Anniversaries)
+
+坂井新奈が「初めて〇〇した日」。公開サイト（sekai-nina-site）のトップ「今日は〇〇の日」と記念日ページの正で、366 日すべてを埋めるのが目標。サイトはビルド時に `GET /anniversaries` を読む（聖地と同じ方式）。`classification` によるクリアランス制御を受ける（既定 `internal` = 公開サイトに出る。`confidential` 以上は出ない）。
+
+画面では、ブログ / トークのアセットページの「記念日に登録」から日付（`canonicalDate` の JST）と出典アセットが埋まった状態で登録する。
+
+### GET /anniversaries
+
+クリアランス内の記念日をすべて返す（ページングなし、**月日順**。同じ月日は年の古い順）。
+
+```json
+{
+  "items": [
+    {
+      "id": "cm...",
+      "date": "2025-04-10",
+      "monthDay": "04-10",
+      "title": "初ブログの日",
+      "description": "『一生一度の 坂井新奈』というタイトルでブログを初めて投稿した",
+      "source": { "url": "https://www.hinatazaka46.com/s/official/diary/detail/59569", "label": "坂井新奈ブログ「一生一度の坂井新奈」", "publisher": "日向坂46公式ブログ" },
+      "asset": { "id": "cm...", "title": "坂井新奈ブログ「一生一度の坂井新奈」", "kind": "text", "date": "2025-04-10" },
+      "article": { "id": "cm...", "shortId": "DhLvmF8", "path": "quote/ひなあい初登場時の自己紹介.md", "slug": null, "title": "ひなあい初登場時の自己紹介" },
+      "classification": "internal",
+      "createdAt": "...",
+      "updatedAt": "..."
+    }
+  ],
+  "filledDays": 10,
+  "totalDays": 366
+}
+```
+
+- `date` は JST の暦日文字列。`monthDay` が毎年の記念日、年は「〇年前」の計算に使う
+- `source` は手入力の `sourceUrl` があればそれ、無ければ出典アセットの `SourceRecord`（url / publisher）から平らにしたもの。どちらも無ければ `null`
+- `filledDays` は同じ月日を 1 と数えた埋まった日数（`items.length` とは違う）
+
+### POST /anniversaries
+
+**必須フィールド:** `date`（暦に実在する `YYYY-MM-DD`）, `title`（100 文字以内）。任意: `description`（1000 文字以内）, `assetId`（自分のクリアランスで見えるアセット）, `sourceUrl`（http(s)）, `articleId`（`Article.id`）, `classification`（既定 `internal`）。
+
+### PATCH /anniversaries/:id
+
+渡したフィールドだけ更新する。`assetId` / `sourceUrl` / `articleId` は `null` で外せる。`classification` は引き上げのみ（前述）。
 
 ---
 
