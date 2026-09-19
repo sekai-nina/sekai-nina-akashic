@@ -1114,6 +1114,8 @@ keep / total は `GET /meetgreets/:id` の `repoCollection` で読む。判定�
 |---|---|---|---|
 | `dryRun` | boolean | | `true` なら書き込まず、適用後の本文と増える行だけ返す |
 | `expectedDigest` | string | | `dryRun` が返した `digest`。渡すと、組み立て直した結果が変わっていたら 409（見せた内容と別のものを保存しない） |
+| `exclude` | string[] | | **今後この回では足さない**ものの key（`dryRun` の `additions[].key`）。保存が成功したときだけ覚える |
+| `restore` | string[] | | `exclude` の取り消し（`dryRun` の `excluded[].key`）。**単独で送る**（`dryRun` / `exclude` / `expectedDigest` と併用すると 400） |
 
 **レスポンス（`dryRun: true`）:**
 
@@ -1126,17 +1128,22 @@ keep / total は `GET /meetgreets/:id` の `repoCollection` で読む。判定�
   "addedLines": [42],
   "newSources": [{"sourceNo": 6, "label": "坂井新奈トーク 2026.8.3 12:00", "url": null, "date": "2026-08-03", "assetId": "…"}],
   "droppedByClearance": 0,
+  "additions": [{"key": "report:2083484444254752944", "kind": "report", "label": "レポ @Ariorihaberi710"}],
+  "excluded": [{"key": "asset:cmf…", "label": "トーク 2026.8.3 12:00"}],
   "empty": false,
   "shortId": "0izz31T"
 }
 ```
 
 **レスポンス（保存）:** `{"mode": "append", "shortId": "…", "added": 1, "sources": 1}`
+**レスポンス（`restore` のみ）:** `{"restored": 1}`
 
 - `mode` は `create` / `append`。**フル再生成は無い**（手で入れた `![rep]` や文面の調整を消すため。必要なら記事の編集画面から）
 - **追記は「純粋な追記」でなければ中止する**（既存行が 1 行でも消える形になったら 409）。脚注番号も既存のまま据え置き、新しい出典だけ末尾に採番する
 - **本文に載るのは `internal` 以下のアセットだけ。** `Article` は非保護テーブルで、本文は push でそのまま公開リポジトリに載るため。落とした件数は `droppedByClearance` で返す（[docs/security-dev.md](./security-dev.md)）
 - 出典は `applyArticleSource` と同じ経路で作られるので、公開に落とせる機密レベルの制限もそのまま効く
+- **`additions` が「今回足すもの」、`excluded` が「足さないと覚えているもの」。** 追記は「本文に無い = まだ足していない」としか判断できないので、人が意図的に消したもの（X 側で消えたレポなど）を `exclude` で覚えさせないと、次の追記で復活する
+- **外したものの出典は作らない。** 本文に出ないのに `ArticleSource` が残ると、frontmatter に載って公開リポジトリに push されてしまう
 - 生成しただけでは公開されない。`dirty` な記事になり、`/articles/push`（画面）で公開リポジトリに出る
 - **TikTok は短縮 URL を解決できたものだけ載せる。** 解決に失敗したものは落とす（短縮のままでは埋め込みにならず、video ID が無いので次の追記で重複するため）
 - TikTok の短縮 URL を解決するため外部に出る。数秒〜十数秒かかることがある
