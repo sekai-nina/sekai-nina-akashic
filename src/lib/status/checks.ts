@@ -4,9 +4,10 @@ import { classificationFilterSql } from "@/lib/classification";
 import { prisma, prismaInternal } from "@/lib/db";
 import { sourcePatternConds } from "@/lib/domain/coverage";
 import { getBranchHead, getTreeBlobs, isGithubConfigured } from "@/lib/github/client";
+import { ALL_PROVIDERS, getProviderSummaries } from "@/lib/costs/report";
 import { isR2Configured } from "@/lib/r2";
 import { thumbnailPendingWhere } from "@/lib/thumbnails";
-import { CHECK_GROUPS } from "@/lib/utils";
+import { CHECK_GROUPS, LLM_PROVIDER_LABELS } from "@/lib/utils";
 import { judgeFreshness, judgeHeartbeat } from "./judge";
 import {
   ARTICLE_DIRTY_MAX_AGE_DAYS,
@@ -279,6 +280,45 @@ const articlesGithubDrift: CheckDefinition = {
 };
 
 // ---------------------------------------------------------------------------
+// コスト (残クレジット)
+// ---------------------------------------------------------------------------
+
+/**
+ * プロバイダごとの「あと何日もつか」。判定は `src/lib/costs/summary.ts` の judgeCredit。
+ *
+ * **要約に金額を入れない。** この 1 行は Discord にも流れるので、残高そのものは
+ * /costs (admin のみ) でだけ見せる。detail にも金額は入れない。
+ */
+function creditChecks(): CheckDefinition[] {
+  // **定義を組み立てる時点では DB を触らない。** ここで await すると runAllChecks の
+  // per-check の try / タイムアウトの外になり、失敗が評価全体を巻き込む
+  // (2026-09-17 の往復事故と同じ形)。3 本のチェックで 1 回だけ引くよう promise を使い回す
+  let cache: Promise<Awaited<ReturnType<typeof getProviderSummaries>>> | null = null;
+  const load = () => (cache ??= getProviderSummaries());
+
+  return ALL_PROVIDERS.map((provider) => ({
+    key: `costs.${provider}`,
+    group: "costs" as const,
+    name: `${LLM_PROVIDER_LABELS[provider]} の残クレジット`,
+    description: "最新の残高スナップショットと直近 7 日のバーンレートから「あと何日もつか」を見る",
+    notify: true,
+    async run() {
+      const s = (await load()).find((x) => x.provider === provider);
+      if (!s) return { status: "unknown" as const, summary: "集計できません", detail: {} };
+      return {
+        status: s.judgement.status,
+        summary: s.judgement.summary,
+        detail: {
+          days: s.days,
+          snapshotAt: s.snapshotAt?.toISOString() ?? null,
+          unpricedModels: s.unpricedModels,
+        },
+      };
+    },
+  }));
+}
+
+// ---------------------------------------------------------------------------
 // akashic 自身
 // ---------------------------------------------------------------------------
 
@@ -311,6 +351,7 @@ const internalDbAccess: CheckDefinition = {
 export async function getCheckDefinitions(): Promise<CheckDefinition[]> {
   const [freshness, heartbeats] = await Promise.all([sourceFreshnessChecks(), heartbeatChecks()]);
   const all = [
+    ...creditChecks(),
     ...freshness,
     ...heartbeats,
     discoveryUnextracted,
