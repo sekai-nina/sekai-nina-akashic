@@ -106,6 +106,15 @@ enum DossierAccessMode {
   clearance
 }
 
+/// ドシエの役割 (#41)。
+/// - general: 通常のドシエ (特定支援・記事の素材)
+/// - clips: 「クリップ」プール。**全体で 1 本だけ** (部分ユニーク索引 `Dossier_clips_singleton` で担保)。
+///   記事未定の抜粋をここに溜め、あとから別ドシエへ移す。削除・アクセス設定の変更は domain で拒否する
+enum DossierKind {
+  general
+  clips
+}
+
 enum DossierItemKind {
   asset_ref
   external_link
@@ -164,17 +173,18 @@ model User {
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
 
-  createdAssets      Asset[]      @relation("AssetCreatedBy")
-  updatedAssets      Asset[]      @relation("AssetUpdatedBy")
-  assetTexts         AssetText[]  @relation("AssetTextCreatedBy")
-  annotations        Annotation[] @relation("AnnotationCreatedBy")
-  dossiers           Dossier[]
-  auditLogs          AuditLog[]
-  apiKeys            ApiKey[]
-  invitation         Invitation?
-  createdInvitations Invitation[] @relation("InvitationCreatedBy")
-  meetGreets         MeetGreet[]  @relation("MeetGreetCreatedBy")
-  creditSnapshots    CreditSnapshot[] @relation("CreditSnapshotCreatedBy")
+  createdAssets       Asset[]          @relation("AssetCreatedBy")
+  updatedAssets       Asset[]          @relation("AssetUpdatedBy")
+  assetTexts          AssetText[]      @relation("AssetTextCreatedBy")
+  annotations         Annotation[]     @relation("AnnotationCreatedBy")
+  dossiers            Dossier[]
+  dossierItemsCreated DossierItem[]    @relation("DossierItemCreatedBy")
+  auditLogs           AuditLog[]
+  apiKeys             ApiKey[]
+  invitation          Invitation?
+  createdInvitations  Invitation[]     @relation("InvitationCreatedBy")
+  meetGreets          MeetGreet[]      @relation("MeetGreetCreatedBy")
+  creditSnapshots     CreditSnapshot[] @relation("CreditSnapshotCreatedBy")
 }
 
 model Asset {
@@ -333,6 +343,7 @@ model Dossier {
   classification ClearanceLevel    @default(internal)
   viewMode       DossierAccessMode @default(private)
   editMode       DossierAccessMode @default(private)
+  kind           DossierKind       @default(general)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -340,10 +351,13 @@ model Dossier {
   items           DossierItem[]
   placeCandidates DossierPlaceCandidate[]
   meetGreet       MeetGreet?
+  /// このドシエを素材にした記事 (`Article.dossierId`)。1 本のドシエから複数記事を許す
+  articles        Article[]
 
   @@index([ownerId])
   @@index([classification])
   @@index([updatedAt])
+  @@index([kind])
 }
 
 model DossierItem {
@@ -373,6 +387,10 @@ model DossierItem {
   excerptStart Int?
   excerptEnd   Int?
 
+  /// 入れた人 (#41)。クリップの一覧で「自分のだけ」に絞るため。#41 以前の行は null
+  createdById String?
+  createdBy   User?   @relation("DossierItemCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -381,6 +399,7 @@ model DossierItem {
   // be added to a dossier multiple times, once per excerpt (range selection).
   @@index([dossierId])
   @@index([assetId])
+  @@index([createdById])
 }
 
 model DossierPlaceCandidate {
@@ -768,6 +787,12 @@ model Article {
   lastSyncedAt DateTime?
   lastPushedAt DateTime?
 
+  /// 素材ドシエ (#41)。クリップを「この記事に足す」ときの移動先。akashic 内部のリンクで
+  /// frontmatter には出さない (旧ワークフローの `frontmatterExtra.dossier` はそのまま残す)。
+  /// ドシエが消えたら null に戻る
+  dossierId String?
+  dossier   Dossier? @relation(fields: [dossierId], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -777,6 +802,7 @@ model Article {
   @@index([type])
   @@index([dirty])
   @@index([publishedAt])
+  @@index([dossierId])
 }
 
 /// 記事とアセットの紐づけ。記事 frontmatter の source[] 1 要素に対応する。
@@ -1002,9 +1028,9 @@ enum LlmUsageSource {
 
 /// 日次 × プロバイダ × モデル × 機能のトークン集計 (自己申告 / プロバイダの usage API)
 model LlmUsageDaily {
-  id   String      @id @default(cuid())
+  id       String      @id @default(cuid())
   /// JST の暦日 (UTC 深夜で保持する。他の date-only 列と同じ扱い)
-  date DateTime    @db.Date
+  date     DateTime    @db.Date
   provider LlmProvider
   model    String
   /// 呼び出し元の識別子 (akashic.testimonials / bot.discovery / worker.fitan_site など)。
@@ -1030,13 +1056,13 @@ model LlmUsageDaily {
 
 /// 日次 × プロバイダの確定コスト (プロバイダの costs API 由来)
 model LlmCostDaily {
-  id       String      @id @default(cuid())
-  date     DateTime    @db.Date
-  provider LlmProvider
+  id        String      @id @default(cuid())
+  date      DateTime    @db.Date
+  provider  LlmProvider
   /// USD。プロバイダが返した金額をそのまま入れる
-  amountUsd Decimal    @db.Decimal(12, 6)
+  amountUsd Decimal     @db.Decimal(12, 6)
   /// 取り込み元の説明 (openai:costs / anthropic:cost_report)
-  source    String     @default("")
+  source    String      @default("")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
