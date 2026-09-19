@@ -37,6 +37,7 @@ export function DossierHeader({ dossier, editable, manageable }: DossierHeaderPr
   const [classification, setClassification] = useState(dossier.classification);
   const [viewMode, setViewMode] = useState(dossier.viewMode);
   const [editMode, setEditMode] = useState(dossier.editMode);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   function persistTitle() {
@@ -55,7 +56,11 @@ export function DossierHeader({ dossier, editable, manageable }: DossierHeaderPr
 
   function handleDelete() {
     if (!confirm(`「${dossier.title}」を削除しますか？`)) return;
-    startTransition(() => deleteDossierAction(dossier.id));
+    startTransition(async () => {
+      // 成功すると redirect するので、戻ってくるのは失敗したときだけ
+      const res = await deleteDossierAction(dossier.id);
+      if (res && !res.ok) setDeleteError(res.error);
+    });
   }
 
   function persistSharing() {
@@ -117,6 +122,15 @@ export function DossierHeader({ dossier, editable, manageable }: DossierHeaderPr
           )}
         </div>
       </div>
+
+      {deleteError && (
+        <p
+          role="status"
+          className="mt-3 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2"
+        >
+          {deleteError}
+        </p>
+      )}
 
       {manageable && settingsOpen && (
         <div className="mt-4 border-t border-slate-100 pt-4">

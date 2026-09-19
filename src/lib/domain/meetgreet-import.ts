@@ -128,7 +128,7 @@ export async function importMeetGreets(
       );
       assertClearance(user.clearance, classification);
 
-      await createMeetGreet(user, {
+      const { reused } = await createMeetGreet(user, {
         date: c.date,
         format: c.format,
         single: c.single,
@@ -137,7 +137,18 @@ export async function importMeetGreets(
         dossierId: c.dossierId,
         ...(c.collection ? { repoCollectionId: c.collection.id } : {}),
       });
-      imported++;
+      // **再利用は「取り込んだ」と数えない (#112)。** 同じ (日付/形式/呼び分け) に
+      // 解釈される候補が 2 つあると、2 件目は紐づかないまま成功に見えてしまう
+      // (候補一覧にも出続ける)。指定したドシエと食い違えば createMeetGreet が投げるが、
+      // 同じドシエを 2 回渡したケースはここで拾う
+      if (reused) {
+        failed.push({
+          dossierTitle: c.dossierTitle,
+          error: "同じ日・形式・呼び分けの回が既にあります (呼び分けを変えてから取り込んでください)",
+        });
+      } else {
+        imported++;
+      }
     } catch (e) {
       failed.push({
         dossierTitle: c.dossierTitle,

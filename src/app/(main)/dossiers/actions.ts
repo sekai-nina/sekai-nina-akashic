@@ -65,9 +65,20 @@ export async function updateDossierMetaAction(id: string, formData: FormData) {
   revalidatePath(`/dossiers/${id}`);
 }
 
+/**
+ * ドシエを削除する。
+ *
+ * **失敗の理由を返す。** 投げっぱなしだと本番ではメッセージが伏せられ、画面には
+ * 「エラーが発生しました」しか出ない。ミーグリで使われているドシエは消せない (#112) ので、
+ * 何をすればよいか伝わる必要がある
+ */
 export async function deleteDossierAction(id: string) {
   const user = await requireUser();
-  await deleteDossierDomain(user, id);
+  try {
+    await deleteDossierDomain(user, id);
+  } catch (e) {
+    return { ok: false as const, error: e instanceof Error ? e.message : String(e) };
+  }
   invalidateDossiers();
   revalidatePath("/dossiers");
   redirect("/dossiers");

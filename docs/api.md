@@ -1043,6 +1043,10 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 
 同じ日に 2 回あるとき（通常盤と初回限定盤、会場違いなど）は **`label` で呼び分ける**。label が同じだと同じ回と見なされる。
 
+- 返すのは既にある行そのままで、**`single` / `classification` など送った値は反映しない**（再送の取りこぼしを拾うのが目的で、更新の口ではない。直すなら `PATCH /meetgreets/:id`）
+- **`dossierId` / `repoCollectionId` を送ったのに既存の行が別のものを指している場合は 400。** 「成功したのに紐づいていない」状態を作らないため
+- 自分のクリアランスでは見えない回とぶつかったときも 400（`label` を変えれば作れる）。500 で返して再送を繰り返させない
+
 ```json
 {
   "date": "2026-08-01",
