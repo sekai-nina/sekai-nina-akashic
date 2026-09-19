@@ -69,6 +69,7 @@
 - **非 ok の第一報は `ALERT_CONFIRM_SEC`（13 分 = 1 回分の間隔）待って裏を取る。** つまり**2 回続けて同じ非 ok を観測してから**通知する。1 回きりの異常（DB の接続待ち・GitHub の 5xx・bot の一時的な失敗）で通知が往復しない。次の評価で ok に戻れば `since` が巻き戻って通知は出ない。**復旧（→ ok）は待たずにすぐ出す**
 - 1 回の評価で複数変わっても **1 メッセージ**（`DISCORD_STATUS_WEBHOOK_URL`、素の `fetch`、行単位で 1900 字に収めて `/status` へのリンクは必ず残す）。送れたものだけ `lastNotifiedAt` / `notifiedStatus` を進める（**送信に失敗した遷移は次の評価で同じ遷移としてもう一度出る**）。通知の要らない行は `notifiedStatus` を今回の status に同期する
 - bot の `message` は要約と Discord では 200 字に切る（`clipMessage`）
+- webhook への送信は `postDiscordWebhook`（`src/lib/status/discord.ts`）に共通化してあり、`/mentions` の言及通知も同じ関数を使う。429 は Discord が返す `retry_after` だけ待って 1 回だけやり直す（#142 で追加。/status の通知にも効く）
 - 同じ cron で 30 日超の `JobRun` を消す
 
 ## 5. 画面（`/status`）

@@ -1,5 +1,5 @@
-import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
+import { authorizeCron } from "@/lib/cron/auth";
 import { ingestAllProviders } from "@/lib/costs/providers";
 
 // プロバイダ 2 社 ×「コスト + 内訳 + キー名 (プロジェクト数ぶん、並列)」。
@@ -16,11 +16,8 @@ const INGEST_DAYS = 3;
  * Admin キーが無いプロバイダは黙ってスキップする (/status に unknown で出る)。
  */
 export async function GET(request: Request) {
-  const secret = process.env.CRON_SECRET?.trim();
-  if (!secret) return NextResponse.json({ error: "cron is not configured" }, { status: 503 });
-  if (!bearerMatches(request.headers.get("authorization"), secret)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const denied = authorizeCron(request);
+  if (denied) return denied;
 
   const results = await ingestAllProviders(INGEST_DAYS);
   const failed = results.filter((r) => r.error);
@@ -30,9 +27,3 @@ export async function GET(request: Request) {
   return NextResponse.json({ results });
 }
 
-/** 長さが違えば即 false、同じなら定数時間で比較する */
-function bearerMatches(header: string | null, secret: string): boolean {
-  const expected = Buffer.from(`Bearer ${secret}`);
-  const actual = Buffer.from(header ?? "");
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
-}

@@ -100,7 +100,7 @@ withSession({ id, clearance }, tx => …)    // 上記 + app.user_id — Dossier
 
 ### 保護テーブル
 
-`Asset`, `AssetText`, `AssetEntity`, `AssetRelation`, `SourceRecord`, `Annotation`, `Testimonial`, `Dossier`, `DossierItem`, `DossierPlaceCandidate`, `Place`, `RepoCollection`, `RepoTweet`, `RepoTweetMedia`, `Lens`, `DataSource`, `Coverage`, `LensItemCheck`, `ArticleSource`, `MeetGreet`, `SketchSetting`, `Anniversary`
+`Asset`, `AssetText`, `AssetEntity`, `AssetRelation`, `SourceRecord`, `Annotation`, `Testimonial`, `Dossier`, `DossierItem`, `DossierPlaceCandidate`, `Place`, `RepoCollection`, `RepoTweet`, `RepoTweetMedia`, `Lens`, `DataSource`, `Coverage`, `LensItemCheck`, `ArticleSource`, `MeetGreet`, `SketchSetting`, `Anniversary`, `XMentionWatch`, `XMentionSetting`, `XMentionHit`
 
 RLS は `clearance_rank(classification::text) <= clearance_rank(current_setting('app.clearance', true))`。`clearance_rank()` は未知/未設定を `-1` にして **fail-closed**。全テーブル `ENABLE` + `FORCE ROW LEVEL SECURITY`。
 
@@ -131,7 +131,7 @@ src/
 └── middleware.ts
 ```
 
-主要ページ: `/search`（既定）, `/gallery`, `/assets`, `/inbox`, `/entities`, `/places`（聖地マップ）, `/anniversaries`（記念日）, `/dossiers`（特定支援）, `/testimonials`, `/repo`, `/meetgreets`（ミーグリ記事ワークフロー）, `/coverage`, `/graph`, `/analysis`, `/dashboard`, `/status`（パイプライン監視）, `/costs`（LLM コスト・admin のみ）, `/admin/*`
+主要ページ: `/search`（既定）, `/gallery`, `/assets`, `/inbox`, `/entities`, `/places`（聖地マップ）, `/anniversaries`（記念日）, `/dossiers`（特定支援）, `/testimonials`, `/repo`, `/mentions`（X 言及監視）, `/meetgreets`（ミーグリ記事ワークフロー）, `/coverage`, `/graph`, `/analysis`, `/dashboard`, `/status`（パイプライン監視）, `/costs`（LLM コスト・admin のみ）, `/admin/*`
 
 ## コード規約
 
@@ -182,7 +182,7 @@ src/
 
 - **Web: Vercel**。`vercel.json` で **region `hnd1` 固定**（Supabase ap-northeast-1 とのコロケーション。既定の iad1 だとページ読み込みが 5-8 秒かかった）
 - **CI**: `.github/workflows/ci.yml` が push to `main` で `pnpm typecheck` を回すだけ（Discord bot は撤去済み）
-- **Vercel Cron**: `vercel.json` の `*/15 * * * *` が `GET /api/cron/status`、`0 3 * * *`（UTC = 12:00 JST）が `GET /api/cron/costs` を呼ぶ（どちらも `CRON_SECRET` 必須。未設定なら 503 で何もしない）
+- **Vercel Cron**: `vercel.json` の `*/15 * * * *` が `GET /api/cron/status`、`0 3 * * *`（UTC = 12:00 JST）が `GET /api/cron/costs`、`0 0 * * *`（09:00 JST）が `GET /api/cron/mentions` を呼ぶ（すべて `CRON_SECRET` 必須。未設定なら 503 で何もしない。認証は `src/lib/cron/auth.ts`）
 - `instrumentation.ts` が起動時に Prisma を事前接続（pooler の ~800ms コールドコネクト回避）
 
 ## ドキュメント
@@ -194,6 +194,7 @@ src/
 | `docs/mcp.md` | MCP サーバー（`/api/mcp`）の仕様と設計判断 |
 | `docs/coverage-design.md` | 収集カバレッジ設計書 |
 | `docs/status-design.md` | パイプライン監視（`/status`・ハートビート API・Cron 評価・Discord 通知）設計書 |
+| `docs/mentions-design.md` | X 言及監視（`/mentions`・日次 cron・除外ユーザー・Discord 通知）設計書 |
 | `docs/costs-design.md` | LLM コスト管理（`/costs`・利用量の自己申告・プロバイダ取り込み・残クレジット判定）設計書 |
 | `docs/security.md` / `docs/security-admin.md` | 非エンジニア / 管理者向け |
 | `docs/architecture.md` | 設計の「なぜ」（RLS を中心に据えた理由、Asset/AssetText の分離、PGroonga 採用の理由） |
