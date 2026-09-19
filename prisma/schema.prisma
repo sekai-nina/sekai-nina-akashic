@@ -977,9 +977,11 @@ model MeetGreet {
 
   classification ClearanceLevel @default(internal)
 
-  /// 素材置き場。作成時に自動で作る (1:1)。ドシエが消えたらこの行も消す
+  /// 素材置き場。作成時に自動で作る (1:1)。
+  /// **Restrict。** この行はスケッチ・切り抜き枠・記事の紐づけ・除外リストを持っていて、
+  /// ドシエを消すだけで一緒に消えると復元できない。先にミーグリを消してもらう (#112)
   dossierId String  @unique
-  dossier   Dossier @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  dossier   Dossier @relation(fields: [dossierId], references: [id], onDelete: Restrict)
 
   /// X レポの収集。作成時に自動で作る。コレクションだけ消しても行は残す
   repoCollectionId String?         @unique
@@ -1016,6 +1018,10 @@ model MeetGreet {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  /// **同じ回を二度作らない (#112)。** 作成は X の収集込みで数十秒かかることがあり、
+  /// bot がタイムアウトして再送するとドシエ・収集が二重にできる。同じ日に 2 回あるときは
+  /// label ("通常" / "初限" / 会場名) で呼び分ける
+  @@unique([date, format, label])
   @@index([date])
   @@index([classification])
 }
