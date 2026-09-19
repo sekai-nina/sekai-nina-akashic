@@ -173,20 +173,21 @@ model User {
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
 
-  createdAssets       Asset[]          @relation("AssetCreatedBy")
-  updatedAssets       Asset[]          @relation("AssetUpdatedBy")
-  assetTexts          AssetText[]      @relation("AssetTextCreatedBy")
-  annotations         Annotation[]     @relation("AnnotationCreatedBy")
+  createdAssets       Asset[]           @relation("AssetCreatedBy")
+  updatedAssets       Asset[]           @relation("AssetUpdatedBy")
+  assetTexts          AssetText[]       @relation("AssetTextCreatedBy")
+  annotations         Annotation[]      @relation("AnnotationCreatedBy")
   dossiers            Dossier[]
-  dossierItemsCreated DossierItem[]    @relation("DossierItemCreatedBy")
+  dossierItemsCreated DossierItem[]     @relation("DossierItemCreatedBy")
   auditLogs           AuditLog[]
   apiKeys             ApiKey[]
   invitation          Invitation?
   aiSettings          AiSetting[]
-  sketchSettings      SketchSetting[]  @relation("SketchSettingUpdatedBy")
-  createdInvitations  Invitation[]     @relation("InvitationCreatedBy")
-  meetGreets          MeetGreet[]      @relation("MeetGreetCreatedBy")
-  creditSnapshots     CreditSnapshot[] @relation("CreditSnapshotCreatedBy")
+  xMentionSettings    XMentionSetting[]
+  sketchSettings      SketchSetting[]   @relation("SketchSettingUpdatedBy")
+  createdInvitations  Invitation[]      @relation("InvitationCreatedBy")
+  meetGreets          MeetGreet[]       @relation("MeetGreetCreatedBy")
+  creditSnapshots     CreditSnapshot[]  @relation("CreditSnapshotCreatedBy")
 }
 
 model Asset {
@@ -1234,5 +1235,71 @@ model SketchSetting {
 
   classification ClearanceLevel @default(internal)
 
+  @@index([classification])
+}
+
+// ============================================================
+// X 言及監視 (#142)
+// 監視語 (X の検索クエリ) ごとに毎日 recent search し、除外ユーザー以外の投稿を
+// Discord に流す。除外ユーザーは全監視語で共通 (XMentionSetting の singleton)。
+// 3 テーブルとも direct-classification パターンの RLS。cron はセッション外なので
+// prismaInternal で触り、/mentions は withClearance で読む。
+// ============================================================
+
+/// 監視語。X の検索クエリをそのまま持つ (`-is:retweet` と除外ユーザーの `-from:` は実行時に付ける)
+model XMentionWatch {
+  id      String  @id @default(cuid())
+  query   String
+  enabled Boolean @default(true)
+
+  /// 最後に見たツイート ID (次回の since_id)。null なら初回 = 直近 24 時間だけ見る
+  lastTweetId   String?
+  lastCheckedAt DateTime?
+  /// 直近の実行で X API に失敗したときのメッセージ。成功したら空に戻す
+  lastError     String    @default("")
+
+  classification ClearanceLevel @default(internal)
+  hits           XMentionHit[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([classification])
+}
+
+/// 除外ユーザー (全監視語で共通)。行は 1 つだけ (id = "singleton")。無ければ除外なし
+model XMentionSetting {
+  id                String   @id @default("singleton")
+  /// X のユーザー名 (@ 抜き、小文字)。クエリの `-from:` とアプリ側の突き合わせの両方に使う
+  excludedUsernames String[] @default([])
+
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+  updatedBy   User?    @relation(fields: [updatedById], references: [id])
+
+  classification ClearanceLevel @default(internal)
+}
+
+/// 拾ったツイート。監視語ごとに 1 行 (同じツイートが複数の監視語に当たれば複数行になるが、
+/// Discord には tweetId ごとに 1 回しか送らない)
+model XMentionHit {
+  id      String        @id @default(cuid())
+  watchId String
+  watch   XMentionWatch @relation(fields: [watchId], references: [id], onDelete: Cascade)
+
+  tweetId        String
+  authorUsername String
+  authorName     String    @default("")
+  text           String
+  tweetedAt      DateTime?
+  url            String
+  /// Discord に送れた時刻。null は未送信 (次回の実行で再送する)
+  notifiedAt     DateTime?
+
+  classification ClearanceLevel @default(internal)
+  createdAt      DateTime       @default(now())
+
+  @@unique([watchId, tweetId])
+  @@index([tweetId])
+  @@index([createdAt])
   @@index([classification])
 }
