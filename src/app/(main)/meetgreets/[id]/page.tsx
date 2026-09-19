@@ -99,9 +99,11 @@ export default async function MeetGreetDetailPage({ params, searchParams }: Prop
         {mg.dossier ? (
           <>
             <p className="text-xs text-slate-500 mb-3">
-              当日〜{MATERIAL_WINDOW_DAYS} 日後のブログ・トークから候補を出しています。本文にミーグリの話があるブログと、当日〜
+              当日〜{MATERIAL_WINDOW_DAYS} 日後のブログ・トークから候補を出しています。
+              <strong className="text-slate-700">チェックは入っていません</strong>
+              ので、入れるものを選んで「ドシエに反映」を押してください。本文にミーグリの話があるブログと、当日〜
               {TALK_SUGGEST_DAYS === 1 ? "翌日" : `${TALK_SUGGEST_DAYS} 日後`}
-              のトーク画像 / 動画は最初からチェック済み ({suggestedCount} 件)。外す / 足すだけして「ドシエに反映」を押してください。抜粋 (本人の感想) はドシエ側で範囲選択します。
+              のトーク画像 / 動画 ({suggestedCount} 件) は「おすすめ」としてまとめて入れられます。抜粋 (本人の感想) はドシエ側で範囲選択します。
             </p>
             <MaterialsStep meetGreetId={mg.id} groups={candidates} />
             <ExcerptStep meetGreetId={mg.id} />
