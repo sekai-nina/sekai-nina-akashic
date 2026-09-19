@@ -50,12 +50,15 @@ export async function deleteWatchAction(id: string): Promise<MentionActionState>
   }
 }
 
-export async function setExcludedUsernamesAction(input: string): Promise<MentionActionState> {
+/** 保存した正規化後のユーザー名を返す (フォームの表示を保存後の形に揃えるため) */
+export async function setExcludedUsernamesAction(
+  input: string
+): Promise<MentionActionState | { ok: true; message: string; usernames: string[] }> {
   const user = await requireRole(EDITORS);
   try {
     const saved = await setExcludedUsernames(input, user.clearance, user.id);
     revalidatePath("/mentions");
-    return { ok: true, message: `除外ユーザーを ${saved.length} 件保存しました` };
+    return { ok: true, message: `除外ユーザーを ${saved.length} 件保存しました`, usernames: saved };
   } catch (e) {
     return fail(e);
   }
@@ -74,12 +77,19 @@ export async function runNowAction(): Promise<MentionActionState> {
       action: "x_mentions.run",
       targetType: "XMentionWatch",
       targetId: "all",
-      metadata: { watches: result.watches.length, newHits: result.newHits, notified: result.notified, notifyError: result.notifyError },
+      metadata: {
+        watches: result.watches.length,
+        newHits: result.newHits,
+        notified: result.notified,
+        notifyRemaining: result.notifyRemaining,
+        notifyError: result.notifyError,
+      },
     });
     revalidatePath("/mentions");
     const failed = result.watches.filter((w) => w.error);
     const parts = [`${result.watches.length} 語を確認、新規 ${result.newHits} 件`];
     if (result.discordConfigured) parts.push(`Discord に ${result.notified} 件通知`);
+    if (result.notifyRemaining) parts.push(`残り ${result.notifyRemaining} 件は次回`);
     if (failed.length) return { ok: false, error: `${parts.join("、")}。失敗: ${failed.map((w) => `${w.query} (${w.error})`).join(" / ")}` };
     if (result.notifyError) return { ok: false, error: `${parts.join("、")}。通知に失敗: ${result.notifyError}` };
     return { ok: true, message: parts.join("、") };

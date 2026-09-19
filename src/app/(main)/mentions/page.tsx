@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getExcludedUsernames, getLastRun, listRecentHits, listWatches } from "@/lib/domain/x-mentions";
 import { isMentionDiscordConfigured } from "@/lib/x-mentions/run";
+import { formatRelative } from "@/lib/utils";
 import { ExclusionForm } from "./exclusion-form";
 import { HitList } from "./hit-list";
 import { RunControls } from "./run-controls";
@@ -12,6 +13,10 @@ import { WatchList } from "./watch-list";
  * 除外ユーザー以外の投稿を Discord に流す。ここで監視語と除外ユーザーを管理し、拾ったものを眺める。
  */
 export const dynamic = "force-dynamic";
+// 「今すぐ実行」は cron と同じ処理 (X API + Discord 連投) を Server Action で走らせるので、cron と同じ長さ
+export const maxDuration = 300;
+
+const HIT_LIMIT = 100;
 
 export default async function MentionsPage() {
   const session = await auth();
@@ -22,9 +27,16 @@ export default async function MentionsPage() {
   const [watches, excluded, hits, lastRun] = await Promise.all([
     listWatches(clearance),
     getExcludedUsernames(clearance),
-    listRecentHits(clearance),
+    listRecentHits(clearance, HIT_LIMIT),
     getLastRun(),
   ]);
+  // 相対時刻はここ (サーバー) で文字列にする。クライアントで計算すると hydration で食い違う
+  const now = new Date();
+  const watchItems = watches.map((w) => ({
+    ...w,
+    lastCheckedLabel: w.lastCheckedAt ? `最終確認 ${formatRelative(w.lastCheckedAt, now)}` : "未実行",
+  }));
+  const lastRunLabel = lastRun ? { relative: formatRelative(lastRun.at, now), ok: lastRun.ok, message: lastRun.message } : null;
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -35,15 +47,11 @@ export default async function MentionsPage() {
         </p>
       </div>
 
-      <RunControls
-        canEdit={canEdit}
-        discordConfigured={isMentionDiscordConfigured()}
-        lastRun={lastRun}
-      />
+      <RunControls canEdit={canEdit} discordConfigured={isMentionDiscordConfigured()} lastRun={lastRunLabel} />
 
       <section className="mt-8">
         <h2 className="text-sm font-medium text-slate-500 mb-3">監視語</h2>
-        <WatchList items={watches} canEdit={canEdit} />
+        <WatchList items={watchItems} canEdit={canEdit} />
       </section>
 
       <section className="mt-8">
@@ -52,7 +60,7 @@ export default async function MentionsPage() {
       </section>
 
       <section className="mt-8">
-        <h2 className="text-sm font-medium text-slate-500 mb-3">直近のヒット（{hits.length} 件）</h2>
+        <h2 className="text-sm font-medium text-slate-500 mb-3">直近のヒット（新しい順に {HIT_LIMIT} 件まで）</h2>
         <HitList items={hits} />
       </section>
     </div>

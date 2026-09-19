@@ -2,9 +2,10 @@ import { NextResponse } from "next/server";
 import { authorizeCron } from "@/lib/cron/auth";
 import { runMentionWatch } from "@/lib/x-mentions/run";
 
-// 監視語ごとに X API を最大 2 ページ + ヒット 1 件ごとに Discord へ 1 リクエスト (0.5 秒間隔)。
-// 監視語が数語、ヒットが数十件でも 1 分に収まる
-export const maxDuration = 60;
+// 監視語ごとに X API を最大 2 ページ (429 なら最長 90 秒待つ) + ヒット 1 件ごとに Discord へ
+// 1 リクエスト (0.5 秒間隔、1 回 60 件まで)。途中で切られると送ったのに notifiedAt が戻って
+// 二重送信になるので、余裕を持って 5 分
+export const maxDuration = 300;
 
 /**
  * X 言及監視の日次実行。`vercel.json` の crons から 09:00 JST に呼ばれる。
@@ -25,6 +26,7 @@ export async function GET(request: Request) {
     startedAt: result.startedAt.toISOString(),
     newHits: result.newHits,
     notified: result.notified,
+    notifyRemaining: result.notifyRemaining,
     notifyError: result.notifyError,
     discordConfigured: result.discordConfigured,
     watches: result.watches,

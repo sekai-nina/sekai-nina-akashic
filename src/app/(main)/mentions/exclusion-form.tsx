@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { setExcludedUsernamesAction, type MentionActionState } from "./actions";
 
 /**
@@ -10,13 +11,22 @@ import { setExcludedUsernamesAction, type MentionActionState } from "./actions";
  */
 export function ExclusionForm({ usernames, canEdit }: { usernames: string[]; canEdit: boolean }) {
   const [draft, setDraft] = useState(usernames.join("\n"));
+  const [saved, setSaved] = useState(usernames);
   const [state, setState] = useState<MentionActionState | null>(null);
   const [isPending, startTransition] = useTransition();
-  const dirty = draft.trim() !== usernames.join("\n");
+  const dirty = draft.trim() !== saved.join("\n");
 
   function save() {
     if (isPending || !dirty) return;
-    startTransition(async () => setState(await setExcludedUsernamesAction(draft)));
+    startTransition(async () => {
+      const r = await setExcludedUsernamesAction(draft);
+      // 保存できたら入力も保存後の形 (小文字・@ 抜き・重複なし) に揃える
+      if (r.ok && "usernames" in r) {
+        setSaved(r.usernames);
+        setDraft(r.usernames.join("\n"));
+      }
+      setState(r);
+    });
   }
 
   if (!canEdit) {
@@ -38,11 +48,13 @@ export function ExclusionForm({ usernames, canEdit }: { usernames: string[]; can
       <textarea
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        rows={Math.min(Math.max(usernames.length + 1, 3), 12)}
+        rows={Math.min(Math.max(saved.length + 1, 3), 12)}
         placeholder={"hinatazaka46\nsakai_nina_official"}
-        className={`w-full px-3 py-2 rounded-md border bg-white text-sm text-slate-900 outline-none focus:border-slate-400 font-mono ${
+        aria-label="除外ユーザー"
+        className={cn(
+          "w-full px-3 py-2 rounded-md border bg-white text-sm text-slate-900 outline-none focus:border-slate-400 font-mono",
           dirty ? "border-amber-400" : "border-slate-200"
-        }`}
+        )}
         spellCheck={false}
       />
       <div className="flex flex-wrap items-center gap-2">

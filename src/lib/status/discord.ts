@@ -34,6 +34,9 @@ function statusPageUrl(): string {
 
 /** Discord の content 上限 (2000) に収める。行単位で切って URL の行は必ず残す */
 const CONTENT_MAX_CHARS = 1900;
+/** 429 のとき待つ幅。retry_after (秒) をこの範囲に収める */
+const RETRY_WAIT_MIN_MS = 500;
+const RETRY_WAIT_MAX_MS = 10_000;
 
 export function formatNotification(lines: NotificationLine[], link: string = statusPageUrl()): string {
   const body = lines.map((l) => {
@@ -87,7 +90,7 @@ export async function postDiscordWebhook(url: string, content: string): Promise<
   let res = await send();
   if (res.status === 429) {
     const body = (await res.json().catch(() => ({}))) as { retry_after?: number };
-    const waitMs = Math.min(Math.max((body.retry_after ?? 1) * 1000, 500), 10_000);
+    const waitMs = Math.min(Math.max((body.retry_after ?? 1) * 1000, RETRY_WAIT_MIN_MS), RETRY_WAIT_MAX_MS);
     await new Promise((r) => setTimeout(r, waitMs));
     res = await send();
   }

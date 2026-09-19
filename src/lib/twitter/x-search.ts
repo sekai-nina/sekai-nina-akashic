@@ -153,7 +153,7 @@ interface XMedia {
 }
 
 export interface XSearchOptions {
-  /** この ID より新しいツイートだけ返す。start_time と同時に渡すと X API は since_id を優先する */
+  /** この ID より新しいツイートだけ返す。start_time とは同時に渡せない (どちらか一方) */
   sinceId?: string;
   bearerToken?: string;
 }

@@ -1,19 +1,15 @@
 import type { XMentionWatch } from "@prisma/client";
 import { prisma, withClearance } from "@/lib/db";
-import { JOB_KEY } from "@/lib/x-mentions/run";
-import { parseUsernames } from "@/lib/x-mentions/query";
+import { JOB_KEY, SETTING_ID, normalizeWatchQuery, parseUsernames } from "@/lib/x-mentions/query";
 
 /**
  * X 言及監視 (/mentions) のドメイン層。監視語・除外ユーザー・ヒット一覧の読み書き。
  *
  * XMentionWatch / XMentionSetting / XMentionHit は RLS 有効 (direct-classification)。
  * owner ベースは無いので withClearance で十分。実行そのものは `src/lib/x-mentions/run.ts`
- * (cron と同じ処理をセッション外で走らせる)。
+ * (cron と同じ処理をセッション外で走らせる)。定数と純関数は `src/lib/x-mentions/query.ts`
+ * (クライアント部品からも import できる leaf module)。
  */
-
-export const SETTING_ID = "singleton";
-/** 監視語の長さ上限。`-is:retweet` と `-from:` を足す余地を残す */
-export const WATCH_QUERY_MAX_CHARS = 200;
 
 export interface WatchView {
   id: string;
@@ -62,16 +58,8 @@ export async function listWatches(clearance: string): Promise<WatchView[]> {
   return rows.map(toWatchView);
 }
 
-/** 監視語の入力を整える。空や長すぎるものは Error */
-function normalizeQuery(raw: string): string {
-  const q = raw.replace(/\s+/g, " ").trim();
-  if (!q) throw new Error("監視語を入力してください");
-  if (q.length > WATCH_QUERY_MAX_CHARS) throw new Error(`監視語は ${WATCH_QUERY_MAX_CHARS} 文字までです`);
-  return q;
-}
-
 export async function createWatch(rawQuery: string, clearance: string): Promise<string> {
-  const query = normalizeQuery(rawQuery);
+  const query = normalizeWatchQuery(rawQuery);
   const row = await withClearance(clearance, (tx) => tx.xMentionWatch.create({ data: { query } }));
   return row.id;
 }
@@ -82,7 +70,7 @@ export async function updateWatch(
   clearance: string
 ): Promise<void> {
   const data: { query?: string; enabled?: boolean } = {};
-  if (patch.query !== undefined) data.query = normalizeQuery(patch.query);
+  if (patch.query !== undefined) data.query = normalizeWatchQuery(patch.query);
   if (patch.enabled !== undefined) data.enabled = patch.enabled;
   if (Object.keys(data).length === 0) return;
   // RLS で見えない行は updateMany が 0 件になるだけ (update だと P2025 で落ちる)

@@ -2,12 +2,12 @@
 
 import { useState, useTransition } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
-import { formatRelative } from "@/lib/utils";
-import type { LastRunView } from "@/lib/domain/x-mentions";
+import { cn } from "@/lib/utils";
 import { runNowAction, type MentionActionState } from "./actions";
 
 /**
  * 「今すぐ実行」と直近の実行結果。cron と同じ処理なので X API を叩き、ヒットがあれば Discord にも流れる。
+ * 相対時刻はサーバーで文字列にしたものを受け取る (hydration のズレを避ける)
  */
 export function RunControls({
   canEdit,
@@ -16,7 +16,7 @@ export function RunControls({
 }: {
   canEdit: boolean;
   discordConfigured: boolean;
-  lastRun: LastRunView | null;
+  lastRun: { relative: string; ok: boolean; message: string } | null;
 }) {
   const [state, setState] = useState<MentionActionState | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -54,8 +54,8 @@ export function RunControls({
       <p className="text-xs text-slate-400">
         {lastRun ? (
           <>
-            最終実行 {formatRelative(lastRun.at)}
-            <span className={lastRun.ok ? "" : " text-red-600"}> ── {lastRun.message}</span>
+            最終実行 {lastRun.relative}
+            <span className={cn(!lastRun.ok && "text-red-600")}> ── {lastRun.message}</span>
           </>
         ) : (
           "まだ実行されていません"
