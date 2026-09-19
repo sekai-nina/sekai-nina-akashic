@@ -3,7 +3,24 @@ import { TestimonialCategory, TestimonialStatus } from "@prisma/client";
 import { searchMentions, MentionResult } from "./mentions";
 import { recordUsage } from "@/lib/costs/usage";
 
-const OPENAI_MODEL = "gpt-4o-mini";
+/**
+ * 口コミ抽出のモデル。
+ *
+ * 人が承認/却下した実データ 80 件 (承認 40 / 却下 40) で 2 回ずつ比べて決めた (2026-09-20):
+ *
+ * | モデル | 承認を拾えた | 却下も拾った | カテゴリ一致 | 無回答 | 80 件の費用 |
+ * |---|---|---|---|---|---|
+ * | gpt-4o-mini  | 35/40 | 20-22/40 | 30-32/40 | 4 | $0.004 |
+ * | gpt-5-nano   | 33/40 | 30/40    | 33/40    | 0 | $0.022 |
+ * | gpt-5.6-luna | 38-39/40 | **14/40** | 33-34/40 | 0 | $0.011 |
+ * | gpt-5.4-mini | 39-40/40 | 27-32/40 | 35-36/40 | 0 | $0.027 |
+ *
+ * luna を採った。拾い漏らしが減ったうえに**却下に回る誤検出が 3 割減る** (= 人の確認が軽くなる)。
+ * gpt-4o-mini は「スキップするな」と指示しているのに毎回 4 件無回答だった。
+ * gpt-5.4-mini は拾う力は一番だが誤検出も多く、値段は 2 倍以上。
+ * 単価は gpt-4o-mini より高いが、この機能は月に数回しか動かないので絶対額は誤差。
+ */
+const OPENAI_MODEL = "gpt-5.6-luna";
 const BATCH_SIZE = 15;
 
 interface ExtractionResult {
@@ -132,7 +149,7 @@ async function callOpenAI(
     },
     body: JSON.stringify({
       model: OPENAI_MODEL,
-      temperature: 0.1,
+      // temperature は送らない。gpt-5 系は指定すると 400 で落ちる
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: buildUserPrompt(blocks) },
