@@ -181,11 +181,26 @@ export async function listArticleLinkCandidates(user: ActingUser): Promise<Artic
   );
   if (meetGreets.length === 0) return [];
 
-  // Article は非保護テーブルなので素の prisma でよい
-  const articles = await prisma.article.findMany({
-    where: { type: "event", meetGreet: null },
-    select: { id: true, title: true, shortId: true, frontmatterExtra: true },
-  });
+  // Article は非保護テーブルなので素の prisma でよいが、**MeetGreet を条件に混ぜない**
+  // (保護テーブルなので app.clearance 無しのサブクエリは 0 行になり、
+  // `meetGreet: null` が常に真になって絞り込みが効かない)。
+  // 既に使われている記事は withSession で引いた ID で外す
+  const linkedArticleIds = new Set(
+    (
+      await withSession(user, (tx) =>
+        tx.meetGreet.findMany({
+          where: { articleId: { not: null } },
+          select: { articleId: true },
+        })
+      )
+    ).flatMap((m) => (m.articleId ? [m.articleId] : []))
+  );
+  const articles = (
+    await prisma.article.findMany({
+      where: { type: "event" },
+      select: { id: true, title: true, shortId: true, frontmatterExtra: true },
+    })
+  ).filter((a) => !linkedArticleIds.has(a.id));
   const byDossier = new Map<string, (typeof articles)[number]>();
   for (const a of articles) {
     const extra = a.frontmatterExtra;

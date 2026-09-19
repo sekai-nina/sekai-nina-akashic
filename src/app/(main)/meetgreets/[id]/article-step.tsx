@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { FileText } from "lucide-react";
-import type { ArticlePreview } from "@/lib/domain/meetgreet-article-save";
+import type { ArticlePreview } from "@/lib/meetgreet/types";
 import { previewArticleAction, saveArticleAction } from "../actions";
 
 /**
@@ -114,7 +114,12 @@ export function ArticleStep({
               <span className="text-[11px] text-slate-500">出典 +{preview.newSources.length} 件</span>
             )}
           </div>
-          <pre className="max-h-96 overflow-auto rounded-md border border-slate-200 bg-white text-[11px] leading-relaxed">
+          <div
+            role="region"
+            aria-label="生成した本文のプレビュー"
+            tabIndex={0}
+            className="max-h-64 sm:max-h-96 overflow-auto rounded-md border border-slate-200 bg-white font-mono text-[11px] leading-relaxed"
+          >
             {preview.body.split("\n").map((line, i) => (
               <div
                 key={i}
@@ -127,7 +132,7 @@ export function ArticleStep({
                 {line}
               </div>
             ))}
-          </pre>
+          </div>
           {preview.newSources.length > 0 && (
             <ul className="mt-2 text-[11px] text-slate-500 space-y-0.5">
               {preview.newSources.map((s) => (

@@ -45,3 +45,24 @@ export interface ApplyExcerptInput {
   start: number;
   end: number;
 }
+
+/** 記事生成の種別 */
+export type ArticleMode = "create" | "append";
+
+/** 記事生成のプレビュー (画面が受け取る形) */
+export interface ArticlePreview {
+  mode: ArticleMode;
+  title: string;
+  /** 適用後の本文 */
+  body: string;
+  /** 追記のとき、増えた行の位置 (0 始まり) */
+  addedLines: number[];
+  /** 追加される出典 */
+  newSources: { sourceNo: number; label: string; url: string | null; assetId: string | null }[];
+  /** 機密レベルで本文に載せなかったアセットの数 */
+  droppedByClearance: number;
+  /** 何も増えない */
+  empty: boolean;
+  /** 既存記事がある場合の shortId */
+  shortId: string | null;
+}

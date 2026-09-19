@@ -35,6 +35,8 @@ export const UpdateMeetGreetSchema = z
   .object({
     single: z.string().max(200).optional(),
     label: z.string().max(50).optional(),
+    /** 会場の正式名称。リアルの記事タイトルに出る (空文字で消せる) */
+    venue: z.string().max(100).optional(),
     extraSketchPrompt: z.string().max(MAX_EXTRA_SKETCH_PROMPT).optional(),
   })
   .strict()
@@ -102,6 +104,7 @@ export function projectMeetGreet(mg: MeetGreetSummary | MeetGreetDetail) {
     format: mg.format,
     single: mg.single,
     label: mg.label,
+    venue: mg.venue,
     classification: mg.classification,
     // ドシエが所有者に private へ戻された / 機密を上げられたときは null (RLS で見えない)
     dossier: mg.dossier

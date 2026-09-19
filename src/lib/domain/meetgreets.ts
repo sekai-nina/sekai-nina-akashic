@@ -301,7 +301,7 @@ async function loadNeedsSync(
 }
 
 export async function listMeetGreets(user: ActingUser) {
-  return withSession(user, async (tx) => {
+  const loaded = await withSession(user, async (tx) => {
     const rows = await tx.meetGreet.findMany({
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
       include: listInclude,
@@ -310,43 +310,54 @@ export async function listMeetGreets(user: ActingUser) {
       loadDossiers(tx, rows.map((r) => r.dossierId)),
       keepCounts(tx, rows.flatMap((r) => (r.repoCollectionId ? [r.repoCollectionId] : []))),
     ]);
-    const needsSync = await loadNeedsSync(
-      rows.flatMap((r) => (r.articleId ? [r.articleId] : [])),
-      dossiers,
-      new Map(rows.flatMap((r) => (r.articleId ? [[r.articleId, r.dossierId] as const] : [])))
-    );
-    return rows.map((r) => ({
-      ...r,
-      dossier: dossiers.get(r.dossierId) ?? null,
-      reports: r.repoCollectionId ? (counts.get(r.repoCollectionId) ?? { keep: 0, total: 0 }) : null,
-      /** ドシエが記事より新しい = 追記すべきものがある */
-      needsSync: r.articleId ? needsSync.has(r.articleId) : false,
-    }));
+    return { rows, dossiers, counts };
   });
+
+  // Article は非保護テーブル。**トランザクションの外で引く**
+  // (中で別の接続を取ると 15,000ms の枠を食い、プールも 2 本使う)
+  const needsSync = await loadNeedsSync(
+    loaded.rows.flatMap((r) => (r.articleId ? [r.articleId] : [])),
+    loaded.dossiers,
+    new Map(loaded.rows.flatMap((r) => (r.articleId ? [[r.articleId, r.dossierId] as const] : [])))
+  );
+  return loaded.rows.map((r) => ({
+    ...r,
+    dossier: loaded.dossiers.get(r.dossierId) ?? null,
+    reports: r.repoCollectionId
+      ? (loaded.counts.get(r.repoCollectionId) ?? { keep: 0, total: 0 })
+      : null,
+    /** ドシエが記事より新しい = 追記すべきものがある */
+    needsSync: r.articleId ? needsSync.has(r.articleId) : false,
+  }));
 }
 
 export type MeetGreetSummary = Awaited<ReturnType<typeof listMeetGreets>>[number];
 
 export async function getMeetGreet(user: ActingUser, id: string) {
-  return withSession(user, async (tx) => {
+  const loaded = await withSession(user, async (tx) => {
     const row = await tx.meetGreet.findUnique({ where: { id }, include: listInclude });
     if (!row) return null;
     const [dossiers, counts] = await Promise.all([
       loadDossiers(tx, [row.dossierId]),
       keepCounts(tx, row.repoCollectionId ? [row.repoCollectionId] : []),
     ]);
-    const needsSync = await loadNeedsSync(
-      row.articleId ? [row.articleId] : [],
-      dossiers,
-      new Map(row.articleId ? [[row.articleId, row.dossierId] as const] : [])
-    );
-    return {
-      ...row,
-      dossier: dossiers.get(row.dossierId) ?? null,
-      reports: row.repoCollectionId ? (counts.get(row.repoCollectionId) ?? { keep: 0, total: 0 }) : null,
-      needsSync: row.articleId ? needsSync.has(row.articleId) : false,
-    };
+    return { row, dossiers, counts };
   });
+  if (!loaded) return null;
+
+  const needsSync = await loadNeedsSync(
+    loaded.row.articleId ? [loaded.row.articleId] : [],
+    loaded.dossiers,
+    new Map(loaded.row.articleId ? [[loaded.row.articleId, loaded.row.dossierId] as const] : [])
+  );
+  return {
+    ...loaded.row,
+    dossier: loaded.dossiers.get(loaded.row.dossierId) ?? null,
+    reports: loaded.row.repoCollectionId
+      ? (loaded.counts.get(loaded.row.repoCollectionId) ?? { keep: 0, total: 0 })
+      : null,
+    needsSync: loaded.row.articleId ? needsSync.has(loaded.row.articleId) : false,
+  };
 }
 
 export type MeetGreetDetail = NonNullable<Awaited<ReturnType<typeof getMeetGreet>>>;
@@ -354,6 +365,8 @@ export type MeetGreetDetail = NonNullable<Awaited<ReturnType<typeof getMeetGreet
 export interface UpdateMeetGreetInput {
   single?: string;
   label?: string;
+  /** 会場の正式名称 (リアルの記事タイトルに出る)。空文字で消す */
+  venue?: string;
   extraSketchPrompt?: string;
 }
 
@@ -367,6 +380,7 @@ export async function updateMeetGreet(user: ActingUser, id: string, input: Updat
       data: {
         ...(input.single !== undefined ? { single: input.single.trim() } : {}),
         ...(input.label !== undefined ? { label: input.label.trim() } : {}),
+        ...(input.venue !== undefined ? { venue: input.venue.trim() || null } : {}),
         ...(input.extraSketchPrompt !== undefined ? { extraSketchPrompt: input.extraSketchPrompt } : {}),
       },
     })

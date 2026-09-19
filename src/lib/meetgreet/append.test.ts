@@ -89,6 +89,53 @@ describe("planAppend", () => {
     expect(p.added.talks).toBe(0);
   });
 
+  it("題が既存行の前方一致でも、別の画像なら足す", () => {
+    // 画像 1 枚だけのブログは題に (n/m) が付かない。部分一致で判定すると
+    // 「…「待ち合わせ」」が「…「待ち合わせ」 (1/11)」に前方一致して取りこぼす
+    const body = ['- 【ブログ・画像】坂井新奈ブログ「待ち合わせ」 (1/11)^[1]', ""].join("\n");
+    const p = planAppend({
+      existingBody: body,
+      parts: {
+        ...EMPTY_PARTS,
+        blogImages: [{ assetId: "solo", line: "- 【ブログ・画像】坂井新奈ブログ「待ち合わせ」^[1]" }],
+      },
+      sources: [],
+      existingSources: [],
+    });
+    expect(p.added.blogImages).toBe(1);
+  });
+
+  it("同じ行は脚注番号が違っても足さない", () => {
+    const body = ['- 【ブログ・画像】坂井新奈ブログ「待ち合わせ」 (1/11)^[1]', ""].join("\n");
+    const p = planAppend({
+      existingBody: body,
+      parts: {
+        ...EMPTY_PARTS,
+        blogImages: [{ assetId: "x", line: "- 【ブログ・画像】坂井新奈ブログ「待ち合わせ」 (1/11)^[9]" }],
+      },
+      sources: [],
+      existingSources: [],
+    });
+    expect(p.added.blogImages).toBe(0);
+  });
+
+  it("出典 URL の突き合わせはフラグメントを保つ (ひなたぼっこ日記)", () => {
+    // …/manager/list?ima=0000#article-NNNNN は #article-NNNNN だけが識別子。
+    // クエリごと切ると別の投稿が同じ出典に化ける
+    const base = "https://www.hinatazaka46.com/s/official/diary/manager/list?ima=0000";
+    const p = planAppend({
+      existingBody: "本文\n",
+      parts: EMPTY_PARTS,
+      sources: [
+        { sourceNo: 1, label: "別の投稿", url: `${base}#article-70600`, date: null, assetId: "a2" },
+      ],
+      existingSources: [{ sourceNo: 3, assetId: "a1", url: `${base}#article-70538` }],
+    });
+    // 別 URL なので新しい出典として採番される (既存の 3 番に吸われない)
+    expect(p.newSources).toHaveLength(1);
+    expect(p.newSources[0].sourceNo).toBe(4);
+  });
+
   it("出典は末尾に採番し、既存の番号は振り直さない", () => {
     const sources: RenderedSource[] = [
       { sourceNo: 1, label: "既にあるブログ", url: "https://blog.example/1", date: "2026-08-03", assetId: "a1" },

@@ -59,7 +59,13 @@ export default async function MeetGreetDetailPage({ params }: Props) {
         <p className="text-xs text-slate-500 mt-1">
           作成 {formatDate(mg.createdAt)} · {mg.createdBy.name}
         </p>
-        <MetaForm id={mg.id} single={mg.single} label={mg.label} />
+        <MetaForm
+          id={mg.id}
+          single={mg.single}
+          label={mg.label}
+          venue={mg.venue}
+          isReal={mg.format === "real"}
+        />
       </div>
 
       {/* 1. 素材 */}

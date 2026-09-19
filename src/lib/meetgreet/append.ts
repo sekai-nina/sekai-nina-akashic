@@ -7,7 +7,12 @@
  * DB に触らない純粋関数。`isPureAppend` で「既存行が消えていないこと」を機械的に検査する。
  */
 
-import type { ArticleParts, RenderedSource } from "./article";
+import {
+  normalizeSourceUrl,
+  normalizeTweetUrl,
+  type ArticleParts,
+  type RenderedSource,
+} from "./article";
 
 const H_QUOTES = "## 本人の感想（ブログより）";
 const H_REPORTS = "## ファンによるミーグリレポ";
@@ -58,7 +63,8 @@ function findSection(sections: Section[], heading: string): Section | undefined 
 function ensureSection(sections: Section[], heading: string, before: string[]): Section {
   const found = findSection(sections, heading);
   if (found) return found;
-  const section: Section = { heading, lines: [""] };
+  // フル生成と同じく見出しの直後に空行を置く (両経路の出力を同じ形に保つ)
+  const section: Section = { heading, lines: ["", ""] };
   const idx = sections.findIndex((s) => s.heading && before.includes(s.heading));
   if (idx >= 0) sections.splice(idx, 0, section);
   else sections.push(section);
@@ -81,10 +87,22 @@ function renumber(line: string, map: Map<number, number>): string {
   });
 }
 
-/** 行の中身 (脚注番号を除いた部分) が既に本文にあるか */
-function hasLine(body: string, line: string): boolean {
-  const core = line.replace(/\^\[\d+\]\s*$/, "").trim();
-  return core.length > 0 && body.includes(core);
+/** 脚注番号を外した行の中身 */
+function lineCore(line: string): string {
+  return line.replace(/\^\[\d+\]\s*$/, "").trim();
+}
+
+/**
+ * その行が既に本文にあるか。**行ごとの完全一致で見る。**
+ *
+ * 部分一致 (`body.includes`) だと、`(n/m)` が付かない 1 枚だけのブログ画像の題
+ * (`…「待ち合わせ」`) が `…「待ち合わせ」 (1/11)` に前方一致して取りこぼす。
+ * アセット ID では判定できない: ブログ画像は 1 本のブログ (本文アセット) を出典として
+ * 共有するので、画像自身の ID は出典に現れない。
+ */
+function hasLine(bodyLines: Set<string>, line: string): boolean {
+  const core = lineCore(line);
+  return core.length > 0 && bodyLines.has(core);
 }
 
 export interface ExistingSource {
@@ -105,11 +123,6 @@ export interface AppendPlan {
 /** TikTok の URL から video ID を取り出す (短縮 URL からは取れない) */
 export function tiktokVideoId(url: string): string | null {
   return url.match(/\/video\/(\d+)/)?.[1] ?? null;
-}
-
-/** X の URL を比べるための正規化 */
-function normUrl(url: string): string {
-  return url.trim().split("?")[0].replace(/\/+$/, "").replace(/^https?:\/\/(www\.)?twitter\.com\//, "https://x.com/");
 }
 
 /**
@@ -134,14 +147,14 @@ export function planAppend(input: {
     if (e.sourceNo == null) continue;
     maxNo = Math.max(maxNo, e.sourceNo);
     if (e.assetId) byAsset.set(e.assetId, e.sourceNo);
-    if (e.url) byUrl.set(normUrl(e.url), e.sourceNo);
+    if (e.url) byUrl.set(normalizeSourceUrl(e.url), e.sourceNo);
   }
   const renumberMap = new Map<number, number>();
   const newSources: RenderedSource[] = [];
   for (const s of input.sources) {
     const hit =
       (s.assetId ? byAsset.get(s.assetId) : undefined) ??
-      (s.url ? byUrl.get(normUrl(s.url)) : undefined);
+      (s.url ? byUrl.get(normalizeSourceUrl(s.url)) : undefined);
     if (hit !== undefined) {
       renumberMap.set(s.sourceNo, hit);
       continue;
@@ -150,6 +163,9 @@ export function planAppend(input: {
     renumberMap.set(s.sourceNo, maxNo);
     newSources.push({ ...s, sourceNo: maxNo });
   }
+
+  // 既に本文にある行 (脚注番号を外したもの)。トーク / ブログ画像の重複判定に使う
+  const bodyLines = new Set(existingBody.split("\n").map(lineCore).filter((l) => l.length > 0));
 
   const sections = parseSections(existingBody);
   const added = { quotes: 0, reports: 0, talks: 0, blogImages: 0, tiktoks: 0 };
@@ -182,9 +198,9 @@ export function planAppend(input: {
 
   // 3. レポ: 末尾に足す
   const seenReports = new Set(
-    (existingBody.match(/https?:\/\/(?:www\.)?(?:x|twitter)\.com\/[^\s)]+/g) ?? []).map(normUrl)
+    (existingBody.match(/https?:\/\/(?:www\.)?(?:x|twitter)\.com\/[^\s)]+/g) ?? []).map(normalizeTweetUrl)
   );
-  const freshReports = parts.reports.filter((u) => !seenReports.has(normUrl(u)));
+  const freshReports = parts.reports.filter((u) => !seenReports.has(normalizeTweetUrl(u)));
   if (freshReports.length > 0) {
     const sec = ensureSection(sections, H_REPORTS, [H_MEDIA]);
     if (sec.lines.every((l) => l.trim() === "")) {
@@ -199,7 +215,7 @@ export function planAppend(input: {
   const freshTiktoks = parts.tiktoks.filter((u) => {
     const id = tiktokVideoId(u);
     if (id) return !existingBody.includes(id);
-    return !existingBody.includes(normUrl(u));
+    return !existingBody.includes(normalizeTweetUrl(u));
   });
   if (freshTiktoks.length > 0) {
     ensureSection(sections, H_MEDIA, []);
@@ -209,7 +225,7 @@ export function planAppend(input: {
   }
 
   // 5. トーク: 時系列の正しい位置に差し込む (脚注番号は飛んでよい。順序 > 番号の連続性)
-  const freshTalks = parts.talks.filter((t) => !hasLine(existingBody, t.line));
+  const freshTalks = parts.talks.filter((t) => !hasLine(bodyLines, t.line));
   if (freshTalks.length > 0) {
     ensureSection(sections, H_MEDIA, []);
     const sec = ensureSection(sections, H_TALK, [H_BLOG_IMAGES]);
@@ -232,7 +248,7 @@ export function planAppend(input: {
   }
 
   // 6. ブログ画像: 末尾に足す
-  const freshImages = parts.blogImages.filter((b) => !hasLine(existingBody, b.line));
+  const freshImages = parts.blogImages.filter((b) => !hasLine(bodyLines, b.line));
   if (freshImages.length > 0) {
     ensureSection(sections, H_MEDIA, []);
     const sec = ensureSection(sections, H_BLOG_IMAGES, []);

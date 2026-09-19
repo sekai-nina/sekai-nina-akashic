@@ -945,6 +945,7 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
       "format": "real",
       "single": "17thシングル「Kind of love」",
       "label": "京都",
+      "venue": "幕張メッセ",
       "classification": "internal",
       "dossier": {"id": "…", "title": "2026-08-01 京都リアミ", "itemCount": 18, "updatedAt": "…"},
       "dossierId": "…",
@@ -1040,7 +1041,7 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 
 ### PATCH /meetgreets/:id
 
-`single` / `label` / `extraSketchPrompt` を部分更新（渡した項目だけ変わる）。`date` / `format` は変えられない（変えたければ作り直す。ドシエ・収集は残る）。更新項目が 1 つも無い（`{}`）なら 400。
+`single` / `label` / `venue` / `extraSketchPrompt` を部分更新（渡した項目だけ変わる）。`venue` は会場の正式名称（「幕張メッセ」）で、**リアルミーグリの記事タイトルに出る**（空文字で消す）。`label` は短い呼び分け（「通常」「京都」）でドシエ名・収集名に使うだけなので、記事には出ない。`date` / `format` は変えられない（変えたければ作り直す。ドシエ・収集は残る）。更新項目が 1 つも無い（`{}`）なら 400。
 
 **レスポンス:** 更新後の行（`GET /meetgreets` の 1 行と同じ形。`candidates` は付かない）。
 

@@ -93,6 +93,31 @@ export interface RenderedArticle {
   };
 }
 
+/**
+ * X の URL を比べるための正規化 (クエリ・末尾スラッシュ・www・twitter.com の揺れを吸収)。
+ * **組み立てと追記で同じ規則を使うこと。** 別々に持つと、片方が拾えない表記
+ * (例: www.x.com) のレポを毎回「新規」と判定して重複追記する。
+ */
+export function normalizeTweetUrl(url: string): string {
+  return url
+    .trim()
+    .split("?")[0]
+    .replace(/\/+$/, "")
+    .replace(/^https?:\/\/(?:www\.)?(?:twitter|x)\.com\//, "https://x.com/");
+}
+
+/**
+ * 出典 URL を比べるための正規化。
+ *
+ * **フラグメントを落とさないこと。** ひなたぼっこ日記は
+ * `…/diary/manager/list?ima=0000#article-70538` の形で、`#article-NNNNN` だけが
+ * 記事を識別する。クエリごと切ると全投稿が同じ URL に潰れ、別の回の画像が
+ * 前の投稿の脚注に紐づく。ツイート用の normalizeTweetUrl を流用してはいけない。
+ */
+export function normalizeSourceUrl(url: string): string {
+  return url.trim().replace(/\/+$/, "");
+}
+
 /** "2026-08-01" → "2026年8月1日" */
 export function jpDate(iso: string): string {
   const [y, m, d] = iso.split("-");
@@ -116,7 +141,7 @@ function imageOrder(title: string): number {
  */
 function isTalk(a: ArticleAssetInput): boolean {
   const src = a.source;
-  if (!src) return "トーク".includes("トーク") && a.title.includes("トーク");
+  if (!src) return a.title.includes("トーク");
   if (src.kind === "other") return true;
   if ((src.title ?? "").startsWith("Talk")) return true;
   if (!src.url && a.title.includes("トーク")) return true;

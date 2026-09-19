@@ -11,24 +11,15 @@ import { toJstDateOnly, todayJst } from "@/lib/utils";
 import { accessibleClassifications } from "@/lib/classification";
 import { MAX_ARTICLE_CLEARANCE } from "@/lib/meetgreet/config";
 import {
+  normalizeTweetUrl,
   renderMeetGreetArticle,
   type ArticleAssetInput,
   type RenderedArticle,
 } from "@/lib/meetgreet/article";
-import type { ActingUser } from "./meetgreets";
+import { MeetGreetInputError, type ActingUser } from "./meetgreets";
 
 /** 本文に載せてよい機密レベル */
 const PUBLISHABLE = new Set<string>(accessibleClassifications(MAX_ARTICLE_CLEARANCE));
-
-/** X の URL を比べるための正規化 (クエリ・末尾スラッシュ・ホストの揺れを吸収) */
-export function normalizeTweetUrl(url: string): string {
-  return url
-    .trim()
-    .split("?")[0]
-    .replace(/\/+$/, "")
-    .replace(/^https?:\/\/(www\.)?twitter\.com\//, "https://x.com/")
-    .replace(/^https?:\/\/(www\.)?x\.com\//, "https://x.com/");
-}
 
 /**
  * TikTok の短縮 URL (vt.tiktok.com/...) を `/video/<id>` 入りの実 URL に解決する。
@@ -75,10 +66,19 @@ export async function buildMeetGreetArticle(
     dossierId: string;
     repoCollectionId: string | null;
     sketchKey: string | null;
+    classification: string;
   },
   options: BuildArticleOptions = {}
 ): Promise<RenderedArticle & { droppedByClearance: number }> {
   const includeKeeps = options.includeKeeps ?? true;
+
+  // **記事の本文は公開リポジトリに載る。** アセット単位の絞り込み (PUBLISHABLE) だけでは
+  // ドシエのサムネ・外部リンク・スケッチが素通りするので、器の機密も入口で見る
+  if (!PUBLISHABLE.has(meetGreet.classification)) {
+    throw new MeetGreetInputError(
+      `このミーグリは ${meetGreet.classification} なので記事にできません (公開リポジトリに載るため ${MAX_ARTICLE_CLEARANCE} 以下のみ)`
+    );
+  }
 
   const data = await withSession(user, async (tx) => {
     const dossier = await tx.dossier.findUnique({
@@ -86,6 +86,7 @@ export async function buildMeetGreetArticle(
       select: {
         id: true,
         updatedAt: true,
+        classification: true,
         _count: { select: { items: true } },
         items: {
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
@@ -113,7 +114,15 @@ export async function buildMeetGreetArticle(
         },
       },
     });
-    if (!dossier) throw new Error("ドシエが見つかりません");
+    // ドシエが見えないのは権限の話なので、呼び出し側が 400 にできる形で投げる
+    if (!dossier) throw new MeetGreetInputError("ドシエが見つかりません (権限がないか削除されています)");
+
+    const collection = meetGreet.repoCollectionId
+      ? await tx.repoCollection.findUnique({
+          where: { id: meetGreet.repoCollectionId },
+          select: { classification: true },
+        })
+      : null;
 
     const keeps =
       includeKeeps && meetGreet.repoCollectionId
@@ -123,7 +132,12 @@ export async function buildMeetGreetArticle(
             select: { url: true },
           })
         : [];
-    return { dossier, keeps };
+    if (!PUBLISHABLE.has(dossier.classification)) {
+      throw new MeetGreetInputError(
+        `ドシエが ${dossier.classification} なので記事にできません (サムネや外部リンクが公開リポジトリに載るため)`
+      );
+    }
+    return { dossier, keeps, collection };
   });
 
   // アセットを 1 件にまとめる (同じアセットが抜粋ごとに複数 item になる)
@@ -186,9 +200,11 @@ export async function buildMeetGreetArticle(
   // TikTok は埋め込みに video ID が要るので、短縮 URL をここで解決しておく
   const resolvedTiktoks = await Promise.all(tiktoks.map((u) => resolveTiktokUrl(u)));
 
-  // keep を後ろに足す (ドシエに既にある URL は重複させない)
+  // keep を後ろに足す (ドシエに既にある URL は重複させない)。
+  // RepoTweet は自前の機密を持たず収集の機密に従うので、ここで見る
+  const keepsPublishable = !data.collection || PUBLISHABLE.has(data.collection.classification);
   const seen = new Set(reports.map(normalizeTweetUrl));
-  for (const t of data.keeps) {
+  for (const t of keepsPublishable ? data.keeps : []) {
     const n = normalizeTweetUrl(t.url);
     if (seen.has(n)) continue;
     seen.add(n);
@@ -199,8 +215,10 @@ export async function buildMeetGreetArticle(
     ...renderMeetGreetArticle({
     date: meetGreet.date,
     format: meetGreet.format,
-    // 会場は正式名称を優先し、無ければ呼び分け (幕張 など) で代用する
-    venue: meetGreet.venue?.trim() || meetGreet.label.trim() || null,
+    // **label は使わない。** label は「通常」「初限」も入る内部用の呼び分けで、
+    // タイトルに出すと `リアルミーグリ（通常）` になり、path も既存ファイルとずれて
+    // 別記事が新規作成されてしまう。会場名は venue に入れる
+    venue: meetGreet.venue?.trim() || null,
     single: meetGreet.single,
     assets: [...assets.values()],
     reports,

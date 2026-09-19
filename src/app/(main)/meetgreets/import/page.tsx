@@ -31,9 +31,10 @@ export default async function ImportMeetGreetsPage() {
       </p>
       <ImportForm candidates={candidates} />
 
-      <h2 className="text-lg font-bold text-slate-900 mt-10 mb-1">公開済みの記事を紐づける</h2>
+      <h2 className="text-sm font-medium text-slate-500 mt-10 mb-2">公開済みの記事を紐づける</h2>
       <p className="text-slate-500 text-sm mb-4">
-        `/meetgreets` を作る前に書いた記事は frontmatter にドシエの ID を持っているので、
+        <span className="font-mono text-xs">/meetgreets</span>{" "}
+        を作る前に書いた記事は frontmatter にドシエの ID を持っているので、
         それで突き合わせます。紐づけると、以降はドシエが増えたぶんを差分として追記できるようになります。
       </p>
       <ArticleLinkForm candidates={linkCandidates} />
