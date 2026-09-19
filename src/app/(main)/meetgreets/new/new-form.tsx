@@ -47,6 +47,7 @@ export function NewMeetGreetForm({
         setMsg(`エラー: ${res.error}`);
         return;
       }
+      if (res.reused) setMsg("同じ回が既にあったので、そちらを開きます");
       router.push(`/meetgreets/${res.id}`);
     });
   }

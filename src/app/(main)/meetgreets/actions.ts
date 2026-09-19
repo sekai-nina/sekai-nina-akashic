@@ -47,12 +47,13 @@ export async function createMeetGreetAction(input: {
 }) {
   const user = await requireMember();
   try {
-    const { id } = await createMeetGreet(user, input);
+    const { id, reused } = await createMeetGreet(user, input);
     invalidateDossiers();
     revalidatePath("/meetgreets");
     revalidatePath("/dossiers");
     revalidatePath("/repo");
-    return { ok: true as const, id };
+    // 同じ回が既にあったときは新しく作らない (#112)。画面でもそう伝える
+    return { ok: true as const, id, reused };
   } catch (e) {
     return { ok: false as const, error: errorMessage(e) };
   }

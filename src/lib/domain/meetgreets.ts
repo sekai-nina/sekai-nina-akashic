@@ -10,7 +10,8 @@
  * 所有者判定 (app.user_id) が要るので読み書きとも withSession で行う。
  */
 
-import type { ClearanceLevel, MeetGreetFormat, Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import type { ClearanceLevel, MeetGreetFormat } from "@prisma/client";
 import { prisma, withClearance, withSession, type TransactionClient } from "@/lib/db";
 import { assertClearance } from "@/lib/classification";
 import { canEditDossier } from "@/lib/auth/dossier-permissions";
@@ -106,7 +107,7 @@ export class MeetGreetInputError extends Error {}
 export async function createMeetGreet(
   user: ActingUser,
   input: CreateMeetGreetInput
-): Promise<{ id: string }> {
+): Promise<{ id: string; reused: boolean }> {
   if (!isValidDateString(input.date)) {
     throw new MeetGreetInputError("date は暦に実在する YYYY-MM-DD で指定してください");
   }
@@ -115,7 +116,35 @@ export async function createMeetGreet(
 
   const naming = { ...input, single: input.single?.trim(), label: input.label?.trim() };
   const groups = reportTagGroups(input.format);
+  const label = naming.label ?? "";
 
+  // **同じ回が既にあればそれを返す (#112)。** 作成は X の収集込みで数十秒かかることがあり、
+  // bot がタイムアウトして再送するとドシエ・収集が二重にできていた。
+  // 競合で擦り抜けた分は `@@unique([date, format, label])` が止め、下の catch で拾う
+  const existing = await findSameMeetGreet(user, input.date, input.format, label);
+  if (existing) return { id: existing, reused: true };
+
+  let created: { id: string };
+  try {
+    created = await createInTransaction(user, input, naming, groups, classification);
+  } catch (e) {
+    // 同時に 2 本走ったとき。@@unique が止めてくれるので、既にできたほうを返す
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      const again = await findSameMeetGreet(user, input.date, input.format, label);
+      if (again) return { id: again, reused: true };
+    }
+    throw e;
+  }
+  return { id: created.id, reused: false };
+}
+
+async function createInTransaction(
+  user: ActingUser,
+  input: CreateMeetGreetInput,
+  naming: MeetGreetNaming,
+  groups: ReturnType<typeof reportTagGroups>,
+  classification: ClearanceLevel
+): Promise<{ id: string }> {
   const created = await withSession(user, async (tx) => {
     // 既にあるものを使う場合は、見えること・まだ他の回に使われていないことを確かめる
     if (input.dossierId) {
@@ -401,7 +430,21 @@ export async function updateMeetGreet(user: ActingUser, id: string, input: Updat
  * MeetGreet の行だけを消す。自動で作ったドシエ / X レポ収集は残す
  * (= それぞれの画面から消せる。素材が入ったあとに巻き込んで消さない)。
  */
+/**
+ * 回を消す。
+ *
+ * **作成者か admin だけ (#112)。** ドシエの削除が所有者だけ (`canManageDossier`) なのに、
+ * ミーグリは誰でも消せて非対称だった。消すとスケッチ・切り抜き枠・記事の紐づけ・
+ * 除外リストがまとめて消える (ドシエと記事そのものは残る)。
+ */
 export async function deleteMeetGreet(user: ActingUser, id: string) {
+  const row = await withClearance(user.clearance, (tx) =>
+    tx.meetGreet.findUnique({ where: { id }, select: { createdById: true } })
+  );
+  if (!row) throw new MeetGreetInputError("見つかりません");
+  if (user.role !== "admin" && row.createdById !== user.id) {
+    throw new MeetGreetInputError("この回を消せるのは作った人か管理者だけです");
+  }
   await withClearance(user.clearance, (tx) => tx.meetGreet.delete({ where: { id } }));
   await logAudit({
     actorId: user.id,
@@ -412,6 +455,22 @@ export async function deleteMeetGreet(user: ActingUser, id: string) {
 }
 
 // --- 素材候補 ---
+
+/** 同じ (date, format, label) の回を探す。見えない (クリアランス) なら null */
+async function findSameMeetGreet(
+  user: ActingUser,
+  date: string,
+  format: MeetGreetFormat,
+  label: string
+): Promise<string | null> {
+  const row = await withClearance(user.clearance, (tx) =>
+    tx.meetGreet.findUnique({
+      where: { date_format_label: { date, format, label } },
+      select: { id: true },
+    })
+  );
+  return row?.id ?? null;
+}
 
 /**
  * 当日〜 +MATERIAL_WINDOW_DAYS 日の、本人 (坂井新奈) が付いたアセットを候補にする。
