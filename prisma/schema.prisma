@@ -189,6 +189,7 @@ model User {
   meetGreets          MeetGreet[]       @relation("MeetGreetCreatedBy")
   creditSnapshots     CreditSnapshot[]  @relation("CreditSnapshotCreatedBy")
   instaWatchTargets InstaWatchTarget[] @relation("InstaWatchTargetUpdatedBy")
+  instaAccounts InstaAccount[] @relation("InstaAccountUpdatedBy")
 }
 
 model Asset {
@@ -1216,6 +1217,35 @@ model AiQuestion {
 ///
 /// bot 側の config/accounts.txt を置き換える。**誰を見ているかは運用判断**なので、
 /// サーバに ssh して編集するのではなく画面から足せるようにする。
+/// insta-watch が story を取りに行くときに使う Instagram アカウント。**1 行だけ。**
+///
+/// **パスワードは持たない。** 認証情報は bot サーバの .env にだけ置き、初回ログインは
+/// 人が `insta-watch login --headful` で行う（スマホ承認が要る）。ここが持つのは
+/// 「どの垢を使っているか」と「セッションが生きているか」だけ。
+///
+/// 複数を抱えて切り替える作りにはしない。
+model InstaAccount {
+  id       String @id @default("singleton")
+  /// @ を除いた小文字のユーザー名
+  username String @default("")
+  note     String @default("")
+
+  /// bot が報告するセッションの状態。false なら人が login をやり直す必要がある
+  sessionValid Boolean   @default(false)
+  /// 最後にセッションが有効だと報告された時刻
+  sessionCheckedAt DateTime?
+  /// 最後に login し直した時刻 (bot が報告する)
+  lastLoginAt DateTime?
+  /// 直近の失敗理由 (challenge / パスワード変更など)。人が読むためだけに持つ
+  lastError String @default("")
+
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+  updatedBy   User?    @relation("InstaAccountUpdatedBy", fields: [updatedById], references: [id])
+
+  classification ClearanceLevel @default(internal)
+}
+
 model InstaWatchTarget {
   id     String @id @default(cuid())
   /// @ を除いたハンドル。小文字で持つ

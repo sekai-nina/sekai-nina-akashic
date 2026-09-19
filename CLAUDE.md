@@ -100,7 +100,7 @@ withSession({ id, clearance }, tx => …)    // 上記 + app.user_id — Dossier
 
 ### 保護テーブル
 
-`Asset`, `AssetText`, `AssetEntity`, `AssetRelation`, `SourceRecord`, `Annotation`, `Testimonial`, `Dossier`, `DossierItem`, `DossierPlaceCandidate`, `Place`, `RepoCollection`, `RepoTweet`, `RepoTweetMedia`, `Lens`, `DataSource`, `Coverage`, `LensItemCheck`, `ArticleSource`, `MeetGreet`, `InstaWatchTarget`, `SketchSetting`, `Anniversary`, `XMentionWatch`, `XMentionSetting`, `XMentionHit`
+`Asset`, `AssetText`, `AssetEntity`, `AssetRelation`, `SourceRecord`, `Annotation`, `Testimonial`, `Dossier`, `DossierItem`, `DossierPlaceCandidate`, `Place`, `RepoCollection`, `RepoTweet`, `RepoTweetMedia`, `Lens`, `DataSource`, `Coverage`, `LensItemCheck`, `ArticleSource`, `MeetGreet`, `InstaWatchTarget`, `InstaAccount`, `SketchSetting`, `Anniversary`, `XMentionWatch`, `XMentionSetting`, `XMentionHit`
 
 RLS は `clearance_rank(classification::text) <= clearance_rank(current_setting('app.clearance', true))`。`clearance_rank()` は未知/未設定を `-1` にして **fail-closed**。全テーブル `ENABLE` + `FORCE ROW LEVEL SECURITY`。
 
@@ -147,7 +147,7 @@ src/
 
 ## データモデル
 
-`prisma/schema.prisma`（34 モデル）。`Asset` がハブ。
+`prisma/schema.prisma`（35 モデル）。`Asset` がハブ。
 
 - `Entity` は `type`（person/place/source/event/tag）で 1 テーブル統合、`@@unique([type, canonicalName])`
 - `DossierItem` は `kind` で `asset_ref` / `external_link` / `external_image` の多態。**意図的に `@@unique([dossierId, assetId])` を持たない**（同一アセットを抜粋ごとに複数回追加できる）

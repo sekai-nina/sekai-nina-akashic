@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { InstaWatchTier } from "@prisma/client";
 import { requireRole } from "@/lib/auth/require-role";
+import { setInstaAccount } from "@/lib/domain/insta-account";
 import {
   InstaTargetError,
   addInstaTarget,
@@ -73,4 +74,27 @@ export async function deleteInstaTargetAction(id: string): Promise<InstaActionSt
   });
   revalidatePath("/admin/insta");
   return { ok: true, message: "削除しました" };
+}
+
+export async function setInstaAccountAction(input: {
+  username: string;
+  note: string;
+}): Promise<InstaActionState> {
+  const user = await requireRole(["admin"]);
+  try {
+    const acc = await setInstaAccount(input, user.clearance, user.id);
+    await logAudit({
+      actorId: user.id,
+      action: "insta.account.set",
+      targetType: "InstaAccount",
+      targetId: "singleton",
+      // **パスワードは扱わないので、監査に残るのもユーザー名だけ**
+      metadata: { username: acc.username },
+    });
+    revalidatePath("/admin/insta");
+    return { ok: true, message: `${acc.username} を登録しました` };
+  } catch (e) {
+    if (e instanceof InstaTargetError) return { ok: false, error: e.message };
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
 }

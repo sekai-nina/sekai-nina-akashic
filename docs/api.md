@@ -1362,6 +1362,29 @@ insta-watch が見張るハンドルの一覧。**有効なものだけ**返す�
 対象は `/admin/insta`（admin のみ）から登録する。**bot 側は最後に読めた一覧を保持する**
 前提で、ここが一時的に落ちても監視は止まらない。
 
+### GET /insta/account
+
+story を取りに行くときに使うアカウント。**パスワードは扱わない。**
+
+```json
+{ "username": "someaccount", "configured": true, "sessionValid": false }
+```
+
+### POST /insta/account
+
+bot がセッションの生死を報告する（**write 権限**）。`/admin/insta` で
+「要ログイン」が見えるようにするためのもので、認証情報はやり取りしない。
+
+```json
+{ "valid": false, "error": "challenge required", "loggedInAt": "2026-09-20T06:00:00.000Z" }
+```
+
+| フィールド | 必須 | 内容 |
+|---|---|---|
+| `valid` | ○ | セッションが使えるか |
+| `error` | | 使えないときの理由（300 字まで。人が読む用） |
+| `loggedInAt` | | login し直した時刻（ISO 8601） |
+
 ## 典型的な利用パターン
 
 ### Discord Botからブログ更新を自動登録

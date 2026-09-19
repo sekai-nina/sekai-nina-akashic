@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { listInstaTargets, TIER_DEFAULT_MINUTES } from "@/lib/domain/insta-targets";
+import { getInstaAccount } from "@/lib/domain/insta-account";
+import { AccountForm } from "./account-form";
 import { TargetForm } from "./target-form";
 
 /**
@@ -31,7 +33,10 @@ export default async function AdminInstaPage() {
   if (!session?.user) notFound();
   if (session.user.role !== "admin") notFound();
 
-  const targets = await listInstaTargets(session.user.clearance);
+  const [targets, account] = await Promise.all([
+    listInstaTargets(session.user.clearance),
+    getInstaAccount(session.user.clearance),
+  ]);
   const enabled = targets.filter((t) => t.enabled);
 
   return (
@@ -46,6 +51,48 @@ export default async function AdminInstaPage() {
           （出口 IP あたりの上限を超えないため）。どうでもいい対象を低頻度にするほど、
           高頻度の対象を速く保てます。
         </p>
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-lg p-4 mb-6">
+        <h2 className="text-sm font-semibold text-slate-700 mb-1">story を取るアカウント</h2>
+        <p className="text-xs text-slate-500 mb-3">
+          投稿の検知にアカウントは要りません。
+          <span className="font-medium text-slate-700">story の取得にだけ</span>使います。
+          <span className="font-medium text-slate-700">パスワードはここでは扱いません</span>
+          — bot サーバの <span className="font-mono">.env</span> に置き、初回だけ
+          <span className="font-mono"> insta-watch login --headful </span>
+          を人が実行してください（スマホ承認が飛びます）。
+        </p>
+        <AccountForm initialUsername={account.username} initialNote={account.note} />
+        <dl className="mt-3 text-xs text-slate-500 flex flex-wrap gap-x-6 gap-y-1">
+          <div>
+            <dt className="inline text-slate-400">セッション: </dt>
+            <dd className="inline">
+              {!account.configured ? (
+                "未登録"
+              ) : account.sessionValid ? (
+                <span className="text-emerald-700 font-medium">有効</span>
+              ) : (
+                <span className="text-amber-700 font-medium">要ログイン</span>
+              )}
+            </dd>
+          </div>
+          {account.sessionCheckedAt && (
+            <div>
+              <dt className="inline text-slate-400">最終確認: </dt>
+              <dd className="inline">{formatJst(account.sessionCheckedAt)}</dd>
+            </div>
+          )}
+          {account.lastLoginAt && (
+            <div>
+              <dt className="inline text-slate-400">最終ログイン: </dt>
+              <dd className="inline">{formatJst(account.lastLoginAt)}</dd>
+            </div>
+          )}
+          {account.lastError && (
+            <div className="w-full text-red-700">直近の失敗: {account.lastError}</div>
+          )}
+        </dl>
       </div>
 
       <TargetForm />
