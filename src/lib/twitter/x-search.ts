@@ -178,7 +178,8 @@ export async function xSearchRecent(
   const baseParams: Record<string, string> = {
     query,
     max_results: "100",
-    "tweet.fields": "created_at,public_metrics,author_id,lang,attachments",
+    // note_tweet: 280 文字超のロングポストの全文 (無いと text が切れて返る)
+    "tweet.fields": "created_at,public_metrics,author_id,lang,attachments,note_tweet",
     expansions: "author_id,attachments.media_keys",
     "user.fields": "username,name",
     "media.fields": "url,preview_image_url,type,width,height,alt_text",
@@ -252,7 +253,7 @@ export async function xSearchRecent(
         tweetId: t.id,
         authorUsername: uname,
         authorName: author.name ?? "",
-        text: t.text ?? "",
+        text: t.note_tweet?.text ?? t.text ?? "",
         createdAt: t.created_at ?? "",
         likeCount: m.like_count ?? 0,
         retweetCount: m.retweet_count ?? 0,

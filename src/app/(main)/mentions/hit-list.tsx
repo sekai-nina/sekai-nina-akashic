@@ -2,7 +2,7 @@ import { ExternalLink } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import type { HitView } from "@/lib/domain/x-mentions";
 
-/** 拾ったツイートの一覧 (新しい順)。本文は 3 行で切り、リンクで X に飛ぶ */
+/** 拾ったツイートの一覧 (新しい順)。本文は全文を出す (読むための一覧なので畳まない)。リンクで X に飛ぶ */
 export function HitList({ items }: { items: HitView[] }) {
   if (items.length === 0) {
     return <p className="text-slate-400 py-6 text-center text-sm">まだ拾ったツイートはありません</p>;
@@ -28,7 +28,7 @@ export function HitList({ items }: { items: HitView[] }) {
               X で開く <ExternalLink size={12} />
             </a>
           </div>
-          <p className="text-sm text-slate-800 mt-1 whitespace-pre-wrap line-clamp-3">{h.text}</p>
+          <p className="text-sm text-slate-800 mt-1 whitespace-pre-wrap break-words">{h.text}</p>
         </div>
       ))}
     </div>
