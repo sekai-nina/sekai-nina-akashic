@@ -1071,6 +1071,45 @@ model Anniversary {
 }
 
 // ---------------------------------------------------------------------------
+// お知らせ (/announcements)
+//
+// 公開サイト (sekai-nina-site) のトップと /news に出す、運営からのお知らせ
+// (機能を足した・記事を更新した・停止する 等)。X に投稿しなくても伝わる経路にする。
+// 正はここ。サイトはビルド時に読むほか、閲覧時にも stats Worker 経由で取りに行くので、
+// 保存すれば再ビルド無しで数分で出る。
+// 本文は Markdown。記事と同じ描画 (renderArticleBody) を通すので [[記事名]] も使える。
+// 全部が公開前提で機密を持たないので非保護テーブル (Article と同じ)。
+// migration で anon / authenticated の権限を剥がす (docs/security-dev.md)。
+// ---------------------------------------------------------------------------
+
+enum AnnouncementKind {
+  /// サイトの機能追加・改善
+  feature
+  /// 記事の追加・更新
+  article
+  /// 運営からの連絡 (停止・方針 等)
+  info
+}
+
+model Announcement {
+  id    String @id @default(cuid())
+  /// 見出し。トップの一覧にはこれだけ出る
+  title String
+  /// 本文 (Markdown)。空でもよい
+  body  String @default("")
+  kind  AnnouncementKind @default(info)
+  /// 「詳しく →」の飛び先。サイト内パス ("/anniversaries") か絶対 URL
+  url   String?
+  /// 公開日時。null は下書き (API の既定・サイトには出ない)。過去日にして並びを調整できる
+  publishedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([publishedAt])
+}
+
+// ---------------------------------------------------------------------------
 // LLM の利用コストと残クレジット (/costs)
 //
 // 2 系統のデータを突き合わせる:

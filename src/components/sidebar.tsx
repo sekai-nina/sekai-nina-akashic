@@ -32,7 +32,9 @@ import {
   Scissors,
   Power,
   Radar,
-  Instagram,} from "lucide-react";
+  Instagram,
+  Megaphone,
+} from "lucide-react";
 import { QuickCreateModal } from "@/components/quick-create-modal";
 
 interface SidebarProps {
@@ -49,6 +51,7 @@ const navItems = [
   { href: "/entities", label: "エンティティ", icon: Tag },
   { href: "/places", label: "聖地マップ", icon: MapPin },
   { href: "/anniversaries", label: "記念日", icon: CalendarHeart },
+  { href: "/announcements", label: "お知らせ", icon: Megaphone },
   { href: "/dossiers", label: "特定支援", icon: FolderSearch },
   { href: "/clips", label: "クリップ", icon: Scissors },
   { href: "/articles", label: "記事", icon: FileText },

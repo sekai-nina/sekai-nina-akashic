@@ -58,6 +58,11 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 | GET | `/anniversaries/:id` | read | 記念日詳細 |
 | PATCH | `/anniversaries/:id` | write | 記念日の部分更新 |
 | DELETE | `/anniversaries/:id` | write | 記念日削除 |
+| GET | `/announcements` | read | お知らせ（公開サイト向け。既定は公開済みのみ、新しい順） |
+| POST | `/announcements` | write | お知らせ作成 |
+| GET | `/announcements/:id` | read | お知らせ詳細 |
+| PATCH | `/announcements/:id` | write | お知らせの部分更新 |
+| DELETE | `/announcements/:id` | write | お知らせ削除 |
 | POST | `/upload` | write | ファイルアップロード |
 | GET | `/lenses` | read | 観点一覧 |
 | POST | `/lenses` | write | 観点作成 |
@@ -523,6 +528,49 @@ API キーからは **引き上げしかできない。** `PATCH /assets/:id` / 
 ### PATCH /anniversaries/:id
 
 渡したフィールドだけ更新する。`assetId` / `sourceUrl` / `articleId` は `null` で外せる。`classification` は引き上げのみ（前述）。
+
+---
+
+## お知らせ (Announcements)
+
+公開サイト（sekai-nina-site）のトップ「お知らせ」と `/news` に出す運営からの知らせ（機能を足した・記事を更新した・停止する 等）。X に投稿しなくても伝わる経路にするのが目的で、正はここ。サイトはビルド時に読むほか、閲覧時にも stats Worker（`stats.sekai-nina.com/news`、5 分キャッシュ）経由で取りに行くので、保存すれば再ビルド無しで数分で出る。
+
+全部が公開前提で機密を持たないので `classification` は無い（非保護テーブル）。画面は `/announcements`。
+
+### GET /announcements
+
+新しい順（`publishedAt` の降順）。既定は **公開済み**（`publishedAt` が今以前）だけ。`?status=all` で下書き（`publishedAt: null`）と予約（未来日）も返す（下書きが先頭）。`?limit=N`（既定 50、最大 200）。
+
+```json
+{
+  "items": [
+    {
+      "id": "cm...",
+      "title": "記念日ページを追加しました",
+      "kind": "feature",
+      "body": "坂井新奈が初めて〇〇した日を集めた [[記念日]] ページを作りました。",
+      "bodyHtml": "<p>坂井新奈が初めて〇〇した日を集めた <a class=\"wikilink\" href=\"/articles/AbC1234\">記念日</a> ページを作りました。</p>",
+      "url": "/anniversaries",
+      "publishedAt": "2026-09-20T09:00:00.000Z",
+      "createdAt": "...",
+      "updatedAt": "..."
+    }
+  ],
+  "generatedAt": "2026-09-20T09:05:00.000Z"
+}
+```
+
+- `kind` は `feature`（機能）/ `article`（記事）/ `info`（運営）
+- `body` は Markdown、`bodyHtml` は記事と同じ描画（`renderArticleBody`。サニタイズ済み、`[[記事名]]` は `/articles/<shortId>` になる）。サイトは `bodyHtml` をそのまま入れる
+- `url` は「詳しく →」の飛び先。`/` で始まるサイト内パスか絶対 URL
+
+### POST /announcements
+
+**必須フィールド:** `title`（120 文字以内）。任意: `body`（Markdown、5000 文字以内）, `kind`（既定 `info`）, `url`（`/` 始まりか http(s)）, `publishedAt`（ISO 8601 か `"now"`。省略 / `null` で下書き）。
+
+### PATCH /announcements/:id
+
+渡したフィールドだけ更新する。`url` は `null` で外す。`publishedAt` は `null` で下書きに戻す、`"now"` で今公開する。
 
 ---
 
