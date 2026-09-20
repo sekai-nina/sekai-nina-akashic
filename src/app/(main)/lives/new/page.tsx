@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import { withClearance } from "@/lib/db";
 import { REPORT_WINDOW_DAYS } from "@/lib/meetgreet/config";
 import { NewLiveForm } from "./new-form";
 
@@ -12,15 +12,18 @@ export default async function NewLivePage() {
 
   // 過去のライブは既に event エンティティがある (ライブ MV の取り込み等)。名前を打ち直して
   // 別のエンティティができないよう、選べるようにする。event は place ではないので
-  // クリアランスの絞り (entityClearanceWhere) は要らない
-  const events = await prisma.entity.findMany({
-    where: { type: "event" },
-    select: { id: true, canonicalName: true, _count: { select: { assets: true } } },
-    orderBy: { canonicalName: "asc" },
-  });
+  // クリアランスの絞り (entityClearanceWhere) は要らないが、`_count.assets` は保護テーブル
+  // AssetEntity の集計なので withClearance の中で引く (素の prisma だと無言で全部 0 件になる)
+  const events = await withClearance(session.user.clearance, (tx) =>
+    tx.entity.findMany({
+      where: { type: "event" },
+      select: { id: true, canonicalName: true, _count: { select: { assets: true } } },
+      orderBy: { canonicalName: "asc" },
+    })
+  );
 
   return (
-    <div className="max-w-3xl mx-auto">
+    <div className="max-w-2xl mx-auto">
       <Link href="/lives" className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600">
         <ArrowLeft size={14} /> ライブ一覧へ
       </Link>

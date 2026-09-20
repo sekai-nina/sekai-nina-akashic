@@ -56,7 +56,23 @@ export function liveReportTagGroups(tags: readonly string[]): HashtagGroup[] {
   return clean.map((t) => ({ tags: [MEETGREET_PERSON_NAME, t], op: "and" }));
 }
 
-/** 1 つのライブに持てる公演の数 (画面・REST 共通。ツアーでも 20 前後) */
+// --- 入力の上限 (画面・REST 共通)。**クライアント部品からも読むので zod を持ち込まない** ---
+
+/**
+ * ライブ名の長さ (文字数)。記事のファイル名 (= タイトル + `.md`) は 255 バイト以内なので、
+ * 日本語なら 3 バイト × 80 = 240 バイトに収まる 80 文字にしておく
+ */
+export const MAX_LIVE_NAME = 80;
+
+/** 補足の長さ */
+export const MAX_LIVE_NOTE = 2000;
+
+/** 会場名 / 呼び分け (昼公演等) / 公演の備考 の長さ */
+export const MAX_VENUE = 200;
+export const MAX_PERFORMANCE_LABEL = 50;
+export const MAX_PERFORMANCE_NOTE = 500;
+
+/** 1 つのライブに持てる公演の数 (ツアーでも 20 前後) */
 export const MAX_PERFORMANCES = 100;
 
 /** 1 つの曲リストに入れられる曲数 */

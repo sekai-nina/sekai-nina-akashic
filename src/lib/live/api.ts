@@ -7,23 +7,27 @@ import { z } from "zod";
 import { isValidDateString } from "@/lib/utils";
 import { getR2PublicUrl } from "@/lib/r2";
 import type { LiveDetail, LiveSummary } from "@/lib/domain/lives";
-import { MAX_PERFORMANCES, MAX_SONG_TITLE, MAX_SONGS_PER_LIST } from "./config";
-
-/** ライブ名の長さ (記事のファイル名になるので 255 バイトより手前で切る) */
-export const MAX_LIVE_NAME = 120;
-
-/** 補足の長さ */
-export const MAX_LIVE_NOTE = 2000;
+import {
+  MAX_LIVE_NAME,
+  MAX_LIVE_NOTE,
+  MAX_PERFORMANCE_LABEL,
+  MAX_PERFORMANCE_NOTE,
+  MAX_PERFORMANCES,
+  MAX_SONG_TITLE,
+  MAX_SONGS_PER_LIST,
+  MAX_VENUE,
+} from "./config";
 
 const SongList = z.array(z.string().max(MAX_SONG_TITLE)).max(MAX_SONGS_PER_LIST);
 
-export const PerformanceSchema = z
+const PerformanceSchema = z
   .object({
+    /** 既存の公演を残して更新する (PUT /setlist のみ。作成では受け付けない) */
     id: z.string().min(1).optional(),
     date: z.string().refine(isValidDateString, "暦に実在する YYYY-MM-DD で指定してください"),
-    venue: z.string().max(200).optional(),
-    label: z.string().max(50).optional(),
-    note: z.string().max(500).optional(),
+    venue: z.string().max(MAX_VENUE).optional(),
+    label: z.string().max(MAX_PERFORMANCE_LABEL).optional(),
+    note: z.string().max(MAX_PERFORMANCE_NOTE).optional(),
     songs: SongList.optional(),
     centerSongs: SongList.optional(),
   })
@@ -36,7 +40,10 @@ export const SetlistSchema = z
   })
   .strict();
 
-export const CreateLiveSchema = SetlistSchema.extend({
+/** 作成では公演の `id` を受け付けない (DB が振る。混ざると他のライブの公演に曲が紐づく) */
+export const CreateLiveSchema = z.object({
+  performances: z.array(PerformanceSchema.omit({ id: true })).min(1).max(MAX_PERFORMANCES),
+  commonSongs: SongList.optional(),
   name: z.string().trim().min(1, "ライブ名を入れてください").max(MAX_LIVE_NAME),
   note: z.string().max(MAX_LIVE_NOTE).optional(),
   classification: z.enum(["public", "internal", "confidential", "restricted"]).optional(),
@@ -46,6 +53,7 @@ export const CreateLiveSchema = SetlistSchema.extend({
   dossierId: z.string().min(1).optional(),
   repoCollectionId: z.string().min(1).optional(),
 }).strict();
+
 
 export const UpdateLiveSchema = z
   .object({

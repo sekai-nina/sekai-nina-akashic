@@ -2,8 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Plus } from "lucide-react";
 import { auth } from "@/lib/auth";
-import { listLives } from "@/lib/domain/lives";
-import { formatDate, formatJpDateRange } from "@/lib/utils";
+import { listLives, livePeriodLabel } from "@/lib/domain/lives";
+import { formatDate } from "@/lib/utils";
 
 /**
  * ライブ記事の作成ワークフロー (#148)。
@@ -51,7 +51,7 @@ export default async function LivesPage() {
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium text-slate-900 truncate">{r.name}</div>
                   <div className="text-xs text-slate-500 truncate mt-0.5">
-                    {dateRangeLabel(r.firstDate, r.lastDate)} · {r.performances.length} 公演 · 作成{" "}
+                    {livePeriodLabel(r)} · {r.performances.length} 公演 · 作成{" "}
                     {formatDate(r.createdAt)}
                   </div>
                 </div>
@@ -80,11 +80,6 @@ export default async function LivesPage() {
       )}
     </div>
   );
-}
-
-function dateRangeLabel(first: string | null, last: string | null): string {
-  if (!first) return "公演未設定";
-  return formatJpDateRange(first, last ?? first);
 }
 
 function Step({ label, done, detail }: { label: string; done: boolean; detail?: string }) {

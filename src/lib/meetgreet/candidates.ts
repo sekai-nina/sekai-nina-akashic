@@ -60,8 +60,8 @@ export interface CandidateGroup {
 }
 
 export interface ClassifyOptions {
-  /** 開催日 (JST "YYYY-MM-DD") */
-  date: string;
+  /** 開催日 (JST "YYYY-MM-DD")。複数あるなら `dates` に */
+  date?: string;
   /**
    * 開催日が複数あるとき (ライブの公演日 #148)。トークの初期チェックは
    * **どれかの日〜 +TALK_SUGGEST_DAYS** に入っていれば付ける。未指定なら `date` だけ
@@ -117,7 +117,7 @@ export function classifyCandidates(
   opts: ClassifyOptions
 ): CandidateGroup[] {
   const keywords = opts.keywords ?? MEETGREET_KEYWORDS;
-  const dates = opts.dates ?? [opts.date];
+  const dates = opts.dates ?? (opts.date ? [opts.date] : []);
   const buckets = new Map<string, { kind: CandidateGroupKind; assets: CandidateAssetInput[] }>();
   for (const a of assets) {
     const kind = classifyGroupKind(a);

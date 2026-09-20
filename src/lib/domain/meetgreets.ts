@@ -28,6 +28,7 @@ import { fetchCollection, type FetchResult } from "./repo";
 import { logAudit } from "./audit";
 import {
   applyMaterialsToDossier,
+  assertContainersFree,
   keepCounts,
   loadDossiers,
   loadMaterialInputs,
@@ -153,24 +154,13 @@ async function createInTransaction(
   classification: ClearanceLevel
 ): Promise<{ id: string }> {
   const created = await withSession(user, async (tx) => {
-    // 既にあるものを使う場合は、見えること・まだ他の回に使われていないことを確かめる
-    if (input.dossierId) {
-      const found = await tx.dossier.findUnique({
-        where: { id: input.dossierId },
-        select: { id: true, kind: true, meetGreet: { select: { id: true } } },
-      });
-      if (!found) throw new MeetGreetInputError("指定されたドシエが見つかりません");
-      if (found.meetGreet) throw new MeetGreetInputError("そのドシエは別のミーグリに使われています");
-      // 全員共有のクリップのプールを 1 回のミーグリに紐づけると、他人のクリップが素材として流れる (#41)
-      if (found.kind === "clips") throw new MeetGreetInputError("クリップのプールはミーグリに使えません");
-    }
-    if (input.repoCollectionId) {
-      const found = await tx.repoCollection.findUnique({
-        where: { id: input.repoCollectionId },
-        select: { id: true, meetGreet: { select: { id: true } } },
-      });
-      if (!found) throw new MeetGreetInputError("指定された X レポ収集が見つかりません");
-      if (found.meetGreet) throw new MeetGreetInputError("その収集は別のミーグリに使われています");
+    // 既にあるものを使う場合は、見えること・まだ他の回 (ミーグリ / ライブ) に使われていないこと・
+    // クリップのプールでないこと (#41) を確かめる
+    try {
+      await assertContainersFree(tx, input);
+    } catch (e) {
+      if (e instanceof WorkflowInputError) throw new MeetGreetInputError(e.message);
+      throw e;
     }
 
     const dossier = input.dossierId

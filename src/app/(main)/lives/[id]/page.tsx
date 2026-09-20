@@ -2,9 +2,9 @@ import Link from "next/link";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { getLive, listMaterialCandidates } from "@/lib/domain/lives";
+import { getLive, listMaterialCandidates, livePeriodLabel } from "@/lib/domain/lives";
 import { MATERIAL_WINDOW_DAYS, TALK_SUGGEST_DAYS } from "@/lib/meetgreet/config";
-import { formatDate, formatJpDateRange } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 import { MaterialsStep } from "@/components/materials-step";
 import { applyMaterialsAction } from "../actions";
 import { MetaForm } from "./meta-form";
@@ -42,15 +42,15 @@ export default async function LiveDetailPage({ params }: Props) {
       <div className="mt-2 mb-6">
         <h1 className="text-2xl font-bold text-slate-900">{live.name}</h1>
         <p className="text-xs text-slate-500 mt-1">
-          {live.firstDate ? formatJpDateRange(live.firstDate, live.lastDate ?? live.firstDate) : "公演未設定"} ·{" "}
+          {livePeriodLabel(live)} ·{" "}
           {live.performances.length} 公演 · 作成 {formatDate(live.createdAt)} · {live.createdBy.name}
         </p>
         <MetaForm id={live.id} name={live.name} note={live.note} entity={live.entity} />
       </div>
 
-      {/* 0. 公演と披露曲 */}
+      {/* 1. 公演と披露曲 */}
       <StepCard
-        no={0}
+        no={1}
         title="公演と披露曲"
         done={live.performances.length > 0 && live.commonSongs.length > 0}
         summary={
@@ -66,9 +66,9 @@ export default async function LiveDetailPage({ params }: Props) {
         <SetlistForm liveId={live.id} commonSongs={live.commonSongs} performances={live.performances} />
       </StepCard>
 
-      {/* 1. 素材 */}
+      {/* 2. 素材 */}
       <StepCard
-        no={1}
+        no={2}
         title="素材"
         done={itemCount > 0}
         summary={live.dossier ? `ドシエに ${itemCount} 件` : "ドシエが見えません"}
@@ -86,7 +86,7 @@ export default async function LiveDetailPage({ params }: Props) {
               各公演日〜{MATERIAL_WINDOW_DAYS} 日後のブログ・トークと、イベントエンティティが付いたアセットから候補を出しています。
               本文にライブの話 (ライブ名・会場名を含む) があるブログと、公演日〜
               {TALK_SUGGEST_DAYS === 1 ? "翌日" : `${TALK_SUGGEST_DAYS} 日後`}
-              のトーク画像 / 動画は最初からチェック済み ({suggestedCount} 件)。外す / 足すだけして「ドシエに反映」を押してください。抜粋 (本人の感想) はドシエ側で範囲選択します。
+              のトーク画像 / 動画 ({suggestedCount} 件) は「おすすめ」としてまとめて入れられます。抜粋 (本人の感想) はドシエ側で範囲選択します。
             </p>
             <MaterialsStep
               groups={candidates}
@@ -101,9 +101,9 @@ export default async function LiveDetailPage({ params }: Props) {
         )}
       </StepCard>
 
-      {/* 2. レポ (収集は PR2 で載る。判定画面へのリンクだけ出す) */}
+      {/* 3. レポ (ハッシュタグの設定と収集の実行は #150 で載る。収集画面へのリンクだけ出す) */}
       <StepCard
-        no={2}
+        no={3}
         title="X レポ"
         done={(live.reports?.keep ?? 0) > 0}
         summary={
@@ -120,7 +120,8 @@ export default async function LiveDetailPage({ params }: Props) {
         }
       >
         <p className="text-xs text-slate-500">
-          ハッシュタグの設定と収集の実行はこの画面にまだありません。当面は /repo の収集画面から行ってください。
+          収集の実行と採用 / 不採用の判定は「収集を開く」先の画面で行えます (条件は #坂井新奈 のみ)。
+          ライブごとのハッシュタグの設定はまだこの画面にありません。
         </p>
       </StepCard>
     </div>

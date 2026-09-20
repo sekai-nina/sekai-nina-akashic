@@ -66,7 +66,7 @@ export function toDraft(live: { commonSongs: string[]; performances: LivePerform
 }
 
 /** 編集用の行 → 保存する形 (曲の 1 行入力をここで分割する) */
-export function toSetlistInput(draft: SetlistDraft): SetlistInput {
+export function toSetlistInput(draft: SetlistDraft): SetlistInput & { commonSongs: string[] } {
   return {
     commonSongs: splitSongs(draft.commonSongs),
     performances: draft.performances.map((r) => ({

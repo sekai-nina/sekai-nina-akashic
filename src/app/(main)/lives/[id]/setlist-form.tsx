@@ -1,14 +1,17 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { LivePerformanceView } from "@/lib/domain/lives";
 import { replaceSetlistAction } from "../actions";
 import { SetlistEditor, toDraft, toSetlistInput, type SetlistDraft } from "../setlist-editor";
 
 /**
  * 詳細画面の公演の表。保存で丸ごと入れ替える (`replaceSetlist`)。
- * 保存後に RSC が新しい公演 (新規行の ID 付き) を返すので、そのときだけ下書きを組み直す
+ * 保存後に RSC が新しい公演 (新規行の ID 付き) を返すので、そのときだけ下書きを組み直す。
+ *
+ * 「編集中か」は ref で持つ。state にして effect の依存に入れると、保存直後の `dirty=false`
+ * で effect が走り、**refresh が返るまでの間だけ保存前の行に戻って**ちらつく
  */
 export function SetlistForm({
   liveId,
@@ -25,14 +28,16 @@ export function SetlistForm({
   const initial = useMemo(() => toDraft({ commonSongs, performances }), [commonSongs, performances]);
   const [draft, setDraft] = useState<SetlistDraft>(initial);
   const [dirty, setDirty] = useState(false);
+  const dirtyRef = useRef(false);
 
   // サーバーの値が変わったら (保存直後・別タブでの編集) 編集中でない限り追随する
   useEffect(() => {
-    if (!dirty) setDraft(initial);
-  }, [initial, dirty]);
+    if (!dirtyRef.current) setDraft(initial);
+  }, [initial]);
 
   function change(next: SetlistDraft) {
     setDraft(next);
+    dirtyRef.current = true;
     setDirty(true);
   }
 
@@ -49,6 +54,7 @@ export function SetlistForm({
         return;
       }
       setMsg(`保存しました (${res.performances} 公演${res.removed > 0 ? `、${res.removed} 件削除` : ""})`);
+      dirtyRef.current = false;
       setDirty(false);
       router.refresh();
     });

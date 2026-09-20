@@ -11,16 +11,22 @@
 
 import type { ClearanceLevel, LiveSongRole, Prisma } from "@prisma/client";
 import { withClearance, withSession, type TransactionClient } from "@/lib/db";
-import { assertClearance } from "@/lib/classification";
+import { accessibleClassifications, assertClearance } from "@/lib/classification";
 import {
   addDaysToDateString,
+  formatJpDateRange,
   isValidDateString,
   jstDayEndExclusive,
   jstDayStart,
   normalizeText,
 } from "@/lib/utils";
 import { buildQuery } from "@/lib/twitter/x-search";
-import { MATERIAL_WINDOW_DAYS, MEETGREET_PERSON_NAME, REPORT_WINDOW_DAYS } from "@/lib/meetgreet/config";
+import {
+  MATERIAL_WINDOW_DAYS,
+  MAX_ARTICLE_CLEARANCE,
+  MEETGREET_PERSON_NAME,
+  REPORT_WINDOW_DAYS,
+} from "@/lib/meetgreet/config";
 import { classifyCandidates, type CandidateGroup } from "@/lib/meetgreet/candidates";
 import {
   liveKeywords,
@@ -32,6 +38,7 @@ import {
 import { logAudit } from "./audit";
 import {
   applyMaterialsToDossier,
+  assertContainersFree,
   keepCounts,
   loadDossiers,
   loadMaterialInputs,
@@ -147,15 +154,19 @@ async function writeSetlist(
     for (const t of p.songs) titles.add(t);
     for (const t of p.centerSongs) titles.add(t);
   }
+  // 曲は 1 曲ずつ upsert しない (Prisma の upsert は 1 曲 3 クエリで、20 曲で 60 往復になる)。
+  // 無いものだけまとめて作り (同時に同じ曲名を作る競合は skipDuplicates が吸う)、引き直す
+  const list = [...titles];
   const songIds = new Map<string, string>();
-  for (const title of titles) {
-    const song = await tx.song.upsert({
-      where: { title },
-      update: {},
-      create: { title },
-      select: { id: true, title: true },
-    });
-    songIds.set(song.title, song.id);
+  if (list.length > 0) {
+    const have = await tx.song.findMany({ where: { title: { in: list } }, select: { id: true, title: true } });
+    for (const s of have) songIds.set(s.title, s.id);
+    const missing = list.filter((t) => !songIds.has(t));
+    if (missing.length > 0) {
+      await tx.song.createMany({ data: missing.map((title) => ({ title })), skipDuplicates: true });
+      const made = await tx.song.findMany({ where: { title: { in: missing } }, select: { id: true, title: true } });
+      for (const s of made) songIds.set(s.title, s.id);
+    }
   }
 
   await tx.liveSong.deleteMany({ where: { liveId } });
@@ -180,6 +191,12 @@ function dateRange(performances: { date: string }[]): { first: string; last: str
   return { first: dates[0], last: dates[dates.length - 1] };
 }
 
+/** 一覧・詳細の見出しに出す公演期間 (「2025年9月20日〜11月21日」)。公演が無ければその旨 */
+export function livePeriodLabel(live: { firstDate: string | null; lastDate: string | null }): string {
+  if (!live.firstDate) return "公演未設定";
+  return formatJpDateRange(live.firstDate, live.lastDate ?? live.firstDate);
+}
+
 /**
  * 起点。ドシエと X レポ収集を用意して紐づけ、公演と曲を入れる。
  *
@@ -200,27 +217,22 @@ export async function createLive(user: ActingUser, input: CreateLiveInput): Prom
   const setlist = cleanSetlist(input);
   const range = dateRange(setlist.performances);
 
+  // **Entity は非保護で、名前が全員に見える。** 記事にできる上限 (internal) より上の機密の
+  // ライブは、ライブ名をエンティティとして作らない (作るとライブ名が /entities に出て、
+  // Live / ドシエ / 収集に付けた classification が意味を失う)。既にあるものを選ぶのは可
+  const entityAllowed = new Set<string>(accessibleClassifications(MAX_ARTICLE_CLEARANCE)).has(classification);
+
   const created = await withSession(user, async (tx) => {
-    // 既にあるものを使う場合は、見えること・まだ他のライブに使われていないことを確かめる
-    if (input.dossierId) {
-      const found = await tx.dossier.findUnique({
-        where: { id: input.dossierId },
-        select: { id: true, live: { select: { id: true } }, meetGreet: { select: { id: true } } },
-      });
-      if (!found) throw new LiveInputError("指定されたドシエが見つかりません");
-      if (found.live || found.meetGreet) throw new LiveInputError("そのドシエは別のライブ / ミーグリに使われています");
-    }
-    if (input.repoCollectionId) {
-      const found = await tx.repoCollection.findUnique({
-        where: { id: input.repoCollectionId },
-        select: { id: true, live: { select: { id: true } }, meetGreet: { select: { id: true } } },
-      });
-      if (!found) throw new LiveInputError("指定された X レポ収集が見つかりません");
-      if (found.live || found.meetGreet) throw new LiveInputError("その収集は別のライブ / ミーグリに使われています");
+    // 既にあるものを使う場合は、見えること・まだ他の器に使われていないこと・プールでないことを確かめる
+    try {
+      await assertContainersFree(tx, input);
+    } catch (e) {
+      if (e instanceof WorkflowInputError) throw new LiveInputError(e.message);
+      throw e;
     }
 
     // Entity は非保護 (ポリシーが素通し) なので tx から触ってよい。place 以外なので clearance の絞りも要らない
-    let entityId: string;
+    let entityId: string | null = null;
     if (input.entityId) {
       const found = await tx.entity.findUnique({
         where: { id: input.entityId },
@@ -228,7 +240,7 @@ export async function createLive(user: ActingUser, input: CreateLiveInput): Prom
       });
       if (!found || found.type !== "event") throw new LiveInputError("指定されたイベントエンティティが見つかりません");
       entityId = found.id;
-    } else {
+    } else if (entityAllowed) {
       const entity = await tx.entity.upsert({
         where: { type_canonicalName: { type: "event", canonicalName: name } },
         update: {},
@@ -292,10 +304,12 @@ export async function createLive(user: ActingUser, input: CreateLiveInput): Prom
       },
       select: { id: true, performances: { select: { id: true }, orderBy: { sortOrder: "asc" } } },
     });
+    // **DB が振った ID を使う。** 入力の `id` は作成では受け付けない (REST のスキーマも弾く) が、
+    // spread の順序で上書きされると他のライブの公演に曲が紐づくので、ここでも後勝ちにしておく
     await writeSetlist(
       tx,
       live.id,
-      live.performances.map((row, i) => ({ id: row.id, ...setlist.performances[i] })),
+      live.performances.map((row, i) => ({ ...setlist.performances[i], id: row.id })),
       setlist.commonSongs
     );
     return { liveId: live.id, dossierId: dossier.id, collectionId: collection.id, entityId };
@@ -380,8 +394,7 @@ function shapeRow(
   const { performances, commonSongs } = shapeSetlist(r);
   const range = performances.length > 0 ? dateRange(performances) : null;
   // 曲の行は shape 済みのものだけ返す (生の LiveSong を外に出さない)
-  const { songs: _songs, ...rest } = r;
-  void _songs;
+  const { songs: _, ...rest } = r;
   return {
     ...rest,
     performances,
@@ -496,8 +509,10 @@ export async function replaceSetlist(user: ActingUser, live: { id: string }, inp
     const existing = new Set(
       (await tx.livePerformance.findMany({ where: { liveId: live.id }, select: { id: true } })).map((p) => p.id)
     );
-    const keep = setlist.performances.flatMap((p) => (p.id && existing.has(p.id) ? [p.id] : []));
-    if (new Set(keep).size !== keep.length) throw new LiveInputError("同じ公演が 2 回指定されています");
+    // 渡された id は既存でも未知でも 2 回は受けない (未知の同じ id が 2 行に化けるのを防ぐ)
+    const given = setlist.performances.flatMap((p) => (p.id ? [p.id] : []));
+    if (new Set(given).size !== given.length) throw new LiveInputError("同じ公演が 2 回指定されています");
+    const keep = given.filter((id) => existing.has(id));
 
     await tx.livePerformance.deleteMany({ where: { liveId: live.id, id: { notIn: keep } } });
 
@@ -526,9 +541,19 @@ export async function replaceSetlist(user: ActingUser, live: { id: string }, inp
 
 /**
  * Live の行だけを消す (公演・曲の紐づけは CASCADE)。自動で作ったドシエ / X レポ収集 /
- * event エンティティは残す (それぞれの画面から消せる。素材が入ったあとに巻き込んで消さない)。
+ * event エンティティ・記事は残す (それぞれの画面から消せる。素材が入ったあとに巻き込んで消さない)。
+ *
+ * **消せるのは作成者か admin だけ** (ミーグリ #112 と同じ。公演・曲の手入力とスケッチ・
+ * 除外リストがまとめて消えるので、誰でも消せる状態にしない)。
  */
 export async function deleteLive(user: ActingUser, id: string) {
+  const row = await withClearance(user.clearance, (tx) =>
+    tx.live.findUnique({ where: { id }, select: { createdById: true } })
+  );
+  if (!row) throw new LiveInputError("見つかりません");
+  if (user.role !== "admin" && row.createdById !== user.id) {
+    throw new LiveInputError("このライブを消せるのは作った人か管理者だけです");
+  }
   await withClearance(user.clearance, (tx) => tx.live.delete({ where: { id } }));
   await logAudit({
     actorId: user.id,
@@ -565,24 +590,32 @@ export async function listMaterialCandidates(
     if (last && start <= last.end) last.end = end > last.end ? end : last.end;
     else windows.push({ start, end });
   }
-  const person = { entities: { some: { entity: { type: "person" as const, canonicalName: MEETGREET_PERSON_NAME } } } };
-  const or: Prisma.AssetWhereInput[] = windows.map((w) => ({
-    canonicalDate: { gte: w.start, lt: w.end },
-    ...person,
-  }));
-  if (live.entityId) or.push({ entities: { some: { entityId: live.entityId } } });
-  if (or.length === 0) return [];
+  // **日付窓とエンティティは別々に引く。** 最上位を OR にすると Postgres が Asset を全件
+  // 走査する (実測 220〜650ms。ミーグリと同じ AND の形なら 40ms) ので、2 本に分けて id で畳む
+  const wheres: Prisma.AssetWhereInput[] = [];
+  if (windows.length > 0) {
+    wheres.push({
+      entities: { some: { entity: { type: "person", canonicalName: MEETGREET_PERSON_NAME } } },
+      OR: windows.map((w) => ({ canonicalDate: { gte: w.start, lt: w.end } })),
+    });
+  }
+  if (live.entityId) wheres.push({ entities: { some: { entityId: live.entityId } } });
+  if (wheres.length === 0) return [];
 
   const dates = [...new Set(live.performances.map((p) => p.date))];
   const keywords = liveKeywords({ name: live.name, venues: live.performances.map((p) => p.venue) });
 
   return withSession(user, async (tx) => {
-    const { inputs, inDossier, staffTexts } = await loadMaterialInputs(tx, { OR: or }, live.dossierId);
+    const loaded = await Promise.all(wheres.map((where) => loadMaterialInputs(tx, where, live.dossierId)));
+    const seen = new Set<string>();
+    const inputs = loaded
+      .flatMap((l) => l.inputs)
+      .filter((a) => (seen.has(a.id) ? false : (seen.add(a.id), true)));
+    const staffTexts = new Map(loaded.flatMap((l) => [...l.staffTexts]));
     return classifyCandidates(inputs, {
-      date: dates[0] ?? "",
       dates,
       keywords,
-      inDossier,
+      inDossier: loaded[0].inDossier,
       staffTexts,
     });
   });

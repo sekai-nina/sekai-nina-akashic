@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Pencil } from "lucide-react";
-import { MAX_LIVE_NAME } from "@/lib/live/api";
+import { MAX_LIVE_NAME } from "@/lib/live/config";
 import { deleteLiveAction, updateLiveAction } from "../actions";
 
 const inputCls =
@@ -64,7 +64,12 @@ export function MetaForm({
   }
 
   function remove() {
-    if (!confirm("このライブを削除します。ドシエ・X レポ収集・イベントエンティティは残ります。よろしいですか？")) return;
+    if (
+      !confirm(
+        "このライブを削除します。公演と披露曲の入力は消えます。ドシエ・X レポ収集・イベントエンティティ・記事は残ります。よろしいですか？"
+      )
+    )
+      return;
     startTransition(async () => {
       const res = await deleteLiveAction(id);
       if (!res.ok) {

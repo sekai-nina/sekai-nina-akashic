@@ -34,6 +34,44 @@ export interface DossierBrief {
 }
 
 /**
+ * 既にあるドシエ / X レポ収集を器に紐づける前の確認。見えること・**ミーグリにもライブにも**
+ * まだ使われていないこと・クリップのプールでないこと (#41: 全員共有のプールを 1 つの器に
+ * 紐づけると他人のクリップが素材として流れる) を確かめる。
+ *
+ * 見えない器 (上位機密) に使われている場合はここでは分からず、`@unique` の違反で落ちる
+ * (安全側。整合性は DB が守る)
+ */
+export async function assertContainersFree(
+  tx: TransactionClient,
+  input: { dossierId?: string; repoCollectionId?: string }
+): Promise<void> {
+  if (input.dossierId) {
+    const found = await tx.dossier.findUnique({
+      where: { id: input.dossierId },
+      select: {
+        id: true,
+        kind: true,
+        meetGreet: { select: { id: true } },
+        live: { select: { id: true } },
+      },
+    });
+    if (!found) throw new WorkflowInputError("指定されたドシエが見つかりません");
+    if (found.meetGreet) throw new WorkflowInputError("そのドシエは別のミーグリに使われています");
+    if (found.live) throw new WorkflowInputError("そのドシエは別のライブに使われています");
+    if (found.kind === "clips") throw new WorkflowInputError("クリップのプールは素材置き場に使えません");
+  }
+  if (input.repoCollectionId) {
+    const found = await tx.repoCollection.findUnique({
+      where: { id: input.repoCollectionId },
+      select: { id: true, meetGreet: { select: { id: true } }, live: { select: { id: true } } },
+    });
+    if (!found) throw new WorkflowInputError("指定された X レポ収集が見つかりません");
+    if (found.meetGreet) throw new WorkflowInputError("その収集は別のミーグリに使われています");
+    if (found.live) throw new WorkflowInputError("その収集は別のライブに使われています");
+  }
+}
+
+/**
  * ドシエは **include せず別に引く**。
  *
  * 器の `dossier` は必須リレーションだが、Dossier の RLS は owner / viewMode で別に判定される。

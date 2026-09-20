@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { MAX_LIVE_NAME } from "@/lib/live/api";
+import { MAX_LIVE_NAME } from "@/lib/live/config";
 import { createLiveAction } from "../actions";
 import { newRow, SetlistEditor, toSetlistInput, type SetlistDraft } from "../setlist-editor";
 
@@ -49,7 +49,7 @@ export function NewLiveForm({ events }: { events: EventOption[] }) {
         note,
         ...(entityId ? { entityId } : {}),
         performances: setlist.performances,
-        commonSongs: setlist.commonSongs ?? [],
+        commonSongs: setlist.commonSongs,
       });
       if (!res.ok) {
         setMsg(`エラー: ${res.error}`);
@@ -114,7 +114,11 @@ export function NewLiveForm({ events }: { events: EventOption[] }) {
         >
           作成する
         </button>
-        {msg && <span className="text-xs text-slate-500">{msg}</span>}
+        {msg && (
+          <span role="status" className="text-xs text-slate-500">
+            {msg}
+          </span>
+        )}
       </div>
     </div>
   );
