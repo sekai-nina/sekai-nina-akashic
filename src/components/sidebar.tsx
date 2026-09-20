@@ -32,6 +32,7 @@ import {
   Scissors,
   Power,
   Radar,
+  Instagram,
   Megaphone,
 } from "lucide-react";
 import { QuickCreateModal } from "@/components/quick-create-modal";
@@ -69,6 +70,7 @@ const navItems = [
 const adminItems = [
   { href: "/admin/ai", label: "案内AI の運転", icon: Power },
   { href: "/admin/sketch", label: "スケッチ生成の設定", icon: Sparkles },
+  { href: "/admin/insta", label: "Instagram の監視対象", icon: Instagram },
   { href: "/costs", label: "コスト", icon: Wallet },
   { href: "/admin/users", label: "ユーザー管理", icon: Users },
   { href: "/admin/invitations", label: "招待管理", icon: UserPlus },
