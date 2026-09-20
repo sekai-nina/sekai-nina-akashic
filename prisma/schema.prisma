@@ -1064,9 +1064,10 @@ model Live {
 
   classification ClearanceLevel @default(internal)
 
-  /// 素材置き場。作成時に自動で作る (1:1)。ドシエが消えたらこの行も消す
+  /// 素材置き場。作成時に自動で作る (1:1)。公演・曲・スケッチを持つので、ドシエ側から
+  /// 巻き添えで消さない (Restrict。MeetGreet と同じ)。先にライブを消してもらう
   dossierId String  @unique
-  dossier   Dossier @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  dossier   Dossier @relation(fields: [dossierId], references: [id], onDelete: Restrict)
 
   /// X レポの収集。作成時に自動で作る。コレクションだけ消しても行は残す
   repoCollectionId String?         @unique
