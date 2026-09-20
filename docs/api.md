@@ -1192,9 +1192,12 @@ keep / total は `GET /meetgreets/:id` の `repoCollection` で読む。判定�
 
 | フィールド | 型 | 必須 | 説明 |
 |---|---|---|---|
-| `assetIds` | string[] | ✓ | 参照にする画像。**ドシエに入っている `internal` 以下の画像に限る**（1〜15 枚。`revisionOf` を渡すときは 14 枚まで） |
+| `assetIds` | string[] | | 参照にする画像。**ドシエに入っている `internal` 以下の画像に限る** |
+| `refKeys` | string[] | | その回だけの参考画像の key（#159）。アセットにもドシエにも入っていない、画面からアップロードしたもの |
 | `revisionOf` | string | | 作り直しの元にする候補の key（`sketch.candidates[].key`）。渡すとその画像も参照に足す |
 | `revisionNote` | string (≤2000) | | 作り直しの指示 |
+
+`assetIds` と `refKeys` は**合わせて 1 枚以上**必要（両方空なら 400）。合計の上限は下の「16 枚まで」の話に従う。
 
 **レスポンス:** `{"candidates": [{"key": "…", "url": "https://…"}, …]}`（既定 2 枚）。`sketch.candidates` には追記され、過去の候補は消えない。確定するまで `sketchKey` は変わらない。
 
@@ -1202,6 +1205,8 @@ keep / total は `GET /meetgreets/:id` の `repoCollection` で読む。判定�
 - 回ごとの追加指示（どの髪型を中央にするか等）は `PATCH /meetgreets/:id` の `extraSketchPrompt` に入れておく。生成のたびにプロンプトの末尾に足される
 - 入力は **16 枚まで**という API の制限があり、最後の 1 枚を基準スケッチに使うので写真は 15 枚まで。**作り直しのときは直す候補でもう 1 枚使うので 14 枚まで**（超えると 400）
 - **`confidential` 以上のアセットは参照にできない。** 画像の中身を外部 API に送る操作なので、`internal` 以下に限っている（[docs/security-dev.md](./security-dev.md)）
+- **ミーグリ自体が `internal` を超えていると生成できない**（#159）。アップロードした参考画像にはアセット側の検査が無く、ここが唯一の歯止めになるため。生成したスケッチは公開 URL の R2 に置かれる
+- **参考画像のアップロードは画面だけ**（`POST /api/meetgreets/:id/sketch-refs`。REST v1 には出していない）。アセットにもドシエにも入らず、R2 に置いて `MeetGreet.sketchRefs` に key を覚えるだけ。切り抜き（`sketch/crops`）は assetId と同じように key を指定すれば効く
 - 画像は Drive に原本があればそれを、無ければ R2 の 640px サムネイルを使う
 - **切り抜き枠 (`POST /meetgreets/:id/sketch/crops`) があれば、その範囲だけを送る。** ツーショットの写真で隣の人の服を拾わないようにするためのもの（#136）
 - **プロンプト本体と基準スケッチは画面の設定（`/admin/sketch`）から変えられる。** 全体で 1 つの設定で、すべての回に効く。未設定なら組み込みの既定

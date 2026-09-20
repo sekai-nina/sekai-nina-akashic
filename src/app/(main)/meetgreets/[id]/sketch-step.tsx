@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { Check, Crop, Sparkles } from "lucide-react";
+import { Check, Crop, Sparkles, X } from "lucide-react";
 import type { SketchCandidate, SketchSourceAsset } from "@/lib/meetgreet/types";
 import type { CropMap, CropRect } from "@/lib/meetgreet/crop";
 import { maxReferencePhotos } from "@/lib/meetgreet/config";
@@ -13,6 +13,7 @@ import {
   updateMeetGreetAction,
 } from "../actions";
 import { CropEditor } from "./crop-editor";
+import { RefUpload } from "./ref-upload";
 
 interface Props {
   meetGreetId: string;
@@ -24,6 +25,17 @@ interface Props {
   crops: CropMap;
   /** 画風の見本。何を参考にしているかを見せる (#136) */
   styleReference: { url: string | null; isDefault: boolean; canEdit: boolean };
+  /** その回だけの参考画像 (#159)。ドシエには入っていない */
+  refs: { key: string; name: string; url: string }[];
+}
+
+/** 参照に使える 1 枚。ドシエの画像とアップロードした参考画像を同じ形で扱う */
+interface PickItem {
+  id: string;
+  title: string;
+  url: string | null;
+  /** アップロードした参考画像か (#159)。切り抜きの元と消せるかが変わる */
+  isRef: boolean;
 }
 
 const textareaCls =
@@ -41,11 +53,12 @@ export function SketchStep({
   extraPrompt,
   crops,
   styleReference,
+  refs,
 }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
-  const [cropping, setCropping] = useState<SketchSourceAsset | null>(null);
+  const [cropping, setCropping] = useState<PickItem | null>(null);
 
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [extra, setExtra] = useState(extraPrompt);
@@ -54,7 +67,16 @@ export function SketchStep({
 
   // 作り直しでは直す候補で 1 枚使うので、写真の上限がその分下がる
   const limit = maxReferencePhotos(!!revisionOf);
-  const sourceIds = useMemo(() => new Set(sources.map((a) => a.id)), [sources]);
+  /** ドシエの画像 + アップロードした参考画像 (#159) */
+  const items = useMemo<PickItem[]>(
+    () => [
+      ...sources.map((a) => ({ id: a.id, title: a.title, url: a.thumbnailUrl, isRef: false })),
+      ...refs.map((r) => ({ id: r.key, title: r.name, url: r.url, isRef: true })),
+    ],
+    [sources, refs]
+  );
+  const sourceIds = useMemo(() => new Set(items.map((a) => a.id)), [items]);
+  const refKeys = useMemo(() => new Set(refs.map((r) => r.key)), [refs]);
   // ドシエから外された画像が選ばれたままにならないようにする
   useEffect(() => {
     setPicked((s) => {
@@ -100,7 +122,9 @@ export function SketchStep({
         }
       }
       const res = await generateSketchAction(meetGreetId, {
-        assetIds: [...picked],
+        // アセットと参考画像は別々に渡す (サーバー側の検査が違う)
+        assetIds: [...picked].filter((id) => !refKeys.has(id)),
+        refKeys: [...picked].filter((id) => refKeys.has(id)),
         ...(revisionOf ? { revisionOf, revisionNote } : {}),
       }).catch((e: unknown) => ({
         ok: false as const,
@@ -138,6 +162,31 @@ export function SketchStep({
     });
   }
 
+  /** 参考画像を消す (#159)。R2 の実体ごと消える */
+  function removeRef(key: string, name: string) {
+    if (!confirm(`参考画像「${name}」を消しますか？`)) return;
+    setMsg("消しています…");
+    startTransition(async () => {
+      const res = await fetch(
+        `/api/meetgreets/${meetGreetId}/sketch-refs?key=${encodeURIComponent(key)}`,
+        { method: "DELETE" }
+      )
+        .then((r) => r.json().then((j: { error?: string }) => ({ ok: r.ok, ...j })))
+        .catch(() => ({ ok: false, error: "通信に失敗しました" }));
+      if (!res.ok) {
+        setMsg(`エラー: ${res.error ?? "消せませんでした"}`);
+        return;
+      }
+      setPicked((p) => {
+        const next = new Set(p);
+        next.delete(key);
+        return next;
+      });
+      setMsg("消しました");
+      router.refresh();
+    });
+  }
+
   function select(key: string) {
     startTransition(async () => {
       const res = await selectSketchAction(meetGreetId, key).catch((e: unknown) => ({
@@ -164,10 +213,10 @@ export function SketchStep({
           <span className="text-xs font-medium text-slate-600">
             参照にする写真 ({picked.size} / 最大 {limit})
           </span>
-          <span className="text-[11px] text-slate-400">その日の服装・髪型が分かるものを選ぶ</span>
+          <span className="text-[11px] text-slate-500">その日の服装・髪型が分かるものを選ぶ</span>
         </div>
         <ul className="grid grid-cols-3 sm:grid-cols-5 gap-2" role="group" aria-label="参照にする写真">
-          {sources.map((a) => {
+          {items.map((a) => {
             const on = picked.has(a.id);
             const crop = crops[a.id];
             return (
@@ -182,16 +231,22 @@ export function SketchStep({
                     (on ? "border-slate-900" : "border-transparent hover:border-slate-300")
                   }
                 >
-                  {a.thumbnailUrl ? (
+                  {a.url ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={a.thumbnailUrl} alt={a.title} className="w-full h-20 object-cover bg-slate-100" />
+                    <img
+                      src={a.url}
+                      alt={a.title}
+                      className="w-full h-20 object-cover bg-slate-100"
+                      loading="lazy"
+                      decoding="async"
+                    />
                   ) : (
                     <span className="flex h-20 items-center justify-center bg-slate-100 text-[10px] text-slate-400 px-1 text-center">
                       {a.title}
                     </span>
                   )}
                 </button>
-                {a.thumbnailUrl && (
+                {a.url && (
                   <button
                     type="button"
                     onClick={() => setCropping(a)}
@@ -207,6 +262,18 @@ export function SketchStep({
                   >
                     <Crop size={10} aria-hidden />
                     {crop ? "済" : ""}
+                  </button>
+                )}
+                {a.isRef && (
+                  <button
+                    type="button"
+                    onClick={() => removeRef(a.id, a.title)}
+                    disabled={pending}
+                    aria-label={`${a.title} を消す`}
+                    title="この参考画像を消す"
+                    className="absolute top-1 right-1 inline-flex h-5 w-5 items-center justify-center rounded bg-white/90 text-slate-500 shadow-sm hover:bg-white hover:text-rose-600 disabled:opacity-50"
+                  >
+                    <X size={11} aria-hidden />
                   </button>
                 )}
               </li>
@@ -242,6 +309,8 @@ export function SketchStep({
           )}
         </div>
       </div>
+
+      <RefUpload meetGreetId={meetGreetId} />
 
       <div>
         <label className="block text-xs font-medium text-slate-600 mb-1.5" htmlFor="mg-extra-prompt">
@@ -296,7 +365,13 @@ export function SketchStep({
         <CropEditor
           // **サムネイルではなく、サーバーが実際に切る画像**の上で枠を引く
           // (サムネイルは出どころで向きが変わり、座標系が揃わない)
-          src={`/api/meetgreets/${meetGreetId}/sketch-reference/${cropping.id}`}
+          // 参考画像は R2 の実体 (保存時に正立にしてある)、ドシエの画像は
+          // 「サーバーが実際に切る画像」を返す route。どちらも正立で座標系が揃う
+          src={
+            cropping.isRef
+              ? (cropping.url ?? "")
+              : `/api/meetgreets/${meetGreetId}/sketch-reference/${cropping.id}`
+          }
           title={cropping.title}
           value={crops[cropping.id] ?? null}
           saving={pending}

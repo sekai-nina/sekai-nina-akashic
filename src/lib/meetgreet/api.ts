@@ -87,19 +87,27 @@ export const ApplyExcerptsSchema = z
 
 export const GenerateSketchSchema = z
   .object({
-    assetIds: z.array(z.string().min(1)).min(1).max(MAX_REFERENCE_PHOTOS),
+    assetIds: z.array(z.string().min(1)).max(MAX_REFERENCE_PHOTOS).default([]),
+    /** その回だけの参考画像の key (#159)。ドシエには入っていない */
+    refKeys: z.array(z.string().min(1)).max(MAX_REFERENCE_PHOTOS).optional(),
     /** 作り直しの元にする候補の R2 key (sketch.candidates[].key) */
     revisionOf: z.string().min(1).optional(),
     revisionNote: z.string().max(MAX_REVISION_NOTE).optional(),
   })
   .strict()
+  .refine((v) => v.assetIds.length + (v.refKeys?.length ?? 0) >= 1, {
+    message: "参照にする写真を選んでください",
+  })
   .refine((v) => !v.revisionNote || v.revisionOf, {
     message: "revisionNote は revisionOf と一緒に指定してください",
   })
   // 作り直しでは直す候補で 1 枚使うので、写真の上限が 1 枚下がる (合計 16 枚)
-  .refine((v) => v.assetIds.length <= maxReferencePhotos(!!v.revisionOf), {
-    message: `作り直しのときの参照写真は ${maxReferencePhotos(true)} 枚までです`,
-  });
+  .refine(
+    (v) => v.assetIds.length + (v.refKeys?.length ?? 0) <= maxReferencePhotos(!!v.revisionOf),
+    {
+      message: `作り直しのときの参照写真は ${maxReferencePhotos(true)} 枚までです`,
+    }
+  );
 
 /**
  * 除外キーの配列 (#134)。**Server Action も公開された口**なので同じものを通す
@@ -113,7 +121,9 @@ export const ExclusionKeysSchema = z.array(z.string().min(1).max(200)).max(200);
  */
 export const SketchCropsSchema = z
   .record(
-    z.string().min(1).max(64),
+    // assetId (cuid) のほか、参考画像の R2 key も入る (#159)。
+    // `meetgreet/<cuid>/refs/<uuid>.webp` で 60 文字強になるので余裕を持たせる
+    z.string().min(1).max(200),
     z
       .object({
         x: z.number().min(0).max(1),

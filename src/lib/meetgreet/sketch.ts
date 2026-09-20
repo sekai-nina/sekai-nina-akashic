@@ -156,13 +156,55 @@ export async function loadAssetImage(
   return null;
 }
 
-/** R2 の画像を 1 枚取る (基準スケッチ・作り直しの元候補) */
+/**
+ * R2 の画像を 1 枚取る (基準スケッチ・作り直しの元候補・その回の参考画像)。
+ *
+ * **拡張子と Content-Type を食い違わせない。** 以前は常に `image/png` と名乗っていたが、
+ * webp を png と偽って multipart に載せると API に弾かれ、**1 枚のせいで生成ごと失敗する**
+ * (1 枚落とすだけでは済まない)。
+ */
 export async function loadR2Image(key: string, filename: string): Promise<SketchSourceImage> {
   const url = getR2PublicUrl(key);
   if (!/^https?:\/\//.test(url)) throw new SketchConfigError("R2_PUBLIC_URL が未設定です");
   const res = await fetch(url);
   if (!res.ok) throw new SketchError(`画像を読めませんでした (${res.status}): ${key}`);
-  return { filename, contentType: "image/png", bytes: Buffer.from(await res.arrayBuffer()) };
+  return {
+    filename,
+    contentType: contentTypeOf(filename),
+    bytes: Buffer.from(await res.arrayBuffer()),
+  };
+}
+
+/** 拡張子から Content-Type を決める (gpt-image-1 が受けるのは png / jpeg / webp) */
+function contentTypeOf(filename: string): string {
+  const ext = filename.toLowerCase().split(".").pop() ?? "";
+  if (ext === "webp") return "image/webp";
+  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+  return "image/png";
+}
+
+/**
+ * その回だけの参考画像を R2 から取る (#159)。
+ *
+ * アップロード時に正立・縮小済みなので、ここでは切り抜きだけ当てる。
+ * 取れなければ null (1 枚落とすだけで生成は続ける)。**切り抜けなかったときは落とす** —
+ * 枠があるのに全体を送ると、隣の人ごと外部に出てしまう。
+ */
+export async function loadR2Reference(
+  key: string,
+  crop?: CropRect
+): Promise<SketchSourceImage | null> {
+  try {
+    const img = await loadR2Image(key, `${key.split("/").pop() ?? "ref"}`);
+    if (!crop) return img;
+    const cut = await cropBytes(img.bytes, crop);
+    return cut === null ? null : { ...img, bytes: cut };
+  } catch (e) {
+    // **設定漏れは握り潰さない。** R2_PUBLIC_URL 未設定だと全部黙って落ちて、
+    // 「参照を選んだのに何も送られない」になる (こちら側の問題なので 500 にしたい)
+    if (e instanceof SketchConfigError) throw e;
+    return null;
+  }
 }
 
 /**
