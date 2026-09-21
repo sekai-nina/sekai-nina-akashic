@@ -6,12 +6,10 @@ import { getDossier, getDossierKind } from "@/lib/domain/dossiers";
 import { canEditDossier, canManageDossier } from "@/lib/auth/dossier-permissions";
 import { formatDate } from "@/lib/utils";
 import { getR2PublicUrl } from "@/lib/r2";
-import { exportDossierToYaml } from "@/lib/yaml/dossier-export";
 import { DossierItemRow } from "./item-row";
 import { DossierHeader } from "./dossier-header";
 import { ExternalLinkForm } from "./external-link-form";
 import { PlaceCandidateList } from "./place-candidate-list";
-import { CopyYamlButton } from "./copy-yaml-button";
 import { ExternalImageForm } from "./external-image-form";
 
 interface DossierDetailProps {
@@ -66,7 +64,6 @@ export default async function DossierDetailPage({ params }: DossierDetailProps) 
             {dossier.articles.length > 0 ? "記事に追記する" : "記事にする"}
           </Link>
         )}
-        <CopyYamlButton yaml={exportDossierToYaml(dossier)} />
       </div>
 
       <section className="mt-6">
