@@ -3,6 +3,7 @@ import { ArrowLeft, ExternalLink } from "lucide-react";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getLive, listMaterialCandidates, livePeriodLabel } from "@/lib/domain/lives";
+import { listSongKeys } from "@/lib/domain/songs";
 import { MATERIAL_WINDOW_DAYS, TALK_SUGGEST_DAYS } from "@/lib/meetgreet/config";
 import { formatDate } from "@/lib/utils";
 import { MaterialsStep } from "@/components/materials-step";
@@ -26,7 +27,7 @@ export default async function LiveDetailPage({ params }: Props) {
   const live = await getLive(session.user, id);
   if (!live) notFound();
 
-  const candidates = await listMaterialCandidates(session.user, live);
+  const [candidates, songKeys] = await Promise.all([listMaterialCandidates(session.user, live), listSongKeys()]);
   const suggestedCount = candidates.reduce(
     (n, g) => n + g.assets.filter((a) => a.suggested).length,
     0
@@ -61,9 +62,9 @@ export default async function LiveDetailPage({ params }: Props) {
       >
         <p className="text-xs text-slate-500 mb-3">
           記事の「公演」の表になります。全公演で披露した曲は共通披露曲に、その公演だけの曲は行の追加曲に入れてください。
-          曲名は保存時に曲マスタへ登録されます (表記揺れは同じ曲として数えられないので、既存記事の表記に合わせてください)。
+          曲名は保存時に曲マスタ (<Link href="/songs" className="underline">曲</Link>) へ登録されます。マスタに無い曲は入力の下に出るので、誤字はその場で直してください。
         </p>
-        <SetlistForm liveId={live.id} commonSongs={live.commonSongs} performances={live.performances} />
+        <SetlistForm liveId={live.id} commonSongs={live.commonSongs} performances={live.performances} knownKeys={songKeys} />
       </StepCard>
 
       {/* 2. 素材 */}

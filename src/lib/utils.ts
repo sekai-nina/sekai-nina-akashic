@@ -8,8 +8,11 @@ import {
   type JobRunStatus,
   type LlmProvider,
   type LlmUsageSource,
+  type LiveSongRole,
   type MeetGreetFormat,
   type PlaceKind,
+  type ReleaseKind,
+  type SongParticipation,
   type StatusLevel,
 } from "@prisma/client";
 
@@ -149,6 +152,25 @@ export const MEETGREET_FORMAT_LABELS: Record<MeetGreetFormat, string> = {
 export const MEETGREET_FORMAT_SHORT_LABELS: Record<MeetGreetFormat, string> = {
   online: "オンミ",
   real: "リアミ",
+};
+
+/** 曲マスタ: 坂井新奈の参加楽曲か (#167) */
+export const SONG_PARTICIPATION_LABELS: Record<SongParticipation, string> = {
+  unknown: "未確認",
+  member: "参加",
+  none: "不参加",
+};
+
+/** 曲マスタ: 作品の種別 */
+export const RELEASE_KIND_LABELS: Record<ReleaseKind, string> = {
+  single: "シングル",
+  album: "アルバム",
+};
+
+/** ライブの公演で曲がどう扱われたか */
+export const LIVE_SONG_ROLE_LABELS: Record<LiveSongRole, string> = {
+  performed: "披露",
+  center: "センター",
 };
 
 /** 素材候補のグループ */

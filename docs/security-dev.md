@@ -96,7 +96,9 @@ const clearance = auth.clearance;
 
 `Announcement`（お知らせ `/announcements`）は公開サイトに出すための文章しか持たないので非保護（`Article` と同じ扱い。`20260920180000_announcement` で REVOKE 済み）。書けるのは admin / member（Server Action は `requireRole`、REST は write キー）。
 
-`Song` / `Release` / `ReleaseTrack`（曲マスタ #167。曲名・収録シングル・発売日）は公式ディスコグラフィそのものなので非保護。`LiveSong` 側は保護されるので「どのライブで何を歌ったか」は漏れない。`Song.participation`（坂井新奈の参加楽曲か）も公開情報の範囲。`20260921000000_live` / `20260921100000_song_master` で `REVOKE` 済み。取り込みは `pnpm cli:import-songs`（`DIRECT_URL`）。
+`Song` / `Release` / `ReleaseTrack`（曲マスタ #167。曲名・収録シングル・発売日）は公式ディスコグラフィそのものなので非保護。`LiveSong` 側は保護されるので「どのライブで何を歌ったか」は漏れない（`/songs` の披露回数・披露した公演は `withClearance` で見える範囲だけ）。`Song.participation`（坂井新奈の参加楽曲か）も公開情報の範囲。`20260921000000_live` / `20260921100000_song_master` で `REVOKE` 済み。取り込みは `pnpm cli:import-songs`（`DIRECT_URL`）。
+
+例外が **曲の統合 `mergeSongs`**（`/songs/[id]`、admin 限定）。誤字の曲を正しい曲に寄せるとき、`LiveSong` は `RESTRICT` なので見えないライブのぶんも付け替えないと消せない。そのため `prismaInternal` で付け替える。返すのは曲名だけで、付け替えた行の中身は返さない（件数は監査ログにだけ残す）。
 
 `LlmUsageDaily` / `LlmCostDaily` / `CreditSnapshot`（コスト管理 `/costs`）も非保護。金額とトークン数しか持たないが、**画面と Server Action は admin のみ**に絞る（口座の残高なので member / viewer には見せない）。`/status` のコストのチェックも admin にだけ表示し、Discord に流れる要約には金額を入れない。
 

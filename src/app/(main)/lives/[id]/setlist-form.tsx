@@ -17,10 +17,13 @@ export function SetlistForm({
   liveId,
   commonSongs,
   performances,
+  knownKeys,
 }: {
   liveId: string;
   commonSongs: string[];
   performances: LivePerformanceView[];
+  /** 曲マスタの名寄せキー (SetlistEditor の注意書き用) */
+  knownKeys: string[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -62,7 +65,7 @@ export function SetlistForm({
 
   return (
     <div>
-      <SetlistEditor value={draft} onChange={change} disabled={pending} />
+      <SetlistEditor value={draft} onChange={change} disabled={pending} knownKeys={knownKeys} />
       <div className="mt-3 flex items-center gap-3">
         <button
           type="button"

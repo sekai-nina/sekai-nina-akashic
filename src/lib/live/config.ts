@@ -81,6 +81,9 @@ export const MAX_SONGS_PER_LIST = 100;
 /** 曲名の長さ */
 export const MAX_SONG_TITLE = 100;
 
+/** 曲マスタのメモの長さ (#167) */
+export const MAX_SONG_NOTE = 2000;
+
 /**
  * 「A / B / C」の 1 行入力を曲名の配列にする。
  * 区切りは ` / ` (全角スラッシュも可)。空と重複は落とす。
