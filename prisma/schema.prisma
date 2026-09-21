@@ -1127,14 +1127,82 @@ model LivePerformance {
   @@index([date])
 }
 
-/// 曲のマスタ。公演フォームの入力から find-or-create で増える (表記揺れは人が直す)
+/// 曲のマスタ (#167)。公式ディスコグラフィ (Sony Music の JSON API) の取り込み
+/// (`pnpm cli:import-songs`) と、公演フォームの入力 (find-or-create) の両方から増える。
+/// 非保護テーブル (曲名は公開情報)。「どのライブで歌ったか」は LiveSong 側で守られる
 model Song {
-  id        String   @id @default(cuid())
-  title     String   @unique
+  id    String @id @default(cuid())
+  /// 公式表記。取り込みが公式に揃える
+  title String @unique
+  /// 名寄せのキー (`normalizeSongTitle`: NFKC → 小文字 → 空白・記号を落とす)。
+  /// 公演フォームの表記揺れをここで同じ曲に寄せる。衝突は /songs の統合で人が解く
+  normalizedTitle String @unique
+  /// 「日向坂46」「けやき坂46」。取り込みが盤のアーティスト名から入れる。手入力の曲は空
+  artist String @default("")
+  /// 坂井新奈が参加楽曲か。API からは取れないので人が付ける
+  participation SongParticipation @default(unknown)
+  note          String            @default("")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   liveSongs LiveSong[]
+  tracks    ReleaseTrack[]
+}
+
+enum SongParticipation {
+  unknown
+  /// 参加している
+  member
+  /// 参加していない (加入前の曲、他ユニット等)
+  none
+}
+
+enum ReleaseKind {
+  single
+  album
+}
+
+/// シングル / アルバム 1 作品 (#167)。TYPE-A〜D / 通常盤は同じ作品として 1 行にまとめ、
+/// 盤の内訳は editions に持つ。非保護
+model Release {
+  id String @id @default(cuid())
+  /// 作品名 (盤の【初回仕様限定盤 TYPE-A】等を落としたもの)
+  title String
+  kind  ReleaseKind
+  /// 発売日 (JST "YYYY-MM-DD")
+  releaseDate String
+  artist      String @default("")
+  /// 代表品番 (通常盤があればそれ、無ければ最初の盤)。取り込みの冪等キー
+  sonyCode String @unique
+  /// 盤の内訳: [{ code: "SRCL-13520", title: "…【初回仕様限定盤 TYPE-A】" }]
+  editions Json @default("[]")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tracks ReleaseTrack[]
+
+  @@index([releaseDate])
+}
+
+/// 作品と曲の紐づけ。全盤の和集合なので、どの盤に入っているかは editions (品番の配列) に持つ。
+/// songId は Cascade (曲を消せば収録も消える)。**曲の統合 (/songs) では収録曲を消す側から
+/// 残す側へ付け替えてから消すこと** (消すだけだと次の取り込みで公式表記の曲が復活する)
+model ReleaseTrack {
+  id        String  @id @default(cuid())
+  releaseId String
+  release   Release @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+  songId    String
+  song      Song    @relation(fields: [songId], references: [id], onDelete: Cascade)
+
+  discNo  Int @default(1)
+  trackNo Int
+  /// この曲が入っている盤の品番
+  editions Json @default("[]")
+
+  @@unique([releaseId, songId])
+  @@index([songId])
 }
 
 enum LiveSongRole {

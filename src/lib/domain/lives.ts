@@ -35,6 +35,7 @@ import {
   MAX_SONG_TITLE,
   MAX_SONGS_PER_LIST,
 } from "@/lib/live/config";
+import { normalizeSongTitle } from "@/lib/songs/normalize";
 import { logAudit } from "./audit";
 import {
   applyMaterialsToDossier,
@@ -92,13 +93,18 @@ export interface CreateLiveInput extends SetlistInput {
 
 function cleanSongs(list: readonly string[] | undefined, what: string): string[] {
   const out: string[] = [];
+  // 同じリストの中の表記揺れ (「HEY!OHISAMA!」と「HEY！OHISAMA！」) も 1 曲にする
+  const keys = new Set<string>();
   for (const raw of list ?? []) {
     const t = raw.replace(/\s+/g, " ").trim();
     if (!t) continue;
     if ([...t].length > MAX_SONG_TITLE) {
       throw new LiveInputError(`${what}の曲名が長すぎます (${MAX_SONG_TITLE} 文字まで): ${t.slice(0, 20)}…`);
     }
-    if (!out.includes(t)) out.push(t);
+    const key = normalizeSongTitle(t);
+    if (keys.has(key)) continue;
+    keys.add(key);
+    out.push(t);
   }
   if (out.length > MAX_SONGS_PER_LIST) {
     throw new LiveInputError(`${what}が多すぎます (${MAX_SONGS_PER_LIST} 曲まで)`);
@@ -155,17 +161,40 @@ async function writeSetlist(
     for (const t of p.centerSongs) titles.add(t);
   }
   // 曲は 1 曲ずつ upsert しない (Prisma の upsert は 1 曲 3 クエリで、20 曲で 60 往復になる)。
-  // 無いものだけまとめて作り (同時に同じ曲名を作る競合は skipDuplicates が吸う)、引き直す
+  // **名寄せキー (normalizedTitle) で既存に寄せる** (#167: 「HEY!OHISAMA!」と「HEY！OHISAMA！」を
+  // 別の曲にしない)。無いものだけまとめて作り (同時に同じ曲を作る競合は skipDuplicates が吸う)、引き直す
   const list = [...titles];
   const songIds = new Map<string, string>();
   if (list.length > 0) {
-    const have = await tx.song.findMany({ where: { title: { in: list } }, select: { id: true, title: true } });
-    for (const s of have) songIds.set(s.title, s.id);
-    const missing = list.filter((t) => !songIds.has(t));
+    const keyOf = new Map(list.map((t) => [t, normalizeSongTitle(t)] as const));
+    const keys = [...new Set(keyOf.values())];
+    const have = await tx.song.findMany({
+      where: { normalizedTitle: { in: keys } },
+      select: { id: true, normalizedTitle: true },
+    });
+    const idByKey = new Map(have.map((s) => [s.normalizedTitle, s.id]));
+    const missing = list.filter((t) => !idByKey.has(keyOf.get(t)!));
     if (missing.length > 0) {
-      await tx.song.createMany({ data: missing.map((title) => ({ title })), skipDuplicates: true });
-      const made = await tx.song.findMany({ where: { title: { in: missing } }, select: { id: true, title: true } });
-      for (const s of made) songIds.set(s.title, s.id);
+      // 同じキーに畳まれる表記が入力に 2 つあれば先のものを公式表記にする
+      const seen = new Set<string>();
+      const rows = missing.flatMap((title) => {
+        const key = keyOf.get(title)!;
+        if (seen.has(key)) return [];
+        seen.add(key);
+        return [{ title, normalizedTitle: key }];
+      });
+      await tx.song.createMany({ data: rows, skipDuplicates: true });
+      const made = await tx.song.findMany({
+        where: { normalizedTitle: { in: rows.map((r) => r.normalizedTitle) } },
+        select: { id: true, normalizedTitle: true },
+      });
+      for (const s of made) idByKey.set(s.normalizedTitle, s.id);
+    }
+    for (const t of list) {
+      const id = idByKey.get(keyOf.get(t)!);
+      // 起きるとすれば normalizedTitle が title と食い違っている行がある (手で直した等) とき
+      if (!id) throw new LiveInputError(`曲「${t}」を曲マスタに登録できませんでした`);
+      songIds.set(t, id);
     }
   }
 
