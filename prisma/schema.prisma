@@ -1080,12 +1080,16 @@ model Live {
   /// X レポ収集のハッシュタグ (string[])。坂井新奈 AND 各タグ、タグ間は OR。空なら坂井新奈だけ
   reportTags Json @default("[]")
 
-  /// スケッチ候補の R2 key の配列 (PR2 で使う)
+  /// スケッチ候補の R2 key の配列 (`live/<id>/sketch/…`)
   sketchCandidates  Json    @default("[]")
   /// 確定したスケッチの R2 key。記事のサムネになる
   sketchKey         String?
   /// スケッチ生成時にプロンプト本体へ追記する、このライブだけの指示
   extraSketchPrompt String  @default("")
+  /// このライブだけの参考画像 (MeetGreet.sketchRefs と同じ形。`live/<id>/refs/…`)
+  sketchRefs        Json    @default("[]")
+  /// 参照写真の切り抜き枠 (MeetGreet.sketchCrops と同じ形)
+  sketchCrops       Json    @default("{}")
 
   /// 記事に足さないと決めたもののキー (MeetGreet.articleExclusions と同じ形式)
   articleExclusions Json @default("[]")

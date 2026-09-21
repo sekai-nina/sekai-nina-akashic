@@ -70,7 +70,7 @@ const clearance = auth.clearance;
 - `MeetGreet`（ミーグリ記事ワークフロー。ドシエを include する読みは所有者判定が要るので `withSession`）
 - `SketchSetting`（スケッチ生成のプロンプトと画風の見本。**全体で 1 行**で、個人のデータではないので読み書きは固定のクリアランス（`MAX_EXTERNAL_AI_CLEARANCE`）で行う。操作者のクリアランスで読むと、低い人のときだけ無言で既定の文面に化ける）
 - `XMentionWatch`, `XMentionSetting`, `XMentionHit`（X 言及監視。cron は `prismaInternal`、`/mentions` は `withClearance`）
-- `Live`, `LivePerformance`, `LiveSong`（ライブ記事ワークフロー。`Live` は自前の classification、子 2 つは親 `Live` に従う。`MeetGreet` と同じく `withSession`）
+- `Live`, `LivePerformance`, `LiveSong`（ライブ記事ワークフロー。`Live` は自前の classification、子 2 つは親 `Live` に従う。`MeetGreet` と同じく `withSession`。参考画像 `sketchRefs` とスケッチ候補も `MeetGreet` と同じ扱い → 下の「外部の AI に渡すもの」）
 - `Anniversary`（記念日。出典アセットの本文は持たないが、機密アセットから作った記念日が漏れないよう自前の classification で守る）
 
 `Article.dossierId`（素材ドシエ。#41）は非保護テーブルから保護テーブルへのポインタ。記事詳細で **ドシエ本体を出すときは `withSession` で引き直す**（private なドシエは所有者にしか見えない = 見えなければ出さない。ID があるからといって `prisma.dossier` を素で触らない）。書くときは `prisma.$executeRaw` で `dossierId` だけ更新する（`prisma.article.update` は `updatedAt` を進めて編集画面の楽観ロックを偽の衝突にする。push の出力にも影響しないので `dirty` も立てない）。
@@ -137,9 +137,10 @@ const clearance = auth.clearance;
 
 RLS があるので読み取り時は不要ですが、**書き込み時のクリアランスチェック**（例：ユーザーが自分のクリアランスより高い機密レベルでアセットを作成しようとした場合）には引き続き使います。
 
-## 外部の AI に渡すもの（ミーグリの抜粋提案・スケッチ生成）
+## 外部の AI に渡すもの（ミーグリ / ライブの抜粋提案・スケッチ生成）
 
-ミーグリの 2 つの機能は、**アセットの中身そのものを OpenAI に送ります**。
+ミーグリとライブ（#150 で同じ仕組みを共用）の 2 つの機能は、**アセットの中身そのものを OpenAI に送ります**。
+処理本体は `src/lib/domain/sketch.ts` / `src/lib/domain/excerpts.ts` で、器（`MeetGreet` / `Live`）ごとの書き込み先だけを差し替えています。以下「ミーグリ」と書いてある縛りはすべてライブにも同じに効きます。
 
 | 機能 | 送るもの |
 |---|---|
@@ -164,21 +165,21 @@ MCP の `akashic_apply_article_source` が公開判断を `internal` 以下に�
 画像だけ**で、抜粋の反映も**そのドシエに入っているアセットの本文だけ**を対象にします。
 これを外すと、読めるアセットの中身を internal のドシエに写して下位に降ろせてしまいます。
 
-例外は**その回だけの参考画像**（`MeetGreet.sketchRefs`、#159）です。「アーカイブに残す
+例外は**その回だけの参考画像**（`MeetGreet.sketchRefs` / `Live.sketchRefs`、#159）です。「アーカイブに残す
 価値は無いが、スケッチの参照には使いたい 1 枚」を、アセットにもドシエにも入れずに
 R2 へ置いて使えるようにしたもので、次の 4 つで縛っています。
 
-- **置き場に縛る。** 受け取るのは `meetgreet/<そのミーグリの id>/refs/` 配下の key だけ
-  （`isRefKeyOf`）。R2 の任意のオブジェクトを参照に仕立てられると、見えないはずの画像を
+- **置き場に縛る。** 受け取るのは `meetgreet/<そのミーグリの id>/refs/`（ライブは `live/<id>/refs/`）配下の key だけ
+  （`isRefKeyOf(kind, id, key)`。器の種類も見る）。R2 の任意のオブジェクトを参照に仕立てられると、見えないはずの画像を
   外部 AI に送る口になります。生成時と削除時の両方で確かめます
 - **key はサーバーが作る。** アップロードの応答に載るだけで、クライアントからは指定できません
-- **置けるのは member 以上**（`/api/meetgreets/:id/sketch-refs`）。画面の Server Action と揃えています
+- **置けるのは member 以上**（`/api/meetgreets/:id/sketch-refs` / `/api/lives/:id/sketch-refs`。処理本体は `src/lib/meetgreet/sketch-ref-routes.ts`）。画面の Server Action と揃えています
 - **ミーグリ自身の機密が `internal` を超える回には置けない／生成もできない。**
   アップロードした画像にはアセット側の機密検査が無いので、ここが唯一の歯止めになります。
   置いた時点で公開 URL の R2 に載るため、「生成のときに断る」では遅い
 
 参考画像は**公開 URL の R2 に載り、署名もされません**（サムネイルやスケッチ候補と同じ）。
-消しても `immutable` で配っているぶんはキャッシュに残りえます。
+消しても `immutable` で配っているぶんはキャッシュに残りえます。生成した候補も `meetgreet/<id>/sketch/…` / `live/<id>/sketch/…` に公開 URL で置かれます。
 
 ## 公開リポジトリへ書き出すもの（記事の push）
 

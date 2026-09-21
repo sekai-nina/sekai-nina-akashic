@@ -3,15 +3,26 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Wand2 } from "lucide-react";
-import type { BlogExcerptProposals } from "@/lib/meetgreet/types";
-import { applyExcerptsAction, proposeExcerptsAction } from "../actions";
+import type { ApplyExcerptInput, BlogExcerptProposals } from "@/lib/meetgreet/types";
+import { WORKFLOW_OWNER_NOUN, type WorkflowOwnerKind } from "./owner";
+
+export type ProposeExcerptsResult = { ok: true; blogs: BlogExcerptProposals[] } | { ok: false; error: string };
+export type ApplyExcerptsResult = { ok: true; added: number; skipped: number } | { ok: false; error: string };
 
 /**
- * 「本人の感想」の抜粋提案。ボタンを押すと LLM がブログ本文から候補を出し、
- * 選んだものをドシエに抜粋付きアイテムとして入れる。
- * 細かい範囲の調整はドシエ側の範囲選択 UI で行う。
+ * 「本人の感想」の抜粋提案 (ミーグリ / ライブで共用)。ボタンを押すと LLM がブログ本文から
+ * 候補を出し、選んだものをドシエに抜粋付きアイテムとして入れる。
+ * 細かい範囲の調整はドシエ側の範囲選択 UI で行う。器ごとの Server Action は props で受ける
  */
-export function ExcerptStep({ meetGreetId }: { meetGreetId: string }) {
+export function ExcerptStep({
+  kind,
+  onPropose,
+  onApply,
+}: {
+  kind: WorkflowOwnerKind;
+  onPropose: () => Promise<ProposeExcerptsResult>;
+  onApply: (inputs: ApplyExcerptInput[]) => Promise<ApplyExcerptsResult>;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
@@ -24,7 +35,7 @@ export function ExcerptStep({ meetGreetId }: { meetGreetId: string }) {
     setMsg("ブログ本文を読んでいます…");
     startTransition(async () => {
       // 長く待たせる処理なので、通信ごと落ちたときに固まったままにしない
-      const res = await proposeExcerptsAction(meetGreetId).catch((e: unknown) => ({
+      const res = await onPropose().catch((e: unknown) => ({
         ok: false as const,
         error: e instanceof Error ? e.message : "通信に失敗しました",
       }));
@@ -44,7 +55,7 @@ export function ExcerptStep({ meetGreetId }: { meetGreetId: string }) {
         total === 0
           ? res.blogs.length === 0
             ? "ドシエに本人のブログ本文がありません（先に素材を反映してください）"
-            : "このミーグリについて書かれた部分は見つかりませんでした"
+            : `この${WORKFLOW_OWNER_NOUN[kind]}について書かれた部分は見つかりませんでした`
           : `${total} 件の候補が見つかりました`
       );
     });
@@ -63,7 +74,7 @@ export function ExcerptStep({ meetGreetId }: { meetGreetId: string }) {
     }
     setMsg("反映中…");
     startTransition(async () => {
-      const res = await applyExcerptsAction(meetGreetId, inputs).catch((e: unknown) => ({
+      const res = await onApply(inputs).catch((e: unknown) => ({
         ok: false as const,
         error: e instanceof Error ? e.message : "通信に失敗しました",
       }));

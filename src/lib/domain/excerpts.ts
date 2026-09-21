@@ -1,17 +1,15 @@
 /**
- * 「本人の感想」の抜粋提案と反映 (#108)。
+ * 「本人の感想」の抜粋提案と反映 (#108。#150 でライブと共用)。
  *
- * ドシエに入っている本人ブログの本文を LLM に読ませ、そのミーグリについて書いている
+ * ドシエに入っている本人ブログの本文を LLM に読ませ、そのミーグリ / ライブについて書いている
  * 範囲を候補として出す。人が選んだものだけを `DossierItem` の抜粋として入れる。
  *
  * **公開サイトの引用になる文面なので、提案をそのまま採用はしない。**
  */
 
-import type { MeetGreetFormat } from "@prisma/client";
 import { withSession } from "@/lib/db";
 import { classificationFilter } from "@/lib/classification";
-import { MEETGREET_FORMAT_LABELS } from "@/lib/utils";
-import { proposeExcerpts } from "@/lib/meetgreet/excerpt";
+import { proposeExcerpts, type ExcerptTopicKind } from "@/lib/meetgreet/excerpt";
 import {
   MAX_BLOGS_PER_PROPOSAL,
   MAX_EXCERPTS_PER_APPLY,
@@ -20,7 +18,21 @@ import {
 import type { ApplyExcerptInput, BlogExcerptProposals } from "@/lib/meetgreet/types";
 import { addAssetItem } from "./dossiers";
 import { logAudit } from "./audit";
-import { MeetGreetInputError, type ActingUser } from "./meetgreets";
+import { WorkflowInputError, type ActingUser } from "./article-workflow";
+
+/** 抜粋を入れる器 (ミーグリ / ライブ)。LLM に伝える対象と、監査ログの宛先 */
+export interface ExcerptTarget {
+  kind: ExcerptTopicKind;
+  id: string;
+  dossierId: string;
+  /** LLM に伝える対象 (「2026-08-01 のリアルミート＆グリート」等) */
+  subject: string;
+  /** 器ごとの入力エラー (REST が instanceof で 400 にする)。無ければ WorkflowInputError */
+  inputError?: new (message: string) => WorkflowInputError;
+}
+
+/** 監査ログの targetType */
+const TARGET_TYPE: Record<ExcerptTopicKind, string> = { meetgreet: "MeetGreet", live: "Live" };
 
 /** ブログ本文を指す URL か (ひなたぼっこ日記 = 運営ブログは本人の感想ではないので対象外) */
 const OWN_BLOG_URL_FRAGMENT = "/diary/detail/";
@@ -35,12 +47,12 @@ const OWN_BLOG_URL_FRAGMENT = "/diary/detail/";
  */
 export async function proposeExcerptsForDossier(
   user: ActingUser,
-  meetGreet: { date: string; format: MeetGreetFormat; dossierId: string }
+  target: Pick<ExcerptTarget, "kind" | "dossierId" | "subject">
 ): Promise<BlogExcerptProposals[]> {
   const items = await withSession(user, (tx) =>
     tx.dossierItem.findMany({
       where: {
-        dossierId: meetGreet.dossierId,
+        dossierId: target.dossierId,
         asset: {
           kind: "text",
           // 外部 AI に渡してよい機密レベルまで
@@ -96,16 +108,15 @@ export async function proposeExcerptsForDossier(
     byAsset.set(a.id, entry);
   }
 
-  const formatLabel = MEETGREET_FORMAT_LABELS[meetGreet.format];
   const targets = [...byAsset.entries()].slice(0, MAX_BLOGS_PER_PROPOSAL);
 
   // ブログごとに独立なので並列で投げる (直列だと本数ぶん待つ)
   return Promise.all(
     targets.map(async ([assetId, entry]) => {
       const proposals = await proposeExcerpts(entry.content, {
-        date: meetGreet.date,
-        formatLabel,
+        subject: target.subject,
         blogTitle: entry.title,
+        kind: target.kind,
       });
       return {
         assetId,
@@ -130,12 +141,13 @@ export async function proposeExcerptsForDossier(
  */
 export async function applyExcerpts(
   user: ActingUser,
-  meetGreet: { id: string; dossierId: string },
+  target: Pick<ExcerptTarget, "kind" | "id" | "dossierId" | "inputError">,
   inputs: ApplyExcerptInput[]
 ): Promise<{ added: number; skipped: number }> {
   if (inputs.length === 0) return { added: 0, skipped: 0 };
   if (inputs.length > MAX_EXCERPTS_PER_APPLY) {
-    throw new MeetGreetInputError(`一度に反映できる抜粋は ${MAX_EXCERPTS_PER_APPLY} 件までです`);
+    const Err = target.inputError ?? WorkflowInputError;
+    throw new Err(`一度に反映できる抜粋は ${MAX_EXCERPTS_PER_APPLY} 件までです`);
   }
 
   const assetIds = [...new Set(inputs.map((i) => i.assetId))];
@@ -146,14 +158,14 @@ export async function applyExcerpts(
           assetId: { in: assetIds },
           textType: "body",
           // このドシエに入っているアセットだけ
-          asset: { dossierItems: { some: { dossierId: meetGreet.dossierId } } },
+          asset: { dossierItems: { some: { dossierId: target.dossierId } } },
         },
         select: { assetId: true, content: true },
         orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       }),
       tx.dossierItem.findMany({
         where: {
-          dossierId: meetGreet.dossierId,
+          dossierId: target.dossierId,
           assetId: { in: assetIds },
           excerptStart: { not: null },
           excerptEnd: { not: null },
@@ -192,7 +204,7 @@ export async function applyExcerpts(
       skipped++;
       continue;
     }
-    await addAssetItem(user, meetGreet.dossierId, {
+    await addAssetItem(user, target.dossierId, {
       assetId: input.assetId,
       excerpt: content.slice(input.start, input.end),
       excerptType: "body",
@@ -205,10 +217,10 @@ export async function applyExcerpts(
 
   await logAudit({
     actorId: user.id,
-    action: "meetgreet.excerpts.apply",
-    targetType: "MeetGreet",
-    targetId: meetGreet.id,
-    metadata: { added, skipped, dossierId: meetGreet.dossierId },
+    action: `${target.kind}.excerpts.apply`,
+    targetType: TARGET_TYPE[target.kind],
+    targetId: target.id,
+    metadata: { added, skipped, dossierId: target.dossierId },
   });
   return { added, skipped };
 }

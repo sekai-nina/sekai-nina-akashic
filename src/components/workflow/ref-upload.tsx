@@ -3,14 +3,15 @@
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 import { ImagePlus } from "lucide-react";
+import { ownerApiPath, WORKFLOW_OWNER_THIS, type WorkflowOwner } from "./owner";
 
 /**
- * その回だけの参考画像のアップロード (#159)。
+ * その器 (ミーグリ / ライブ) だけの参考画像のアップロード (#159)。
  *
  * **Server Action ではなく API route に投げる** (Server Action の本文は既定 1MB までで、
  * 写真は普通にそれを超える)。アセットにもドシエにも入らない。
  */
-export function RefUpload({ meetGreetId }: { meetGreetId: string }) {
+export function RefUpload({ owner }: { owner: WorkflowOwner }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
@@ -28,7 +29,7 @@ export function RefUpload({ meetGreetId }: { meetGreetId: string }) {
     for (const file of files) {
       const data = new FormData();
       data.set("file", file);
-      const res = await fetch(`/api/meetgreets/${meetGreetId}/sketch-refs`, {
+      const res = await fetch(`${ownerApiPath(owner)}/sketch-refs`, {
         method: "POST",
         body: data,
       })
@@ -66,7 +67,7 @@ export function RefUpload({ meetGreetId }: { meetGreetId: string }) {
         />
       </label>
       <span className="text-[11px] text-slate-500">
-        ドシエには入りません。この回のスケッチにだけ使います
+        ドシエには入りません。{WORKFLOW_OWNER_THIS[owner.kind]}のスケッチにだけ使います
       </span>
       {msg && (
         <span role="status" className="text-xs text-slate-500">

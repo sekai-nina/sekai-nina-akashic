@@ -1,6 +1,6 @@
 /**
- * ミーグリの服装スケッチ (#108)。処理本体は sketch.ts (#150 でライブと共用)。
- * ここは MeetGreet テーブルへの書き込み先と名前を渡すだけ。
+ * ライブの衣装スケッチ (#150)。処理本体は sketch.ts (ミーグリと共用)。
+ * ここは Live テーブルへの書き込み先と名前を渡すだけ。
  */
 
 import type { Prisma } from "@prisma/client";
@@ -14,31 +14,30 @@ import {
   type SketchOwner,
   type SketchStore,
 } from "./sketch";
-import { MeetGreetInputError, type ActingUser } from "./meetgreets";
+import { LiveInputError, type ActingUser } from "./lives";
 
 export { listSketchSources, type GenerateSketchOptions } from "./sketch";
 
-/** MeetGreet への書き込み先 */
-export const meetGreetSketchStore: SketchStore = {
-  kind: "meetgreet",
-  targetType: "MeetGreet",
-  noun: "回",
-  inputError: MeetGreetInputError,
+/** Live への書き込み先 */
+export const liveSketchStore: SketchStore = {
+  kind: "live",
+  targetType: "Live",
+  noun: "ライブ",
+  inputError: LiveInputError,
   async appendCandidates(tx: TransactionClient, id: string, keys: string[]) {
-    // 同時に 2 回生成されても取りこぼさないよう、読み書きではなく jsonb の追記で足す
     await tx.$executeRaw`
-      UPDATE "MeetGreet"
+      UPDATE "Live"
       SET "sketchCandidates" = "sketchCandidates" || ${JSON.stringify(keys)}::jsonb,
           "updatedAt" = NOW()
       WHERE id = ${id}
     `;
   },
   async readRefs(tx, id) {
-    const row = await tx.meetGreet.findUnique({ where: { id }, select: { sketchRefs: true } });
+    const row = await tx.live.findUnique({ where: { id }, select: { sketchRefs: true } });
     return row?.sketchRefs;
   },
   async update(tx, id, data) {
-    await tx.meetGreet.update({
+    await tx.live.update({
       where: { id },
       data: {
         ...(data.sketchRefs !== undefined ? { sketchRefs: data.sketchRefs as Prisma.InputJsonValue } : {}),
@@ -49,20 +48,20 @@ export const meetGreetSketchStore: SketchStore = {
   },
 };
 
-export function generateSketch(user: ActingUser, meetGreet: SketchOwner, options: GenerateSketchOptions) {
-  return generate(meetGreetSketchStore, user, meetGreet, options);
+export function generateSketch(user: ActingUser, live: SketchOwner, options: GenerateSketchOptions) {
+  return generate(liveSketchStore, user, live, options);
 }
 
 
 
 export function saveSketchCrops(
   user: ActingUser,
-  meetGreet: { id: string; dossierId: string; sketchCrops: unknown; sketchRefs: unknown },
+  live: { id: string; dossierId: string; sketchCrops: unknown; sketchRefs: unknown },
   changes: Record<string, CropRect | null>
 ) {
-  return saveCrops(meetGreetSketchStore, user, meetGreet, changes);
+  return saveCrops(liveSketchStore, user, live, changes);
 }
 
-export function selectSketch(user: ActingUser, meetGreet: { id: string; sketchCandidates: unknown }, key: string) {
-  return select(meetGreetSketchStore, user, meetGreet, key);
+export function selectSketch(user: ActingUser, live: { id: string; sketchCandidates: unknown }, key: string) {
+  return select(liveSketchStore, user, live, key);
 }

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import sharp from "sharp";
 
 import { padToCardAspect } from "./sketch";
-import { buildSketchPrompt, SKETCH_PROMPT } from "./sketch-prompt";
+import { buildSketchPrompt, LIVE_SKETCH_ADDENDUM, SKETCH_PROMPT, sketchAddendumFor } from "./sketch-prompt";
 import { maxReferencePhotos, MAX_IMAGE_INPUTS } from "./config";
 
 const solid = (width: number, height: number) =>
@@ -73,5 +73,23 @@ describe("buildSketchPrompt", () => {
     for (const anchor of ["最後の1枚", "1.91:1", "白背景", "禁止事項", "顔は描かない"]) {
       expect(SKETCH_PROMPT).toContain(anchor);
     }
+  });
+});
+
+describe("sketchAddendumFor", () => {
+  it("ミーグリには何も足さない (= #108 以来のプロンプトのまま)、ライブにはステージ衣装の指示を足す", () => {
+    expect(sketchAddendumFor("meetgreet")).toBe("");
+    expect(sketchAddendumFor("live")).toBe(LIVE_SKETCH_ADDENDUM);
+    expect(LIVE_SKETCH_ADDENDUM).toContain("ステージ衣装");
+  });
+
+  it("追加指示との連結: ミーグリは追加指示そのもの (空なら空) になる", () => {
+    const join = (kind: "meetgreet" | "live", extra: string) =>
+      [sketchAddendumFor(kind), extra].filter((s) => s.trim()).join("\n");
+    expect(join("meetgreet", "中央はツインテールで")).toBe("中央はツインテールで");
+    expect(join("meetgreet", "")).toBe("");
+    expect(join("meetgreet", "   ")).toBe("");
+    expect(join("live", "アンコール T シャツを補助に")).toBe(`${LIVE_SKETCH_ADDENDUM}\nアンコール T シャツを補助に`);
+    expect(join("live", "")).toBe(LIVE_SKETCH_ADDENDUM);
   });
 });
