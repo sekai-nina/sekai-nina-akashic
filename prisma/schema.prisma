@@ -207,6 +207,7 @@ model User {
   creditSnapshots     CreditSnapshot[]  @relation("CreditSnapshotCreatedBy")
   instaWatchTargets InstaWatchTarget[] @relation("InstaWatchTargetUpdatedBy")
   instaAccounts InstaAccount[] @relation("InstaAccountUpdatedBy")
+  tiktokWatchTargets TiktokWatchTarget[] @relation("TiktokWatchTargetUpdatedBy")
 }
 
 model Asset {
@@ -256,6 +257,7 @@ model Asset {
   relationsAsTarget AssetRelation[] @relation("RelationTarget")
   articleSources    ArticleSource[]
   anniversaries     Anniversary[]
+  tiktokVideo       TiktokVideo?
 
   @@index([sha256])
   @@index([status])
@@ -1548,6 +1550,95 @@ enum InstaWatchTier {
   normal
   /// 低頻度 (bot 側の `~`)
   cold
+}
+
+/// TikTok の監視対象 (#179)。tiktok-watch (bot) が `GET /api/v1/tiktok/targets` で読み、
+/// 見えた動画を `POST /api/v1/tiktok/targets/{handle}/sightings` で報告する。
+/// 対象の増減は運用判断なので `/admin/tiktok` から編集する (bot サーバに ssh しない)
+model TiktokWatchTarget {
+  id     String @id @default(cuid())
+  /// @ を除いたハンドル。小文字で持つ
+  handle String @unique
+
+  /// 登録したアセットに紐づける出典エンティティ (type=source) の名前。空なら `TikTok @<handle>`
+  sourceName String  @default("")
+  /// 公式アカウントなら true → 登録したアセットの trustLevel を official にする
+  official   Boolean @default(true)
+  /// 巡回の間隔 (分)。TikTok は WAF が強いので既定 30 分
+  intervalMinutes Int     @default(30)
+  /// 外すときは消さずにこれを false にする (履歴とメモを残すため)
+  enabled         Boolean @default(true)
+  note            String  @default("")
+
+  /// bot が報告するプロフィール情報。secUid は yt-dlp の `tiktokuser:` 用、videoCount は未取得の目安
+  secUid     String?
+  videoCount Int?
+  /// bot が最後にプロフィールを読めた時刻
+  lastCheckedAt DateTime?
+  /// 直近の巡回失敗 (Playwright が開けない等)。成功したら空に戻す
+  lastError   String    @default("")
+  lastErrorAt DateTime?
+
+  videos TiktokVideo[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+  updatedBy   User?    @relation("TiktokWatchTargetUpdatedBy", fields: [updatedById], references: [id])
+
+  classification ClearanceLevel @default(internal)
+
+  @@index([enabled])
+}
+
+enum TiktokVideoStatus {
+  /// 対象を登録した時点で既に在った動画。DL しない (backfill で pending に変わる)
+  skipped_initial
+  /// bot が DL して登録する番
+  pending
+  /// アセットとして登録済み
+  registered
+  /// DL か登録に失敗。attempts が上限に達するまでは次の周で再試行する
+  failed
+}
+
+/// bot が見た動画 1 本 = 1 行。「どれを取ったか」の台帳は akashic が持ち、bot は手足に徹する
+/// (bot の state を失っても二重登録・二重通知しない)
+model TiktokVideo {
+  id       String            @id @default(cuid())
+  targetId String
+  target   TiktokWatchTarget @relation(fields: [targetId], references: [id], onDelete: Cascade)
+
+  /// TikTok の動画 ID (URL 末尾の数字)
+  videoId     String   @unique
+  createTime  DateTime
+  caption     String   @default("")
+  durationSec Int?
+  /// bot が見たときのカバー画像 URL (署名付きで失効する。登録時にサムネイルへ写す)
+  coverUrl    String?
+
+  status    TiktokVideoStatus @default(pending)
+  attempts  Int               @default(0)
+  lastError String            @default("")
+  /// 登録できたら Discord に流すか。新着として見つけた行だけ true。
+  /// 初回接触で飛ばした過去動画は backfill や画面の「取り込む」で pending に戻っても false のまま
+  /// (過去分で通知を埋めない)。bot は pending の応答に載るこの値に従う
+  notify    Boolean           @default(true)
+
+  assetId      String?   @unique
+  asset        Asset?    @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  registeredAt DateTime?
+  /// Discord に送れた時刻。null は未送信
+  notifiedAt   DateTime?
+
+  firstSeenAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  classification ClearanceLevel @default(internal)
+
+  @@index([targetId, status])
+  @@index([createTime])
+  @@index([classification])
 }
 
 model AiSetting {

@@ -72,6 +72,7 @@ const clearance = auth.clearance;
 - `XMentionWatch`, `XMentionSetting`, `XMentionHit`（X 言及監視。cron は `prismaInternal`、`/mentions` は `withClearance`）
 - `Live`, `LivePerformance`, `LiveSong`（ライブ記事ワークフロー。`Live` は自前の classification、子 2 つは親 `Live` に従う。`MeetGreet` と同じく `withSession`。参考画像 `sketchRefs` とスケッチ候補も `MeetGreet` と同じ扱い → 下の「外部の AI に渡すもの」）
 - `Anniversary`（記念日。出典アセットの本文は持たないが、機密アセットから作った記念日が漏れないよう自前の classification で守る）
+- `TiktokWatchTarget`, `TiktokVideo`（TikTok 監視 #179。対象と「どの動画を取ったか」の台帳。画面 `/admin/tiktok` も bot 向け API `/api/v1/tiktok/*` も `withClearance`。`prismaInternal` で回す経路は無い）
 
 `Article.dossierId`（素材ドシエ。#41）は非保護テーブルから保護テーブルへのポインタ。記事詳細で **ドシエ本体を出すときは `withSession` で引き直す**（private なドシエは所有者にしか見えない = 見えなければ出さない。ID があるからといって `prisma.dossier` を素で触らない）。書くときは `prisma.$executeRaw` で `dossierId` だけ更新する（`prisma.article.update` は `updatedAt` を進めて編集画面の楽観ロックを偽の衝突にする。push の出力にも影響しないので `dirty` も立てない）。
 
