@@ -106,6 +106,9 @@ export async function getDossier(user: ActingUser, id: string) {
         owner: { select: { id: true, name: true, avatarUrl: true } },
         // このドシエを素材にした記事 (#41)。Article は非保護なので RLS で落ちない
         articles: { select: { shortId: true, title: true, path: true }, orderBy: { title: "asc" } },
+        // 器 (MeetGreet / Live) の素材なら「記事にする」はそちらの画面 (#170)
+        meetGreet: { select: { id: true } },
+        live: { select: { id: true } },
         items: {
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
           include: {

@@ -8,6 +8,7 @@
 
 import type { ArticleTemplate } from "@prisma/client";
 import { MEETGREET_APPEND_LAYOUT } from "@/lib/meetgreet/append";
+import { QUOTE_BLOG_TEMPLATE } from "./quote-blog";
 import type { ArticleTemplateDef } from "./types";
 
 export type { ArticleTemplateDef, DossierRenderInput } from "./types";
@@ -23,6 +24,7 @@ const MEETGREET_TEMPLATE: ArticleTemplateDef = {
 
 const TEMPLATES: Partial<Record<ArticleTemplate, ArticleTemplateDef>> = {
   meetgreet: MEETGREET_TEMPLATE,
+  quote_blog: QUOTE_BLOG_TEMPLATE,
 };
 
 export function getTemplate(key: ArticleTemplate): ArticleTemplateDef | null {
