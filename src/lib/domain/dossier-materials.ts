@@ -16,6 +16,7 @@ import { toJstDateOnly } from "@/lib/utils";
 import { accessibleClassifications } from "@/lib/classification";
 import { MAX_ARTICLE_CLEARANCE, MAX_EXTERNAL_AI_CLEARANCE } from "@/lib/meetgreet/config";
 import type { ArticleAssetInput } from "@/lib/article-workflow/render";
+import type { DossierPlace } from "@/lib/article-workflow/templates/types";
 
 /** 本文に載せてよい機密レベル */
 export const PUBLISHABLE = new Set<string>(accessibleClassifications(MAX_ARTICLE_CLEARANCE));
@@ -46,6 +47,18 @@ export interface DossierForMaterials {
       texts?: { textType: TextType; content: string }[];
       entities?: { entity: { canonicalName: string } }[];
     } | null;
+  }[];
+  /** 場所候補 (ドシエの並び順)。おでかけ記事の `locations` になる */
+  placeCandidates: {
+    name: string;
+    placeId: string | null;
+    latitude: number | null;
+    longitude: number | null;
+    address: string | null;
+    googleMapsUrl: string | null;
+    note: string;
+    /** 昇格先の聖地。RLS で見えなければ null (= 上位機密。記事にも AI にも出さない) */
+    place: { classification: string; entity: { canonicalName: string } } | null;
   }[];
   /**
    * `withTexts` のときだけ。ドシエに**画像しか入っていないブログ**の本文アセット (同じ URL の text)。
@@ -121,6 +134,19 @@ function dossierSelect<A extends Prisma.AssetSelect>(asset: A) {
         asset: { select: asset },
       },
     },
+    placeCandidates: {
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+      select: {
+        name: true,
+        placeId: true,
+        latitude: true,
+        longitude: true,
+        address: true,
+        googleMapsUrl: true,
+        note: true,
+        place: { select: { classification: true, entity: { select: { canonicalName: true } } } },
+      },
+    },
   } satisfies Prisma.DossierSelect;
 }
 
@@ -189,6 +215,8 @@ export interface DossierMaterials {
   tiktoks: string[];
   /** caption「サムネ」の external_image */
   dossierThumb: string | null;
+  /** 場所候補 (おでかけ記事の `locations`) */
+  places: DossierPlace[];
   /** 機密レベルで落としたアセットの数 */
   droppedByClearance: number;
 }
@@ -280,6 +308,25 @@ export function shapeDossierMaterials(dossier: DossierForMaterials): DossierMate
     reports,
     tiktoks,
     dossierThumb,
+    places: dossier.placeCandidates.flatMap((p) => {
+      // 昇格済みの候補は聖地 (Place) の機密で判定する。見えない (RLS) / 本文に載せられない聖地の名前・座標を
+      // 公開記事や AI に出さない。座標へのフォールバックもしない (同じ場所なので)
+      if (p.placeId && (!p.place || !PUBLISHABLE.has(p.place.classification))) return [];
+      // 名前は画面と同じく聖地のエンティティ名を優先 (候補の name が空のまま昇格したものがある)
+      const name = (p.place?.entity.canonicalName || p.name).trim();
+      if (!name) return [];
+      return [
+        {
+          name,
+          placeId: p.placeId,
+          lat: p.latitude,
+          lng: p.longitude,
+          address: p.address,
+          googleMapsUrl: p.googleMapsUrl,
+          note: p.note,
+        },
+      ];
+    }),
     droppedByClearance: dropped.size,
   };
 }

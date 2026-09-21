@@ -169,14 +169,19 @@ export async function setDossierTemplate(
 }
 
 /**
- * 紐づく記事の型から既定のテンプレートを推す (#172 で outing / quote_situational を足す)。
- * 推せなければ null (画面で選ばせる)
+ * 紐づく記事の型から既定のテンプレートを推す。推せなければ null (画面で選ばせる)
  */
 export function suggestTemplate(dossier: DossierForArticle): ArticleTemplate | null {
+  // 器のドシエ (ミーグリの記事も type: event なので、見ないと outing を推してしまう)
+  if (dossier.container || isContainerTemplate(dossier.articleTemplate)) return null;
   const types = new Set(dossier.articles.map((a) => a.type));
   if (types.size !== 1) return null;
   const [type] = types;
-  if (type === "quote" && dossier.articles.every((a) => isQuoteBlogTitle(a.title))) return "quote_blog";
+  if (type === "attribute") return "attribute";
+  if (type === "event") return "outing";
+  if (type === "quote") {
+    return dossier.articles.every((a) => isQuoteBlogTitle(a.title)) ? "quote_blog" : "quote_situational";
+  }
   return null;
 }
 
@@ -243,6 +248,7 @@ export async function buildDossierArticle(
     reports: materials.reports,
     tiktoks,
     thumbnailUrl: materials.dossierThumb,
+    places: materials.places,
     today: options.today ?? todayJst(),
   };
 

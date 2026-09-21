@@ -622,7 +622,7 @@ export async function saveArticle(
     if (!created.ok) {
       const message =
         created.reason === "path_exists"
-          ? `同じ名前の記事が既にあります (${created.existingTitle})。その記事に紐づけてから追記してください`
+          ? `「${rendered.title}」と同じ名前の記事が既にあります (${created.existingTitle})。その記事に紐づけてから追記するか、ドシエのタイトルを変えてください`
           : created.reason === "path_exists_upstream"
             ? `公開リポジトリに同じ名前のファイルがあります (${created.path})。先に取り込んでください`
             : created.reason === "invalid_path"

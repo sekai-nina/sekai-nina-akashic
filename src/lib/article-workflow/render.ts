@@ -79,7 +79,8 @@ export interface DossierSnapshot {
 
 /**
  * 記事の本文に載る日付まわり。テンプレートが決める
- * (ミーグリは開催日、言葉は無し、おでかけは AI の提案)。null は frontmatter に出さない
+ * (ミーグリは開催日、ブログの名言は無し、スナップは無し、おでかけ / 状況つきの言葉は AI の提案)。
+ * null は frontmatter に出さない
  */
 export interface RenderedDates {
   /** "YYYY-MM-DD" */
@@ -313,15 +314,32 @@ function blogImageLine(b: BlogGroup, a: ArticleAssetInput): string {
   return `- 【${b.staff ? STAFF_BLOG_NAME : "ブログ"}・画像】${a.title}^[${b.sourceNo}]`;
 }
 
+/**
+ * 関連メディアの章の形。
+ * - `sections`: ミーグリ記事の形。`### TikTok` / `### トーク` / `### ブログ（画像）` に分ける
+ * - `flat`: おでかけ記事の形。導入文 1 行のあと、トーク → ブログ画像を 1 つの箇条書きに並べる
+ */
+export type RelatedMediaStyle = { kind: "sections" } | { kind: "flat"; lead: string };
+
 /** `## 関連メディア` の章 (トーク・ブログ画像はリンクのみ、TikTok は埋め込み)。何も無ければ空 */
 export function renderRelatedMediaSection(input: {
   talks: ArticleAssetInput[];
   blogs: BlogGroup[];
   tiktoks: string[];
   talkSourceNo: Map<string, number>;
+  style?: RelatedMediaStyle;
 }): string[] {
   const blogsWithImages = input.blogs.filter((b) => b.images.length > 0);
   if (input.talks.length === 0 && blogsWithImages.length === 0 && input.tiktoks.length === 0) return [];
+  const style = input.style ?? { kind: "sections" };
+  if (style.kind === "flat") {
+    const body: string[] = ["## 関連メディア", "", style.lead, ""];
+    body.push(...input.tiktoks.map((u) => `![](${u})`));
+    for (const a of input.talks) body.push(talkLine(a, input.talkSourceNo.get(a.id)));
+    for (const b of blogsWithImages) for (const a of b.images) body.push(blogImageLine(b, a));
+    body.push("");
+    return body;
+  }
   const body: string[] = ["## 関連メディア", ""];
   if (input.tiktoks.length > 0) {
     // 埋め込みで目を引くので先頭に置く

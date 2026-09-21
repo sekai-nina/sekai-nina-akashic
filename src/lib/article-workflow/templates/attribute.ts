@@ -8,8 +8,7 @@
  * - `date` は持たない。tags は人物 / トピック
  * - 関連メディアの章は出さない (既存記事に無い)
  *
- * 本文は AI が書く (`needsAi`)。鉄則は sekai-nina-site の
- * `dossier-to-outing-article/SKILL.md` の「編集の鉄則」をそのまま持ち込む。
+ * 本文は AI が書く (`needsAi`)。鉄則は `shared.ts` の `EDITORIAL_RULES` (全 AI テンプレート共通)。
  * AI が使えないときは骨組み (出典だけ採番済み、本文はプレースホルダ) を返し、人が書く。
  */
 
@@ -22,6 +21,7 @@ import {
   type ArticleParts,
   type RenderedArticle,
 } from "../render";
+import { aiSystemPrompt, EDITORIAL_RULES, NO_QUOTES_APPEND_LAYOUT, normalizeAiBody, normalizeAiTags } from "./shared";
 import type { AiContext, AiDraft, AiPrompt, ArticleTemplateDef, DossierRenderInput } from "./types";
 
 /** AI が使えなかったときに本文に置くプレースホルダ。記事編集画面で人が置き換える */
@@ -77,21 +77,7 @@ const RULES = `あなたは日向坂46・坂井新奈のアーカイブサイト
   長い引用はしない。ブログの文章をそのまま貼らず、事実に言い換える
 - 推測を書くなら「〜と思われる」「〜かもしれない」「不明」と明示する。断定しない
 
-## 編集の鉄則 (最重要)
-
-このサイトは坂井新奈のアーカイブです。記事は坂井新奈を主語に据え、次を厳守してください。
-
-1. **坂井新奈以外のメンバーの感想・気持ちは書かない。** 他メンバーが「美味しかった」「楽しかった」
-   と述べていても、それはそのメンバーのアーカイブに属する情報です。載せてよいのは
-   (a) 坂井新奈が関与する出来事の事実 と (b) 坂井新奈自身の言動・感想 だけ
-   - 他メンバーが単独で何を食べた / したか (坂井が絡まないもの) は、事実でも載せない
-   - ただし、坂井新奈の言動の前提になる同席者のふるまいは可 (例: 「鶴崎仁香によると、坂井新奈は
-     『すごく静かに道を間違える』らしい」は、坂井についての証言なので可)
-   - 他メンバーの属性・趣味・食習慣など、その話と無関係な背景情報も載せない
-   - 他メンバーのブログ / トークは「坂井新奈について何が書かれているか」の事実の抽出源としてだけ使う
-2. **原文に無い予定・因果・背景を推測で補完しない。** 原文に忠実に。どうしても触れるなら
-   「〜と思われる」と明示する
-3. **素材に無いことは書かない。** 一般知識や他の記事の内容で膨らませない
+${EDITORIAL_RULES}
 
 ## 出力
 
@@ -107,23 +93,8 @@ JSON で返す。
 ${SAMPLES.map((s) => `### 「${s.title}」 (tags: ${s.tags.length ? s.tags.join(", ") : "なし"})\n${s.body}`).join("\n\n")}
 `;
 
-/**
- * システムプロンプト。鉄則・見本 (滅多に変わらない) と語彙 (既存タグ・既存記事タイトル。記事を保存すると
- * 変わる) を**別のブロック**にして、語彙が変わっても前半のキャッシュが残るようにする。
- * **ブロック内の順番を変えない** (先頭からの一致で prompt caching が効く)
- */
 export function attributeSystemPrompt(context: AiContext): string[] {
-  return [
-    RULES,
-    [
-      "## 既存のタグ (tags はここから選ぶ)",
-      context.tagVocabulary.join("、") || "(なし)",
-      "",
-      "## 既存記事のタイトル ([[…]] でリンクしてよいのはこれだけ)",
-      context.existingTitles.map((t) => `- ${t}`).join("\n") || "(なし)",
-      "",
-    ].join("\n"),
-  ];
+  return aiSystemPrompt(RULES, context);
 }
 
 export function attributePrompt(input: DossierRenderInput, context: AiContext): AiPrompt {
@@ -142,27 +113,14 @@ export function attributePrompt(input: DossierRenderInput, context: AiContext): 
   };
 }
 
-/**
- * AI の本文を記事に入れる形に揃える (改行コード・前後の空白・末尾の改行)。
- * **出典に無い番号の `^[n]` は落とす** (AI が番号を作った / 画面から来た下書きが古い)。
- * 宛先の無い脚注を公開リポジトリに出さないため。事実の文は残る (人が出典を付け直す)
- */
-function normalizeBody(body: string, sourceCount: number): string {
-  return body
-    .replace(/\r\n?/g, "\n")
-    .replace(/\^\[(\d+)\]/g, (whole, n) => (Number(n) >= 1 && Number(n) <= sourceCount ? whole : ""))
-    .replace(/[ \t]+$/gm, "")
-    .trim() + "\n";
-}
-
 export function renderAttributeArticle(input: DossierRenderInput, draft?: AiDraft | null): RenderedArticle {
   const { blogs, talks } = classifyMaterials(input.assets);
   const { sources } = numberSources(blogs, talks);
 
   // 空の本文は「下書き無し」と同じ (骨組みだけにする)
   const hasDraft = !!draft && draft.body.trim().length > 0;
-  const body = hasDraft ? normalizeBody(draft.body, sources.length) : `${ATTRIBUTE_BODY_PLACEHOLDER}\n`;
-  const tags = hasDraft ? [...new Set(draft.tags.map((t) => t.trim()).filter((t) => t.length > 0))] : [];
+  const body = hasDraft ? normalizeAiBody(draft.body, sources.length) : `${ATTRIBUTE_BODY_PLACEHOLDER}\n`;
+  const tags = hasDraft ? normalizeAiTags(draft.tags) : [];
 
   // 追記の対象になる章は無い (本文は AI / 人が持つ)。出典だけ足せるよう内訳は空
   const parts: ArticleParts = { quotes: [], reports: [], tiktoks: [], talks: [], blogImages: [] };
@@ -184,12 +142,8 @@ export const ATTRIBUTE_TEMPLATE: ArticleTemplateDef = {
   key: "attribute",
   articleType: "attribute",
   needsAi: true,
-  // 追記で足す章は無い (`parts` は常に空)。`AppendLayout.reports` が必須なので名前だけ置く
-  appendLayout: {
-    quotesHeading: null,
-    quoteAttribution: false,
-    reports: { heading: "## ファンの反応", lead: "ファンの投稿（X）。" },
-  },
+  // 追記で足す章は無い (`parts` は常に空)
+  appendLayout: NO_QUOTES_APPEND_LAYOUT,
   render: renderAttributeArticle,
   prompt: attributePrompt,
 };

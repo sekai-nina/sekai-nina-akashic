@@ -22,8 +22,23 @@ export interface DossierRenderInput {
   tiktoks: string[];
   /** ドシエの「サムネ」(external_image) の URL */
   thumbnailUrl: string | null;
+  /**
+   * 場所候補 (`DossierPlaceCandidate`、ドシエの並び順)。おでかけ記事の `locations` になる。
+   * `placeId` があれば聖地に昇格済み (frontmatter は `place_id` だけ)、無ければ座標をインラインで持つ
+   */
+  places: DossierPlace[];
   /** published_at / synced_at に入れる JST の今日 */
   today: string;
+}
+
+export interface DossierPlace {
+  name: string;
+  placeId: string | null;
+  lat: number | null;
+  lng: number | null;
+  address: string | null;
+  googleMapsUrl: string | null;
+  note: string;
 }
 
 /**
@@ -38,9 +53,9 @@ export const AiDraftSchema = z
   .object({
     body: z.string().max(20_000),
     tags: z.array(z.string().max(100)).max(10),
-    /** ドシエタイトルと違うタイトルを提案するとき (quote_situational、#172 で使う予定) */
+    /** ドシエタイトルと違うタイトルを提案するとき (quote_situational が使う) */
     title: z.string().max(200).nullable(),
-    /** "YYYY-MM-DD" (outing、#172 で使う予定) */
+    /** "YYYY-MM-DD" (outing / quote_situational が使う) */
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
     dateDisplay: z.string().max(100).nullable(),
   })
@@ -48,7 +63,19 @@ export const AiDraftSchema = z
 
 export type AiDraft = z.infer<typeof AiDraftSchema>;
 
-/** モデルの返答を上限に収める (プレビューで通ったものが保存で弾かれないように) */
+/** 暦に実在する "YYYY-MM-DD" か (2025-13-45 を通さない。`createArticle` が後で弾いて払った生成を捨てないように) */
+function isRealDate(value: string): boolean {
+  const m = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return false;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const date = new Date(Date.UTC(y, mo - 1, d));
+  return date.getUTCFullYear() === y && date.getUTCMonth() === mo - 1 && date.getUTCDate() === d;
+}
+
+/** 制御文字を除く (タイトルは記事の path と frontmatter に出る。`createArticle` と同じ扱い) */
+const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/g;
+
+/** モデルの返答を上限に収め、path になるタイトルを正規化する (プレビューで通ったものが保存で弾かれないように) */
 export function clampAiDraft(raw: {
   body: string;
   tags: string[];
@@ -56,12 +83,13 @@ export function clampAiDraft(raw: {
   date: string | null;
   dateDisplay: string | null;
 }): AiDraft {
+  const title = raw.title?.normalize("NFC").replace(CONTROL_CHARS, "").trim().slice(0, 200) || null;
   return {
     body: raw.body.slice(0, 20_000),
     tags: raw.tags.map((t) => t.trim().slice(0, 100)).filter((t) => t.length > 0).slice(0, 10),
-    title: raw.title ? raw.title.slice(0, 200) : null,
-    date: raw.date && /^\d{4}-\d{2}-\d{2}$/.test(raw.date) ? raw.date : null,
-    dateDisplay: raw.dateDisplay ? raw.dateDisplay.slice(0, 100) : null,
+    title,
+    date: raw.date && isRealDate(raw.date) ? raw.date : null,
+    dateDisplay: raw.dateDisplay ? raw.dateDisplay.trim().slice(0, 100) || null : null,
   };
 }
 
