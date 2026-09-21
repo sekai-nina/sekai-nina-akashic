@@ -1050,14 +1050,14 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
   "container": null,
   "template": "quote_blog",
   "templateSupported": true,
-  "suggestedTemplate": null,
+  "suggestedTemplate": "quote_blog",
   "selectableTemplates": ["quote_blog"],
   "articles": [{"id": "…", "shortId": "HtP8cV6", "title": "ブログ「だいすき！」", "type": "quote", "draft": false}]
 }
 ```
 
-- `container` は `meetgreet` / `live` / `null`。**器に使われているドシエは `/meetgreets/:id/article` から作る**（`POST` は 400）
-- `template` は `Dossier.articleTemplate`（`meetgreet` / `live` / `outing` / `quote_blog` / `quote_situational` / `attribute`、未設定は `null`）。`templateSupported` が `false` なら、決まってはいるがまだ組み立てに対応していない
+- `container` は `meetgreet` / `live` / `null`。**器に使われているドシエは `/meetgreets/:id/article` から作る**（`POST` は 400）。器が呼び出し側の機密より上だと `null` に見えるが、その場合も `template` が `meetgreet` / `live` なので `POST` は 400
+- `template` は `Dossier.articleTemplate`（`meetgreet` / `live` / `outing` / `quote_blog` / `quote_situational` / `attribute`、未設定は `null`）。`templateSupported` が `false` なら、決まってはいるがまだ組み立てに対応していない（`meetgreet` / `live` は器側で組むので `true`）
 - `suggestedTemplate` は紐づく記事の型から推した既定値（推せなければ `null`）
 - `selectableTemplates` は器を持たないドシエが `POST` の `template` に指定できるもの（実装済みのものだけ。現在は `quote_blog`）
 
@@ -1067,14 +1067,14 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 
 | フィールド | 型 | 必須 | 説明 |
 |---|---|---|---|
-| `template` | string | 未設定なら必須 | 記事テンプレート。`selectableTemplates` のいずれか。未設定のドシエに決める（監査ログ `dossier.template.set`）。**記事を作った後は別の型に変えられない**（400）。既に同じ値ならそのまま |
+| `template` | string | 未設定なら必須 | 記事テンプレート。`selectableTemplates` のいずれか。未設定のドシエに決める（監査ログ `dossier.template.set`）。**記事を作った後は別の型に変えられない**（400）。既に同じ値ならそのまま。**永続化されるのは保存のときだけ**で、`dryRun` / `restore` と併せたときはその要求の間だけ当てる（`dryRun` は書き込まない、の約束を守る） |
 | `articleId` | string | 記事が 2 本以上のとき必須 | 追記する記事。`GET` の `articles[].id`。1 本ならそれに追記、0 本なら新規作成 |
 
 - テンプレートが未設定のまま送ると 400（`template` で決めてから）
 - クリップのプール（`kind = clips`）は 400。器に使われているドシエも 400
 - **保存はドシエの編集権限が要る**（`editMode` と所有者。`dryRun` は見えれば可）。無ければ 403
-- 作った記事は `Article.dossierId` でドシエに紐づく（`GET /articles/:shortId` の `dossierId`）
-- 「今後足さない」は `Dossier.articleExclusions` に覚える（形式は MeetGreet と同じ）
+- 作った記事は `Article.dossierId` でドシエに紐づく（`GET /dossiers/:id/article` の `articles[]` で辿れる）
+- 「今後足さない」は `Dossier.articleExclusions` に覚える（形式は MeetGreet と同じ）。**ドシエ単位で 1 つ**なので、同じドシエから記事を 2 本作っている場合は両方に効く
 - 本文に載る機密レベルの上限（`internal`）、出典の作り方、`dirty` の扱いはミーグリと同じ
 
 テンプレートごとの形:
