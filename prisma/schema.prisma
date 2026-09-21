@@ -115,6 +115,22 @@ enum DossierKind {
   clips
 }
 
+/// ドシエから記事を組み立てるときの型 (#169)。
+/// MeetGreet / Live は作成時に自分の値を書く。それ以外は記事にするときに選ぶ (null = 未設定)。
+/// テンプレートごとの章立て・AI の要否は `src/lib/article-workflow/templates/` が持つ
+enum ArticleTemplate {
+  meetgreet
+  live
+  /// おでかけ (出来事)。場所候補が `locations` に出る
+  outing
+  /// 本人ブログの名言。抜粋を引用ブロックで並べるだけ (AI 不要)
+  quote_blog
+  /// 状況説明つきの言葉
+  quote_situational
+  /// 属性 (スナップ)。「坂井新奈は〜」の事実の箇条書き
+  attribute
+}
+
 enum DossierItemKind {
   asset_ref
   external_link
@@ -352,6 +368,13 @@ model Dossier {
   viewMode       DossierAccessMode @default(private)
   editMode       DossierAccessMode @default(private)
   kind           DossierKind       @default(general)
+
+  /// 記事テンプレート (#169)。null は未設定で、`/dossiers/[id]/article` で選ぶ。
+  /// MeetGreet / Live に紐づくドシエは作成時にそれぞれ `meetgreet` / `live` が入る
+  articleTemplate ArticleTemplate?
+  /// 記事に足さないと決めたもののキー (#134)。器 (MeetGreet / Live) を持たないドシエが
+  /// 記事の器になるときに使う。形式は `MeetGreet.articleExclusions` と同じ
+  articleExclusions Json @default("[]")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
