@@ -12,13 +12,13 @@ import {
   suggestTemplate,
 } from "@/lib/domain/dossier-article";
 import { getTemplate, selectableTemplates } from "@/lib/article-workflow/templates";
-import { ArticleGenerateSchema } from "@/lib/meetgreet/api";
+import { AiDraftSchema, ArticleGenerateSchema } from "@/lib/meetgreet/api";
 import { formatZodError } from "@/lib/zod-error";
 
 type Params = { params: Promise<{ id: string }> };
 
-/** TikTok の短縮 URL の解決で外部に出るので、少し余裕を持たせる */
-export const maxDuration = 120;
+/** TikTok の短縮 URL の解決と、本文を書く Claude の呼び出し (#171) で外部に出る。数十秒かかることがある */
+export const maxDuration = 300;
 
 // ミーグリと同じ本体 + テンプレート / 追記先。restore の単独制約も同じ
 const DossierArticleSchema = z
@@ -28,10 +28,16 @@ const DossierArticleSchema = z
     template: z.enum(ArticleTemplate).optional(),
     /** 追記する記事。ドシエに記事が 2 本以上あるときに要る */
     articleId: z.string().min(1).optional(),
+    /** dryRun が返した AI の下書き (#171)。保存で差し込む。null は骨組みだけ。省略も骨組み */
+    aiDraft: AiDraftSchema.nullable().optional(),
   })
   .strict()
   .refine((v) => !(v.restore && (v.dryRun || v.exclude?.length || v.expectedDigest)), {
     message: "restore は単独で指定してください",
+  })
+  // 下書きは保存でしか使わない。dryRun に付けると黙って捨てて Claude をもう 1 回呼ぶことになる
+  .refine((v) => !(v.aiDraft !== undefined && (v.dryRun || v.restore)), {
+    message: "aiDraft は保存のときだけ指定してください (dryRun / restore とは併用できません)",
   });
 
 function errorResponse(e: unknown) {
@@ -130,9 +136,17 @@ export async function POST(request: Request, { params }: Params) {
         excluded: preview.excluded,
         empty: preview.empty,
         shortId: preview.shortId,
+        ai: preview.ai,
+        aiDraft: preview.aiDraft,
       });
     }
-    const result = await saveArticle(auth, target, parsed.data.expectedDigest, parsed.data.exclude ?? []);
+    const result = await saveArticle(
+      auth,
+      target,
+      parsed.data.expectedDigest,
+      parsed.data.exclude ?? [],
+      parsed.data.aiDraft
+    );
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: 409 });
     return NextResponse.json({
       mode: result.mode,

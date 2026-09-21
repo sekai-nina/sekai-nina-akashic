@@ -31,7 +31,12 @@ import { jsonStringArray, MAX_ARTICLE_CLEARANCE } from "@/lib/meetgreet/config";
 import { planAppend, isPureAppend, appendDiff, type AppendLayout } from "@/lib/meetgreet/append";
 import type { ArticleMode, ArticlePreview } from "@/lib/meetgreet/types";
 import type { RenderedArticle, RenderedSource } from "@/lib/article-workflow/render";
-import { MEETGREET_TEMPLATE, type ArticleTemplateDef } from "@/lib/article-workflow/templates";
+import {
+  MEETGREET_TEMPLATE,
+  type AiDraft,
+  type ArticleAiStatus,
+  type ArticleTemplateDef,
+} from "@/lib/article-workflow/templates";
 import { TemplateInputError } from "@/lib/article-workflow/errors";
 import {
   addAssetToArticle,
@@ -54,6 +59,16 @@ import { logAudit } from "./audit";
 /** プレビューした内容と保存する内容が同じかを見るための指紋 */
 export function bodyDigest(body: string): string {
   return createHash("sha256").update(body).digest("hex").slice(0, 16);
+}
+
+/**
+ * 新規作成の指紋は**本文 + 出典**で取る。本文を AI が書くテンプレートは本文が画面から来る
+ * (素材と独立) ので、本文だけだとプレビューのあとで素材が増減して脚注の宛先がずれても
+ * 気づけない。機械で組むテンプレートでも出典を含めるほうが厳しいだけで害は無い
+ */
+function createDigest(rendered: { body: string; sources: RenderedSource[] }): string {
+  const sources = rendered.sources.map((s) => `${s.sourceNo}:${s.assetId ?? s.url ?? ""}`).join("\n");
+  return bodyDigest(`${rendered.body}\n--sources--\n${sources}`);
 }
 
 export interface MeetGreetForArticle {
@@ -88,6 +103,13 @@ export type ArticleTarget =
 /** ドシエが器のときの入力エラー (REST は 400) */
 export class DossierArticleError extends WorkflowInputError {}
 
+/** 組み立ての結果。AI の情報は本文を AI が書くテンプレートだけ入る (ミーグリは付けない) */
+type BuiltArticle = RenderedArticle & {
+  droppedByClearance: number;
+  ai?: ArticleAiStatus | null;
+  aiDraft?: AiDraft | null;
+};
+
 /**
  * 器ごとの違いをここに閉じ込める。preview / save 本体は器を知らない
  */
@@ -98,7 +120,11 @@ interface ResolvedTarget {
   articleId: string | null;
   /** 器のスナップショットにある除外キー */
   storedExclusions: string[];
-  build: () => Promise<RenderedArticle & { droppedByClearance: number }>;
+  /**
+   * 組み立てる。`aiDraft` は本文を AI が書くテンプレートだけ意味を持つ
+   * (undefined = 生成する / AiDraft = それを使う / null = 骨組みだけ)
+   */
+  build: (aiDraft?: AiDraft | null) => Promise<BuiltArticle>;
   /** 除外キーを**読み直してから**足す (1 トランザクション。保存中に別タブで戻されたものを古い値で書き戻さない) */
   addExclusions: (keys: readonly string[]) => Promise<string[]>;
   /** 除外キーを取り消す。戻した数を返す */
@@ -217,7 +243,7 @@ function resolveDossier(
     layout: template.appendLayout,
     articleId,
     storedExclusions: jsonStringArray(dossier.articleExclusions),
-    build: () => buildDossierArticle(user, dossier, template),
+    build: (aiDraft) => buildDossierArticle(user, dossier, template, { aiDraft }),
     // 読み直しと書き込みを 1 トランザクションに収める (別タブで戻されたものを古い値で書き戻さない)
     addExclusions: async (keys) => {
       if (keys.length === 0) return [];
@@ -247,9 +273,9 @@ function resolveDossier(
 }
 
 /** テンプレートの入力エラーを器のエラーに包む (REST が 400 にできる型に揃える) */
-async function buildOrThrow(resolved: ResolvedTarget) {
+async function buildOrThrow(resolved: ResolvedTarget, aiDraft?: AiDraft | null) {
   try {
-    return await resolved.build();
+    return await resolved.build(aiDraft);
   } catch (e) {
     if (e instanceof TemplateInputError) throw resolved.inputError(e.message);
     throw e;
@@ -267,14 +293,18 @@ export async function previewArticle(
   extraExclude: readonly string[] = []
 ): Promise<ArticlePreview> {
   const resolved = resolveTarget(user, target);
-  const rendered = await buildOrThrow(resolved);
+  // 本文を AI に書かせる新規作成は 1 回ごとに費用がかかる。見えるだけの人には押させない
+  // (保存できないのに生成できる、を塞ぐ)
+  if (resolved.template.needsAi && !resolved.articleId) resolved.assertCanSave();
+  // 追記では本文を AI に書かせない (地の文は人のもの)。新規作成のときだけ生成する
+  const rendered = await buildOrThrow(resolved, resolved.articleId ? null : undefined);
 
   if (!resolved.articleId) {
     return {
       mode: "create",
       title: rendered.title,
       body: rendered.body,
-      digest: bodyDigest(rendered.body),
+      digest: createDigest(rendered),
       addedLines: [],
       newSources: rendered.sources,
       droppedByClearance: rendered.droppedByClearance,
@@ -282,6 +312,8 @@ export async function previewArticle(
       excluded: [],
       empty: false,
       shortId: null,
+      ai: rendered.ai ?? null,
+      aiDraft: rendered.aiDraft ?? null,
     };
   }
 
@@ -321,6 +353,8 @@ export async function previewArticle(
     excluded: describeExclusions(stored, planArgs),
     empty: plan.empty,
     shortId: article.shortId,
+    ai: null,
+    aiDraft: null,
   };
 }
 
@@ -535,15 +569,20 @@ export async function saveArticle(
   /** 画面が見せたプレビューの指紋。渡すと、組み立て直した結果が変わっていたら中止する */
   expectedDigest?: string,
   /** 今回「足さない」と決めたもののキー。除外リストに追加してから組み立て直す (#134) */
-  exclude: readonly string[] = []
+  exclude: readonly string[] = [],
+  /**
+   * プレビューが返した AI の下書き (#171)。本文を AI が書くテンプレートの新規作成では
+   * **これを差し込む** (保存で生成し直すと別の文になり指紋が合わない)。null は骨組みだけ
+   */
+  aiDraft?: AiDraft | null
 ): Promise<SaveArticleResult> {
   const actor: ArticleActor = { id: user.id };
   const resolved = resolveTarget(user, target);
   resolved.assertCanSave();
-  const rendered = await buildOrThrow(resolved);
+  // 保存で AI を呼ばない: 新規作成は画面から受け取った下書き (無ければ骨組み)、追記は本文を触らない
+  const rendered = await buildOrThrow(resolved, resolved.template.needsAi ? (aiDraft ?? null) : undefined);
 
-  const mismatch = (body: string) =>
-    expectedDigest !== undefined && bodyDigest(body) !== expectedDigest;
+  const mismatch = (digest: string) => expectedDigest !== undefined && digest !== expectedDigest;
 
   // --- 新規作成 ---
   if (!resolved.articleId) {
@@ -552,7 +591,11 @@ export async function saveArticle(
     if (exclude.length > 0) {
       return { ok: false, error: "記事がまだ無いので外すものを指定できません (先に記事を作ってください)" };
     }
-    if (mismatch(rendered.body)) {
+    if (mismatch(createDigest(rendered))) {
+      // 本文を AI が書くテンプレートで下書きを渡し忘れると骨組みになって必ず食い違う。理由を言う
+      if (resolved.template.needsAi && aiDraft === undefined) {
+        return { ok: false, error: "プレビューが返した aiDraft を保存に渡してください (渡さないと骨組みだけになります)" };
+      }
       return {
         ok: false,
         error: "内容が変わりました (素材が増減したか、TikTok の解決結果が変わりました)。もう一度差分を見てください",
@@ -646,6 +689,8 @@ export async function saveArticle(
         sources: applied.applied,
         failed: applied.failed.length,
         dropped: rendered.droppedByClearance,
+        // 本文を AI が書いたか (given = プレビューの下書き / unavailable = 骨組み)
+        ai: rendered.ai?.status ?? null,
       },
     });
     return {
@@ -694,7 +739,7 @@ export async function saveArticle(
   // **指紋は「見せたときと同じ条件」で照合する。** 除外を足すと本文が変わるので、
   // 除外を当てる前の結果と突き合わせる (除外を渡せば照合をすり抜けられる、を防ぐ)
   const shown = planAppend({ ...planArgs, excluded: stored });
-  if (mismatch(shown.body)) {
+  if (mismatch(bodyDigest(shown.body))) {
     return {
       ok: false,
       error: "内容が変わりました (素材が増減したか、記事が他で編集されました)。もう一度差分を見てください",

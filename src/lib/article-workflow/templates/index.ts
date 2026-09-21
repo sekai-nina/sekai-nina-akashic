@@ -8,10 +8,12 @@
 
 import type { ArticleTemplate } from "@prisma/client";
 import { MEETGREET_APPEND_LAYOUT } from "@/lib/meetgreet/append";
+import { ATTRIBUTE_TEMPLATE } from "./attribute";
 import { QUOTE_BLOG_TEMPLATE } from "./quote-blog";
 import type { ArticleTemplateDef } from "./types";
 
-export type { ArticleTemplateDef, DossierRenderInput } from "./types";
+export type { AiContext, AiDraft, AiPrompt, AiUsage, ArticleAiStatus, ArticleTemplateDef, DossierRenderInput } from "./types";
+export { AiDraftSchema, clampAiDraft } from "./types";
 
 /** ミーグリ。組み立ては器側 (`buildMeetGreetArticle`) が開催日などと合わせて行う */
 export const MEETGREET_TEMPLATE: ArticleTemplateDef = {
@@ -25,6 +27,7 @@ export const MEETGREET_TEMPLATE: ArticleTemplateDef = {
 const TEMPLATES: Partial<Record<ArticleTemplate, ArticleTemplateDef>> = {
   meetgreet: MEETGREET_TEMPLATE,
   quote_blog: QUOTE_BLOG_TEMPLATE,
+  attribute: ATTRIBUTE_TEMPLATE,
 };
 
 export function getTemplate(key: ArticleTemplate): ArticleTemplateDef | null {

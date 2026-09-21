@@ -115,6 +115,9 @@ export const GenerateSketchSchema = z
  */
 export const ExclusionKeysSchema = z.array(z.string().min(1).max(200)).max(200);
 
+/** プレビューが返した AI の下書き (#171)。保存に渡す。定義は純粋層 (`templates/types.ts`) にある */
+export { AiDraftSchema } from "@/lib/article-workflow/templates/types";
+
 /**
  * 参照写真の切り抜き枠 (#136)。`{ "<assetId>": {x,y,w,h} | null }`。
  * 値は**画像に対する割合 (0〜1)**。null は枠を外す = 画像全体を使う

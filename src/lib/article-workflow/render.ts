@@ -36,6 +36,14 @@ export interface ArticleAssetInput {
   source: { kind: string; title: string; url: string | null; publishedAt: string | null } | null;
   /** 抜粋 (本人の感想)。同じアセットから複数あることがある */
   excerpts: string[];
+  /**
+   * AI に渡す素材 (#171)。本文を AI が書くテンプレートのときだけ読み込む (`withTexts`)。
+   * `text` はブログ / トークの本文全文 (body / message_body)。`caption` はドシエのアイテムの
+   * キャプション、`people` はアセットに付いた人物エンティティ名
+   */
+  text?: string | null;
+  caption?: string;
+  people?: string[];
 }
 
 export interface RenderedSource {
@@ -149,6 +157,11 @@ export function isTalk(a: ArticleAssetInput): boolean {
   return false;
 }
 
+/** `坂井新奈ブログ「…」` / `高井俐香ブログ「…」` の形か (取り込みが付けるアセットの題) */
+export function isBlogAssetTitle(title: string): boolean {
+  return /^.+?ブログ「.*」\s*$/.test(title);
+}
+
 /** 1 本のブログ (本文 + 画像 + 抜粋) */
 export interface BlogGroup {
   url: string | null;
@@ -189,6 +202,10 @@ export function classifyMaterials(assets: ArticleAssetInput[]): {
     };
     if (a.kind === "text") {
       group.ref = a.id;
+      // 出典のタイトルは古い取り込みだと素のブログ題 (「自分を変える」) で、誰のブログか分からない。
+      // アセットの題が「〜ブログ「…」」の形ならそちらを出典ラベルにする (既存記事の frontmatter と同じ形)
+      // ひなたぼっこ日記は `blogLabel` が名前を付けるので触らない (二重に包まない)
+      if (!group.staff && isBlogAssetTitle(a.title)) group.title = a.title;
       // 同じブログから複数箇所を抜粋していることがある (全部拾う)
       for (const ex of a.excerpts) if (ex && !group.excerpts.includes(ex)) group.excerpts.push(ex);
     } else {
