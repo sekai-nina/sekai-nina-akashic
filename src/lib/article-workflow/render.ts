@@ -287,12 +287,12 @@ export function renderReportsSection(
 }
 
 /** トークの行 (関連メディア)。追記の突き合わせにも使うので 1 箇所で作る */
-export function talkLine(a: ArticleAssetInput, sourceNo: number | undefined): string {
+function talkLine(a: ArticleAssetInput, sourceNo: number | undefined): string {
   return `- 【トーク・${mediaLabel(a.kind)}】${a.title}^[${sourceNo}]`;
 }
 
 /** ブログ画像の行 (関連メディア) */
-export function blogImageLine(b: BlogGroup, a: ArticleAssetInput): string {
+function blogImageLine(b: BlogGroup, a: ArticleAssetInput): string {
   return `- 【${b.staff ? STAFF_BLOG_NAME : "ブログ"}・画像】${a.title}^[${b.sourceNo}]`;
 }
 
@@ -361,11 +361,6 @@ export function buildParts(input: {
       .filter((b) => b.images.length > 0)
       .flatMap((b) => b.images.map((a) => ({ assetId: a.id, line: blogImageLine(b, a) }))),
   };
-}
-
-/** 空の内訳 (章を持たないテンプレート用) */
-export function emptyParts(): ArticleParts {
-  return { quotes: [], reports: [], tiktoks: [], talks: [], blogImages: [] };
 }
 
 export function dossierSnapshot(

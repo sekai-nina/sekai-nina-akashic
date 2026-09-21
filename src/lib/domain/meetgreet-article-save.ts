@@ -6,7 +6,7 @@
  * REST (`/api/v1/meetgreets/:id/article`) の import 元を変えずに済ませている。
  */
 
-import type { ArticleMode, ArticlePreview } from "@/lib/meetgreet/types";
+import type { ArticlePreview } from "@/lib/meetgreet/types";
 import type { ActingUser } from "./meetgreets";
 import {
   previewArticle,
@@ -15,9 +15,6 @@ import {
   type MeetGreetForArticle,
   type SaveArticleResult,
 } from "./article-generate";
-
-export type { ArticleMode, ArticlePreview, MeetGreetForArticle, SaveArticleResult };
-export { bodyDigest } from "./article-generate";
 
 /**
  * 生成結果を見せる (DB には書かない)。

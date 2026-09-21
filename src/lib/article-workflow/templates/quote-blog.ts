@@ -14,11 +14,12 @@
 import { TemplateInputError } from "../errors";
 import {
   blockquote,
-  blogLabel,
+  buildParts,
   classifyMaterials,
   dossierSnapshot,
-  emptyParts,
   joinBody,
+  numberSources,
+  quotedBlogs,
   type RenderedArticle,
 } from "../render";
 import type { ArticleTemplateDef, DossierRenderInput } from "./types";
@@ -31,10 +32,15 @@ export function quoteBlogTitle(assetTitle: string): string {
   return m ? `ブログ${m[1]}` : assetTitle || "無題";
 }
 
+/** このテンプレートが作る記事のタイトルか (紐づく記事からテンプレートを推すのに使う) */
+export function isQuoteBlogTitle(articleTitle: string): boolean {
+  return articleTitle.startsWith("ブログ「");
+}
+
 export function renderQuoteBlogArticle(input: DossierRenderInput): RenderedArticle {
   const { blogs } = classifyMaterials(input.assets);
-  // ひなたぼっこ日記の抜粋は本人の言葉ではない
-  const quoted = blogs.filter((b) => b.excerpts.length > 0 && !b.staff);
+  // ひなたぼっこ日記の抜粋は本人の言葉ではない (quotedBlogs が落とす)
+  const quoted = quotedBlogs(blogs);
   if (quoted.length === 0) {
     throw new TemplateInputError(
       "本人ブログの抜粋がドシエにありません。ブログ本文を範囲選択して抜粋を入れてください"
@@ -46,8 +52,8 @@ export function renderQuoteBlogArticle(input: DossierRenderInput): RenderedArtic
     );
   }
   const blog = quoted[0];
-  blog.sourceNo = 1;
-  const label = blogLabel(blog);
+  // 出典はこのブログ 1 件 (トークやブログ画像が一緒に入っていても載せない)
+  const { sources, talkSourceNo } = numberSources([blog], []);
 
   const body: string[] = [QUOTE_BLOG_LEAD, ""];
   for (const ex of blog.excerpts) body.push(blockquote(ex), "");
@@ -56,19 +62,8 @@ export function renderQuoteBlogArticle(input: DossierRenderInput): RenderedArtic
     title: quoteBlogTitle(blog.title),
     tags: [],
     body: joinBody(body),
-    sources: [{ sourceNo: 1, url: blog.url, label, date: blog.date || null, assetId: blog.ref }],
-    parts: {
-      ...emptyParts(),
-      quotes: [
-        {
-          sourceNo: 1,
-          label,
-          url: blog.url,
-          date: blog.date,
-          excerpts: blog.excerpts.map((ex) => ex.replace(/\r\n?/g, "\n")),
-        },
-      ],
-    },
+    sources,
+    parts: buildParts({ quoted, reports: [], tiktoks: [], talks: [], blogs: [], talkSourceNo }),
     dates: { date: null, dateDisplay: null, dateMode: null },
     draft: false,
     frontmatterExtra: { dossier: dossierSnapshot(input.dossier, input.today) },

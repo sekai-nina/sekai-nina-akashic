@@ -11,11 +11,8 @@ import { withSession } from "@/lib/db";
 import { getR2PublicUrl } from "@/lib/r2";
 import { todayJst } from "@/lib/utils";
 import { MAX_ARTICLE_CLEARANCE } from "@/lib/meetgreet/config";
-import {
-  normalizeTweetUrl,
-  renderMeetGreetArticle,
-  type RenderedMeetGreetArticle,
-} from "@/lib/meetgreet/article";
+import { normalizeTweetUrl } from "@/lib/article-workflow/render";
+import { renderMeetGreetArticle, type RenderedMeetGreetArticle } from "@/lib/meetgreet/article";
 import {
   loadDossierForArticle,
   PUBLISHABLE,
@@ -23,8 +20,6 @@ import {
   shapeDossierMaterials,
 } from "./dossier-materials";
 import { MeetGreetInputError, type ActingUser } from "./meetgreets";
-
-export { resolveTiktokUrl } from "./dossier-materials";
 
 export interface BuildArticleOptions {
   /** X レポ収集の keep を取り込むか (既存記事との突き合わせ検証では false にする) */

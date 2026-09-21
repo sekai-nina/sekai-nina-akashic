@@ -3,16 +3,17 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { FileText } from "lucide-react";
+import { MAX_ARTICLE_CLEARANCE } from "@/lib/meetgreet/config";
 import type { ArticlePreview } from "@/lib/meetgreet/types";
 
 type ActionError = { ok: false; error: string };
 
 /** プレビュー / 保存 / 戻す の結果。ミーグリ / ドシエ (/ ライブ) の Server Action が同じ形で返す */
-export type PreviewArticleResult = { ok: true; preview: ArticlePreview } | ActionError;
-export type SaveArticleActionResult =
+type PreviewArticleResult = { ok: true; preview: ArticlePreview } | ActionError;
+type SaveArticleActionResult =
   | { ok: true; mode: "create" | "append"; shortId: string; added: number; sources: number }
   | ActionError;
-export type RestoreExclusionsResult = { ok: true; restored: number } | ActionError;
+type RestoreExclusionsResult = { ok: true; restored: number } | ActionError;
 
 /**
  * 記事の生成。まず差分を見せ、確認してから保存する。
@@ -182,7 +183,7 @@ export function ArticleStep({
 
       {preview && preview.droppedByClearance > 0 && (
         <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-          機密レベルが internal を超えるアセット {preview.droppedByClearance} 件は本文に載せていません
+          機密レベルが {MAX_ARTICLE_CLEARANCE} を超えるアセット {preview.droppedByClearance} 件は本文に載せていません
           （記事は公開リポジトリに push されるため）。必要なら記事の編集画面から手で足してください。
         </p>
       )}

@@ -27,11 +27,8 @@ import {
   type RenderedArticle,
 } from "@/lib/article-workflow/render";
 
-// 以前ここにあった共通部品。import 元を変えずに済むよう再輸出する
+// 以前ここにあった共通部品のうち、`append.ts` とテストが使うものだけ再輸出する
 export {
-  STAFF_BLOG_NAME,
-  isStaffBlog,
-  jpDate,
   normalizeSourceUrl,
   normalizeTweetUrl,
   type ArticleAssetInput,

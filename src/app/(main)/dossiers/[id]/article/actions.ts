@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 import { ArticleTemplate } from "@prisma/client";
 import * as z from "zod";
 import { requireRole } from "@/lib/auth/require-role";
-import { invalidateDossiers } from "@/lib/cache";
 import { previewArticle, restoreExclusions, saveArticle } from "@/lib/domain/article-generate";
 import { getDossierForArticle, setDossierTemplate } from "@/lib/domain/dossier-article";
 import { ExclusionKeysSchema } from "@/lib/meetgreet/api";
@@ -16,7 +15,7 @@ function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-const TemplateSchema = z.nativeEnum(ArticleTemplate);
+const TemplateSchema = z.enum(ArticleTemplate);
 
 /** テンプレートを決める (#170)。器を持たないドシエだけ */
 export async function setTemplateAction(dossierId: string, template: string) {
@@ -27,8 +26,6 @@ export async function setTemplateAction(dossierId: string, template: string) {
     const dossier = await getDossierForArticle(user, dossierId);
     if (!dossier) throw new Error("ドシエが見つかりません");
     await setDossierTemplate(user, dossier, parsed.data);
-    invalidateDossiers();
-    revalidatePath(`/dossiers/${dossierId}`);
     revalidatePath(`/dossiers/${dossierId}/article`);
     return { ok: true as const };
   } catch (e) {
@@ -97,7 +94,7 @@ export async function saveDossierArticleAction(
       parsed.data
     );
     if (!result.ok) return { ok: false as const, error: result.error };
-    invalidateDossiers();
+    // ドシエ詳細の「記事にする / 追記する」の文言が紐づく記事の有無で変わる
     revalidatePath(`/dossiers/${dossierId}`);
     revalidatePath(`/dossiers/${dossierId}/article`);
     revalidatePath("/articles");

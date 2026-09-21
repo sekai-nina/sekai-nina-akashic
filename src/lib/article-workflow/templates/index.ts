@@ -3,7 +3,7 @@
  *
  * `ArticleTemplate` (Prisma enum) の値ごとに定義を引く。**まだ実装していないテンプレートは
  * 登録しない** (`getTemplate` が null を返し、domain 層が「まだ使えません」にする)。
- * 実装状況は `docs/security-dev.md` の記事の節を参照。
+ * この登録簿が実装状況の正。
  */
 
 import type { ArticleTemplate } from "@prisma/client";
@@ -14,7 +14,7 @@ import type { ArticleTemplateDef } from "./types";
 export type { ArticleTemplateDef, DossierRenderInput } from "./types";
 
 /** ミーグリ。組み立ては器側 (`buildMeetGreetArticle`) が開催日などと合わせて行う */
-const MEETGREET_TEMPLATE: ArticleTemplateDef = {
+export const MEETGREET_TEMPLATE: ArticleTemplateDef = {
   key: "meetgreet",
   articleType: "event",
   needsAi: false,
