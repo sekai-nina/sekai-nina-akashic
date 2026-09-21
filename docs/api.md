@@ -1056,15 +1056,15 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
   "template": "quote_blog",
   "templateSupported": true,
   "suggestedTemplate": "quote_blog",
-  "selectableTemplates": ["quote_blog", "attribute"],
+  "selectableTemplates": ["quote_blog", "quote_situational", "attribute", "outing"],
   "articles": [{"id": "…", "shortId": "HtP8cV6", "title": "ブログ「だいすき！」", "type": "quote", "draft": false}]
 }
 ```
 
 - `container` は `meetgreet` / `live` / `null`。**器に使われているドシエは `/meetgreets/:id/article` から作る**（`POST` は 400）。器が呼び出し側の機密より上だと `null` に見えるが、その場合も `template` が `meetgreet` / `live` なので `POST` は 400
 - `template` は `Dossier.articleTemplate`（`meetgreet` / `live` / `outing` / `quote_blog` / `quote_situational` / `attribute`、未設定は `null`）。`templateSupported` が `false` なら、決まってはいるがまだ組み立てに対応していない（`meetgreet` / `live` は器側で組むので `true`）
-- `suggestedTemplate` は紐づく記事の型から推した既定値（推せなければ `null`）
-- `selectableTemplates` は器を持たないドシエが `POST` の `template` に指定できるもの（実装済みのものだけ。現在は `quote_blog` / `attribute`）
+- `suggestedTemplate` は紐づく記事の型から推した既定値（`attribute` → `attribute`、`event` → `outing`、`quote` → タイトルが「ブログ「」で始まれば `quote_blog`、それ以外 `quote_situational`。推せなければ `null`）
+- `selectableTemplates` は器を持たないドシエが `POST` の `template` に指定できるもの（実装済みのものだけ。`quote_blog` / `quote_situational` / `attribute` / `outing`。`meetgreet` / `live` は器側）
 
 ### POST /dossiers/:id/article
 
@@ -1094,7 +1094,10 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 | `quote_blog` | `quote` | 「坂井新奈ブログでの名言を紹介する。」+ ドシエの抜粋を `>` の引用ブロックで併記 | 本人ブログ **1 本**の抜粋だけを使う（抜粋のあるブログが 2 本以上なら 400、ひなたぼっこ日記は数えない）。タイトルは `坂井新奈ブログ「X」` → `ブログ「X」`。`date` / 関連メディアは持たない。追記は増えた抜粋を末尾に足す |
 | `attribute` | `attribute` | **AI（Claude）が書く**: リード 1 文 + 事実の箇条書き、各事実に `^[n]`（出典番号は素材と同じ採番: ブログ → トーク） | タイトル = ドシエのタイトル。`date` 無し。tags は既存タグから選ぶよう AI に指示する（保証はしない。他メンバー名可）。`[[…]]` は公開済み記事のタイトルにだけ張るよう指示する。**ドシエに画像しか入っていないブログは、同じ URL の本文アセットを素材に足して出典の宛先にする**（人はブログを読んで書くため。RLS と機密の上限は同じに効く）。`draft: true` で保存。追記は本文に足すものが無い（新しい素材を反映するには記事の編集画面で手で書く。作り直しは後続） |
 
-（`outing` / `quote_situational` は #172、`live` は #151）
+| `outing` | `event` | **AI が書く**: 冒頭 1〜2 文 + 場所 / 行動ごとの `##` と事実の箇条書き `^[n]`（引用しない）。そのあとに機械で `## 関連メディア`（坂井新奈が写るトーク / ブログの画像・動画を 1 つの箇条書きで。文章のトークは出典にだけ） | タイトル = ドシエのタイトル。`date` / `date_display` は AI の提案（日が分からなければ月の 1 日 + 「YYYY年M月頃」）。tags = 同行者 + カテゴリ。**`locations` は場所候補から**（聖地に昇格済みなら `{ name, place_id }`、未昇格で座標があれば `{ name, lat, lng, google_maps_url }`、座標も無ければ落とす）。場所候補の名前・住所・Google マップ URL も AI に渡す。`draft: true`。追記は関連メディアだけ足す |
+| `quote_situational` | `quote` | **AI が書く**: 状況の地の文 → `>` 発言 → 反応 1 文 | **タイトルは AI が実際の発言の表記に整えてよい**（ドシエのタイトルは目安。`yes, me now?` → `Yes, me now?`。path もそのタイトルで決まる）。`date` / `date_display` は発言の時期、tags は関係するメンバー。関連メディアは出さない。`draft: true` |
+
+（`live` は #151）
 
 ## ミーグリ記事ワークフロー (MeetGreets)
 
