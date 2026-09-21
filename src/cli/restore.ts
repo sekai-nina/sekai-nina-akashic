@@ -13,7 +13,7 @@
  *   pnpm cli:restore
  */
 import "dotenv/config";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, type ArticleTemplate, type Prisma } from "@prisma/client";
 import {
   getOrCreateDriveFolder,
   listDriveFiles,
@@ -245,6 +245,9 @@ async function main() {
           // kind を落とすとクリップのプールが普通のドシエとして復元され、次のクリップで
           // プールがもう 1 本できる (#41)
           kind: (d.kind as "general" | "clips") ?? "general",
+          // 記事テンプレートと「今後足さない」(#170)。落とすと追記で外したものが復活する (#134)
+          articleTemplate: (d.articleTemplate as ArticleTemplate | null) ?? null,
+          articleExclusions: (d.articleExclusions as Prisma.InputJsonValue | null) ?? [],
           createdAt: new Date(d.createdAt as string),
           updatedAt: new Date(d.updatedAt as string),
           items: {

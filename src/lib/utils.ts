@@ -1,9 +1,11 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import type { CandidateGroupKind } from "@/lib/meetgreet/candidates";
+import type { ExclusionKind } from "@/lib/meetgreet/types";
 import {
   TextType,
   type AnnouncementKind,
+  type ArticleTemplate,
   type ArticleType,
   type JobRunStatus,
   type LlmProvider,
@@ -197,6 +199,27 @@ export const ARTICLE_TYPE_LABELS: Record<ArticleType, string> = {
   quote: "言葉",
   column: "コラム",
   item: "物",
+};
+
+/** 記事の追記で「足さない」と決めるものの種別 (#134)。除外キーの接頭辞と同じ */
+export const EXCLUSION_KIND_LABELS: Record<ExclusionKind | "asset", string> = {
+  quote: "引用",
+  report: "レポ",
+  tiktok: "TikTok",
+  talk: "トーク",
+  blogImage: "ブログ画像",
+  /** talk / blogImage のキーは `asset:` で持つ */
+  asset: "素材",
+};
+
+/** 記事テンプレート (#169)。ドシエから記事を組み立てる型 */
+export const ARTICLE_TEMPLATE_LABELS: Record<ArticleTemplate, string> = {
+  meetgreet: "ミーグリ",
+  live: "ライブ",
+  outing: "おでかけ",
+  quote_blog: "言葉（ブログの名言）",
+  quote_situational: "言葉（状況つき）",
+  attribute: "スナップ",
 };
 
 /** お知らせの種類。公開サイトの一覧で見出しの前に出る小さな文字 */

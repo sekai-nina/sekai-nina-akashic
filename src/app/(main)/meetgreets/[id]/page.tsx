@@ -18,15 +18,18 @@ import {
   applyExcerptsAction,
   applyMaterialsAction,
   generateSketchAction,
+  previewArticleAction,
   proposeExcerptsAction,
   refetchReportsAction,
+  restoreExclusionsAction,
+  saveArticleAction,
   saveExtraSketchPromptAction,
   saveSketchCropsAction,
   selectSketchAction,
 } from "../actions";
 import { ExcerptStep } from "@/components/workflow/excerpt-step";
 import { ReportsStep } from "@/components/workflow/reports-step";
-import { ArticleStep } from "./article-step";
+import { ArticleStep } from "@/components/workflow/article-step";
 import { SketchStep } from "@/components/workflow/sketch-step";
 
 interface Props {
@@ -232,7 +235,13 @@ export default async function MeetGreetDetailPage({ params, searchParams }: Prop
             記事を書いた後にドシエが変わっています。差分を見て追記してください。
           </p>
         )}
-        <ArticleStep meetGreetId={mg.id} hasArticle={!!mg.article} hasDossier={!!mg.dossier} />
+        <ArticleStep
+          hasArticle={!!mg.article}
+          hasDossier={!!mg.dossier}
+          onPreview={previewArticleAction.bind(null, mg.id)}
+          onSave={saveArticleAction.bind(null, mg.id)}
+          onRestore={restoreExclusionsAction.bind(null, mg.id)}
+        />
       </StepCard>
     </div>
   );

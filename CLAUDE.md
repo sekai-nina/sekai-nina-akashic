@@ -154,6 +154,7 @@ src/
 - `Coverage` = `Lens`(観点) × `DataSource`。`LensItemCheck` のアイテムは `DataSource.itemRule` から SourceRecord/Asset を**導出**（実体化しない）
 - `ClearanceLevel` = public / internal / confidential / restricted
 - **`Collection` は `Dossier`（特定支援）に置き換え済み。** 旧名が RLS migration 等に残っている
+- **ドシエ → 記事はテンプレート (`Dossier.articleTemplate`) で組む (#169)。** 入口は `src/lib/domain/article-generate.ts` の `previewArticle` / `saveArticle` 1 つで、器 (`MeetGreet` / `Live`) は `ArticleTarget` の kind。テンプレートの章立ては `src/lib/article-workflow/templates/`（純粋関数）、共通コアは `render.ts`。未実装のテンプレートは登録簿に無い
 
 検索は **PGroonga**（`&@` 演算子）。トークナイザは `TokenNgram`（`unify_alphabet` / `unify_digit` / `unify_symbol` をすべて無効）、ノーマライザは `NormalizerNFKC130`。
 

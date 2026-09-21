@@ -8,6 +8,7 @@
  */
 
 import {
+  MEETGREET_REPORTS_LAYOUT,
   normalizeSourceUrl,
   normalizeTweetUrl,
   type ArticleParts,
@@ -15,8 +16,28 @@ import {
 } from "./article";
 import type { ExclusionKind } from "./types";
 
-const H_QUOTES = "## 本人の感想（ブログより）";
-const H_REPORTS = "## ファンによるミーグリレポ";
+/**
+ * 章の置き方 (#170)。テンプレートごとに違うのはここだけで、「まだ無いものだけ足す」規則は同じ。
+ * 既定はミーグリ記事の形
+ */
+export interface AppendLayout {
+  /**
+   * 引用を入れる章の見出し。**null なら見出しを作らず本文の先頭の節 (地の文) の末尾に足す**
+   * (言葉記事は引用そのものが本文で、章も出典行も持たない)
+   */
+  quotesHeading: string | null;
+  /** 引用の後ろに `*引用: […]*^[n]` の出典行を置くか */
+  quoteAttribution: boolean;
+  /** ファンのレポの章 */
+  reports: { heading: string; lead: string };
+}
+
+export const MEETGREET_APPEND_LAYOUT: AppendLayout = {
+  quotesHeading: "## 本人の感想（ブログより）",
+  quoteAttribution: true,
+  reports: MEETGREET_REPORTS_LAYOUT,
+};
+
 const H_MEDIA = "## 関連メディア";
 const H_TIKTOK = "### TikTok";
 const H_TALK = "### トーク";
@@ -204,8 +225,13 @@ export function planAppend(input: {
   existingSources: ExistingSource[];
   /** 「足さない」と決めたもののキー (#134) */
   excluded?: readonly string[];
+  /** 章の置き方。省略時はミーグリ記事の形 */
+  layout?: AppendLayout;
 }): AppendPlan {
   const { existingBody, parts } = input;
+  const layout = input.layout ?? MEETGREET_APPEND_LAYOUT;
+  const H_QUOTES = layout.quotesHeading;
+  const H_REPORTS = layout.reports.heading;
   const excluded = new Set(input.excluded ?? []);
   const additions: AppendItem[] = [];
   /** 除外されていなければ一覧に足して true を返す */
@@ -312,17 +338,30 @@ export function planAppend(input: {
   // --- 3. 本文に差し込む ---
 
   if (freshQuotes.length > 0) {
-    const sec = ensureSection(sections, H_QUOTES, [H_REPORTS, H_MEDIA]);
-    const at = appendIndex(sec.lines);
+    // 見出しが無い形 (言葉記事) は先頭の節 = 地の文の末尾に足す。地の文が無い (本文が見出しで
+    // 始まる手書きの記事) なら、先頭見出しの上に割り込ませず末尾の節に足す
+    const sec = H_QUOTES
+      ? ensureSection(sections, H_QUOTES, [H_REPORTS, H_MEDIA])
+      : appendIndex(sections[0].lines) > 0
+        ? sections[0]
+        : sections[sections.length - 1];
+    let at = appendIndex(sec.lines);
     const lines: string[] = [];
+    // 引用はブロックなので、前の行と空行で区切る。区切らないと直前の引用と 1 つの
+    // ブロックに繋がる (言葉記事は抜粋ごとに空行で分けるのが形)。
+    // 節を作ったばかり (= 空行だけ) なら見出し直後の空行は残して、その次に入れる
+    if (at === 0 && sec.lines[0]?.trim() === "") at = 1;
+    else if (at > 0 && sec.lines[at - 1].trim() !== "") lines.push("");
     for (const q of freshQuotes) {
       for (const ex of q.excerpts) {
         lines.push(ex.split("\n").map((l) => (l ? `> ${l}` : ">")).join("\n"));
         lines.push("");
         added.quotes++;
       }
-      lines[lines.length - 1] = `*引用: [${q.label}（${q.date}）](${q.url})*^[${renumberMap.get(q.sourceNo) ?? q.sourceNo}]`;
-      lines.push("");
+      if (layout.quoteAttribution) {
+        lines[lines.length - 1] = `*引用: [${q.label}（${q.date}）](${q.url})*^[${renumberMap.get(q.sourceNo) ?? q.sourceNo}]`;
+        lines.push("");
+      }
     }
     sec.lines.splice(at, 0, ...lines);
   }
@@ -330,7 +369,7 @@ export function planAppend(input: {
   if (freshReports.length > 0) {
     const sec = ensureSection(sections, H_REPORTS, [H_MEDIA]);
     if (sec.lines.every((l) => l.trim() === "")) {
-      sec.lines = ["", "ファンが投稿したミート＆グリートの感想（X）。", ""];
+      sec.lines = ["", layout.reports.lead, ""];
     }
     sec.lines.splice(appendIndex(sec.lines), 0, ...freshReports.map((u) => `![](${u})`));
     added.reports = freshReports.length;

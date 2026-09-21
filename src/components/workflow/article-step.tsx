@@ -3,21 +3,40 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { FileText } from "lucide-react";
+import { MAX_ARTICLE_CLEARANCE } from "@/lib/meetgreet/config";
 import type { ArticlePreview } from "@/lib/meetgreet/types";
-import { previewArticleAction, restoreExclusionsAction, saveArticleAction } from "../actions";
+
+type ActionError = { ok: false; error: string };
+
+/** プレビュー / 保存 / 戻す の結果。ミーグリ / ドシエ (/ ライブ) の Server Action が同じ形で返す */
+type PreviewArticleResult = { ok: true; preview: ArticlePreview } | ActionError;
+type SaveArticleActionResult =
+  | { ok: true; mode: "create" | "append"; shortId: string; added: number; sources: number }
+  | ActionError;
+type RestoreExclusionsResult = { ok: true; restored: number } | ActionError;
 
 /**
  * 記事の生成。まず差分を見せ、確認してから保存する。
  * 既存記事があれば追記（増えた分だけ）、無ければ新規作成。
+ *
+ * ミーグリ (#109) の部品を器に依らない形にしたもの (#170)。Server Action は器ごとに違うので
+ * `onPreview` / `onSave` / `onRestore` で受け取る (`MaterialsStep.onApply` と同じ作り)。
  */
 export function ArticleStep({
-  meetGreetId,
   hasArticle,
   hasDossier,
+  onPreview,
+  onSave,
+  onRestore,
 }: {
-  meetGreetId: string;
   hasArticle: boolean;
   hasDossier: boolean;
+  /** 差分を組み立てる。`extraExclude` はまだ保存していない「外すつもり」のキー */
+  onPreview: (extraExclude: string[]) => Promise<PreviewArticleResult>;
+  /** 保存する。`expectedDigest` は見せた本文の指紋、`exclude` は今回外すもの */
+  onSave: (expectedDigest: string | undefined, exclude: string[]) => Promise<SaveArticleActionResult>;
+  /** 「今後足さない」を取り消す */
+  onRestore: (keys: string[]) => Promise<RestoreExclusionsResult>;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -36,7 +55,7 @@ export function ArticleStep({
   function load(overlay: string[] = [], note?: string) {
     setMsg("組み立てています…");
     startTransition(async () => {
-      const res = await previewArticleAction(meetGreetId, overlay).catch((e: unknown) => ({
+      const res = await onPreview(overlay).catch((e: unknown) => ({
         ok: false as const,
         error: e instanceof Error ? e.message : "通信に失敗しました",
       }));
@@ -75,7 +94,7 @@ export function ArticleStep({
     const digest = preview.digest;
     startTransition(async () => {
       // 見せた内容と保存する内容が食い違っていたら中止させる
-      const res = await saveArticleAction(meetGreetId, digest, exclude).catch((e: unknown) => ({
+      const res = await onSave(digest, exclude).catch((e: unknown) => ({
         ok: false as const,
         error: e instanceof Error ? e.message : "通信に失敗しました",
       }));
@@ -100,7 +119,7 @@ export function ArticleStep({
   function restore(key: string) {
     setMsg("戻しています…");
     startTransition(async () => {
-      const res = await restoreExclusionsAction(meetGreetId, [key]).catch((e: unknown) => ({
+      const res = await onRestore([key]).catch((e: unknown) => ({
         ok: false as const,
         error: e instanceof Error ? e.message : "通信に失敗しました",
       }));
@@ -164,7 +183,7 @@ export function ArticleStep({
 
       {preview && preview.droppedByClearance > 0 && (
         <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-          機密レベルが internal を超えるアセット {preview.droppedByClearance} 件は本文に載せていません
+          機密レベルが {MAX_ARTICLE_CLEARANCE} を超えるアセット {preview.droppedByClearance} 件は本文に載せていません
           （記事は公開リポジトリに push されるため）。必要なら記事の編集画面から手で足してください。
         </p>
       )}
@@ -172,7 +191,7 @@ export function ArticleStep({
       {preview && preview.additions.length > 0 && (
         <div>
           <div className="text-xs font-medium text-slate-600 mb-1.5">
-            足すもの（外したものは今後この回では提示されません）
+            足すもの（外したものは今後この素材からは提示されません）
           </div>
           <ul className="rounded-md border border-slate-200 divide-y divide-slate-100">
             {preview.additions.map((a) => (

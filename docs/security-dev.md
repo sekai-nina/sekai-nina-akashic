@@ -87,7 +87,7 @@ const clearance = auth.clearance;
 - **`requireEditAccess` はプールを既定で拒否する。** ピッカーが隠していても Server Action の `dossierId` はクライアント入力なので、ここで止めないと「ドシエに追加」でプールに任意のアセットを入れられる（= `createClip` の classification 検査を素通りする）。プール内アイテムのメモ編集・削除だけ `allowClipPool: true` で通す。外部画像 API（`/api/v1/dossiers/:id/external-image`）と `createMeetGreet` も `kind` を見て拒否する
 - 移動（`moveClips`）も移動先ドシエの classification とアセットの classification を突き合わせる。RLS の WITH CHECK はドシエしか見ないので、internal の抜粋を public のドシエへ移すと下位に見える。見えないアセット（後から機密が上がったもの）のクリップも移せない
 - **アセットの機密を後から上げても、プールに入っている抜粋は消えない**（DossierItem の RLS は親ドシエしか見ない）。一般のドシエと同じ穴だが、プールは全員共有なので範囲が広い。機密を上げるときはプール（と各ドシエ）の抜粋を手で確認する
-- バックアップ/リストア: `backup.ts` は全列を書くが、`restore.ts` は列を列挙して書くので **`Dossier.kind` と `DossierItem.createdById` を落とさないこと**（落とすとリストア後にプールが普通のドシエになり、次のクリップでプールが 2 本目できる）。`Article.dossierId` は Article がバックアップ対象外なので、リストア後は `pnpm cli:backfill-article-dossiers` で張り直す
+- バックアップ/リストア: `backup.ts` は全列を書くが、`restore.ts` は列を列挙して書くので **`Dossier.kind` / `Dossier.articleTemplate` / `Dossier.articleExclusions` と `DossierItem.createdById` を落とさないこと**（落とすとリストア後にプールが普通のドシエになり、次のクリップでプールが 2 本目できる）。`Article.dossierId` は Article がバックアップ対象外なので、リストア後は `pnpm cli:backfill-article-dossiers` で張り直す
 - サイドバーの件数バッジは `getCachedClipCount(clearance)`（`withClearance`。`app.user_id` 無しでも `viewMode = clearance` のプールは RLS が通る）
 
 **非保護テーブルを足したら `REVOKE ALL ON TABLE "<Table>" FROM anon, authenticated;` を migration に書く。** Supabase は public スキーマの全テーブルに `anon` / `authenticated` への DML を既定で与え、PostgREST (`/rest/v1/<table>`) がそれを外に出す。保護テーブルが守られているのは RLS が `TO app_runtime` のポリシーしか持たないからで、権限のためではない。
@@ -155,6 +155,13 @@ RLS があるので読み取り時は不要ですが、**書き込み時のク�
 出典は `applyArticleSource` を通すので、公開に落とせる機密レベルの制限（`maxClassification`）もそのまま効きます。
 `confidential` / `restricted` のアセットは候補にも出さず、ID を直接指定しても弾きます
 （`classificationFilter(MAX_EXTERNAL_AI_CLEARANCE)` を、抜粋・スケッチ双方のクエリに入れている）。
+
+記事の組み立ては器（`MeetGreet` / `Live`）を持たないドシエからもできます（#169 / #170、`Dossier.articleTemplate`）。
+入口は `src/lib/domain/article-generate.ts` の `previewArticle` / `saveArticle` の 1 つで、上の線引き
+（`MAX_ARTICLE_CLEARANCE`、`applyArticleSource` 経由の出典、`dirty` の規約）は器に依らず同じです。
+ドシエが器のときは **保存にドシエの編集権限**（`canEditDossier`）が要り、記事は `Article.dossierId` で紐づきます。
+テンプレートの実装状況は `src/lib/article-workflow/templates/index.ts`（登録簿）が正で、
+未実装のものは「まだ使えません」で止まります。
 
 RLS は「その人が読めるか」しか見ないので、**読める人が外に出せてしまうのを止めるのはアプリ層**です。
 MCP の `akashic_apply_article_source` が公開判断を `internal` 以下に限っているのと同じ考え方で、
