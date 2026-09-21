@@ -204,7 +204,8 @@ export function classifyMaterials(assets: ArticleAssetInput[]): {
       group.ref = a.id;
       // 出典のタイトルは古い取り込みだと素のブログ題 (「自分を変える」) で、誰のブログか分からない。
       // アセットの題が「〜ブログ「…」」の形ならそちらを出典ラベルにする (既存記事の frontmatter と同じ形)
-      if (isBlogAssetTitle(a.title)) group.title = a.title;
+      // ひなたぼっこ日記は `blogLabel` が名前を付けるので触らない (二重に包まない)
+      if (!group.staff && isBlogAssetTitle(a.title)) group.title = a.title;
       // 同じブログから複数箇所を抜粋していることがある (全部拾う)
       for (const ex of a.excerpts) if (ex && !group.excerpts.includes(ex)) group.excerpts.push(ex);
     } else {

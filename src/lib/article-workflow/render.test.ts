@@ -33,6 +33,14 @@ describe("classifyMaterials の出典ラベル", () => {
     expect(numberSources(blogs, []).sources[0].label).toBe("坂井新奈ブログ「🍈🫧」");
   });
 
+  it("ひなたぼっこ日記の本文アセットの題が「〜ブログ「…」」でも二重に包まない", () => {
+    const url = "https://www.hinatazaka46.com/s/official/diary/manager/list?ima=0000#article-2";
+    const { blogs } = classifyMaterials([
+      asset({ id: "text", title: "運営ブログ「集合」", source: { kind: "url", title: "集合", url, publishedAt: "2026-08-01" } }),
+    ]);
+    expect(numberSources(blogs, []).sources[0].label).toBe("ひなたぼっこ日記「集合」");
+  });
+
   it("ひなたぼっこ日記 (画像だけ) は今までどおり運営ブログの名前を付ける", () => {
     const url = "https://www.hinatazaka46.com/s/official/diary/manager/list?ima=0000#article-1";
     const { blogs } = classifyMaterials([

@@ -7,8 +7,7 @@
  */
 
 import type { AssetKind } from "@prisma/client";
-import type { AiDraft } from "@/lib/article-workflow/templates/types";
-import type { ArticleAiStatus } from "@/lib/domain/dossier-article";
+import type { AiDraft, ArticleAiStatus } from "@/lib/article-workflow/templates/types";
 
 /**
  * 「足さない」と決めたものの種別 (#134)。

@@ -9,7 +9,7 @@
  * `shapeDossierMaterials` は純粋関数。
  */
 
-import type { Prisma, TextType } from "@prisma/client";
+import type { ClearanceLevel, Prisma, TextType } from "@prisma/client";
 import type { TransactionClient } from "@/lib/db";
 import { getR2PublicUrl } from "@/lib/r2";
 import { toJstDateOnly } from "@/lib/utils";
@@ -20,7 +20,7 @@ import type { ArticleAssetInput } from "@/lib/article-workflow/render";
 /** 本文に載せてよい機密レベル */
 export const PUBLISHABLE = new Set<string>(accessibleClassifications(MAX_ARTICLE_CLEARANCE));
 /** 外部の AI に渡してよい機密レベル (本文全文を送るので、本文に載る上限とは別に見る) */
-const EXTERNAL_AI_OK = new Set<string>(accessibleClassifications(MAX_EXTERNAL_AI_CLEARANCE));
+export const EXTERNAL_AI_OK = new Set<string>(accessibleClassifications(MAX_EXTERNAL_AI_CLEARANCE));
 
 /** `loadDossierForArticle` が返すドシエ (組み立てに要る列だけ) */
 export interface DossierForMaterials {
@@ -92,7 +92,8 @@ function pickText(texts: { textType: TextType; content: string }[] | undefined):
   if (!texts) return null;
   for (const type of TEXT_TYPES_FOR_AI) {
     const hit = texts.find((t) => t.textType === type && t.content.trim());
-    if (hit) return hit.content;
+    // ブログ本文の画像の位置印 `{{IMG:<assetId>}}` は AI には雑音なので落とす
+    if (hit) return hit.content.replace(/\{\{IMG:[A-Za-z0-9_-]+\}\}/g, "");
   }
   return null;
 }
@@ -130,43 +131,53 @@ function dossierSelect<A extends Prisma.AssetSelect>(asset: A) {
 export async function loadDossierForArticle(
   tx: TransactionClient,
   dossierId: string,
-  options: { withTexts?: boolean } = {}
+  options: {
+    /** 本文全文と人物を読む (AI に書かせるとき) */
+    withTexts?: boolean;
+    /**
+     * 画像しか入っていないブログの本文アセットを出典の宛先として足す (本文を AI が書くテンプレート)。
+     * **保存時も同じにする** (プレビューと出典がずれないように)。本文は `withTexts` のときだけ読む
+     */
+    withExtraBlogTexts?: boolean;
+  } = {}
 ): Promise<DossierForMaterials | null> {
   // select を条件で組むと Prisma の型推論が崩れるので、2 本に分けて書く
-  if (!options.withTexts) {
-    const dossier = await tx.dossier.findUnique({ where: { id: dossierId }, select: dossierSelect(ASSET_SELECT) });
-    if (!dossier) return null;
-    const { _count, ...rest } = dossier;
-    return { ...rest, itemCount: _count.items };
-  }
-
-  const dossier = await tx.dossier.findUnique({
-    where: { id: dossierId },
-    select: dossierSelect(ASSET_SELECT_WITH_TEXTS),
-  });
+  const dossier = options.withTexts
+    ? await tx.dossier.findUnique({ where: { id: dossierId }, select: dossierSelect(ASSET_SELECT_WITH_TEXTS) })
+    : await tx.dossier.findUnique({ where: { id: dossierId }, select: dossierSelect(ASSET_SELECT) });
   if (!dossier) return null;
   const { _count, ...rest } = dossier;
+  if (!options.withExtraBlogTexts) return { ...rest, itemCount: _count.items };
 
-  // 画像しか入っていないブログの本文を同じ URL の text アセットから引く (RLS 下なので見えない分は落ちる)
+  // 画像しか入っていないブログの本文を同じ URL の text アセットから引く。RLS 下なので見えない分は
+  // 落ち、機密の上限は where にも入れる (読めても外に出せないものをメモリに載せない)
   const urlsWithText = new Set<string>();
   const urlsWithoutText = new Set<string>();
   for (const item of dossier.items) {
     const a = item.asset;
     const url = a?.sourceRecords[0]?.url;
-    if (!a || !isBlogUrl(url)) continue;
-    if (a.kind === "text") urlsWithText.add(url!);
-    else urlsWithoutText.add(url!);
+    if (!a || !url || !isBlogUrl(url)) continue;
+    if (a.kind === "text") urlsWithText.add(url);
+    else urlsWithoutText.add(url);
   }
   const missing = [...urlsWithoutText].filter((u) => !urlsWithText.has(u));
-  const extraTextAssets =
-    missing.length === 0
-      ? []
-      : await tx.asset.findMany({
-          where: { kind: "text", sourceRecords: { some: { url: { in: missing } } } },
-          select: ASSET_SELECT_WITH_TEXTS,
-          orderBy: { createdAt: "asc" },
-        });
-  return { ...rest, itemCount: _count.items, extraTextAssets };
+  if (missing.length === 0) return { ...rest, itemCount: _count.items, extraTextAssets: [] };
+
+  const where = {
+    kind: "text" as const,
+    classification: { in: [...EXTERNAL_AI_OK] as ClearanceLevel[] },
+    sourceRecords: { some: { url: { in: missing } } },
+  };
+  const found = options.withTexts
+    ? await tx.asset.findMany({ where, select: ASSET_SELECT_WITH_TEXTS, orderBy: { createdAt: "asc" } })
+    : await tx.asset.findMany({ where, select: ASSET_SELECT, orderBy: { createdAt: "asc" } });
+  // 同じ URL に本文アセットが複数あれば古い 1 件だけ (出典の宛先と AI に渡す本文を 1 つに)
+  const byUrl = new Map<string, (typeof found)[number]>();
+  for (const a of found) {
+    const url = a.sourceRecords[0]?.url;
+    if (url && !byUrl.has(url)) byUrl.set(url, a);
+  }
+  return { ...rest, itemCount: _count.items, extraTextAssets: [...byUrl.values()] };
 }
 
 export interface DossierMaterials {
@@ -182,6 +193,33 @@ export interface DossierMaterials {
   droppedByClearance: number;
 }
 
+type LoadedAsset = NonNullable<DossierForMaterials["items"][number]["asset"]>;
+
+/** 読んだアセットを組み立ての入力に (`texts` があるとき = AI のテンプレートは本文・人物も付ける) */
+function toAssetInput(a: LoadedAsset, item: { excerpt?: string; caption?: string }): ArticleAssetInput {
+  const src = a.sourceRecords[0];
+  return {
+    id: a.id,
+    kind: a.kind,
+    title: a.title,
+    // UTC で切ると JST 0〜9 時のものが前日に落ちる
+    canonicalDate: toJstDateOnly(a.canonicalDate),
+    // 並べ替えは時刻まで見る (日付だけだと同じ日のトークが同着になる)
+    sortAt: a.canonicalDate ? a.canonicalDate.toISOString() : null,
+    source: src
+      ? { kind: src.sourceKind, title: src.title, url: src.url, publishedAt: toJstDateOnly(src.publishedAt) }
+      : null,
+    excerpts: item.excerpt ? [item.excerpt] : [],
+    ...(a.texts !== undefined
+      ? {
+          text: pickText(a.texts),
+          caption: item.caption || undefined,
+          people: (a.entities ?? []).map((e) => e.entity.canonicalName),
+        }
+      : {}),
+  };
+}
+
 /** ドシエのアイテムを組み立ての入力に振り分ける (純粋関数) */
 export function shapeDossierMaterials(dossier: DossierForMaterials): DossierMaterials {
   // アセットを 1 件にまとめる (同じアセットが抜粋ごとに複数 item になる)
@@ -190,6 +228,13 @@ export function shapeDossierMaterials(dossier: DossierForMaterials): DossierMate
   const reports: string[] = [];
   const tiktoks: string[] = [];
   let dossierThumb: string | null = null;
+
+  /**
+   * 本文に載せてよいか。AI に渡す経路 (`texts` を読んでいる) は外部に出す上限も見る。
+   * 今はどちらも internal で同じだが、片方だけ上げたときに AI の側が黙って追随しないように
+   */
+  const allowed = (a: LoadedAsset) =>
+    PUBLISHABLE.has(a.classification) && (a.texts === undefined || EXTERNAL_AI_OK.has(a.classification));
 
   for (const item of dossier.items) {
     if (item.kind === "external_image") {
@@ -211,65 +256,23 @@ export function shapeDossierMaterials(dossier: DossierForMaterials): DossierMate
     const a = item.asset;
     if (!a) continue;
     // 本文は公開リポジトリに載るので、上位機密のアセットは載せない
-    if (!PUBLISHABLE.has(a.classification)) {
+    if (!allowed(a)) {
       dropped.add(a.id);
       continue;
     }
-    const src = a.sourceRecords[0];
     const existing = assets.get(a.id);
     if (existing) {
       if (item.excerpt) existing.excerpts.push(item.excerpt);
       continue;
     }
-    assets.set(a.id, {
-      id: a.id,
-      kind: a.kind,
-      title: a.title,
-      // UTC で切ると JST 0〜9 時のものが前日に落ちる
-      canonicalDate: toJstDateOnly(a.canonicalDate),
-      // 並べ替えは時刻まで見る (日付だけだと同じ日のトークが同着になる)
-      sortAt: a.canonicalDate ? a.canonicalDate.toISOString() : null,
-      source: src
-        ? {
-            kind: src.sourceKind,
-            title: src.title,
-            url: src.url,
-            publishedAt: toJstDateOnly(src.publishedAt),
-          }
-        : null,
-      excerpts: item.excerpt ? [item.excerpt] : [],
-      // AI に渡す素材 (withTexts のときだけ入る)。外部に出すので EXTERNAL の上限も見る
-      ...(a.texts !== undefined
-        ? {
-            text: EXTERNAL_AI_OK.has(a.classification) ? pickText(a.texts) : null,
-            caption: item.caption || undefined,
-            people: (a.entities ?? []).map((e) => e.entity.canonicalName),
-          }
-        : {}),
-    });
+    assets.set(a.id, toAssetInput(a, item));
   }
 
-  // 画像しか入っていないブログの本文 (withTexts のときだけ)。ブログのグループに合流して出典の宛先になる
+  // 画像しか入っていないブログの本文 (AI のテンプレートだけ)。ブログのグループに合流して出典の宛先になる。
+  // 人が入れたアイテムではないので、落としても `droppedByClearance` には数えない
   for (const a of dossier.extraTextAssets ?? []) {
-    if (assets.has(a.id)) continue;
-    if (!PUBLISHABLE.has(a.classification)) {
-      dropped.add(a.id);
-      continue;
-    }
-    const src = a.sourceRecords[0];
-    assets.set(a.id, {
-      id: a.id,
-      kind: a.kind,
-      title: a.title,
-      canonicalDate: toJstDateOnly(a.canonicalDate),
-      sortAt: a.canonicalDate ? a.canonicalDate.toISOString() : null,
-      source: src
-        ? { kind: src.sourceKind, title: src.title, url: src.url, publishedAt: toJstDateOnly(src.publishedAt) }
-        : null,
-      excerpts: [],
-      text: EXTERNAL_AI_OK.has(a.classification) ? pickText(a.texts) : null,
-      people: (a.entities ?? []).map((e) => e.entity.canonicalName),
-    });
+    if (assets.has(a.id) || !allowed(a)) continue;
+    assets.set(a.id, toAssetInput(a, {}));
   }
 
   return {

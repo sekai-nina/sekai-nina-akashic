@@ -204,14 +204,13 @@ export function ArticleStep({
               : "text-slate-600 bg-slate-50 border-slate-200")
           }
         >
-          {preview.ai.status === "unavailable" ? (
+          {preview.ai.status !== "generated" ? (
             <>
-              AI が使えなかったので本文は空です（{preview.ai.reason}）。骨組み（出典だけ）で下書き保存し、記事の編集画面で書けます。
+              AI が使えなかったので本文はプレースホルダだけです（{preview.ai.reason}）。骨組み（出典だけ）で下書き保存し、記事の編集画面で書けます。
             </>
           ) : (
             <>
-              {preview.ai.status === "generated" ? `AI (${preview.ai.model}) が書いた本文です。` : "画面から受け取った下書きです。"}
-              素材 {preview.ai.included} 件
+              AI ({preview.ai.model}) が書いた本文です。素材 {preview.ai.included} 件
               {preview.ai.truncated > 0 ? `（うち ${preview.ai.truncated} 件は長すぎて途中まで）` : ""}
               {preview.ai.usage
                 ? ` · 入力 ${preview.ai.usage.inputTokens.toLocaleString()} / 出力 ${preview.ai.usage.outputTokens.toLocaleString()} トークン`

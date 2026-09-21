@@ -115,19 +115,8 @@ export const GenerateSketchSchema = z
  */
 export const ExclusionKeysSchema = z.array(z.string().min(1).max(200)).max(200);
 
-/**
- * プレビューが返した AI の下書き (#171)。保存に渡す。null は「AI を使わず骨組みだけ」。
- * 本文の上限は記事編集と同じ桁 (スナップは数百字なので十分)
- */
-export const AiDraftSchema = z
-  .object({
-    body: z.string().max(20_000),
-    tags: z.array(z.string().max(100)).max(10),
-    title: z.string().max(200).nullable(),
-    date: z.string().max(10).nullable(),
-    dateDisplay: z.string().max(100).nullable(),
-  })
-  .strict();
+/** プレビューが返した AI の下書き (#171)。保存に渡す。定義は純粋層 (`templates/types.ts`) にある */
+export { AiDraftSchema } from "@/lib/article-workflow/templates/types";
 
 /**
  * 参照写真の切り抜き枠 (#136)。`{ "<assetId>": {x,y,w,h} | null }`。

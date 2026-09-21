@@ -67,6 +67,9 @@ export async function POST(request: Request, { params }: Params) {
         excluded: preview.excluded,
         empty: preview.empty,
         shortId: preview.shortId,
+        // ドシエの `/article` と同じ形 (ミーグリは本文を AI に書かせないので常に null)
+        ai: preview.ai,
+        aiDraft: preview.aiDraft,
       });
     }
     const result = await saveMeetGreetArticle(

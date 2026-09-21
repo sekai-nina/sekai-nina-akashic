@@ -65,7 +65,7 @@ describe("buildMaterialsText", () => {
     expect(talkAt).toBeGreaterThan(blogAt);
     expect(m.text).toContain("> 家に帰ろうとすると違うところへ行ってしまう");
     expect(m.text).toContain("登場人物: 坂井新奈、鶴崎仁香");
-    expect(m.text).toContain("キャプション: 方向音痴の話");
+    expect(m.text).toContain("- 方向音痴の話");
     // CRLF は落とす
     expect(m.text).not.toContain("\r");
   });
@@ -77,7 +77,7 @@ describe("buildMaterialsText", () => {
     expect(m.text).toContain("500 字を省略");
   });
 
-  it("本文の無い画像だけのブログもそう書く", () => {
+  it("本文の無い画像だけのブログもそう書く。キャプションがあれば素材として数える", () => {
     const img = asset({
       id: "img",
       title: "坂井新奈ブログ「しゃぼん🫧 坂井新奈」 (1/3)",
@@ -87,6 +87,26 @@ describe("buildMaterialsText", () => {
     const m = buildMaterialsText(input([img]));
     expect(m.text).toContain("(本文なし。画像だけのブログ)");
     expect(m.text).toContain("- 江ノ島の写真");
+    expect(m.included).toBe(1);
+    // 本文・抜粋・キャプションのどれも無ければ数えない (AI に読ませるものが無い)
+    expect(buildMaterialsText(input([asset({ ...img, id: "img2", caption: undefined })])).included).toBe(0);
+  });
+
+  it("全体の上限に達しても、後ろの出典に最低限の本文は残す", () => {
+    const blogs = Array.from({ length: 8 }, (_, i) =>
+      asset({
+        id: `b${i}`,
+        kind: "text",
+        title: `坂井新奈ブログ「${i}」`,
+        canonicalDate: `2025-01-0${i + 1}`,
+        source: { kind: "url", title: `坂井新奈ブログ「${i}」`, url: `${BLOG_URL}${i}`, publishedAt: `2025-01-0${i + 1}` },
+        text: "あ".repeat(MAX_CHARS_PER_SOURCE),
+      })
+    );
+    const m = buildMaterialsText(input([...blogs, talk]));
+    expect(m.included).toBe(9);
+    // 最後のトークの本文は丸ごと残る (短いので最低枠に収まる)
+    expect(m.text).toContain("すごく静かに道を間違えるってりかちゃんに言われた");
   });
 });
 
@@ -95,18 +115,33 @@ describe("attributePrompt", () => {
     const ctx = { existingTitles: ["高井俐香と3時間半迷子になった", "方向音痴"], tagVocabulary: ["幼少期", "家族"] };
     const p1 = attributePrompt(input([blog]), ctx);
     const p2 = attributePrompt(input([blog, talk]), ctx);
-    expect(p1.system).toBe(p2.system);
-    expect(p1.system).toBe(attributeSystemPrompt(ctx));
-    expect(p1.system).toContain("坂井新奈以外のメンバーの感想・気持ちは書かない");
-    expect(p1.system).toContain("- 高井俐香と3時間半迷子になった");
-    expect(p1.system).toContain("幼少期、家族");
-    expect(p1.system.indexOf("編集の鉄則")).toBeLessThan(p1.system.indexOf("既存のタグ"));
+    expect(p1.system).toEqual(p2.system);
+    expect(p1.system).toEqual(attributeSystemPrompt(ctx));
+    // 鉄則・見本 と 語彙 は別ブロック (語彙が変わっても前半のキャッシュが残る)
+    expect(p1.system).toHaveLength(2);
+    expect(p1.system[0]).toContain("坂井新奈以外のメンバーの感想・気持ちは書かない");
+    expect(p1.system[0]).not.toContain("## 既存のタグ");
+    expect(p1.system[1]).toContain("- 高井俐香と3時間半迷子になった");
+    expect(p1.system[1]).toContain("幼少期、家族");
     expect(p1.user).toContain("記事のタイトル (= まとめる属性): 方向音痴");
     expect(p1.user).toContain("### ^[1] 坂井新奈ブログ");
+    expect(p1.included).toBe(1);
+    expect(p2.included).toBe(2);
   });
 });
 
 describe("renderAttributeArticle", () => {
+  it("出典に無い番号の ^[n] は落とす (宛先の無い脚注を出さない)", () => {
+    const r = renderAttributeArticle(input([talk, blog]), { ...draft, body: "- 事実^[2]\n- 作った番号^[9]\n- ゼロ^[0]" });
+    expect(r.body).toBe("- 事実^[2]\n- 作った番号\n- ゼロ\n");
+  });
+
+  it("空の本文は下書き無しと同じ (骨組み)", () => {
+    const r = renderAttributeArticle(input([talk, blog]), { ...draft, body: "  \n" });
+    expect(r.body).toBe(`${ATTRIBUTE_BODY_PLACEHOLDER}\n`);
+    expect(r.tags).toEqual([]);
+  });
+
   it("下書きを差し込み、出典を採番し、draft: true・date 無しで返す", () => {
     const r = renderAttributeArticle(input([talk, blog]), draft);
     expect(r.title).toBe("方向音痴");

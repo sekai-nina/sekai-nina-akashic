@@ -12,7 +12,8 @@ import { ATTRIBUTE_TEMPLATE } from "./attribute";
 import { QUOTE_BLOG_TEMPLATE } from "./quote-blog";
 import type { ArticleTemplateDef } from "./types";
 
-export type { AiContext, AiDraft, AiPrompt, ArticleTemplateDef, DossierRenderInput } from "./types";
+export type { AiContext, AiDraft, AiPrompt, AiUsage, ArticleAiStatus, ArticleTemplateDef, DossierRenderInput } from "./types";
+export { AiDraftSchema, clampAiDraft } from "./types";
 
 /** ミーグリ。組み立ては器側 (`buildMeetGreetArticle`) が開催日などと合わせて行う */
 export const MEETGREET_TEMPLATE: ArticleTemplateDef = {

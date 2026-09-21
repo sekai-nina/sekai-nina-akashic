@@ -100,7 +100,7 @@ JSON で返す。
 - tags: 記事のタグ。「既存のタグ」から 0〜4 個選ぶ。記事の主題を表すもの (人物名・トピック・
   カテゴリ) だけ。**出典の種類や時期を表すタグ (ninatalk / ブログ / 2026年 など) は付けない。**
   登場する他メンバーの名前は入れてよい。タイトルそのものはタグにしない
-- title / date / date_display: この記事の型では使わない。null を返す
+- title / date / dateDisplay: この記事の型では使わない。null を返す
 
 ## 見本 (既存記事。この形に揃える)
 
@@ -108,19 +108,22 @@ ${SAMPLES.map((s) => `### 「${s.title}」 (tags: ${s.tags.length ? s.tags.join(
 `;
 
 /**
- * システムプロンプト。鉄則・見本のあとに語彙 (既存タグ・既存記事タイトル) を置く。
- * **順番を変えない** (先頭からの一致で prompt caching が効く)
+ * システムプロンプト。鉄則・見本 (滅多に変わらない) と語彙 (既存タグ・既存記事タイトル。記事を保存すると
+ * 変わる) を**別のブロック**にして、語彙が変わっても前半のキャッシュが残るようにする。
+ * **ブロック内の順番を変えない** (先頭からの一致で prompt caching が効く)
  */
-export function attributeSystemPrompt(context: AiContext): string {
+export function attributeSystemPrompt(context: AiContext): string[] {
   return [
     RULES,
-    "## 既存のタグ (tags はここから選ぶ)",
-    context.tagVocabulary.join("、") || "(なし)",
-    "",
-    "## 既存記事のタイトル ([[…]] でリンクしてよいのはこれだけ)",
-    context.existingTitles.map((t) => `- ${t}`).join("\n") || "(なし)",
-    "",
-  ].join("\n");
+    [
+      "## 既存のタグ (tags はここから選ぶ)",
+      context.tagVocabulary.join("、") || "(なし)",
+      "",
+      "## 既存記事のタイトル ([[…]] でリンクしてよいのはこれだけ)",
+      context.existingTitles.map((t) => `- ${t}`).join("\n") || "(なし)",
+      "",
+    ].join("\n"),
+  ];
 }
 
 export function attributePrompt(input: DossierRenderInput, context: AiContext): AiPrompt {
@@ -134,20 +137,32 @@ export function attributePrompt(input: DossierRenderInput, context: AiContext): 
       "",
       materials.text,
     ].join("\n"),
+    included: materials.included,
+    truncated: materials.truncated,
   };
 }
 
-/** AI の本文を記事に入れる形に揃える (改行コード・前後の空白・末尾の改行) */
-function normalizeBody(body: string): string {
-  return body.replace(/\r\n?/g, "\n").replace(/[ \t]+$/gm, "").trim() + "\n";
+/**
+ * AI の本文を記事に入れる形に揃える (改行コード・前後の空白・末尾の改行)。
+ * **出典に無い番号の `^[n]` は落とす** (AI が番号を作った / 画面から来た下書きが古い)。
+ * 宛先の無い脚注を公開リポジトリに出さないため。事実の文は残る (人が出典を付け直す)
+ */
+function normalizeBody(body: string, sourceCount: number): string {
+  return body
+    .replace(/\r\n?/g, "\n")
+    .replace(/\^\[(\d+)\]/g, (whole, n) => (Number(n) >= 1 && Number(n) <= sourceCount ? whole : ""))
+    .replace(/[ \t]+$/gm, "")
+    .trim() + "\n";
 }
 
 export function renderAttributeArticle(input: DossierRenderInput, draft?: AiDraft | null): RenderedArticle {
   const { blogs, talks } = classifyMaterials(input.assets);
   const { sources } = numberSources(blogs, talks);
 
-  const body = draft ? normalizeBody(draft.body) : `${ATTRIBUTE_BODY_PLACEHOLDER}\n`;
-  const tags = draft ? [...new Set(draft.tags.map((t) => t.trim()).filter((t) => t.length > 0))] : [];
+  // 空の本文は「下書き無し」と同じ (骨組みだけにする)
+  const hasDraft = !!draft && draft.body.trim().length > 0;
+  const body = hasDraft ? normalizeBody(draft.body, sources.length) : `${ATTRIBUTE_BODY_PLACEHOLDER}\n`;
+  const tags = hasDraft ? [...new Set(draft.tags.map((t) => t.trim()).filter((t) => t.length > 0))] : [];
 
   // 追記の対象になる章は無い (本文は AI / 人が持つ)。出典だけ足せるよう内訳は空
   const parts: ArticleParts = { quotes: [], reports: [], tiktoks: [], talks: [], blogImages: [] };
@@ -169,6 +184,7 @@ export const ATTRIBUTE_TEMPLATE: ArticleTemplateDef = {
   key: "attribute",
   articleType: "attribute",
   needsAi: true,
+  // 追記で足す章は無い (`parts` は常に空)。`AppendLayout.reports` が必須なので名前だけ置く
   appendLayout: {
     quotesHeading: null,
     quoteAttribution: false,

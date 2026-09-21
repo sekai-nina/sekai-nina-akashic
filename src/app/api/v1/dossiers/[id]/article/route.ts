@@ -34,6 +34,10 @@ const DossierArticleSchema = z
   .strict()
   .refine((v) => !(v.restore && (v.dryRun || v.exclude?.length || v.expectedDigest)), {
     message: "restore は単独で指定してください",
+  })
+  // 下書きは保存でしか使わない。dryRun に付けると黙って捨てて Claude をもう 1 回呼ぶことになる
+  .refine((v) => !(v.aiDraft !== undefined && (v.dryRun || v.restore)), {
+    message: "aiDraft は保存のときだけ指定してください (dryRun / restore とは併用できません)",
   });
 
 function errorResponse(e: unknown) {

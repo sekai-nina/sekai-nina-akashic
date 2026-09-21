@@ -19,12 +19,17 @@ import type { DossierRenderInput } from "./templates/types";
 
 /** 1 つの出典 (ブログ 1 本 / トーク 1 件) の本文の上限文字数 */
 export const MAX_CHARS_PER_SOURCE = 12_000;
-/** 素材全体の上限文字数 (≈ 4 万トークン)。超えた出典は本文を切る */
+/**
+ * 素材全体の上限文字数。日本語は Claude ではおおむね 1 文字 1 トークンなので ≈ 8 万トークン
+ * (Opus 5 で $0.4 程度)。超えた出典は本文を切る
+ */
 export const MAX_CHARS_TOTAL = 80_000;
+/** 全体の上限に達しても、出典ごとに最低これだけは本文を残す (後ろの短いトークが丸ごと消えないように) */
+const MIN_CHARS_PER_SOURCE = 1_000;
 
 export interface MaterialsText {
   text: string;
-  /** 素材に入れた出典の数 */
+  /** 素材に入れた出典の数 (本文・抜粋・キャプションのどれかがあるもの) */
   included: number;
   /** 本文を切った出典の数 */
   truncated: number;
@@ -35,58 +40,85 @@ function truncate(text: string, limit: number): { text: string; cut: boolean } {
   return { text: `${text.slice(0, limit)}\n…（以下略。${text.length - limit} 字を省略）`, cut: true };
 }
 
+function quoteLines(excerpt: string): string {
+  return `> ${excerpt.replace(/\r\n?/g, "\n").split("\n").join("\n> ")}`;
+}
+
 function joinPeople(assets: ArticleAssetInput[]): string[] {
   const seen = new Set<string>();
   for (const a of assets) for (const p of a.people ?? []) seen.add(p);
   return [...seen];
 }
 
-function blogSection(b: BlogGroup, textAsset: ArticleAssetInput | undefined, budget: number) {
-  const lines: string[] = [];
-  lines.push(`### ^[${b.sourceNo}] ${b.title}${b.date ? `（${b.date}）` : ""}`);
-  if (b.url) lines.push(`URL: ${b.url}`);
-  const people = joinPeople(textAsset ? [textAsset, ...b.images] : b.images);
-  if (people.length > 0) lines.push(`登場人物: ${people.join("、")}`);
-  if (b.excerpts.length > 0) {
-    lines.push("", "人が選んだ重要箇所 (抜粋):");
-    for (const ex of b.excerpts) lines.push(`> ${ex.replace(/\r\n?/g, "\n").split("\n").join("\n> ")}`);
-  }
-  const captions = b.images.map((i) => i.caption?.trim()).filter((c): c is string => !!c);
-  if (captions.length > 0) {
-    lines.push("", "画像のキャプション:");
-    for (const c of captions) lines.push(`- ${c}`);
-  }
-  let cut = false;
-  const body = textAsset?.text?.trim();
-  if (body) {
-    const t = truncate(body.replace(/\r\n?/g, "\n"), Math.max(0, budget));
-    cut = t.cut;
-    lines.push("", "本文:", t.text);
-  } else {
-    lines.push("", "(本文なし。画像だけのブログ)");
-  }
-  return { text: lines.join("\n"), cut, used: lines.join("\n").length };
+interface Section {
+  text: string;
+  cut: boolean;
+  /** 本文・抜粋・キャプションのどれかがある (AI に読ませる価値がある) */
+  hasContent: boolean;
 }
 
-function talkSection(a: ArticleAssetInput, sourceNo: number | undefined, budget: number) {
-  const lines: string[] = [];
-  lines.push(`### ^[${sourceNo}] ${a.title}${a.canonicalDate ? `（${a.canonicalDate}）` : ""}`);
-  if (a.people && a.people.length > 0) lines.push(`登場人物: ${a.people.join("、")}`);
-  if (a.caption?.trim()) lines.push(`キャプション: ${a.caption.trim()}`);
-  if (a.excerpts.length > 0) {
+/** 見出し行のあとに、抜粋・キャプション・本文を並べる (ブログとトークで共通) */
+function section(
+  header: string[],
+  parts: { excerpts: string[]; captions: string[]; body: string | null; noBodyNote: string },
+  budget: number
+): Section {
+  const lines = [...header];
+  if (parts.excerpts.length > 0) {
     lines.push("", "人が選んだ重要箇所 (抜粋):");
-    for (const ex of a.excerpts) lines.push(`> ${ex.replace(/\r\n?/g, "\n").split("\n").join("\n> ")}`);
+    for (const ex of parts.excerpts) lines.push(quoteLines(ex));
+  }
+  if (parts.captions.length > 0) {
+    lines.push("", "画像のキャプション:");
+    for (const c of parts.captions) lines.push(`- ${c}`);
   }
   let cut = false;
-  const body = a.text?.trim();
+  const body = parts.body?.trim();
   if (body) {
-    const t = truncate(body.replace(/\r\n?/g, "\n"), Math.max(0, budget));
+    const t = truncate(body.replace(/\r\n?/g, "\n"), budget);
     cut = t.cut;
     lines.push("", "本文:", t.text);
   } else {
-    lines.push("", `(本文なし。${a.kind === "video" ? "動画" : "画像"}のトーク)`);
+    lines.push("", parts.noBodyNote);
   }
-  return { text: lines.join("\n"), cut, used: lines.join("\n").length };
+  return {
+    text: lines.join("\n"),
+    cut,
+    hasContent: !!body || parts.excerpts.length > 0 || parts.captions.length > 0,
+  };
+}
+
+function blogSection(b: BlogGroup, textAsset: ArticleAssetInput | undefined, budget: number): Section {
+  const header = [`### ^[${b.sourceNo}] ${b.title}${b.date ? `（${b.date}）` : ""}`];
+  if (b.url) header.push(`URL: ${b.url}`);
+  const people = joinPeople(textAsset ? [textAsset, ...b.images] : b.images);
+  if (people.length > 0) header.push(`登場人物: ${people.join("、")}`);
+  return section(
+    header,
+    {
+      excerpts: b.excerpts,
+      captions: b.images.map((i) => i.caption?.trim()).filter((c): c is string => !!c),
+      body: textAsset?.text ?? null,
+      noBodyNote: "(本文なし。画像だけのブログ)",
+    },
+    budget
+  );
+}
+
+function talkSection(a: ArticleAssetInput, sourceNo: number | undefined, budget: number): Section {
+  const header = [`### ^[${sourceNo}] ${a.title}${a.canonicalDate ? `（${a.canonicalDate}）` : ""}`];
+  if (a.people && a.people.length > 0) header.push(`登場人物: ${a.people.join("、")}`);
+  const caption = a.caption?.trim();
+  return section(
+    header,
+    {
+      excerpts: a.excerpts,
+      captions: caption ? [caption] : [],
+      body: a.text ?? null,
+      noBodyNote: `(本文なし。${a.kind === "video" ? "動画" : "画像"}のトーク)`,
+    },
+    budget
+  );
 }
 
 /**
@@ -98,26 +130,25 @@ export function buildMaterialsText(input: DossierRenderInput): MaterialsText {
   const { talkSourceNo } = numberSources(blogs, talks);
   const textAssetById = new Map(input.assets.filter((a) => a.kind === "text").map((a) => [a.id, a]));
 
-  const parts: string[] = [];
+  const parts: string[] = [`# ドシエ「${input.dossier.title}」の素材`, ""];
   let remaining = MAX_CHARS_TOTAL;
   let truncated = 0;
   let included = 0;
 
-  parts.push(`# ドシエ「${input.dossier.title}」の素材`, "");
+  const push = (sec: Section) => {
+    parts.push(sec.text, "");
+    // 本文以外 (見出し・抜粋・キャプション) も枠を使うが、出典ごとの最低枠は残す
+    remaining = Math.max(remaining - sec.text.length, 0);
+    if (sec.cut) truncated++;
+    if (sec.hasContent) included++;
+  };
+  const budget = () => Math.max(Math.min(MAX_CHARS_PER_SOURCE, remaining), MIN_CHARS_PER_SOURCE);
+
   for (const b of blogs) {
     const textAsset = b.ref ? textAssetById.get(b.ref) : undefined;
-    const sec = blogSection(b, textAsset, Math.min(MAX_CHARS_PER_SOURCE, remaining));
-    parts.push(sec.text, "");
-    remaining -= sec.used;
-    if (sec.cut) truncated++;
-    included++;
+    push(blogSection(b, textAsset, budget()));
   }
-  for (const a of talks) {
-    const sec = talkSection(a, talkSourceNo.get(a.id), Math.min(MAX_CHARS_PER_SOURCE, remaining));
-    parts.push(sec.text, "");
-    remaining -= sec.used;
-    if (sec.cut) truncated++;
-    included++;
-  }
+  for (const a of talks) push(talkSection(a, talkSourceNo.get(a.id), budget()));
+
   return { text: parts.join("\n").trimEnd() + "\n", included, truncated };
 }
