@@ -79,14 +79,62 @@ export async function postDiscord(content: string): Promise<void> {
  * (webhook は 1 本あたり 2 秒に 5 件までで、続けて送るとすぐ当たる)。
  */
 export async function postDiscordWebhook(url: string, content: string): Promise<void> {
-  const trimmed = content.length > CONTENT_MAX_CHARS ? `${content.slice(0, CONTENT_MAX_CHARS)}\n…` : content;
-  const send = () =>
+  const trimmed = trimContent(content);
+  await sendWithRetry(() =>
     fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content: trimmed, allowed_mentions: { parse: [] } }),
       signal: AbortSignal.timeout(10_000),
+    }),
+  );
+}
+
+export interface DiscordAttachment {
+  filename: string;
+  data: Buffer;
+  /** 必ず付ける。無いと Discord が動画をただのファイルとして出し、その場で再生できない */
+  contentType: string;
+}
+
+/**
+ * 本文 + 添付を 1 メッセージで送る (multipart/form-data)。添付の件数・サイズは呼び出し側が
+ * Discord の上限 (10 件・無料枠 8MiB) に収めておく。添付が空なら `postDiscordWebhook` と同じ。
+ */
+export async function postDiscordWebhookWithFiles(
+  url: string,
+  content: string,
+  files: DiscordAttachment[],
+): Promise<void> {
+  if (files.length === 0) return postDiscordWebhook(url, content);
+  const trimmed = trimContent(content);
+  const build = () => {
+    const form = new FormData();
+    form.append(
+      "payload_json",
+      JSON.stringify({
+        content: trimmed,
+        allowed_mentions: { parse: [] },
+        attachments: files.map((f, i) => ({ id: i, filename: f.filename })),
+      }),
+    );
+    files.forEach((f, i) => {
+      // Buffer をコピーせず view のまま Blob にする (10 × 8MiB を 2 重に持たない)。
+      // Node の Buffer は ArrayBufferLike を指すので、BlobPart に合わせて型だけ絞る
+      const view = new Uint8Array(f.data.buffer as ArrayBuffer, f.data.byteOffset, f.data.byteLength);
+      form.append(`files[${i}]`, new Blob([view], { type: f.contentType }), f.filename);
     });
+    return form;
+  };
+  // FormData は 1 回しか送れないので、再送のたびに組み直す (数十 MB でも一瞬)
+  await sendWithRetry(() => fetch(url, { method: "POST", body: build(), signal: AbortSignal.timeout(60_000) }));
+}
+
+function trimContent(content: string): string {
+  return content.length > CONTENT_MAX_CHARS ? `${content.slice(0, CONTENT_MAX_CHARS)}\n…` : content;
+}
+
+async function sendWithRetry(send: () => Promise<Response>): Promise<void> {
   let res = await send();
   if (res.status === 429) {
     const body = (await res.json().catch(() => ({}))) as { retry_after?: number };

@@ -4,6 +4,9 @@ import { revalidatePath } from "next/cache";
 import type { InstaWatchTier } from "@prisma/client";
 import { requireRole } from "@/lib/auth/require-role";
 import { setInstaAccount } from "@/lib/domain/insta-account";
+import { createStoryJob, tickStoryJobs } from "@/lib/domain/insta-jobs";
+import { DISPATCHER_NOT_CONFIGURED_MESSAGE } from "@/lib/insta/dispatch";
+import { InstaJobError } from "@/lib/insta/jobs";
 import {
   InstaTargetError,
   addInstaTarget,
@@ -95,6 +98,48 @@ export async function setInstaAccountAction(input: {
     return { ok: true, message: `${acc.username} を登録しました` };
   } catch (e) {
     if (e instanceof InstaTargetError) return { ok: false, error: e.message };
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * story ジョブを手で作る (#178)。URL でもハンドルでもよい。
+ * bot を経ずに iPad 側の動作を確かめる用。作れたら空いていれば即 Pushcut で送る。
+ */
+export async function createInstaJobAction(input: { url: string }): Promise<InstaActionState> {
+  const user = await requireRole(["admin"]);
+  try {
+    const res = await createStoryJob({ url: input.url }, { id: user.id, clearance: user.clearance });
+    revalidatePath("/admin/insta");
+    if (res.existing) {
+      return { ok: true, message: `${res.job.handle} のジョブは進行中です (${res.job.status})` };
+    }
+    if (res.dispatch == null) {
+      return { ok: true, message: `${res.job.handle} のジョブを積みました。前のジョブが終わったら送ります` };
+    }
+    return res.dispatch.ok
+      ? { ok: true, message: `${res.job.handle} のジョブを iPad に送りました` }
+      : { ok: false, error: `ジョブは作りましたが送れませんでした: ${res.dispatch.error}` };
+  } catch (e) {
+    if (e instanceof InstaTargetError || e instanceof InstaJobError) return { ok: false, error: e.message };
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** 取り残された pending の再送や失効の回収を手で起こす */
+export async function tickInstaJobsAction(): Promise<InstaActionState> {
+  await requireRole(["admin"]);
+  try {
+    const res = await tickStoryJobs();
+    revalidatePath("/admin/insta");
+    if (!res.dispatcherConfigured) return { ok: false, error: DISPATCHER_NOT_CONFIGURED_MESSAGE };
+    if (res.dispatch && !res.dispatch.ok) return { ok: false, error: `送信に失敗: ${res.dispatch.error}` };
+    const parts = [
+      res.expired.length ? `失効 ${res.expired.length} 件` : null,
+      res.dispatchedId ? "1 件を iPad に送りました" : "送るジョブはありません",
+    ].filter(Boolean);
+    return { ok: true, message: parts.join(" / ") };
+  } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 }
