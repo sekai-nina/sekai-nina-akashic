@@ -1461,7 +1461,7 @@ GET /api/v1/songs?q=ハニー&participation=member
       "artist": "日向坂46",
       "participation": "unknown",
       "note": "",
-      "firstRelease": {"id": "…", "title": "君はハニーデュー", "kind": "single", "releaseDate": "2024-05-08", "artist": "日向坂46"},
+      "firstRelease": {"id": "…", "title": "君はハニーデュー", "kind": "single", "releaseDate": "2024-05-08", "artist": "日向坂46", "trackNo": 1},
       "releaseCount": 2,
       "performanceCount": 3
     }
@@ -1469,8 +1469,8 @@ GET /api/v1/songs?q=ハニー&participation=member
 }
 ```
 
-- 並びは名寄せキー順（≒ 五十音・アルファベット順）
-- `firstRelease` は発売日が最も古い収録作品。未収録なら `null`。`kind` は `single` / `album`（Sony の種別。「Kind of love」は Sony ではアルバムだが 17th シングルなので `single` に補正している）
+- 並びは**初出の作品の新しい順 → その作品でのトラック順**。未収録の曲は末尾（題の順）。作品ごとに見出しを付けるならこの順のまま `firstRelease.id` でまとめればよい
+- `firstRelease` は発売日が最も古い収録作品。未収録なら `null`。`trackNo` はその作品でのトラック番号。`kind` は `single` / `album`（Sony の種別。「Kind of love」は Sony ではアルバムだが 17th シングルなので `single` に補正している）
 - `releaseCount` は収録作品数（アルバム再収録を含む）
 - 何枚目のシングルか（ordinal）は持たない
 

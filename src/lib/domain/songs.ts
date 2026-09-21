@@ -36,11 +36,15 @@ const releaseSelect = {
   kind: true,
   releaseDate: true,
   artist: true,
+  sonyCode: true,
 } satisfies Prisma.ReleaseSelect;
 
 /**
  * 一覧。初出の作品 (発売日が最も古い収録) と披露回数を付ける。
  * 披露回数は見える Live のぶんだけ (withClearance の中で数える)。
+ *
+ * 並びは **初出の作品の新しい順 → その作品でのトラック順** (画面は作品ごとに見出しを付ける)。
+ * 未収録の曲は末尾に題の順。REST も同じ順
  */
 export async function listSongs(user: ActingUser, opts: ListSongsOptions = {}) {
   const q = opts.q?.trim() ? normalizeSongTitle(opts.q) : "";
@@ -60,7 +64,7 @@ export async function listSongs(user: ActingUser, opts: ListSongsOptions = {}) {
         participation: true,
         note: true,
         tracks: {
-          select: { trackNo: true, release: { select: releaseSelect } },
+          select: { discNo: true, trackNo: true, release: { select: releaseSelect } },
           // 同じ日に 2 作品 (シングルとアルバム) に入ることがあっても初出が揺れないように品番でも並べる
           orderBy: [{ release: { releaseDate: "asc" } }, { release: { sonyCode: "asc" } }],
         },
@@ -68,7 +72,7 @@ export async function listSongs(user: ActingUser, opts: ListSongsOptions = {}) {
       },
     })
   );
-  return rows.map((s) => ({
+  const shaped = rows.map((s) => ({
     id: s.id,
     title: s.title,
     artist: s.artist,
@@ -76,9 +80,25 @@ export async function listSongs(user: ActingUser, opts: ListSongsOptions = {}) {
     note: s.note,
     /** 初出の作品 (無ければ null = 未収録) */
     firstRelease: s.tracks[0]?.release ?? null,
+    /** 初出の作品でのトラック番号 (画面の並び用) */
+    firstTrack: s.tracks[0] ? { discNo: s.tracks[0].discNo, trackNo: s.tracks[0].trackNo } : null,
     releaseCount: s.tracks.length,
     performanceCount: s._count.liveSongs,
   }));
+  shaped.sort((a, b) => {
+    if (!a.firstRelease || !b.firstRelease) {
+      if (a.firstRelease) return -1;
+      if (b.firstRelease) return 1;
+      return a.title.localeCompare(b.title, "ja");
+    }
+    return (
+      b.firstRelease.releaseDate.localeCompare(a.firstRelease.releaseDate) ||
+      a.firstRelease.sonyCode.localeCompare(b.firstRelease.sonyCode) ||
+      a.firstTrack!.discNo - b.firstTrack!.discNo ||
+      a.firstTrack!.trackNo - b.firstTrack!.trackNo
+    );
+  });
+  return shaped;
 }
 
 export type SongSummary = Awaited<ReturnType<typeof listSongs>>[number];

@@ -51,6 +51,7 @@ export function projectSong(s: SongSummary) {
           kind: s.firstRelease.kind,
           releaseDate: s.firstRelease.releaseDate,
           artist: s.firstRelease.artist,
+          trackNo: s.firstTrack?.trackNo ?? null,
         }
       : null,
     releaseCount: s.releaseCount,
