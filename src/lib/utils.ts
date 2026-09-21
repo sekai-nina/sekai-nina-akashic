@@ -4,6 +4,7 @@ import type { CandidateGroupKind } from "@/lib/meetgreet/candidates";
 import {
   TextType,
   type AnnouncementKind,
+  type ArticleTemplate,
   type ArticleType,
   type JobRunStatus,
   type LlmProvider,
@@ -175,6 +176,16 @@ export const ARTICLE_TYPE_LABELS: Record<ArticleType, string> = {
   quote: "言葉",
   column: "コラム",
   item: "物",
+};
+
+/** 記事テンプレート (#169)。ドシエから記事を組み立てる型 */
+export const ARTICLE_TEMPLATE_LABELS: Record<ArticleTemplate, string> = {
+  meetgreet: "ミーグリ",
+  live: "ライブ",
+  outing: "おでかけ",
+  quote_blog: "言葉（ブログの名言）",
+  quote_situational: "言葉（状況つき）",
+  attribute: "スナップ",
 };
 
 /** お知らせの種類。公開サイトの一覧で見出しの前に出る小さな文字 */

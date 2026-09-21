@@ -157,7 +157,7 @@ async function createInTransaction(
     // 既にあるものを使う場合は、見えること・まだ他の回 (ミーグリ / ライブ) に使われていないこと・
     // クリップのプールでないこと (#41) を確かめる
     try {
-      await assertContainersFree(tx, input);
+      await assertContainersFree(tx, input, "meetgreet");
     } catch (e) {
       if (e instanceof WorkflowInputError) throw new MeetGreetInputError(e.message);
       throw e;
@@ -174,6 +174,8 @@ async function createInTransaction(
             // 作成者以外も素材を足せるようにする (ドシエ既定の private では bot も触れない)
             viewMode: "clearance",
             editMode: "clearance",
+            // 記事テンプレートは器が決める (#170)
+            articleTemplate: "meetgreet",
           },
           select: { id: true },
         });

@@ -9,8 +9,9 @@
  * すべて呼び出し側の withSession の中 (`tx`) で動く前提 (ドシエは所有者判定が要る)。
  */
 
-import type { Prisma } from "@prisma/client";
+import type { ArticleTemplate, Prisma } from "@prisma/client";
 import { prisma, withSession, type TransactionClient } from "@/lib/db";
+import { ARTICLE_TEMPLATE_LABELS } from "@/lib/utils";
 import { canEditDossier } from "@/lib/auth/dossier-permissions";
 import type { CandidateAssetInput } from "@/lib/meetgreet/candidates";
 
@@ -38,12 +39,16 @@ export interface DossierBrief {
  * まだ使われていないこと・クリップのプールでないこと (#41: 全員共有のプールを 1 つの器に
  * 紐づけると他人のクリップが素材として流れる) を確かめる。
  *
+ * `template` を渡すと、ドシエの記事テンプレート (#170) が別の型に決まっていないことも確かめ、
+ * 未設定なら器の型を書き込む (器がテンプレートを決める。同じトランザクションで行う)。
+ *
  * 見えない器 (上位機密) に使われている場合はここでは分からず、`@unique` の違反で落ちる
  * (安全側。整合性は DB が守る)
  */
 export async function assertContainersFree(
   tx: TransactionClient,
-  input: { dossierId?: string; repoCollectionId?: string }
+  input: { dossierId?: string; repoCollectionId?: string },
+  template?: ArticleTemplate
 ): Promise<void> {
   if (input.dossierId) {
     const found = await tx.dossier.findUnique({
@@ -51,6 +56,7 @@ export async function assertContainersFree(
       select: {
         id: true,
         kind: true,
+        articleTemplate: true,
         meetGreet: { select: { id: true } },
         live: { select: { id: true } },
       },
@@ -59,6 +65,16 @@ export async function assertContainersFree(
     if (found.meetGreet) throw new WorkflowInputError("そのドシエは別のミーグリに使われています");
     if (found.live) throw new WorkflowInputError("そのドシエは別のライブに使われています");
     if (found.kind === "clips") throw new WorkflowInputError("クリップのプールは素材置き場に使えません");
+    if (template) {
+      if (found.articleTemplate && found.articleTemplate !== template) {
+        throw new WorkflowInputError(
+          `そのドシエは記事テンプレート「${ARTICLE_TEMPLATE_LABELS[found.articleTemplate]}」に決まっています`
+        );
+      }
+      if (!found.articleTemplate) {
+        await tx.dossier.update({ where: { id: found.id }, data: { articleTemplate: template } });
+      }
+    }
   }
   if (input.repoCollectionId) {
     const found = await tx.repoCollection.findUnique({

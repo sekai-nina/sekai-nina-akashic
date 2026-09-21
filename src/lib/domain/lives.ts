@@ -254,7 +254,7 @@ export async function createLive(user: ActingUser, input: CreateLiveInput): Prom
   const created = await withSession(user, async (tx) => {
     // 既にあるものを使う場合は、見えること・まだ他の器に使われていないこと・プールでないことを確かめる
     try {
-      await assertContainersFree(tx, input);
+      await assertContainersFree(tx, input, "live");
     } catch (e) {
       if (e instanceof WorkflowInputError) throw new LiveInputError(e.message);
       throw e;
@@ -290,6 +290,8 @@ export async function createLive(user: ActingUser, input: CreateLiveInput): Prom
             // 作成者以外も素材を足せるようにする (ドシエ既定の private では bot も触れない)
             viewMode: "clearance",
             editMode: "clearance",
+            // 記事テンプレートは器が決める (#170)
+            articleTemplate: "live",
           },
           select: { id: true },
         });

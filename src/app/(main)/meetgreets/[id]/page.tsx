@@ -14,10 +14,15 @@ import { MATERIAL_WINDOW_DAYS, REPORT_WINDOW_DAYS, TALK_SUGGEST_DAYS } from "@/l
 import { formatDate } from "@/lib/utils";
 import { MetaForm } from "./meta-form";
 import { MaterialsStep } from "@/components/materials-step";
-import { applyMaterialsAction } from "../actions";
+import { ArticleStep } from "@/components/article-step";
+import {
+  applyMaterialsAction,
+  previewArticleAction,
+  restoreExclusionsAction,
+  saveArticleAction,
+} from "../actions";
 import { ExcerptStep } from "./excerpt-step";
 import { ReportsStep } from "./reports-step";
-import { ArticleStep } from "./article-step";
 import { SketchStep } from "./sketch-step";
 
 interface Props {
@@ -212,7 +217,13 @@ export default async function MeetGreetDetailPage({ params, searchParams }: Prop
             記事を書いた後にドシエが変わっています。差分を見て追記してください。
           </p>
         )}
-        <ArticleStep meetGreetId={mg.id} hasArticle={!!mg.article} hasDossier={!!mg.dossier} />
+        <ArticleStep
+          hasArticle={!!mg.article}
+          hasDossier={!!mg.dossier}
+          onPreview={previewArticleAction.bind(null, mg.id)}
+          onSave={saveArticleAction.bind(null, mg.id)}
+          onRestore={restoreExclusionsAction.bind(null, mg.id)}
+        />
       </StepCard>
     </div>
   );
