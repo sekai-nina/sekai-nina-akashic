@@ -16,6 +16,7 @@ import {
   type ReleaseKind,
   type SongParticipation,
   type StatusLevel,
+  type TiktokVideoStatus,
 } from "@prisma/client";
 
 export function cn(...inputs: ClassValue[]) {
@@ -142,6 +143,14 @@ export const PLACE_KIND_LABELS: Record<PlaceKind, string> = {
   scenery: "寺社・公園・景色",
   venue: "会場・放送局",
   shop: "店・施設",
+};
+
+/** TikTok 台帳の動画の状態 (#179) */
+export const TIKTOK_VIDEO_STATUS_LABELS: Record<TiktokVideoStatus, string> = {
+  skipped_initial: "既知（未取得）",
+  pending: "取得待ち",
+  registered: "登録済み",
+  failed: "失敗",
 };
 
 /** ミーグリの形式。「ミーグリ」を後ろに付けて使う (記事・画面では略称のオンミ / リアミを使わない) */
