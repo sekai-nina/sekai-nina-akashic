@@ -371,6 +371,7 @@ model Dossier {
 
   /// 記事テンプレート (#169)。null は未設定で、`/dossiers/[id]/article` で選ぶ。
   /// MeetGreet / Live に紐づくドシエは作成時にそれぞれ `meetgreet` / `live` が入る
+  /// (既存行は 20260922010000 で埋めた)。**器が上位機密で見えないときもこれで器と分かる**
   articleTemplate ArticleTemplate?
   /// 記事に足さないと決めたもののキー (#134)。器 (MeetGreet / Live) を持たないドシエが
   /// 記事の器になるときに使う。形式は `MeetGreet.articleExclusions` と同じ
