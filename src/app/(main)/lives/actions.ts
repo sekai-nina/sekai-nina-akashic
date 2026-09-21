@@ -20,12 +20,12 @@ import { generateSketch, saveSketchCrops, selectSketch } from "@/lib/domain/live
 import { CreateLiveSchema, SetlistSchema, UpdateLiveSchema } from "@/lib/live/api";
 import {
   ApplyExcerptsSchema,
+  ExclusionKeysSchema,
   GenerateSketchSchema,
   MAX_MATERIALS_PER_APPLY,
   SketchCropsSchema,
 } from "@/lib/meetgreet/api";
 import type { ApplyExcerptInput } from "@/lib/meetgreet/types";
-import { ExclusionKeysSchema } from "@/lib/meetgreet/api";
 import { formatZodError } from "@/lib/zod-error";
 
 const requireMember = () => requireRole(["admin", "member"]);

@@ -22,6 +22,7 @@ import {
   joinBody,
   jpDate,
   numberSources,
+  QUOTES_HEADING,
   quotedBlogs,
   renderQuotesSection,
   renderRelatedMediaSection,
@@ -134,14 +135,15 @@ export function renderPerformancesBlock(input: {
   const headers = ["日付", "会場", ...(hasSongs ? ["追加曲"] : []), ...(hasCenter ? ["センター曲"] : []), ...(hasNote ? ["備考"] : [])];
   const lines = [`| ${headers.join(" | ")} |`, `| ${headers.map(() => "---").join(" | ")} |`];
   for (const p of performances) {
-    const date = p.label.trim() ? `${slashDate(p.date)} ${p.label.trim()}` : slashDate(p.date);
+    const date = p.label.trim() ? `${slashDate(p.date)} ${cell(p.label)}` : slashDate(p.date);
     const cells = [date, cell(p.venue)];
     if (hasSongs) cells.push(cell(p.songs.join(" / ")));
     if (hasCenter) cells.push(cell(p.centerSongs.join(" / ")));
     if (hasNote) cells.push(cell(p.note));
     lines.push(`| ${cells.join(" | ")} |`);
   }
-  if (commonSongs.length > 0) lines.push(`共通披露曲：${commonSongs.join(" / ")}`);
+  // 表の直後に置くと GFM が表の行として飲み込む (空行で表を閉じる)
+  if (commonSongs.length > 0) lines.push("", `共通披露曲：${commonSongs.join(" / ")}`);
   return lines;
 }
 
@@ -156,7 +158,7 @@ export function livePerformancesBlock(input: {
     lines: renderPerformancesBlock(input),
     section: {
       heading: LIVE_PERFORMANCES_HEADING,
-      before: [MEETGREET_APPEND_LAYOUT.quotesHeading!, LIVE_REPORTS_LAYOUT.heading, "## 関連メディア"],
+      before: [QUOTES_HEADING, LIVE_REPORTS_LAYOUT.heading, "## 関連メディア"],
     },
   };
 }

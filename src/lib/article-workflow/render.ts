@@ -296,10 +296,13 @@ export function quotedBlogs(blogs: BlogGroup[]): BlogGroup[] {
   return blogs.filter((b) => b.excerpts.length > 0 && !b.staff);
 }
 
+/** 本人の感想の章の見出し (フル生成と追記で同じものを見る) */
+export const QUOTES_HEADING = "## 本人の感想（ブログより）";
+
 /** `## 本人の感想（ブログより）` の章。引用が無ければ空 */
 export function renderQuotesSection(quoted: BlogGroup[]): string[] {
   if (quoted.length === 0) return [];
-  const body: string[] = ["## 本人の感想（ブログより）", ""];
+  const body: string[] = [QUOTES_HEADING, ""];
   for (const b of quoted) {
     for (const ex of b.excerpts) body.push(blockquote(ex), "");
     // 引用が複数あっても出典行はブログごとに 1 回だけ

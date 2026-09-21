@@ -2,7 +2,7 @@
  * ドシエから記事を組み立てて保存する、テンプレート共通の層 (#169 / #170)。
  *
  * ミーグリ記事の保存 (`meetgreet-article-save.ts`、#109) を「器 + テンプレート」で動く形にしたもの。
- * 器は 2 種類:
+ * 器は 3 種類:
  *
  * - **MeetGreet** (`ArticleTarget.kind = "meetgreet"`): 開催日などの構造化メタを持つ行。組み立ては
  *   `buildMeetGreetArticle`、記事の紐づけは `MeetGreet.articleId`、除外は `MeetGreet.articleExclusions`
@@ -28,7 +28,7 @@ import { EXCLUSION_KIND_LABELS, todayJst } from "@/lib/utils";
 import { canEditDossier } from "@/lib/auth/dossier-permissions";
 import { parseFrontmatterDate } from "@/lib/articles/frontmatter";
 import { jsonStringArray, MAX_ARTICLE_CLEARANCE } from "@/lib/meetgreet/config";
-import { planAppend, isPureAppend, appendDiff, type AppendLayout } from "@/lib/meetgreet/append";
+import { planAppend, isPureAppend, type AppendLayout } from "@/lib/meetgreet/append";
 import type { ArticleMode, ArticlePreview } from "@/lib/meetgreet/types";
 import type { RenderedArticle, RenderedSource } from "@/lib/article-workflow/render";
 import {
@@ -385,10 +385,10 @@ export async function previewArticle(
     existingSources,
     layout: resolved.layout,
   };
-  const base = planAppend({ ...planArgs, excluded: stored });
+  const base = planOrThrow(resolved, { ...planArgs, excluded: stored });
   const plan =
     extraExclude.length > 0
-      ? planAppend({ ...planArgs, excluded: [...stored, ...extraExclude] })
+      ? planOrThrow(resolved, { ...planArgs, excluded: [...stored, ...extraExclude] })
       : base;
   return {
     mode: "append",
@@ -398,7 +398,7 @@ export async function previewArticle(
     // 照合するので (= 外すつもりを渡せば照合をすり抜けられる、を塞ぐため)、
     // 重ねて見せているときも指紋は base のものを返す
     digest: bodyDigest(base.body),
-    addedLines: appendDiff(article.body, plan.body).added,
+    addedLines: plan.changedLines,
     newSources: plan.newSources,
     droppedByClearance: rendered.droppedByClearance,
     // 一覧は外すつもりのものも含めて出す (チェックを戻せるように)
@@ -409,6 +409,16 @@ export async function previewArticle(
     ai: null,
     aiDraft: null,
   };
+}
+
+/** 追記の計画。区間のマーカーが壊れている等のテンプレートの入力エラーは器のエラーに包む (REST は 400) */
+function planOrThrow(resolved: ResolvedTarget, args: Parameters<typeof planAppend>[0]) {
+  try {
+    return planAppend(args);
+  } catch (e) {
+    if (e instanceof TemplateInputError) throw resolved.inputError(e.message);
+    throw e;
+  }
 }
 
 /**
@@ -798,7 +808,7 @@ export async function saveArticle(
 
   // **指紋は「見せたときと同じ条件」で照合する。** 除外を足すと本文が変わるので、
   // 除外を当てる前の結果と突き合わせる (除外を渡せば照合をすり抜けられる、を防ぐ)
-  const shown = planAppend({ ...planArgs, excluded: stored });
+  const shown = planOrThrow(resolved, { ...planArgs, excluded: stored });
   if (mismatch(bodyDigest(shown.body))) {
     return {
       ok: false,
@@ -808,7 +818,7 @@ export async function saveArticle(
 
   const plan =
     exclude.length > 0
-      ? planAppend({ ...planArgs, excluded: [...new Set([...stored, ...exclude])] })
+      ? planOrThrow(resolved, { ...planArgs, excluded: [...new Set([...stored, ...exclude])] })
       : shown;
   if (plan.empty) {
     // 全部外したケース。本文は変えないが、外した事実は覚える
@@ -879,7 +889,7 @@ export async function saveArticle(
   // 中止したときに「外した」だけが残り、戻す手段が無くなる
   await resolved.addExclusions(exclude);
 
-  const added = appendDiff(article.body, plan.body).added.length;
+  const added = plan.changedLines.length;
   await logAudit({
     actorId: user.id,
     action: `${resolved.audit.prefix}.append`,

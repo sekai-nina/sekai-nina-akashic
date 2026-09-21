@@ -14,7 +14,8 @@ import {
   type ArticleParts,
   type RenderedSource,
 } from "./article";
-import type { MarkerBlock, RelatedMediaStyle } from "@/lib/article-workflow/render";
+import { QUOTES_HEADING, type MarkerBlock, type RelatedMediaStyle } from "@/lib/article-workflow/render";
+import { TemplateInputError } from "@/lib/article-workflow/errors";
 import type { ExclusionKind } from "./types";
 
 /**
@@ -39,7 +40,7 @@ export interface AppendLayout {
 }
 
 export const MEETGREET_APPEND_LAYOUT: AppendLayout = {
-  quotesHeading: "## 本人の感想（ブログより）",
+  quotesHeading: QUOTES_HEADING,
   quoteAttribution: true,
   reports: MEETGREET_REPORTS_LAYOUT,
 };
@@ -178,6 +179,11 @@ export interface AppendPlan {
   additions: AppendItem[];
   /** 毎回作り直す区間の中身が変わった (公演や曲を直した) */
   blocksChanged: boolean;
+  /**
+   * 画面で色を付ける行 (`body` の 0 始まりの位置): 足した行 + 差し替えた区間の中身。
+   * `appendDiff(existingBody, body)` は区間の中で行が変わる / 減ると以降を全部「増えた」にしてしまうので使わない
+   */
+  changedLines: number[];
   /** 何も増えなかった (区間の変化も無い) */
   empty: boolean;
 }
@@ -465,15 +471,31 @@ export function planAppend(input: {
   }
 
   const total = added.quotes + added.reports + added.talks + added.blogImages + added.tiktoks;
+  const body = toBody(sections);
   return {
-    body: toBody(sections),
+    body,
     baseBody: existingBody,
     newSources,
     added,
     additions,
     blocksChanged: replaced.changed,
+    changedLines: changedLineIndices(existingBody, body, replaced.changed ? (parts.blocks ?? []) : []),
     empty: total === 0 && newSources.length === 0 && !replaced.changed,
   };
+}
+
+/** 足した行 (差し替え後の本文との差分) と、変わった区間の中身の行 */
+function changedLineIndices(baseBody: string, body: string, changedBlocks: MarkerBlock[]): number[] {
+  const out = new Set(appendDiff(baseBody, body).added);
+  if (changedBlocks.length > 0) {
+    const lines = body.split("\n");
+    for (const block of changedBlocks) {
+      const start = lines.findIndex((l) => l.trim() === block.start);
+      const end = start >= 0 ? lines.findIndex((l, i) => i > start && l.trim() === block.end) : -1;
+      if (start >= 0 && end > start) for (let i = start + 1; i < end; i++) out.add(i);
+    }
+  }
+  return [...out].sort((a, b) => a - b);
 }
 
 /**
@@ -495,10 +517,23 @@ function replaceBlocks(existingBody: string, blocks: MarkerBlock[]): { body: str
       lines = [...lines.slice(0, start + 1), ...block.lines, ...lines.slice(end)];
       continue;
     }
-    // 区間が無い (マーカーを消された / 旧い記事): 章の末尾にマーカーごと置く
+    // **開始だけ残っている区間は止める。** 末尾に区間をもう 1 つ足すと、次の追記で「古い開始 〜 新しい終了」が
+    // 区間と見なされ、間に人が書いた文章ごと差し替えてしまう
+    if (start >= 0) {
+      throw new TemplateInputError(
+        `${block.start} はあるのに ${block.end} が見つかりません。記事の編集画面で終了のマーカーを戻すか、開始のマーカーも消してください`
+      );
+    }
+    // 区間が無い (両方のマーカーを消された / 旧い記事): 章の末尾にマーカーごと置く。
+    // 形はフル生成と同じ (前の行と空行で区切り、区間の後ろに空行 1 つ)
     const sections = parseSections(lines.join("\n"));
     const sec = ensureSection(sections, block.section.heading, block.section.before);
-    sec.lines.splice(appendIndex(sec.lines), 0, block.start, ...block.lines, block.end, "");
+    const at = appendIndex(sec.lines);
+    const fresh = at === 0;
+    const gap = !fresh && sec.lines[at - 1].trim() !== "" ? [""] : [];
+    const after = sec.lines[at]?.trim() === "" ? [] : [""];
+    if (fresh) sec.lines = ["", block.start, ...block.lines, block.end, ""];
+    else sec.lines.splice(at, 0, ...gap, block.start, ...block.lines, block.end, ...after);
     lines = toBody(sections).split("\n");
     changed = true;
   }

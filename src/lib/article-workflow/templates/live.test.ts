@@ -84,6 +84,7 @@ describe("renderPerformancesBlock", () => {
       "| 2025/9/20 | セキスイハイムスーパーアリーナ（宮城） |  |  |  |",
       "| 2025/9/21 | セキスイハイムスーパーアリーナ（宮城） | JOYFUL LOVE |  | アンコールで追加 |",
       "| 2025/11/21 夜公演 | 横浜アリーナ |  | My fans |  |",
+      "",
       "共通披露曲：キツネ / NO WAR in the future 2020",
     ]);
     expect(renderPerformancesBlock({ performances: [perf({ date: "2026-04-04", venue: "横浜スタジアム" })], commonSongs: [] })).toEqual([
@@ -94,9 +95,9 @@ describe("renderPerformancesBlock", () => {
     expect(renderPerformancesBlock({ performances: [], commonSongs: [] })).toEqual(["（公演は未設定）"]);
   });
 
-  it("セルの | と改行は潰す", () => {
-    const lines = renderPerformancesBlock({ performances: [perf({ date: "2026-04-04", venue: "A|B", note: "x\ny" })], commonSongs: [] });
-    expect(lines[2]).toBe("| 2026/4/4 | A／B | x y |");
+  it("セルの | と改行は潰す (label も)", () => {
+    const lines = renderPerformancesBlock({ performances: [perf({ date: "2026-04-04", venue: "A|B", label: "昼|夜", note: "x\ny" })], commonSongs: [] });
+    expect(lines[2]).toBe("| 2026/4/4 昼／夜 | A／B | x y |");
   });
 });
 
@@ -119,6 +120,7 @@ describe("renderLiveArticle", () => {
         "| 2025/9/20 | セキスイハイムスーパーアリーナ（宮城） |  |  |  |",
         "| 2025/9/21 | セキスイハイムスーパーアリーナ（宮城） | JOYFUL LOVE |  | アンコールで追加 |",
         "| 2025/11/21 夜公演 | 横浜アリーナ |  | My fans |  |",
+        "",
         "共通披露曲：キツネ / NO WAR in the future 2020",
         LIVE_PERFORMANCES_END,
         "",
@@ -197,6 +199,34 @@ describe("ライブ記事の追記 (公演の表は毎回差し替え)", () => {
     );
   });
 
+  it("行を直しても、色を付けるのは区間の中身と足した行だけ (以降の全行を「増えた」にしない)", () => {
+    const before = renderLiveArticle(input());
+    const after = renderLiveArticle(input({ performances: [{ ...PERFS[0], venue: "直した会場" }, PERFS[1], PERFS[2]] }));
+    const p = planAppend({
+      existingBody: before.body,
+      parts: after.parts,
+      sources: after.sources,
+      existingSources: [
+        { sourceNo: 1, assetId: "blog-text", url: BLOG_URL },
+        { sourceNo: 2, assetId: "talk-1", url: null },
+      ],
+      layout: LIVE_TEMPLATE.appendLayout,
+    });
+    const lines = p.body.split("\n");
+    const start = lines.indexOf(LIVE_PERFORMANCES_START);
+    const end = lines.indexOf(LIVE_PERFORMANCES_END);
+    expect(p.changedLines).toEqual(Array.from({ length: end - start - 1 }, (_, i) => start + 1 + i));
+    expect(lines[start + 3]).toContain("直した会場");
+  });
+
+  it("開始のマーカーだけ残っていれば止める (次の追記で間の文章を巻き込まないため)", () => {
+    const r = renderLiveArticle(input());
+    const broken = r.body.replace(`${LIVE_PERFORMANCES_END}\n`, "手書きの補足。\n");
+    expect(() =>
+      planAppend({ existingBody: broken, parts: r.parts, sources: r.sources, existingSources: [], layout: LIVE_TEMPLATE.appendLayout })
+    ).toThrow(/終了のマーカー/);
+  });
+
   it("何も変わっていなければ empty", () => {
     const r = renderLiveArticle(input());
     const p = planAppend({
@@ -230,7 +260,8 @@ describe("ライブ記事の追記 (公演の表は毎回差し替え)", () => {
     const repAt = p.body.indexOf("## ファンによるライブレポ");
     expect(perfAt).toBeGreaterThan(0);
     expect(perfAt).toBeLessThan(repAt);
-    expect(p.body).toContain(`${LIVE_PERFORMANCES_START}\n| 日付 |`);
+    expect(p.body).toContain(`## 公演\n\n${LIVE_PERFORMANCES_START}\n| 日付 |`);
+    expect(p.body).toContain(`${LIVE_PERFORMANCES_END}\n\n## 本人の感想（ブログより）`);
     expect(p.body).toContain("![](https://x.com/bbb/status/222)");
     expect(isPureAppend(p.baseBody, p.body)).toBe(true);
   });
