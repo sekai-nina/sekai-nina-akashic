@@ -153,6 +153,13 @@ RLS があるので読み取り時は不要ですが、**書き込み時のク�
 `confidential` / `restricted` のアセットは候補にも出さず、ID を直接指定しても弾きます
 （`classificationFilter(MAX_EXTERNAL_AI_CLEARANCE)` を、抜粋・スケッチ双方のクエリに入れている）。
 
+記事の組み立ては器（`MeetGreet` / `Live`）を持たないドシエからもできます（#169 / #170、`Dossier.articleTemplate`）。
+入口は `src/lib/domain/article-generate.ts` の `previewArticle` / `saveArticle` の 1 つで、上の線引き
+（`MAX_ARTICLE_CLEARANCE`、`applyArticleSource` 経由の出典、`dirty` の規約）は器に依らず同じです。
+ドシエが器のときは **保存にドシエの編集権限**（`canEditDossier`）が要り、記事は `Article.dossierId` で紐づきます。
+テンプレートの実装状況は `src/lib/article-workflow/templates/index.ts`（登録簿）が正で、
+未実装のものは「まだ使えません」で止まります。
+
 RLS は「その人が読めるか」しか見ないので、**読める人が外に出せてしまうのを止めるのはアプリ層**です。
 MCP の `akashic_apply_article_source` が公開判断を `internal` 以下に限っているのと同じ考え方で、
 機械（LLM）に上位機密を触らせないための線引きです。上位機密のものを外部 AI に渡したくなったら、

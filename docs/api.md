@@ -93,6 +93,8 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 | POST | `/meetgreets/:id/sketch/crops` | write | 参照写真の切り抜き枠を保存 |
 | POST | `/meetgreets/:id/sketch/select` | write | 候補の 1 枚を確定 |
 | POST | `/meetgreets/:id/article` | write | 記事を生成（既存があれば増えた分だけ追記） |
+| GET | `/dossiers/:id/article` | read | ドシエの記事テンプレートと紐づく記事 |
+| POST | `/dossiers/:id/article` | write | 器を持たないドシエから記事を生成（テンプレート指定つき） |
 | GET | `/lives` | read | ライブ（記事ワークフロー）一覧と進み具合 |
 | POST | `/lives` | write | ライブ作成（ドシエと X レポ収集を自動作成し、公演と曲を入れ、素材候補を返す） |
 | GET | `/lives/:id` | read | ライブ詳細 + 素材候補 |
@@ -1037,6 +1039,51 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 
 - **`GET /dossiers` にはクリップのプール（`kind = clips` のドシエ、#41）は出ない。** 記事未定の抜粋の置き場で、画面の `/clips` 専用。`GET /dossiers/:id` は id を直接指定すれば返す（RLS 内なので可視性は変わらない）
 - `POST /dossiers/:id/external-image` はプールには使えない（400）
+
+### GET /dossiers/:id/article
+
+ドシエの記事テンプレート（#169）と、このドシエを素材にした記事を返す。`POST` で何を送ればよいかを知るためのもの。
+
+```json
+{
+  "dossierId": "…",
+  "container": null,
+  "template": "quote_blog",
+  "templateSupported": true,
+  "suggestedTemplate": null,
+  "selectableTemplates": ["quote_blog"],
+  "articles": [{"id": "…", "shortId": "HtP8cV6", "title": "ブログ「だいすき！」", "type": "quote", "draft": false}]
+}
+```
+
+- `container` は `meetgreet` / `live` / `null`。**器に使われているドシエは `/meetgreets/:id/article` から作る**（`POST` は 400）
+- `template` は `Dossier.articleTemplate`（`meetgreet` / `live` / `outing` / `quote_blog` / `quote_situational` / `attribute`、未設定は `null`）。`templateSupported` が `false` なら、決まってはいるがまだ組み立てに対応していない
+- `suggestedTemplate` は紐づく記事の型から推した既定値（推せなければ `null`）
+- `selectableTemplates` は器を持たないドシエが `POST` の `template` に指定できるもの（実装済みのものだけ。現在は `quote_blog`）
+
+### POST /dossiers/:id/article
+
+器（MeetGreet / Live）を持たないドシエから記事を生成する。本体は `POST /meetgreets/:id/article` と同じ（`dryRun` / `expectedDigest` / `exclude` / `restore` の意味・制約・レスポンスも同じ）で、次の 2 つが足される。
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `template` | string | 未設定なら必須 | 記事テンプレート。`selectableTemplates` のいずれか。未設定のドシエに決める（監査ログ `dossier.template.set`）。**記事を作った後は別の型に変えられない**（400）。既に同じ値ならそのまま |
+| `articleId` | string | 記事が 2 本以上のとき必須 | 追記する記事。`GET` の `articles[].id`。1 本ならそれに追記、0 本なら新規作成 |
+
+- テンプレートが未設定のまま送ると 400（`template` で決めてから）
+- クリップのプール（`kind = clips`）は 400。器に使われているドシエも 400
+- **保存はドシエの編集権限が要る**（`editMode` と所有者。`dryRun` は見えれば可）。無ければ 403
+- 作った記事は `Article.dossierId` でドシエに紐づく（`GET /articles/:shortId` の `dossierId`）
+- 「今後足さない」は `Dossier.articleExclusions` に覚える（形式は MeetGreet と同じ）
+- 本文に載る機密レベルの上限（`internal`）、出典の作り方、`dirty` の扱いはミーグリと同じ
+
+テンプレートごとの形:
+
+| template | 記事の型 | 本文 | 備考 |
+|---|---|---|---|
+| `quote_blog` | `quote` | 「坂井新奈ブログでの名言を紹介する。」+ ドシエの抜粋を `>` の引用ブロックで併記 | 本人ブログ **1 本**の抜粋だけを使う（抜粋のあるブログが 2 本以上なら 400、ひなたぼっこ日記は数えない）。タイトルは `坂井新奈ブログ「X」` → `ブログ「X」`。`date` / 関連メディアは持たない。追記は増えた抜粋を末尾に足す |
+
+（`attribute` / `outing` / `quote_situational` は #171 / #172、`live` は #151）
 
 ## ミーグリ記事ワークフロー (MeetGreets)
 
