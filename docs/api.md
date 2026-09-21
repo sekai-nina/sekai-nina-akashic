@@ -1056,7 +1056,7 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
   "template": "quote_blog",
   "templateSupported": true,
   "suggestedTemplate": "quote_blog",
-  "selectableTemplates": ["quote_blog"],
+  "selectableTemplates": ["quote_blog", "attribute"],
   "articles": [{"id": "…", "shortId": "HtP8cV6", "title": "ブログ「だいすき！」", "type": "quote", "draft": false}]
 }
 ```
@@ -1074,7 +1074,7 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 |---|---|---|---|
 | `template` | string | 未設定なら必須 | 記事テンプレート。`selectableTemplates` のいずれか。未設定のドシエに決める（監査ログ `dossier.template.set`）。**記事を作った後は別の型に変えられない**（400）。既に同じ値ならそのまま。**永続化されるのは保存のときだけ**で、`dryRun` / `restore` と併せたときはその要求の間だけ当てる（`dryRun` は書き込まない、の約束を守る） |
 | `articleId` | string | 記事が 2 本以上のとき必須 | 追記する記事。`GET` の `articles[].id`。1 本ならそれに追記、0 本なら新規作成 |
-| `aiDraft` | object \| null | | **本文を AI が書くテンプレート**（`attribute`）の新規作成で、`dryRun` が返した `aiDraft` をそのまま渡す（`{ body, tags, title, date, dateDisplay }`）。保存で生成し直すと別の文になり `expectedDigest` が合わないため。`null` か省略なら AI を使わず骨組み（出典だけ採番、本文はプレースホルダ）で作る |
+| `aiDraft` | object \| null | | **本文を AI が書くテンプレート**（`attribute`）の新規作成で、`dryRun` が返した `aiDraft` をそのまま渡す（`{ body, tags, title, date, dateDisplay }`。`body` ≤ 20,000 字、`tags` ≤ 10）。保存で生成し直すと別の文になり `expectedDigest` が合わないため。`null` か省略なら AI を使わず骨組み（出典だけ採番、本文はプレースホルダ）で作る。`dryRun` / `restore` とは併用できない（400） |
 
 - テンプレートが未設定のまま送ると 400（`template` で決めてから）
 - クリップのプール（`kind = clips`）は 400。器に使われているドシエも 400
@@ -1082,7 +1082,9 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 - 作った記事は `Article.dossierId` でドシエに紐づく（`GET /dossiers/:id/article` の `articles[]` で辿れる）
 - 「今後足さない」は `Dossier.articleExclusions` に覚える（形式は MeetGreet と同じ）。**ドシエ単位で 1 つ**なので、同じドシエから記事を 2 本作っている場合は両方に効く
 - 本文に載る機密レベルの上限（`internal`）、出典の作り方、`dirty` の扱いはミーグリと同じ
-- **本文を AI が書くテンプレートの `dryRun` は Claude を 1 回呼ぶ**（数十秒・数十円。`/costs` に `akashic.article_body` で積まれる）。応答に `ai`（`{ status: "generated" | "given" | "unavailable", model, reason, included, truncated, usage, costUsd }`）と `aiDraft` が付く。`ANTHROPIC_API_KEY` が無い・Claude が失敗したときは `status: "unavailable"` で本文がプレースホルダの骨組みになる（保存はできる）。追記では AI を呼ばない（地の文は人のもの）
+- **本文を AI が書くテンプレートの `dryRun` は Claude を 1 回呼ぶ**（数十秒・数十円。`/costs` に `akashic.article_body` で積まれ、監査ログ `dossier.article.ai` が残る。`dryRun` で書き込むのはこの 2 つだけ）。**ドシエの編集権限が要る**（見えるだけの人に費用を使わせない。403）。`dryRun` の応答は常に `ai` と `aiDraft` を持ち、AI を使わないテンプレート（`quote_blog` / ミーグリ）では両方 `null`。`ai` は `{ status: "generated" | "unavailable", model, reason, included, truncated, usage: { inputTokens, cachedInputTokens, outputTokens } | null, costUsd }`。`ANTHROPIC_API_KEY` が無い・Claude が失敗したときは `status: "unavailable"` で本文がプレースホルダの骨組みになる（保存はできる）。追記では AI を呼ばない（地の文は人のもの）
+- **新規作成の `expectedDigest` は本文 + 出典で取る**（AI の本文は素材と独立なので、本文だけだと `dryRun` のあとで素材が増減して脚注の宛先がずれても気づけない）。`dryRun` の `digest` をそのまま渡せばよい
+- `aiDraft.body` の `^[n]` は出典に無い番号（AI が作った / 古い下書き）を落として保存する。宛先の無い脚注を公開リポジトリに出さないため
 - AI が書いた記事は **`draft: true` で保存される。** 記事の編集画面で読んで直し、下書きを外してから push する
 
 テンプレートごとの形:
@@ -1090,7 +1092,7 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 | template | 記事の型 | 本文 | 備考 |
 |---|---|---|---|
 | `quote_blog` | `quote` | 「坂井新奈ブログでの名言を紹介する。」+ ドシエの抜粋を `>` の引用ブロックで併記 | 本人ブログ **1 本**の抜粋だけを使う（抜粋のあるブログが 2 本以上なら 400、ひなたぼっこ日記は数えない）。タイトルは `坂井新奈ブログ「X」` → `ブログ「X」`。`date` / 関連メディアは持たない。追記は増えた抜粋を末尾に足す |
-| `attribute` | `attribute` | **AI（Claude）が書く**: リード 1 文 + 事実の箇条書き、各事実に `^[n]`（出典番号は素材と同じ採番: ブログ → トーク） | タイトル = ドシエのタイトル。`date` 無し。tags は既存タグから AI が選ぶ（他メンバー名可）。`[[…]]` は既存記事のタイトルにだけ張る。**ドシエに画像しか入っていないブログは、同じ URL の本文アセットを素材に足して出典の宛先にする**（人はブログを読んで書くため。RLS と機密の上限は同じに効く）。`draft: true` で保存。追記は本文に足すものが無い（新しい素材を反映するには記事の編集画面で手で書く。作り直しは後続） |
+| `attribute` | `attribute` | **AI（Claude）が書く**: リード 1 文 + 事実の箇条書き、各事実に `^[n]`（出典番号は素材と同じ採番: ブログ → トーク） | タイトル = ドシエのタイトル。`date` 無し。tags は既存タグから選ぶよう AI に指示する（保証はしない。他メンバー名可）。`[[…]]` は公開済み記事のタイトルにだけ張るよう指示する。**ドシエに画像しか入っていないブログは、同じ URL の本文アセットを素材に足して出典の宛先にする**（人はブログを読んで書くため。RLS と機密の上限は同じに効く）。`draft: true` で保存。追記は本文に足すものが無い（新しい素材を反映するには記事の編集画面で手で書く。作り直しは後続） |
 
 （`outing` / `quote_situational` は #172、`live` は #151）
 
