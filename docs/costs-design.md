@@ -8,6 +8,7 @@
 |---|---|---|---|
 | akashic `src/lib/domain/testimonials.ts` | OpenAI `gpt-4o-mini` | 口コミ抽出 | `akashic.testimonials` |
 | akashic `src/lib/meetgreet/sketch.ts` | OpenAI `gpt-image-1` | ミーグリのスケッチ生成 | `akashic.meetgreet_sketch` |
+| akashic `src/lib/article-workflow/llm.ts` | Anthropic `claude-opus-5` | 記事本文の生成（スナップ等、#171） | `akashic.article_body` |
 | bot `blog_watch/discovery.py` | OpenAI `gpt-5.4-mini` | 今日の発見の抽出 | `bot.discovery` |
 | bot `ocr/ai_provider.py` | OpenAI `gpt-5.2` | 画像 OCR | `bot.ocr` |
 | bot `github_sync/ai/openai_impl.py` | OpenAI `gpt-4o` | メッセージ解析 | `bot.github_sync` |

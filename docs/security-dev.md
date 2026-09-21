@@ -142,12 +142,16 @@ RLS があるので読み取り時は不要ですが、**書き込み時のク�
 ミーグリとライブ（#150 で同じ仕組みを共用）の 2 つの機能は、**アセットの中身そのものを OpenAI に送ります**。
 処理本体は `src/lib/domain/sketch.ts` / `src/lib/domain/excerpts.ts` で、器（`MeetGreet` / `Live`）ごとの書き込み先だけを差し替えています。以下「ミーグリ」と書いてある縛りはすべてライブにも同じに効きます。
 
-| 機能 | 送るもの |
-|---|---|
-| 抜粋の提案（`src/lib/meetgreet/excerpt.ts`） | ドシエに入っている本人ブログの**本文全文** |
-| スケッチ生成（`src/lib/meetgreet/sketch.ts`） | ドシエで選んだ**画像**（Drive の原本を 1280px に縮小したもの）+ 基準スケッチ |
+| 機能 | 送るもの | 送り先 |
+|---|---|---|
+| 抜粋の提案（`src/lib/meetgreet/excerpt.ts`） | ドシエに入っている本人ブログの**本文全文** | OpenAI |
+| スケッチ生成（`src/lib/meetgreet/sketch.ts`） | ドシエで選んだ**画像**（Drive の原本を 1280px に縮小したもの）+ 基準スケッチ | OpenAI |
+| 記事本文の生成（`src/lib/article-workflow/llm.ts`、#171。器を持たないドシエのスナップなど） | ドシエのアイテムの**本文全文**（ブログ / トーク / 番組の文字起こし・説明）・抜粋・メディアのキャプション・人物エンティティ名・ドシエのタイトル。**画像しか入っていないブログは同じ URL の本文アセットも**（RLS 下で引くので見えない分は入らない）。加えて既存記事の**タイトル一覧**と**タグ一覧**（どちらも公開済みの情報） | Anthropic |
 
 **送ってよいのは `internal` 以下だけです** → `src/lib/meetgreet/config.ts` の `MAX_EXTERNAL_AI_CLEARANCE`。
+記事本文の生成は `shapeDossierMaterials` が本文 (`text`) を付けるときにこの上限で見ており（`dossier-materials.ts`）、
+上限を超えるアセットは記事にも載らない（`MAX_ARTICLE_CLEARANCE`）ので素材からも落ちます。
+ドシエ自体が `internal` を超える場合は入口で止まります。
 
 同じ理由で、**生成する記事の本文に載せてよいのも `internal` 以下だけ**です → `MAX_ARTICLE_CLEARANCE`。
 `Article` は非保護テーブルで、本文（引用・トーク名・画像名）は push でそのまま公開リポジトリに載ります。
