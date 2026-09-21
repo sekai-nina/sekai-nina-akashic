@@ -31,7 +31,8 @@
     "cli:import-articles": "tsx src/cli/import-articles.ts",
     "cli:verify-pgroonga": "tsx src/cli/verify-pgroonga.ts",
     "cli:verify-article-push": "tsx src/cli/verify-article-push.ts",
-    "cli:backfill-article-dossiers": "tsx src/cli/backfill-article-dossiers.ts"
+    "cli:backfill-article-dossiers": "tsx src/cli/backfill-article-dossiers.ts",
+    "cli:import-songs": "tsx src/cli/import-songs.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
