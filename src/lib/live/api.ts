@@ -7,12 +7,15 @@ import { z } from "zod";
 import { isValidDateString } from "@/lib/utils";
 import { getR2PublicUrl } from "@/lib/r2";
 import type { LiveDetail, LiveSummary } from "@/lib/domain/lives";
+import { jsonStringArray, MAX_EXTRA_SKETCH_PROMPT } from "@/lib/meetgreet/config";
 import {
   MAX_LIVE_NAME,
   MAX_LIVE_NOTE,
   MAX_PERFORMANCE_LABEL,
   MAX_PERFORMANCE_NOTE,
   MAX_PERFORMANCES,
+  MAX_REPORT_TAG_LENGTH,
+  MAX_REPORT_TAGS,
   MAX_SONG_TITLE,
   MAX_SONGS_PER_LIST,
   MAX_VENUE,
@@ -59,6 +62,9 @@ export const UpdateLiveSchema = z
   .object({
     name: z.string().trim().min(1).max(MAX_LIVE_NAME).optional(),
     note: z.string().max(MAX_LIVE_NOTE).optional(),
+    /** X レポ収集のハッシュタグ (#150)。`#` は付けても付けなくてもよい */
+    reportTags: z.array(z.string().max(MAX_REPORT_TAG_LENGTH)).max(MAX_REPORT_TAGS).optional(),
+    extraSketchPrompt: z.string().max(MAX_EXTRA_SKETCH_PROMPT).optional(),
   })
   .strict()
   .refine((v) => Object.values(v).some((x) => x !== undefined), {
@@ -94,6 +100,8 @@ export function projectLive(live: LiveSummary | LiveDetail) {
         }
       : null,
     dossierId: live.dossierId,
+    /** X レポ収集のハッシュタグ (坂井新奈 AND 各タグ、タグ間 OR) */
+    reportTags: jsonStringArray(live.reportTags),
     repoCollection: live.repoCollection
       ? {
           id: live.repoCollection.id,

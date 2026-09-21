@@ -4,19 +4,41 @@ import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getLive, listMaterialCandidates, livePeriodLabel } from "@/lib/domain/lives";
 import { listSongKeys } from "@/lib/domain/songs";
-import { MATERIAL_WINDOW_DAYS, TALK_SUGGEST_DAYS } from "@/lib/meetgreet/config";
+import { listMeetGreetKeeps } from "@/lib/domain/meetgreet-reports";
+import { listSketchSources } from "@/lib/domain/live-sketch";
+import { getSketchSetting } from "@/lib/domain/sketch-setting";
+import { jsonStringArray, MATERIAL_WINDOW_DAYS, REPORT_WINDOW_DAYS, TALK_SUGGEST_DAYS } from "@/lib/meetgreet/config";
+import { cropsFromJson } from "@/lib/meetgreet/crop";
+import { refsFromJson } from "@/lib/meetgreet/sketch-refs";
+import { getR2PublicUrl } from "@/lib/r2";
 import { formatDate } from "@/lib/utils";
 import { MaterialsStep } from "@/components/materials-step";
-import { applyMaterialsAction } from "../actions";
+import { ExcerptStep } from "@/components/workflow/excerpt-step";
+import { ReportsStep } from "@/components/workflow/reports-step";
+import { SketchStep } from "@/components/workflow/sketch-step";
+import {
+  applyExcerptsAction,
+  applyMaterialsAction,
+  generateSketchAction,
+  proposeExcerptsAction,
+  refetchReportsAction,
+  saveExtraSketchPromptAction,
+  saveSketchCropsAction,
+  selectSketchAction,
+} from "../actions";
 import { MetaForm } from "./meta-form";
+import { ReportTagsForm } from "./report-tags-form";
 import { SetlistForm } from "./setlist-form";
 
 interface Props {
   params: Promise<{ id: string }>;
 }
 
+/** X レポの収集は最大 90 秒ほどかかる (画像を 1 枚ずつ R2 に載せるため) */
+export const maxDuration = 300;
+
 /**
- * ライブ 1 つ分の進行画面。公演 → 素材 → (レポ → スケッチ → 記事 は後続 PR) を縦に並べる。
+ * ライブ 1 つ分の進行画面。公演 → 素材 → レポ → スケッチ → (記事 は #151) を縦に並べる。
  * ドシエ / /repo / 記事の中身はそれぞれの画面で扱い、ここからはリンクする。
  */
 export default async function LiveDetailPage({ params }: Props) {
@@ -27,7 +49,17 @@ export default async function LiveDetailPage({ params }: Props) {
   const live = await getLive(session.user, id);
   if (!live) notFound();
 
-  const [candidates, songKeys] = await Promise.all([listMaterialCandidates(session.user, live), listSongKeys()]);
+  const [candidates, songKeys, keeps, sketchSources, sketchSetting] = await Promise.all([
+    listMaterialCandidates(session.user, live),
+    listSongKeys(),
+    listMeetGreetKeeps(session.user, live, live.reports?.keep ?? 0),
+    listSketchSources(session.user, live),
+    getSketchSetting(),
+  ]);
+  // 新しい候補を先に出す (作り直すほど古いものが上に溜まらないように)
+  const sketchCandidates = jsonStringArray(live.sketchCandidates)
+    .map((key) => ({ key, url: getR2PublicUrl(key) }))
+    .reverse();
   const suggestedCount = candidates.reduce(
     (n, g) => n + g.assets.filter((a) => a.suggested).length,
     0
@@ -94,6 +126,11 @@ export default async function LiveDetailPage({ params }: Props) {
               topic="ライブ"
               onApply={applyMaterialsAction.bind(null, live.id)}
             />
+            <ExcerptStep
+              kind="live"
+              onPropose={proposeExcerptsAction.bind(null, live.id)}
+              onApply={applyExcerptsAction.bind(null, live.id)}
+            />
           </>
         ) : (
           <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-3">
@@ -102,7 +139,7 @@ export default async function LiveDetailPage({ params }: Props) {
         )}
       </StepCard>
 
-      {/* 3. レポ (ハッシュタグの設定と収集の実行は #150 で載る。収集画面へのリンクだけ出す) */}
+      {/* 3. レポ */}
       <StepCard
         no={3}
         title="X レポ"
@@ -115,15 +152,71 @@ export default async function LiveDetailPage({ params }: Props) {
         action={
           live.repoCollection ? (
             <Link href={`/repo/${live.repoCollection.id}`} className={linkCls}>
-              収集を開く <ExternalLink size={12} />
+              レポを判定する <ExternalLink size={12} />
             </Link>
           ) : null
         }
       >
-        <p className="text-xs text-slate-500">
-          収集の実行と採用 / 不採用の判定は「収集を開く」先の画面で行えます (条件は #坂井新奈 のみ)。
-          ライブごとのハッシュタグの設定はまだこの画面にありません。
+        {live.repoCollection && <ReportTagsForm liveId={live.id} tags={jsonStringArray(live.reportTags)} />}
+        <p className="text-xs text-slate-500 mb-3">
+          期間は初日〜最終日{REPORT_WINDOW_DAYS === 1 ? "の翌日" : `+${REPORT_WINDOW_DAYS} 日`} (公演を直すと追随)。
+          {live.repoCollection?.lastFetchedAt
+            ? "公演のたびに再収集すると、その週の投稿を拾えます。"
+            : "まだ収集していません。X の recent search は直近 7 日までなので、終わって日が経ったライブは取得できません。"}
+          採用にしたツイートは記事生成がそのまま読みます。
         </p>
+        <ReportsStep
+          kind="live"
+          onRefetch={refetchReportsAction.bind(null, live.id)}
+          hasCollection={!!live.repoCollectionId}
+          fetched={!!live.repoCollection?.lastFetchedAt}
+          keeps={keeps}
+        />
+      </StepCard>
+
+      {/* 4. スケッチ */}
+      <StepCard
+        no={4}
+        title="衣装スケッチ"
+        done={!!live.sketchKey}
+        summary={
+          live.sketchKey
+            ? "確定済み"
+            : sketchCandidates.length > 0
+              ? `候補 ${sketchCandidates.length} 枚`
+              : "未生成"
+        }
+        action={
+          live.sketchKey ? (
+            <a href={getR2PublicUrl(live.sketchKey)} target="_blank" rel="noreferrer" className={linkCls}>
+              確定した画像を開く <ExternalLink size={12} />
+            </a>
+          ) : null
+        }
+      >
+        <p className="text-xs text-slate-500 mb-3">
+          ステージ衣装のスケッチ。衣装が複数あるときはメインに代表的な衣装、補助に他の衣装が描かれます (追加指示で指定できます)。
+        </p>
+        <SketchStep
+          owner={{ kind: "live", id: live.id }}
+          actions={{
+            saveExtraPrompt: saveExtraSketchPromptAction.bind(null, live.id),
+            generate: generateSketchAction.bind(null, live.id),
+            saveCrops: saveSketchCropsAction.bind(null, live.id),
+            select: selectSketchAction.bind(null, live.id),
+          }}
+          sources={sketchSources}
+          candidates={sketchCandidates}
+          selectedKey={live.sketchKey}
+          extraPrompt={live.extraSketchPrompt}
+          crops={cropsFromJson(live.sketchCrops)}
+          refs={refsFromJson(live.sketchRefs).map((r) => ({ ...r, url: getR2PublicUrl(r.key) }))}
+          styleReference={{
+            url: sketchSetting.styleReferenceUrl,
+            isDefault: sketchSetting.isDefaultStyleReference,
+            canEdit: session.user.role === "admin",
+          }}
+        />
       </StepCard>
     </div>
   );

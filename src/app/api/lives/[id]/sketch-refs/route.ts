@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getMeetGreet } from "@/lib/domain/meetgreets";
-import { meetGreetSketchStore } from "@/lib/domain/meetgreet-sketch";
+import { getLive } from "@/lib/domain/lives";
+import { liveSketchStore } from "@/lib/domain/live-sketch";
 import { deleteSketchRef, uploadSketchRef } from "@/lib/meetgreet/sketch-ref-routes";
 
 type Params = { params: Promise<{ id: string }> };
 
-/** その回だけの参考画像 (#159)。処理本体は src/lib/meetgreet/sketch-ref-routes.ts (ライブと共用 #150) */
+/** そのライブだけの参考画像 (#150)。処理本体は src/lib/meetgreet/sketch-ref-routes.ts (ミーグリと共用) */
 export const maxDuration = 60;
 
 export async function POST(request: Request, { params }: Params) {
@@ -18,9 +18,9 @@ export async function POST(request: Request, { params }: Params) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   const { id } = await params;
-  const mg = await getMeetGreet(session.user, id);
-  if (!mg) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return uploadSketchRef(request, meetGreetSketchStore, session.user, mg);
+  const live = await getLive(session.user, id);
+  if (!live) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  return uploadSketchRef(request, liveSketchStore, session.user, live);
 }
 
 export async function DELETE(request: Request, { params }: Params) {
@@ -30,7 +30,7 @@ export async function DELETE(request: Request, { params }: Params) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   const { id } = await params;
-  const mg = await getMeetGreet(session.user, id);
-  if (!mg) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return deleteSketchRef(request, meetGreetSketchStore, session.user, mg);
+  const live = await getLive(session.user, id);
+  if (!live) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  return deleteSketchRef(request, liveSketchStore, session.user, live);
 }

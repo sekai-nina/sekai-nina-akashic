@@ -13,6 +13,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma, withSession, type TransactionClient } from "@/lib/db";
 import { canEditDossier } from "@/lib/auth/dossier-permissions";
 import type { CandidateAssetInput } from "@/lib/meetgreet/candidates";
+import { fetchCollection, type FetchResult } from "./repo";
 
 export interface ActingUser {
   id: string;
@@ -92,6 +93,20 @@ export async function loadDossiers(
   return new Map(
     rows.map((d) => [d.id, { id: d.id, title: d.title, updatedAt: d.updatedAt, itemCount: d._count.items }])
   );
+}
+
+export type ReportFetchOutcome =
+  | { ok: true; result: FetchResult }
+  | { ok: false; error: string };
+
+/** X レポを (再) 収集する。失敗は投げずに結果で返す (画面がそのまま出す) */
+export async function refetchCollection(collectionId: string, clearance: string): Promise<ReportFetchOutcome> {
+  try {
+    const result = await fetchCollection(collectionId, clearance);
+    return { ok: true, result };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 /** X レポ収集の keep / 取得数 */

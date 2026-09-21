@@ -74,6 +74,9 @@ export function maxReferencePhotos(isRevision: boolean): number {
 /** 1 回の生成で作る候補の枚数 */
 export const SKETCH_CANDIDATE_COUNT = 2;
 
+/** 回ごとの追加指示の長さ */
+export const MAX_EXTRA_SKETCH_PROMPT = 4000;
+
 /** 参照に選べる画像の一覧の上限 (大きいドシエで画面が重くならないように) */
 export const MAX_SKETCH_SOURCES = 60;
 
