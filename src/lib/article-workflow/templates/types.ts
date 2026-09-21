@@ -144,6 +144,12 @@ interface ArticleTemplateBase {
   /** 追記の章の置き方 (`planAppend`) */
   appendLayout: AppendLayout;
   /**
+   * 追記のたびに frontmatter で作り直す `frontmatterExtra` のキー (ライブの `live:` など、機械が持つブロック)。
+   * `dossier` (スナップショット) は常に作り直す。ここに無いキー (`meetgreet:` / `locations`) は
+   * 新規作成時のまま (人が直しうるので触らない)
+   */
+  refreshExtraOnAppend?: string[];
+  /**
    * ドシエの素材から記事を組み立てる。
    * **器 (MeetGreet / Live) を持つテンプレートは null** で、器側の関数
    * (`buildMeetGreetArticle` 等) が開催日などの構造化メタと合わせて組む。

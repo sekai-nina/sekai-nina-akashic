@@ -16,6 +16,7 @@ import { MaterialsStep } from "@/components/materials-step";
 import { ExcerptStep } from "@/components/workflow/excerpt-step";
 import { ReportsStep } from "@/components/workflow/reports-step";
 import { SketchStep } from "@/components/workflow/sketch-step";
+import { ArticleStep } from "@/components/workflow/article-step";
 import {
   applyExcerptsAction,
   applyMaterialsAction,
@@ -25,6 +26,9 @@ import {
   saveExtraSketchPromptAction,
   saveSketchCropsAction,
   selectSketchAction,
+  previewArticleAction,
+  restoreExclusionsAction,
+  saveArticleAction,
 } from "../actions";
 import { MetaForm } from "./meta-form";
 import { ReportTagsForm } from "./report-tags-form";
@@ -38,7 +42,7 @@ interface Props {
 export const maxDuration = 300;
 
 /**
- * ライブ 1 つ分の進行画面。公演 → 素材 → レポ → スケッチ → (記事 は #151) を縦に並べる。
+ * ライブ 1 つ分の進行画面。公演 → 素材 → レポ → スケッチ → 記事 を縦に並べる。
  * ドシエ / /repo / 記事の中身はそれぞれの画面で扱い、ここからはリンクする。
  */
 export default async function LiveDetailPage({ params }: Props) {
@@ -216,6 +220,42 @@ export default async function LiveDetailPage({ params }: Props) {
             isDefault: sketchSetting.isDefaultStyleReference,
             canEdit: session.user.role === "admin",
           }}
+        />
+      </StepCard>
+
+      {/* 5. 記事 */}
+      <StepCard
+        no={5}
+        title="記事"
+        done={!!live.article}
+        summary={
+          live.article
+            ? `${live.article.title} (${live.article.dirty ? "未 push" : "push 済み"}${live.needsSync ? " · 要反映" : ""})`
+            : "未生成"
+        }
+        action={
+          live.article ? (
+            <Link href={`/articles/${live.article.shortId}`} className={linkCls}>
+              記事を開く <ExternalLink size={12} />
+            </Link>
+          ) : null
+        }
+      >
+        <p className="text-xs text-slate-500 mb-3">
+          公演の表 (<code>{"<!-- live:performances -->"}</code> の区間) は追記のたびに作り直され、公演や曲を直すと記事にも反映されます。
+          本人の感想・ファンのレポ・関連メディアはミーグリと同じく「まだ無いものだけ」足します。
+        </p>
+        {live.needsSync && (
+          <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-3">
+            記事を書いた後にドシエが変わっています。差分を見て追記してください。
+          </p>
+        )}
+        <ArticleStep
+          hasArticle={!!live.article}
+          hasDossier={!!live.dossier}
+          onPreview={previewArticleAction.bind(null, live.id)}
+          onSave={saveArticleAction.bind(null, live.id)}
+          onRestore={restoreExclusionsAction.bind(null, live.id)}
         />
       </StepCard>
     </div>

@@ -14,7 +14,7 @@ import {
   type ArticleParts,
   type RenderedSource,
 } from "./article";
-import type { RelatedMediaStyle } from "@/lib/article-workflow/render";
+import type { MarkerBlock, RelatedMediaStyle } from "@/lib/article-workflow/render";
 import type { ExclusionKind } from "./types";
 
 /**
@@ -166,12 +166,19 @@ export interface AppendItem {
 
 export interface AppendPlan {
   body: string;
+  /**
+   * 「純粋な追記」の比較元。毎回作り直す区間 (`parts.blocks`) を差し替えたあとの既存本文で、
+   * 区間が無いテンプレートでは `existingBody` そのもの。`isPureAppend(baseBody, body)` で検査する
+   */
+  baseBody: string;
   /** 追加する出典 (sourceNo は採番済み) */
   newSources: RenderedSource[];
   added: { quotes: number; reports: number; talks: number; blogImages: number; tiktoks: number };
   /** 足されるものの一覧。ここから外したものを除外リストに入れる */
   additions: AppendItem[];
-  /** 何も増えなかった */
+  /** 毎回作り直す区間の中身が変わった (公演や曲を直した) */
+  blocksChanged: boolean;
+  /** 何も増えなかった (区間の変化も無い) */
   empty: boolean;
 }
 
@@ -234,10 +241,14 @@ export function planAppend(input: {
   /** 章の置き方。省略時はミーグリ記事の形 */
   layout?: AppendLayout;
 }): AppendPlan {
-  const { existingBody, parts } = input;
   const layout = input.layout ?? MEETGREET_APPEND_LAYOUT;
   const H_QUOTES = layout.quotesHeading;
   const H_REPORTS = layout.reports.heading;
+  const { parts } = input;
+
+  // --- 0. 毎回作り直す区間を差し替える (公演の表)。以降はこれを「既存の本文」として扱う ---
+  const replaced = replaceBlocks(input.existingBody, parts.blocks ?? []);
+  const existingBody = replaced.body;
   const excluded = new Set(input.excluded ?? []);
   const additions: AppendItem[] = [];
   /** 除外されていなければ一覧に足して true を返す */
@@ -456,11 +467,43 @@ export function planAppend(input: {
   const total = added.quotes + added.reports + added.talks + added.blogImages + added.tiktoks;
   return {
     body: toBody(sections),
+    baseBody: existingBody,
     newSources,
     added,
     additions,
-    empty: total === 0 && newSources.length === 0,
+    blocksChanged: replaced.changed,
+    empty: total === 0 && newSources.length === 0 && !replaced.changed,
   };
+}
+
+/**
+ * 毎回作り直す区間 (`MarkerBlock`) を既存の本文に当てる。
+ * - 区間が両方のマーカーごとあれば、中身だけ差し替える (マーカーの外は一切さわらない)
+ * - 無ければ、`section.heading` の章を (無ければ作って) その末尾にマーカーごと置く
+ * 返す `changed` は「中身が変わった / 新しく置いた」
+ */
+function replaceBlocks(existingBody: string, blocks: MarkerBlock[]): { body: string; changed: boolean } {
+  if (blocks.length === 0) return { body: existingBody, changed: false };
+  let lines = existingBody.split("\n");
+  let changed = false;
+  for (const block of blocks) {
+    const start = lines.findIndex((l) => l.trim() === block.start);
+    const end = start >= 0 ? lines.findIndex((l, i) => i > start && l.trim() === block.end) : -1;
+    if (start >= 0 && end > start) {
+      const current = lines.slice(start + 1, end);
+      if (current.join("\n") !== block.lines.join("\n")) changed = true;
+      lines = [...lines.slice(0, start + 1), ...block.lines, ...lines.slice(end)];
+      continue;
+    }
+    // 区間が無い (マーカーを消された / 旧い記事): 章の末尾にマーカーごと置く
+    const sections = parseSections(lines.join("\n"));
+    const sec = ensureSection(sections, block.section.heading, block.section.before);
+    sec.lines.splice(appendIndex(sec.lines), 0, block.start, ...block.lines, block.end, "");
+    lines = toBody(sections).split("\n");
+    changed = true;
+  }
+  const body = lines.join("\n");
+  return { body: body.endsWith("\n") ? body : `${body}\n`, changed };
 }
 
 /**
