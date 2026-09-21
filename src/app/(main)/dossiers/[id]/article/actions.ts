@@ -6,7 +6,8 @@ import * as z from "zod";
 import { requireRole } from "@/lib/auth/require-role";
 import { previewArticle, restoreExclusions, saveArticle } from "@/lib/domain/article-generate";
 import { getDossierForArticle, setDossierTemplate } from "@/lib/domain/dossier-article";
-import { ExclusionKeysSchema } from "@/lib/meetgreet/api";
+import { AiDraftSchema, ExclusionKeysSchema } from "@/lib/meetgreet/api";
+import type { AiDraft } from "@/lib/article-workflow/templates";
 import { formatZodError } from "@/lib/zod-error";
 
 const requireMember = () => requireRole(["admin", "member"]);
@@ -79,11 +80,15 @@ export async function saveDossierArticleAction(
   dossierId: string,
   articleId: string | null,
   expectedDigest?: string,
-  exclude: string[] = []
+  exclude: string[] = [],
+  /** プレビューが返した AI の下書き (#171)。null は骨組みだけ */
+  aiDraft?: AiDraft | null
 ) {
   const user = await requireMember();
   const parsed = ExclusionKeysSchema.safeParse(exclude);
   if (!parsed.success) return { ok: false as const, error: formatZodError(parsed.error) };
+  const draft = aiDraft === undefined ? undefined : AiDraftSchema.nullable().safeParse(aiDraft);
+  if (draft && !draft.success) return { ok: false as const, error: formatZodError(draft.error) };
   try {
     const dossier = await getDossierForArticle(user, dossierId);
     if (!dossier) throw new Error("ドシエが見つかりません");
@@ -91,7 +96,8 @@ export async function saveDossierArticleAction(
       user,
       { kind: "dossier", dossier, articleId },
       expectedDigest,
-      parsed.data
+      parsed.data,
+      draft?.data
     );
     if (!result.ok) return { ok: false as const, error: result.error };
     // ドシエ詳細の「記事にする / 追記する」の文言が紐づく記事の有無で変わる

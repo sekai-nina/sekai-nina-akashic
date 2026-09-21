@@ -31,7 +31,7 @@ import { jsonStringArray, MAX_ARTICLE_CLEARANCE } from "@/lib/meetgreet/config";
 import { planAppend, isPureAppend, appendDiff, type AppendLayout } from "@/lib/meetgreet/append";
 import type { ArticleMode, ArticlePreview } from "@/lib/meetgreet/types";
 import type { RenderedArticle, RenderedSource } from "@/lib/article-workflow/render";
-import { MEETGREET_TEMPLATE, type ArticleTemplateDef } from "@/lib/article-workflow/templates";
+import { MEETGREET_TEMPLATE, type AiDraft, type ArticleTemplateDef } from "@/lib/article-workflow/templates";
 import { TemplateInputError } from "@/lib/article-workflow/errors";
 import {
   addAssetToArticle,
@@ -46,6 +46,7 @@ import {
   assertPlainDossier,
   buildDossierArticle,
   requireRenderableTemplate,
+  type ArticleAiStatus,
   type DossierForArticle,
 } from "./dossier-article";
 import { MeetGreetInputError } from "./meetgreets";
@@ -88,6 +89,13 @@ export type ArticleTarget =
 /** ドシエが器のときの入力エラー (REST は 400) */
 export class DossierArticleError extends WorkflowInputError {}
 
+/** 組み立ての結果。AI の情報は本文を AI が書くテンプレートだけ入る */
+type BuiltArticle = RenderedArticle & {
+  droppedByClearance: number;
+  ai?: ArticleAiStatus | null;
+  aiDraft?: AiDraft | null;
+};
+
 /**
  * 器ごとの違いをここに閉じ込める。preview / save 本体は器を知らない
  */
@@ -98,7 +106,11 @@ interface ResolvedTarget {
   articleId: string | null;
   /** 器のスナップショットにある除外キー */
   storedExclusions: string[];
-  build: () => Promise<RenderedArticle & { droppedByClearance: number }>;
+  /**
+   * 組み立てる。`aiDraft` は本文を AI が書くテンプレートだけ意味を持つ
+   * (undefined = 生成する / AiDraft = それを使う / null = 骨組みだけ)
+   */
+  build: (aiDraft?: AiDraft | null) => Promise<BuiltArticle>;
   /** 除外キーを**読み直してから**足す (1 トランザクション。保存中に別タブで戻されたものを古い値で書き戻さない) */
   addExclusions: (keys: readonly string[]) => Promise<string[]>;
   /** 除外キーを取り消す。戻した数を返す */
@@ -217,7 +229,7 @@ function resolveDossier(
     layout: template.appendLayout,
     articleId,
     storedExclusions: jsonStringArray(dossier.articleExclusions),
-    build: () => buildDossierArticle(user, dossier, template),
+    build: (aiDraft) => buildDossierArticle(user, dossier, template, { aiDraft }),
     // 読み直しと書き込みを 1 トランザクションに収める (別タブで戻されたものを古い値で書き戻さない)
     addExclusions: async (keys) => {
       if (keys.length === 0) return [];
@@ -247,9 +259,9 @@ function resolveDossier(
 }
 
 /** テンプレートの入力エラーを器のエラーに包む (REST が 400 にできる型に揃える) */
-async function buildOrThrow(resolved: ResolvedTarget) {
+async function buildOrThrow(resolved: ResolvedTarget, aiDraft?: AiDraft | null) {
   try {
-    return await resolved.build();
+    return await resolved.build(aiDraft);
   } catch (e) {
     if (e instanceof TemplateInputError) throw resolved.inputError(e.message);
     throw e;
@@ -267,7 +279,8 @@ export async function previewArticle(
   extraExclude: readonly string[] = []
 ): Promise<ArticlePreview> {
   const resolved = resolveTarget(user, target);
-  const rendered = await buildOrThrow(resolved);
+  // 追記では本文を AI に書かせない (地の文は人のもの)。新規作成のときだけ生成する
+  const rendered = await buildOrThrow(resolved, resolved.articleId ? null : undefined);
 
   if (!resolved.articleId) {
     return {
@@ -282,6 +295,8 @@ export async function previewArticle(
       excluded: [],
       empty: false,
       shortId: null,
+      ai: rendered.ai ?? null,
+      aiDraft: rendered.aiDraft ?? null,
     };
   }
 
@@ -321,6 +336,8 @@ export async function previewArticle(
     excluded: describeExclusions(stored, planArgs),
     empty: plan.empty,
     shortId: article.shortId,
+    ai: null,
+    aiDraft: null,
   };
 }
 
@@ -535,12 +552,18 @@ export async function saveArticle(
   /** 画面が見せたプレビューの指紋。渡すと、組み立て直した結果が変わっていたら中止する */
   expectedDigest?: string,
   /** 今回「足さない」と決めたもののキー。除外リストに追加してから組み立て直す (#134) */
-  exclude: readonly string[] = []
+  exclude: readonly string[] = [],
+  /**
+   * プレビューが返した AI の下書き (#171)。本文を AI が書くテンプレートの新規作成では
+   * **これを差し込む** (保存で生成し直すと別の文になり指紋が合わない)。null は骨組みだけ
+   */
+  aiDraft?: AiDraft | null
 ): Promise<SaveArticleResult> {
   const actor: ArticleActor = { id: user.id };
   const resolved = resolveTarget(user, target);
   resolved.assertCanSave();
-  const rendered = await buildOrThrow(resolved);
+  // 保存で AI を呼ばない: 新規作成は画面から受け取った下書き (無ければ骨組み)、追記は本文を触らない
+  const rendered = await buildOrThrow(resolved, resolved.template.needsAi ? (aiDraft ?? null) : undefined);
 
   const mismatch = (body: string) =>
     expectedDigest !== undefined && bodyDigest(body) !== expectedDigest;

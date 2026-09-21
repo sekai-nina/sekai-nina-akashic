@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 import { FileText } from "lucide-react";
 import { MAX_ARTICLE_CLEARANCE } from "@/lib/meetgreet/config";
 import type { ArticlePreview } from "@/lib/meetgreet/types";
+import type { AiDraft } from "@/lib/article-workflow/templates/types";
 
 type ActionError = { ok: false; error: string };
 
@@ -33,8 +34,15 @@ export function ArticleStep({
   hasDossier: boolean;
   /** 差分を組み立てる。`extraExclude` はまだ保存していない「外すつもり」のキー */
   onPreview: (extraExclude: string[]) => Promise<PreviewArticleResult>;
-  /** 保存する。`expectedDigest` は見せた本文の指紋、`exclude` は今回外すもの */
-  onSave: (expectedDigest: string | undefined, exclude: string[]) => Promise<SaveArticleActionResult>;
+  /**
+   * 保存する。`expectedDigest` は見せた本文の指紋、`exclude` は今回外すもの、
+   * `aiDraft` はプレビューが返した AI の下書き (#171。器のテンプレートは受け取らない)
+   */
+  onSave: (
+    expectedDigest: string | undefined,
+    exclude: string[],
+    aiDraft: AiDraft | null
+  ) => Promise<SaveArticleActionResult>;
   /** 「今後足さない」を取り消す */
   onRestore: (keys: string[]) => Promise<RestoreExclusionsResult>;
 }) {
@@ -81,7 +89,9 @@ export function ArticleStep({
           (res.preview.empty
             ? "増えているものはありません"
             : res.preview.mode === "create"
-              ? "新しい記事の本文です。確認して保存してください"
+              ? res.preview.ai?.status === "generated"
+                ? "AI が本文を書きました。確認して保存してください (下書きとして保存されます)"
+                : "新しい記事の本文です。確認して保存してください"
               : `${res.preview.addedLines.length} 行増えます`)
       );
     });
@@ -94,7 +104,7 @@ export function ArticleStep({
     const digest = preview.digest;
     startTransition(async () => {
       // 見せた内容と保存する内容が食い違っていたら中止させる
-      const res = await onSave(digest, exclude).catch((e: unknown) => ({
+      const res = await onSave(digest, exclude, preview.aiDraft ?? null).catch((e: unknown) => ({
         ok: false as const,
         error: e instanceof Error ? e.message : "通信に失敗しました",
       }));
@@ -105,7 +115,7 @@ export function ArticleStep({
       const dropped = exclude.length > 0 ? ` / ${exclude.length} 件は今後足しません` : "";
       setMsg(
         res.mode === "create"
-          ? `記事を作りました（出典 ${res.sources} 件）。公開は記事の push から`
+          ? `記事を作りました（出典 ${res.sources} 件）。${preview.ai ? "下書きなので、記事の編集画面で確認して下書きを外してください" : "公開は記事の push から"}`
           : res.added === 0
             ? `本文は変えていません${dropped}`
             : `${res.added} 行を追記しました（出典 +${res.sources}）${dropped}`
@@ -161,7 +171,11 @@ export function ArticleStep({
             disabled={pending}
             className="h-8 px-3 rounded-md bg-slate-900 text-white text-xs hover:bg-slate-800 disabled:opacity-50"
           >
-            {preview.mode === "create" ? "この内容で作る" : "この差分を追記する"}
+            {preview.mode === "create"
+              ? preview.ai
+                ? "この内容で下書きを作る"
+                : "この内容で作る"
+              : "この差分を追記する"}
           </button>
         )}
         {preview && stale && (
@@ -180,6 +194,34 @@ export function ArticleStep({
           </span>
         )}
       </div>
+
+      {preview?.ai && (
+        <p
+          className={
+            "text-[11px] rounded-md px-3 py-2 border " +
+            (preview.ai.status === "unavailable"
+              ? "text-amber-800 bg-amber-50 border-amber-200"
+              : "text-slate-600 bg-slate-50 border-slate-200")
+          }
+        >
+          {preview.ai.status === "unavailable" ? (
+            <>
+              AI が使えなかったので本文は空です（{preview.ai.reason}）。骨組み（出典だけ）で下書き保存し、記事の編集画面で書けます。
+            </>
+          ) : (
+            <>
+              {preview.ai.status === "generated" ? `AI (${preview.ai.model}) が書いた本文です。` : "画面から受け取った下書きです。"}
+              素材 {preview.ai.included} 件
+              {preview.ai.truncated > 0 ? `（うち ${preview.ai.truncated} 件は長すぎて途中まで）` : ""}
+              {preview.ai.usage
+                ? ` · 入力 ${preview.ai.usage.inputTokens.toLocaleString()} / 出力 ${preview.ai.usage.outputTokens.toLocaleString()} トークン`
+                : ""}
+              {preview.ai.costUsd != null ? ` · 約 $${preview.ai.costUsd.toFixed(3)}` : ""}
+              。事実の取り違え・他メンバーの感想・推測が無いか、保存前に読んでください。
+            </>
+          )}
+        </p>
+      )}
 
       {preview && preview.droppedByClearance > 0 && (
         <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">

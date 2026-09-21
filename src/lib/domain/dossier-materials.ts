@@ -9,15 +9,18 @@
  * `shapeDossierMaterials` は純粋関数。
  */
 
+import type { Prisma, TextType } from "@prisma/client";
 import type { TransactionClient } from "@/lib/db";
 import { getR2PublicUrl } from "@/lib/r2";
 import { toJstDateOnly } from "@/lib/utils";
 import { accessibleClassifications } from "@/lib/classification";
-import { MAX_ARTICLE_CLEARANCE } from "@/lib/meetgreet/config";
+import { MAX_ARTICLE_CLEARANCE, MAX_EXTERNAL_AI_CLEARANCE } from "@/lib/meetgreet/config";
 import type { ArticleAssetInput } from "@/lib/article-workflow/render";
 
 /** 本文に載せてよい機密レベル */
 export const PUBLISHABLE = new Set<string>(accessibleClassifications(MAX_ARTICLE_CLEARANCE));
+/** 外部の AI に渡してよい機密レベル (本文全文を送るので、本文に載る上限とは別に見る) */
+const EXTERNAL_AI_OK = new Set<string>(accessibleClassifications(MAX_EXTERNAL_AI_CLEARANCE));
 
 /** `loadDossierForArticle` が返すドシエ (組み立てに要る列だけ) */
 export interface DossierForMaterials {
@@ -39,52 +42,131 @@ export interface DossierForMaterials {
       canonicalDate: Date | null;
       classification: string;
       sourceRecords: { sourceKind: string; title: string; url: string | null; publishedAt: Date | null }[];
+      /** `withTexts` のときだけ (AI に渡す本文と人物) */
+      texts?: { textType: TextType; content: string }[];
+      entities?: { entity: { canonicalName: string } }[];
     } | null;
   }[];
+  /**
+   * `withTexts` のときだけ。ドシエに**画像しか入っていないブログ**の本文アセット (同じ URL の text)。
+   * 人はブログを読んで書くので、画像だけ選んであっても本文を AI に渡す。ドシエのアイテムでは
+   * ないので抜粋は無い。RLS と機密の上限は普通のアイテムと同じに効く
+   */
+  extraTextAssets?: NonNullable<DossierForMaterials["items"][number]["asset"]>[];
 }
 
-/** ドシエとアイテムを読む。見えなければ null (権限か削除。呼び出し側が入力エラーにする) */
-export async function loadDossierForArticle(
-  tx: TransactionClient,
-  dossierId: string
-): Promise<DossierForMaterials | null> {
-  const dossier = await tx.dossier.findUnique({
-    where: { id: dossierId },
-    select: {
-      id: true,
-      title: true,
-      updatedAt: true,
-      classification: true,
-      _count: { select: { items: true } },
-      items: {
-        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-        select: {
-          kind: true,
-          caption: true,
-          excerpt: true,
-          externalUrl: true,
-          externalImageKey: true,
-          asset: {
-            select: {
-              id: true,
-              kind: true,
-              title: true,
-              canonicalDate: true,
-              classification: true,
-              sourceRecords: {
-                select: { sourceKind: true, title: true, url: true, publishedAt: true },
-                orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-                take: 1,
-              },
-            },
-          },
-        },
+const ASSET_SELECT = {
+  id: true,
+  kind: true,
+  title: true,
+  canonicalDate: true,
+  classification: true,
+  sourceRecords: {
+    select: { sourceKind: true, title: true, url: true, publishedAt: true },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    take: 1,
+  },
+} satisfies Prisma.AssetSelect;
+
+/**
+ * AI に渡す本文の種類と優先順。ブログは body、トークは message_body、番組は transcript か description。
+ * 同じアセットに複数あれば先のものを使う (`pickText`)
+ */
+const TEXT_TYPES_FOR_AI: TextType[] = ["body", "message_body", "transcript", "description"];
+
+/** AI に渡す本文と人物 */
+const ASSET_SELECT_WITH_TEXTS = {
+  ...ASSET_SELECT,
+  texts: {
+    where: { textType: { in: TEXT_TYPES_FOR_AI } },
+    select: { textType: true, content: true },
+    orderBy: { createdAt: "asc" },
+  },
+  entities: {
+    where: { entity: { type: "person" } },
+    select: { entity: { select: { canonicalName: true } } },
+  },
+} satisfies Prisma.AssetSelect;
+
+function pickText(texts: { textType: TextType; content: string }[] | undefined): string | null {
+  if (!texts) return null;
+  for (const type of TEXT_TYPES_FOR_AI) {
+    const hit = texts.find((t) => t.textType === type && t.content.trim());
+    if (hit) return hit.content;
+  }
+  return null;
+}
+
+/** ブログの URL か (本人 / 他メンバー / ひなたぼっこ日記) */
+function isBlogUrl(url: string | null | undefined): boolean {
+  return !!url && /hinatazaka46\.com\/s\/official\/diary\//.test(url);
+}
+
+function dossierSelect<A extends Prisma.AssetSelect>(asset: A) {
+  return {
+    id: true,
+    title: true,
+    updatedAt: true,
+    classification: true,
+    _count: { select: { items: true } },
+    items: {
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+      select: {
+        kind: true,
+        caption: true,
+        excerpt: true,
+        externalUrl: true,
+        externalImageKey: true,
+        asset: { select: asset },
       },
     },
+  } satisfies Prisma.DossierSelect;
+}
+
+/**
+ * ドシエとアイテムを読む。見えなければ null (権限か削除。呼び出し側が入力エラーにする)。
+ * `withTexts` は本文を AI が書くテンプレートのときだけ (本文全文と人物エンティティを一緒に引く)
+ */
+export async function loadDossierForArticle(
+  tx: TransactionClient,
+  dossierId: string,
+  options: { withTexts?: boolean } = {}
+): Promise<DossierForMaterials | null> {
+  // select を条件で組むと Prisma の型推論が崩れるので、2 本に分けて書く
+  if (!options.withTexts) {
+    const dossier = await tx.dossier.findUnique({ where: { id: dossierId }, select: dossierSelect(ASSET_SELECT) });
+    if (!dossier) return null;
+    const { _count, ...rest } = dossier;
+    return { ...rest, itemCount: _count.items };
+  }
+
+  const dossier = await tx.dossier.findUnique({
+    where: { id: dossierId },
+    select: dossierSelect(ASSET_SELECT_WITH_TEXTS),
   });
   if (!dossier) return null;
   const { _count, ...rest } = dossier;
-  return { ...rest, itemCount: _count.items };
+
+  // 画像しか入っていないブログの本文を同じ URL の text アセットから引く (RLS 下なので見えない分は落ちる)
+  const urlsWithText = new Set<string>();
+  const urlsWithoutText = new Set<string>();
+  for (const item of dossier.items) {
+    const a = item.asset;
+    const url = a?.sourceRecords[0]?.url;
+    if (!a || !isBlogUrl(url)) continue;
+    if (a.kind === "text") urlsWithText.add(url!);
+    else urlsWithoutText.add(url!);
+  }
+  const missing = [...urlsWithoutText].filter((u) => !urlsWithText.has(u));
+  const extraTextAssets =
+    missing.length === 0
+      ? []
+      : await tx.asset.findMany({
+          where: { kind: "text", sourceRecords: { some: { url: { in: missing } } } },
+          select: ASSET_SELECT_WITH_TEXTS,
+          orderBy: { createdAt: "asc" },
+        });
+  return { ...rest, itemCount: _count.items, extraTextAssets };
 }
 
 export interface DossierMaterials {
@@ -156,6 +238,37 @@ export function shapeDossierMaterials(dossier: DossierForMaterials): DossierMate
           }
         : null,
       excerpts: item.excerpt ? [item.excerpt] : [],
+      // AI に渡す素材 (withTexts のときだけ入る)。外部に出すので EXTERNAL の上限も見る
+      ...(a.texts !== undefined
+        ? {
+            text: EXTERNAL_AI_OK.has(a.classification) ? pickText(a.texts) : null,
+            caption: item.caption || undefined,
+            people: (a.entities ?? []).map((e) => e.entity.canonicalName),
+          }
+        : {}),
+    });
+  }
+
+  // 画像しか入っていないブログの本文 (withTexts のときだけ)。ブログのグループに合流して出典の宛先になる
+  for (const a of dossier.extraTextAssets ?? []) {
+    if (assets.has(a.id)) continue;
+    if (!PUBLISHABLE.has(a.classification)) {
+      dropped.add(a.id);
+      continue;
+    }
+    const src = a.sourceRecords[0];
+    assets.set(a.id, {
+      id: a.id,
+      kind: a.kind,
+      title: a.title,
+      canonicalDate: toJstDateOnly(a.canonicalDate),
+      sortAt: a.canonicalDate ? a.canonicalDate.toISOString() : null,
+      source: src
+        ? { kind: src.sourceKind, title: src.title, url: src.url, publishedAt: toJstDateOnly(src.publishedAt) }
+        : null,
+      excerpts: [],
+      text: EXTERNAL_AI_OK.has(a.classification) ? pickText(a.texts) : null,
+      people: (a.entities ?? []).map((e) => e.entity.canonicalName),
     });
   }
 

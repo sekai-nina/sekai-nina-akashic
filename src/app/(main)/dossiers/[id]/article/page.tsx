@@ -20,8 +20,8 @@ interface Props {
   searchParams: Promise<{ article?: string }>;
 }
 
-/** TikTok の短縮 URL の解決で外部に出るので、少し余裕を持たせる */
-export const maxDuration = 120;
+/** TikTok の短縮 URL の解決と、本文を書く Claude の呼び出し (#171) で外部に出る。数十秒かかることがある */
+export const maxDuration = 300;
 
 /**
  * 器 (MeetGreet / Live) を持たないドシエから記事を作る (#170)。

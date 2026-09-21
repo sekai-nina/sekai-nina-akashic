@@ -25,18 +25,52 @@ export interface DossierRenderInput {
   today: string;
 }
 
+/**
+ * AI が書いた下書き (#171)。テンプレートが必要な項目だけ使う (スナップは title / date を使わない)。
+ * プレビューが返し、画面が保存に渡す (保存で生成し直すと別の文になり指紋が合わないため)
+ */
+export interface AiDraft {
+  body: string;
+  tags: string[];
+  /** ドシエタイトルと違うタイトルを提案するとき (quote_situational だけ使う) */
+  title: string | null;
+  /** "YYYY-MM-DD" (outing だけ使う) */
+  date: string | null;
+  dateDisplay: string | null;
+}
+
+/** プロンプトに入れる、素材以外の文脈 */
+export interface AiContext {
+  /** 既存記事のタイトル (wikilink はこの中にだけ張らせる) */
+  existingTitles: string[];
+  /** 既存記事のタグ (使用頻度順)。tags はここから選ばせる */
+  tagVocabulary: string[];
+}
+
+export interface AiPrompt {
+  /** 毎回同じ部分 (鉄則・見本・語彙)。prompt caching の対象 */
+  system: string;
+  /** 素材 (毎回変わる) */
+  user: string;
+}
+
 export interface ArticleTemplateDef {
   key: ArticleTemplate;
   /** 記事の type (= path の先頭ディレクトリ) */
   articleType: ArticleType;
-  /** 本文を AI が書くか (#171 から)。true のテンプレートは新規作成を draft で保存する */
+  /** 本文を AI が書くか (#171)。true のテンプレートは新規作成を draft で保存する */
   needsAi: boolean;
   /** 追記の章の置き方 (`planAppend`) */
   appendLayout: AppendLayout;
   /**
    * ドシエの素材から記事を組み立てる。
    * **器 (MeetGreet / Live) を持つテンプレートは null** で、器側の関数
-   * (`buildMeetGreetArticle` 等) が開催日などの構造化メタと合わせて組む
+   * (`buildMeetGreetArticle` 等) が開催日などの構造化メタと合わせて組む。
+   *
+   * `needsAi` のテンプレートは `draft` を受け取る: AI の下書きなら差し込み、
+   * **null なら AI が使えなかった**ので本文はプレースホルダ (骨組みだけ。人が後で書く)
    */
-  render: ((input: DossierRenderInput) => RenderedArticle) | null;
+  render: ((input: DossierRenderInput, draft?: AiDraft | null) => RenderedArticle) | null;
+  /** `needsAi` のテンプレートだけ。素材からプロンプトを組む (純粋関数) */
+  prompt?: (input: DossierRenderInput, context: AiContext) => AiPrompt;
 }
