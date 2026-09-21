@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { listInstaTargets, TIER_DEFAULT_MINUTES } from "@/lib/domain/insta-targets";
 import { getInstaAccount } from "@/lib/domain/insta-account";
 import { AccountForm } from "./account-form";
-import { TargetForm } from "./target-form";
+import { RowActions, TargetForm } from "./target-form";
 
 /**
  * insta-watch の監視対象。
@@ -143,7 +143,7 @@ export default async function AdminInstaPage() {
                   {t.updatedByName && <> / {t.updatedByName}</>}
                 </td>
                 <td className="px-4 py-2 text-right">
-                  <TargetForm.RowActions id={t.id} enabled={t.enabled} handle={t.handle} />
+                  <RowActions id={t.id} enabled={t.enabled} handle={t.handle} />
                 </td>
               </tr>
             ))}

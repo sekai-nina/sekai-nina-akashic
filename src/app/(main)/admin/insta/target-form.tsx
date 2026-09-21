@@ -108,7 +108,7 @@ export function TargetForm() {
   );
 }
 
-function RowActions({ id, enabled, handle }: { id: string; enabled: boolean; handle: string }) {
+export function RowActions({ id, enabled, handle }: { id: string; enabled: boolean; handle: string }) {
   const [isPending, startTransition] = useTransition();
   const [confirming, setConfirming] = useState(false);
 
@@ -145,5 +145,3 @@ function RowActions({ id, enabled, handle }: { id: string; enabled: boolean; han
     </span>
   );
 }
-
-TargetForm.RowActions = RowActions;
