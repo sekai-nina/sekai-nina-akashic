@@ -100,6 +100,7 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 | DELETE | `/lives/:id` | write | ライブの行を消す（ドシエ・収集・エンティティは残る） |
 | PUT | `/lives/:id/setlist` | write | 公演と披露曲を丸ごと入れ替える |
 | POST | `/lives/:id/materials` | write | 素材候補のチェック結果をドシエに反映 |
+| GET | `/songs` | read | 曲マスタ（公式ディスコグラフィ + 公演で披露した曲）の一覧 |
 
 ---
 
@@ -1428,6 +1429,50 @@ X レポの再収集・スケッチ・記事生成の API は PR2 / PR3（#150 /
 `POST /meetgreets/:id/materials` と同じ（`{"assetIds": […]}` をドシエに `asset_ref` で入れる。1 回に 500 件、同じアセットは 2 回入らない、権限が無ければ 403、ドシエが消えていれば 404）。
 
 **レスポンス:** `{"added": 12, "skipped": 2, "dossierId": "…"}`
+
+---
+
+## 曲マスタ (Songs)
+
+公式ディスコグラフィ（Sony Music の JSON API。公式サイトが描画に使っているもの）を `pnpm cli:import-songs` で取り込んだ `Song` / `Release` / `ReleaseTrack` と、ライブの公演フォームで打った曲（find-or-create）の一覧（設計は #167）。曲名は `normalizedTitle`（NFKC → 小文字 → 空白・記号を落とす）で名寄せされる。3 テーブルとも公開情報なので非保護。**披露回数だけはキーの持ち主に見えるライブのぶん**（`LiveSong` は保護）。
+
+公開サイトのディスコグラフィ / 参加楽曲ページはここから作る想定（site リポで別 Issue）。編集（曲名・参加・メモ・統合）は画面 `/songs` のみで API は無い。
+
+### GET /songs
+
+```
+GET /api/v1/songs?q=ハニー&participation=member
+```
+
+| パラメータ | 説明 |
+|---|---|
+| `q` | 曲名の部分一致（≤100）。名寄せキー（NFKC → 小文字 → 空白・記号除去）で比べるので「HEY!OHISAMA!」でも「HEY！OHISAMA！」でも当たる。**ひらがな / カタカナは畳まない**（`はにー` では当たらない） |
+| `participation` | `unknown` / `member` / `none`（坂井新奈の参加楽曲か。人が付ける。省略で絞らない。曲の既定値は `unknown`） |
+| `orphan` | `1` でどの作品にも入っていない曲だけ（ライブ限定アレンジ・誤字の候補） |
+
+未知のパラメータは無視、空の値は「指定なし」。
+
+```json
+{
+  "items": [
+    {
+      "id": "…",
+      "title": "君はハニーデュー",
+      "artist": "日向坂46",
+      "participation": "unknown",
+      "note": "",
+      "firstRelease": {"id": "…", "title": "君はハニーデュー", "kind": "single", "releaseDate": "2024-05-08", "artist": "日向坂46"},
+      "releaseCount": 2,
+      "performanceCount": 3
+    }
+  ]
+}
+```
+
+- 並びは名寄せキー順（≒ 五十音・アルファベット順）
+- `firstRelease` は発売日が最も古い収録作品。未収録なら `null`。`kind` は `single` / `album`（Sony の種別。「Kind of love」は Sony ではアルバムだが 17th シングルなので `single` に補正している）
+- `releaseCount` は収録作品数（アルバム再収録を含む）
+- 何枚目のシングルか（ordinal）は持たない
 
 ---
 

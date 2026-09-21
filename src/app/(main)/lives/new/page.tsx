@@ -3,6 +3,7 @@ import { ArrowLeft } from "lucide-react";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { withClearance } from "@/lib/db";
+import { listSongKeys } from "@/lib/domain/songs";
 import { REPORT_WINDOW_DAYS } from "@/lib/meetgreet/config";
 import { NewLiveForm } from "./new-form";
 
@@ -14,13 +15,16 @@ export default async function NewLivePage() {
   // 別のエンティティができないよう、選べるようにする。event は place ではないので
   // クリアランスの絞り (entityClearanceWhere) は要らないが、`_count.assets` は保護テーブル
   // AssetEntity の集計なので withClearance の中で引く (素の prisma だと無言で全部 0 件になる)
-  const events = await withClearance(session.user.clearance, (tx) =>
-    tx.entity.findMany({
-      where: { type: "event" },
-      select: { id: true, canonicalName: true, _count: { select: { assets: true } } },
-      orderBy: { canonicalName: "asc" },
-    })
-  );
+  const [events, songKeys] = await Promise.all([
+    withClearance(session.user.clearance, (tx) =>
+      tx.entity.findMany({
+        where: { type: "event" },
+        select: { id: true, canonicalName: true, _count: { select: { assets: true } } },
+        orderBy: { canonicalName: "asc" },
+      })
+    ),
+    listSongKeys(),
+  ]);
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -36,6 +40,7 @@ export default async function NewLivePage() {
       </p>
       <NewLiveForm
         events={events.map((e) => ({ id: e.id, name: e.canonicalName, assetCount: e._count.assets }))}
+        songKeys={songKeys}
       />
     </div>
   );
