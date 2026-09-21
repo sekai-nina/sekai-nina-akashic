@@ -1688,6 +1688,134 @@ bot がセッションの生死を報告する（**write 権限**）。`/admin/i
 | `error` | | 使えないときの理由（300 字まで。人が読む用） |
 | `loggedInAt` | | login し直した時刻（ISO 8601） |
 
+## TikTok の監視 (#179)
+
+tiktok-watch (bot) が公式 TikTok の新着を見張り、DL して登録し、Discord に流すための API。
+**「どの動画を取ったか」の台帳は akashic が持つ。** bot は見えた動画を報告し、akashic が
+「これを DL して」と返した分だけ DL する（bot の state を失っても二重登録・二重通知しない）。
+設計は `docs/tiktok-design.md`。
+
+流れ: `GET /tiktok/targets` → 対象ごとに `POST /tiktok/targets/{handle}/sightings` → 返った
+`pending` を yt-dlp で DL → `POST /upload`（4MB 超は `/upload/initiate` → `/upload/complete`）→
+`POST /tiktok/videos/{videoId}/register` → Discord → `POST /tiktok/videos/{videoId}/notified`。
+1 周ごとに `POST /jobs/bot.tiktok_watch/runs`。
+
+### GET /tiktok/targets
+
+有効な監視対象。認証は API キー（読むだけなので read / write の別は問わない）。
+
+```json
+{ "targets": [ { "handle": "hinatazakanews", "intervalMinutes": 30, "secUid": "MS4wLjAB..." } ] }
+```
+
+| フィールド | 内容 |
+|---|---|
+| `handle` | `@` を除いた小文字のハンドル |
+| `intervalMinutes` | 巡回間隔（分） |
+| `secUid` | bot が報告した secUid（初回は `null`） |
+
+対象は `/admin/tiktok`（admin のみ）から登録する。
+
+### POST /tiktok/targets/{handle}/sightings
+
+profile で見えた動画を報告し、DL すべき一覧を受け取る（**write 権限**）。
+
+```json
+{
+  "videos": [
+    { "videoId": "7687944101915823380", "createTime": "2026-09-21T10:29:38Z",
+      "caption": "「IDOL RUNWAY COLLECTION」ありがとうございました💖 片山紗希🐰 #日向坂46",
+      "durationSec": 33, "coverUrl": "https://p16-sign.tiktokcdn.com/..." }
+  ],
+  "secUid": "MS4wLjAB...",
+  "videoCount": 1113,
+  "backfill": false
+}
+```
+
+| フィールド | 必須 | 内容 |
+|---|---|---|
+| `videos[]` | ○ | 見えた動画（最大 500）。`videoId` は URL 末尾の数字、`createTime` は ISO 8601（**タイムゾーン必須**: `Z` か `+09:00`）、`caption` は 5,000 字で切って受ける |
+| `secUid` / `videoCount` | | プロフィールから取れたら付ける（対象に保存する） |
+| `backfill` | | `true` なら過去分の取得。**初回接触扱いにせず**、`skipped_initial` の動画も `pending` に戻す |
+
+- **台帳が空の対象への最初の報告（`backfill` なし）は初回接触**: 見えた動画を全件 `skipped_initial` にして `pending` は返さない（対象を足した瞬間に過去 1,000 本を落とし始めない）。この行は `notify: false` で、後で backfill / 画面の「取り込む」で `pending` に戻しても Discord には流さない
+- 既に載っている動画は、変わったキャプション等だけ更新する（status・createTime は触らない。空のキャプションで上書きしない）
+- 対象の `lastCheckedAt` を進め、`lastError` を消す
+- `coverUrl` は TikTok の CDN（`*.tiktokcdn.com` 等）の https だけ受け付ける（それ以外は捨てる。サーバが取りに行くため）
+
+**レスポンス:**
+
+```json
+{
+  "initial": false,
+  "added": 1,
+  "counts": { "skipped_initial": 48, "pending": 1, "registered": 12, "failed": 0 },
+  "pending": [
+    { "videoId": "7687944101915823380", "url": "https://www.tiktok.com/@hinatazakanews/video/7687944101915823380",
+      "createTime": "2026-09-21T11:09:38.000Z", "caption": "...", "notify": true }
+  ]
+}
+```
+
+`pending` は**今回見えた分に限らず**、その対象で `pending` のもの全部と、`failed` で試行回数が上限（3）未満かつ前回の失敗から 15 分経ったもの。新しい順に最大 20 件（backfill はこれを繰り返して減らす）。`notify` は登録できたら Discord に流すか（新着だけ `true`。bot はこれに従い、自分が backfill かどうかで判断しない）。
+
+### POST /tiktok/targets/{handle}/report
+
+巡回そのものの失敗（profile が開けない等）を対象に残す（**write 権限**）。次に成功した `sightings` で消える。
+
+```json
+{ "error": "playwright: timeout while loading profile" }
+```
+
+**レスポンス:** `{ "ok": true }`
+
+### POST /tiktok/videos/{videoId}/register
+
+`POST /upload` で作ったアセットを TikTok の動画として整える（**write 権限**）。
+
+```json
+{ "assetId": "cm..." }
+```
+
+akashic 側で付けるもの: `title`（ハッシュタグを除いて実のある最初の行を 80 字。無ければ `@handle YYYY/MM/DD`）/ `description`（キャプション全文）/ `canonicalDate`（投稿時刻）/ `sourceType: web` / `trustLevel: official`（対象が公式のとき）/ `SourceRecord`（`publisher: "TikTok"`、動画 URL）/ 出典エンティティ（対象の `sourceName`、既定 `TikTok @handle`）/ **キャプションにフルネームが含まれるメンバーの person エンティティ**（`src/lib/members.ts` の名簿）/ cover 画像からの R2 サムネイル（取れなければ `pnpm cli:thumbnails --kind=video` が後で埋める）。
+
+**先に台帳の行を `pending` / `failed` → `registered` に取ってから整える。** daemon と `watch --once` / backfill が同じ動画を同時に持ってきても、整えるのは 1 回、`alreadyRegistered: false` が返るのも 1 回（通知も 1 回）。整える途中で失敗したら行を `failed` に戻す。
+
+**レスポンス:**
+
+```json
+{ "assetId": "cm...", "title": "「IDOL RUNWAY COLLECTION」ありがとうございました💖 片山紗希🐰",
+  "url": "https://www.tiktok.com/@hinatazakanews/video/7687944101915823380",
+  "members": ["片山紗希", "佐藤優羽"], "highlight": false, "notify": true, "alreadyRegistered": false }
+```
+
+`highlight` は坂井新奈が入っているか（Discord で目立たせる用）。`notify` は台帳の値（`false` なら流さない）。`upload` の SHA256 dedup で既存アセットが返ったときも同じ `assetId` で呼んでよい（既に `registered` なら `alreadyRegistered: true` で何もしない。**その場合も通知しない**）。
+
+- 409: その動画が**別のアセット**で登録済み、またはそのアセットが**別の動画**に紐づいている（dedup で同じファイルが返った）。再試行しても解決しないので bot は `failed` で残す
+
+### POST /tiktok/videos/{videoId}/notified
+
+Discord に送れたことを台帳に残す（**write 権限**）。本文なし。**レスポンス:** `{ "ok": true }`
+
+### POST /tiktok/videos/{videoId}/failed
+
+DL か登録の失敗（**write 権限**）。`attempts` が進み、3 回で `pending` に返さなくなる（`/admin/tiktok` の「再試行」で戻す）。
+
+```json
+{ "error": "yt-dlp: HTTP Error 403" }
+```
+
+**レスポンス:** `{ "ok": true, "attempts": 1, "willRetry": true }`。既に `registered` の行には効かない（bot 側のタイムアウトで実は登録が済んでいた行を壊さない。`willRetry: false` で返る）
+
+### エラー
+
+| 状態 | 意味 |
+|---|---|
+| 400 | 本文の形式（zod）/ `videoId` や `handle` の形式が不正 |
+| 404 | `handle` が監視対象に無い / `videoId` が台帳に無い / `assetId` が見えない |
+| 409 | `register` の台帳との食い違い（上記） |
+
 ## 典型的な利用パターン
 
 ### Discord Botからブログ更新を自動登録

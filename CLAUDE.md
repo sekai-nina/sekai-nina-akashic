@@ -100,7 +100,7 @@ withSession({ id, clearance }, tx => …)    // 上記 + app.user_id — Dossier
 
 ### 保護テーブル
 
-`Asset`, `AssetText`, `AssetEntity`, `AssetRelation`, `SourceRecord`, `Annotation`, `Testimonial`, `Dossier`, `DossierItem`, `DossierPlaceCandidate`, `Place`, `RepoCollection`, `RepoTweet`, `RepoTweetMedia`, `Lens`, `DataSource`, `Coverage`, `LensItemCheck`, `ArticleSource`, `MeetGreet`, `InstaWatchTarget`, `InstaAccount`, `SketchSetting`, `Anniversary`, `XMentionWatch`, `XMentionSetting`, `XMentionHit`, `Live`, `LivePerformance`, `LiveSong`
+`Asset`, `AssetText`, `AssetEntity`, `AssetRelation`, `SourceRecord`, `Annotation`, `Testimonial`, `Dossier`, `DossierItem`, `DossierPlaceCandidate`, `Place`, `RepoCollection`, `RepoTweet`, `RepoTweetMedia`, `Lens`, `DataSource`, `Coverage`, `LensItemCheck`, `ArticleSource`, `MeetGreet`, `InstaWatchTarget`, `InstaAccount`, `SketchSetting`, `Anniversary`, `XMentionWatch`, `XMentionSetting`, `XMentionHit`, `Live`, `LivePerformance`, `LiveSong`, `TiktokWatchTarget`, `TiktokVideo`
 
 RLS は `clearance_rank(classification::text) <= clearance_rank(current_setting('app.clearance', true))`。`clearance_rank()` は未知/未設定を `-1` にして **fail-closed**。全テーブル `ENABLE` + `FORCE ROW LEVEL SECURITY`。
 
@@ -196,6 +196,7 @@ src/
 | `docs/coverage-design.md` | 収集カバレッジ設計書 |
 | `docs/status-design.md` | パイプライン監視（`/status`・ハートビート API・Cron 評価・Discord 通知）設計書 |
 | `docs/mentions-design.md` | X 言及監視（`/mentions`・日次 cron・除外ユーザー・Discord 通知）設計書 |
+| `docs/tiktok-design.md` | TikTok 監視（`/admin/tiktok`・tiktok-watch bot・台帳 API・Discord 通知）設計書 |
 | `docs/costs-design.md` | LLM コスト管理（`/costs`・利用量の自己申告・プロバイダ取り込み・残クレジット判定）設計書 |
 | `docs/security.md` / `docs/security-admin.md` | 非エンジニア / 管理者向け |
 | `docs/architecture.md` | 設計の「なぜ」（RLS を中心に据えた理由、Asset/AssetText の分離、PGroonga 採用の理由） |
