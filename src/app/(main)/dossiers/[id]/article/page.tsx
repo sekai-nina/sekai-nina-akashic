@@ -6,7 +6,7 @@ import { canEditDossier } from "@/lib/auth/dossier-permissions";
 import { getDossierForArticle, isContainerTemplate, suggestTemplate } from "@/lib/domain/dossier-article";
 import { selectableTemplates } from "@/lib/article-workflow/templates";
 import { ARTICLE_TEMPLATE_LABELS, ARTICLE_TYPE_LABELS } from "@/lib/utils";
-import { ArticleStep } from "@/components/article-step";
+import { ArticleStep } from "@/components/workflow/article-step";
 import {
   previewDossierArticleAction,
   restoreDossierExclusionsAction,

@@ -1,8 +1,10 @@
 "use client";
 
 import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
+import { useMemo } from "react";
 import type { LivePerformanceView, SetlistInput } from "@/lib/domain/lives";
 import { joinSongs, MAX_PERFORMANCES, splitSongs } from "@/lib/live/config";
+import { normalizeSongTitle } from "@/lib/songs/normalize";
 
 /**
  * 公演の表の編集用の行。曲は「A / B / C」の 1 行のまま持ち、保存時に分割する
@@ -94,12 +96,22 @@ export function SetlistEditor({
   value,
   onChange,
   disabled,
+  knownKeys,
 }: {
   value: SetlistDraft;
   onChange: (next: SetlistDraft) => void;
   disabled?: boolean;
+  /**
+   * 曲マスタにある曲の名寄せキー (#167)。入力中の曲でマスタに無いものを行の下に出す
+   * (誤字に気づけるように)。保存は止めない (ライブ限定アレンジなど未収録の曲もある)
+   */
+  knownKeys?: string[];
 }) {
   const rows = value.performances;
+  const known = useMemo(() => new Set(knownKeys ?? []), [knownKeys]);
+  /** マスタに無い曲 (knownKeys が無ければ判定しない) */
+  const unknownIn = (text: string): string[] =>
+    known.size === 0 ? [] : splitSongs(text).filter((t) => !known.has(normalizeSongTitle(t)));
 
   function patch(i: number, p: Partial<PerformanceRow>) {
     onChange({ ...value, performances: rows.map((r, j) => (j === i ? { ...r, ...p } : r)) });
@@ -134,6 +146,7 @@ export function SetlistEditor({
         placeholder="NO WAR in the future 2020 / キツネ / 空飛ぶ車"
         disabled={disabled}
       />
+      <UnknownSongs titles={unknownIn(value.commonSongs)} />
 
       <div className="mt-3 space-y-2">
         {rows.map((r, i) => (
@@ -187,6 +200,7 @@ export function SetlistEditor({
                   placeholder="One choice"
                   disabled={disabled}
                 />
+                <UnknownSongs titles={unknownIn(r.songs)} />
               </div>
               <div>
                 <label className={labelCls} htmlFor={`${r.key}-center`}>センター曲</label>
@@ -198,6 +212,7 @@ export function SetlistEditor({
                   placeholder="ソンナコトナイヨ"
                   disabled={disabled}
                 />
+                <UnknownSongs titles={unknownIn(r.centerSongs)} />
               </div>
             </div>
             <div className="flex items-end gap-2 mt-2">
@@ -253,5 +268,15 @@ export function SetlistEditor({
         <Plus size={12} /> 公演を足す
       </button>
     </div>
+  );
+}
+
+/** マスタに無い曲の注意書き。無ければ何も出さない */
+function UnknownSongs({ titles }: { titles: string[] }) {
+  if (titles.length === 0) return null;
+  return (
+    <p className="mt-0.5 text-[11px] text-amber-700">
+      曲マスタに無い: {titles.join(" / ")} (誤字なら直してください。未収録の曲ならそのまま保存できます)
+    </p>
   );
 }

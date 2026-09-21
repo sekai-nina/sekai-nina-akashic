@@ -24,7 +24,6 @@ import {
   MEETGREET_FORMAT_SHORT_LABELS,
 } from "@/lib/utils";
 import { buildQuery } from "@/lib/twitter/x-search";
-import { fetchCollection, type FetchResult } from "./repo";
 import { logAudit } from "./audit";
 import {
   applyMaterialsToDossier,
@@ -34,9 +33,11 @@ import {
   loadDossiers,
   loadMaterialInputs,
   loadNeedsSync,
+  refetchCollection,
   WorkflowInputError,
   type ActingUser,
   type DossierBrief,
+  type ReportFetchOutcome,
 } from "./article-workflow";
 import {
   MATERIAL_WINDOW_DAYS,
@@ -76,6 +77,17 @@ export function meetGreetTitle(input: MeetGreetNaming): string {
   return `${formatJpDate(input.date)} ${input.label ?? ""}${meetGreetName(input)}`;
 }
 
+/** 抜粋の提案 / 反映 (excerpts.ts) に渡す器の情報。LLM には「日付 の 形式ミート＆グリート」と伝える */
+export function meetGreetExcerptTarget(mg: { id: string; dossierId: string; date: string; format: MeetGreetFormat }) {
+  return {
+    kind: "meetgreet" as const,
+    id: mg.id,
+    dossierId: mg.dossierId,
+    subject: `${mg.date} の${MEETGREET_FORMAT_LABELS[mg.format]}ミート＆グリート`,
+    inputError: MeetGreetInputError,
+  };
+}
+
 export interface CreateMeetGreetInput {
   date: string;
   format: MeetGreetFormat;
@@ -88,9 +100,7 @@ export interface CreateMeetGreetInput {
   repoCollectionId?: string;
 }
 
-export type ReportFetchOutcome =
-  | { ok: true; result: FetchResult }
-  | { ok: false; error: string };
+export type { ReportFetchOutcome };
 
 /** 入力が不正なことを呼び出し元 (REST の 400) に伝える */
 export class MeetGreetInputError extends WorkflowInputError {}
@@ -230,15 +240,6 @@ async function createInTransaction(
   });
 
   return { id: created.meetGreetId };
-}
-
-async function safeFetch(collectionId: string, clearance: string): Promise<ReportFetchOutcome> {
-  try {
-    const result = await fetchCollection(collectionId, clearance);
-    return { ok: true, result };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
-  }
 }
 
 const listInclude = {
@@ -496,5 +497,5 @@ export async function refetchReports(
   meetGreet: { id: string; repoCollectionId: string | null }
 ): Promise<ReportFetchOutcome> {
   if (!meetGreet.repoCollectionId) return { ok: false, error: "X レポ収集が紐づいていません" };
-  return safeFetch(meetGreet.repoCollectionId, user.clearance);
+  return refetchCollection(meetGreet.repoCollectionId, user.clearance);
 }

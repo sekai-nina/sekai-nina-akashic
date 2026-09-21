@@ -6,17 +6,31 @@ import { Check, Crop, Sparkles, X } from "lucide-react";
 import type { SketchCandidate, SketchSourceAsset } from "@/lib/meetgreet/types";
 import type { CropMap, CropRect } from "@/lib/meetgreet/crop";
 import { maxReferencePhotos } from "@/lib/meetgreet/config";
-import {
-  generateSketchAction,
-  saveSketchCropsAction,
-  selectSketchAction,
-  updateMeetGreetAction,
-} from "../actions";
 import { CropEditor } from "./crop-editor";
 import { RefUpload } from "./ref-upload";
+import { ownerApiPath, WORKFLOW_OWNER_THIS, type WorkflowOwner } from "./owner";
+
+type Fail = { ok: false; error: string };
+
+/**
+ * 器ごとの Server Action (bind 済み)。ミーグリとライブで返りの形は同じ
+ */
+export interface SketchStepActions {
+  /** 生成前に追加指示を保存する */
+  saveExtraPrompt: (extra: string) => Promise<{ ok: true } | Fail>;
+  generate: (options: {
+    assetIds: string[];
+    refKeys: string[];
+    revisionOf?: string;
+    revisionNote?: string;
+  }) => Promise<{ ok: true; candidates: { key: string; url: string }[] } | Fail>;
+  saveCrops: (changes: Record<string, CropRect | null>) => Promise<{ ok: true } | Fail>;
+  select: (key: string) => Promise<{ ok: true } | Fail>;
+}
 
 interface Props {
-  meetGreetId: string;
+  owner: WorkflowOwner;
+  actions: SketchStepActions;
   sources: SketchSourceAsset[];
   candidates: SketchCandidate[];
   selectedKey: string | null;
@@ -46,7 +60,8 @@ const textareaCls =
  * 気に入らなければ候補を 1 枚選んで修正指示を書き、それを元に作り直す。
  */
 export function SketchStep({
-  meetGreetId,
+  owner,
+  actions,
   sources,
   candidates,
   selectedKey,
@@ -113,7 +128,7 @@ export function SketchStep({
       // 追加指示は生成の前に保存する。**失敗したら生成しない**
       // (サーバーは保存済みの指示を読むので、古い内容で 1 分かけて作ってしまう)
       if (extra !== extraPrompt) {
-        const saved = await updateMeetGreetAction(meetGreetId, { extraSketchPrompt: extra }).catch(
+        const saved = await actions.saveExtraPrompt(extra).catch(
           (e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : "保存に失敗しました" })
         );
         if (!saved.ok) {
@@ -121,7 +136,7 @@ export function SketchStep({
           return;
         }
       }
-      const res = await generateSketchAction(meetGreetId, {
+      const res = await actions.generate({
         // アセットと参考画像は別々に渡す (サーバー側の検査が違う)
         assetIds: [...picked].filter((id) => !refKeys.has(id)),
         refKeys: [...picked].filter((id) => refKeys.has(id)),
@@ -145,7 +160,7 @@ export function SketchStep({
   function saveCrop(assetId: string, rect: CropRect | null) {
     setMsg(rect ? "切り抜きを保存中…" : "切り抜きを外しています…");
     startTransition(async () => {
-      const res = await saveSketchCropsAction(meetGreetId, { [assetId]: rect }).catch(
+      const res = await actions.saveCrops({ [assetId]: rect }).catch(
         (e: unknown) => ({
           ok: false as const,
           error: e instanceof Error ? e.message : "通信に失敗しました",
@@ -167,10 +182,9 @@ export function SketchStep({
     if (!confirm(`参考画像「${name}」を消しますか？`)) return;
     setMsg("消しています…");
     startTransition(async () => {
-      const res = await fetch(
-        `/api/meetgreets/${meetGreetId}/sketch-refs?key=${encodeURIComponent(key)}`,
-        { method: "DELETE" }
-      )
+      const res = await fetch(`${ownerApiPath(owner)}/sketch-refs?key=${encodeURIComponent(key)}`, {
+        method: "DELETE",
+      })
         .then((r) => r.json().then((j: { error?: string }) => ({ ok: r.ok, ...j })))
         .catch(() => ({ ok: false, error: "通信に失敗しました" }));
       if (!res.ok) {
@@ -189,7 +203,7 @@ export function SketchStep({
 
   function select(key: string) {
     startTransition(async () => {
-      const res = await selectSketchAction(meetGreetId, key).catch((e: unknown) => ({
+      const res = await actions.select(key).catch((e: unknown) => ({
         ok: false as const,
         error: e instanceof Error ? e.message : "通信に失敗しました",
       }));
@@ -310,11 +324,11 @@ export function SketchStep({
         </div>
       </div>
 
-      <RefUpload meetGreetId={meetGreetId} />
+      <RefUpload owner={owner} />
 
       <div>
         <label className="block text-xs font-medium text-slate-600 mb-1.5" htmlFor="mg-extra-prompt">
-          この回の追加指示 (任意。どの髪型を中央にするか、配置の希望など)
+          {WORKFLOW_OWNER_THIS[owner.kind]}だけの追加指示 (任意。どの髪型・衣装を中央にするか、配置の希望など)
         </label>
         <textarea
           id="mg-extra-prompt"
@@ -370,7 +384,7 @@ export function SketchStep({
           src={
             cropping.isRef
               ? (cropping.url ?? "")
-              : `/api/meetgreets/${meetGreetId}/sketch-reference/${cropping.id}`
+              : `${ownerApiPath(owner)}/sketch-reference/${cropping.id}`
           }
           title={cropping.title}
           value={crops[cropping.id] ?? null}

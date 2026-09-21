@@ -27,15 +27,19 @@ describe("refsFromJson", () => {
 
 describe("isRefKeyOf", () => {
   it("その回の置き場の key だけ通す", () => {
-    expect(isRefKeyOf("mg1", `${refPrefix("mg1")}/1.webp`)).toBe(true);
+    expect(isRefKeyOf("meetgreet", "mg1", `${refPrefix("meetgreet", "mg1")}/1.webp`)).toBe(true);
+    expect(refPrefix("meetgreet", "mg1")).toBe("meetgreet/mg1/refs");
+    expect(refPrefix("live", "l1")).toBe("live/l1/refs");
   });
 
   it("他の回・無関係な R2 オブジェクトは弾く", () => {
     // **ここが緩むと、見えないはずの画像を外部 AI に送る口になる**
-    expect(isRefKeyOf("mg1", `${refPrefix("mg2")}/1.webp`)).toBe(false);
-    expect(isRefKeyOf("mg1", "meetgreet/style-reference/base.png")).toBe(false);
-    expect(isRefKeyOf("mg1", "dossiers/x/y/image.webp")).toBe(false);
+    expect(isRefKeyOf("meetgreet", "mg1", `${refPrefix("meetgreet", "mg2")}/1.webp`)).toBe(false);
+    expect(isRefKeyOf("meetgreet", "mg1", "meetgreet/style-reference/base.png")).toBe(false);
+    expect(isRefKeyOf("meetgreet", "mg1", "dossiers/x/y/image.webp")).toBe(false);
     // 前方一致だけで通さない (mg10 の置き場を mg1 のものと誤認しない)
-    expect(isRefKeyOf("mg1", "meetgreet/mg10/refs/1.webp")).toBe(false);
+    expect(isRefKeyOf("meetgreet", "mg1", "meetgreet/mg10/refs/1.webp")).toBe(false);
+    // 器の種類が違えば同じ ID でも弾く (ライブとミーグリの ID は cuid で被らないが、規則として)
+    expect(isRefKeyOf("live", "mg1", "meetgreet/mg1/refs/1.webp")).toBe(false);
   });
 });

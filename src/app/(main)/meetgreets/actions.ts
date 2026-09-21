@@ -12,7 +12,8 @@ import {
   refetchReports,
   updateMeetGreet,
 } from "@/lib/domain/meetgreets";
-import { applyExcerpts, proposeExcerptsForDossier } from "@/lib/domain/meetgreet-excerpts";
+import { applyExcerpts, proposeExcerptsForDossier } from "@/lib/domain/excerpts";
+import { meetGreetExcerptTarget } from "@/lib/domain/meetgreets";
 import { importMeetGreets, linkArticles } from "@/lib/domain/meetgreet-import";
 import {
   previewMeetGreetArticle,
@@ -130,7 +131,7 @@ export async function proposeExcerptsAction(id: string) {
   try {
     const mg = await getMeetGreet(user, id);
     if (!mg) throw new Error("見つかりません");
-    const blogs = await proposeExcerptsForDossier(user, mg);
+    const blogs = await proposeExcerptsForDossier(user, meetGreetExcerptTarget(mg));
     return { ok: true as const, blogs };
   } catch (e) {
     return { ok: false as const, error: errorMessage(e) };
@@ -144,7 +145,7 @@ export async function applyExcerptsAction(id: string, inputs: ApplyExcerptInput[
   try {
     const mg = await getMeetGreet(user, id);
     if (!mg) throw new Error("見つかりません");
-    const result = await applyExcerpts(user, mg, parsed.data.inputs);
+    const result = await applyExcerpts(user, meetGreetExcerptTarget(mg), parsed.data.inputs);
     invalidateDossiers();
     revalidatePath(`/meetgreets/${id}`);
     revalidatePath(`/dossiers/${mg.dossierId}`);
@@ -189,6 +190,11 @@ export async function saveSketchCropsAction(
   } catch (e) {
     return { ok: false as const, error: errorMessage(e) };
   }
+}
+
+/** スケッチの追加指示だけを保存する (生成の直前に SketchStep が呼ぶ。bind で渡すため 1 引数) */
+export async function saveExtraSketchPromptAction(id: string, extra: string) {
+  return updateMeetGreetAction(id, { extraSketchPrompt: extra });
 }
 
 export async function selectSketchAction(id: string, key: string) {

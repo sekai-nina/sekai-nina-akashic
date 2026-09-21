@@ -16,7 +16,7 @@ export interface EventOption {
   assetCount: number;
 }
 
-export function NewLiveForm({ events }: { events: EventOption[] }) {
+export function NewLiveForm({ events, songKeys }: { events: EventOption[]; songKeys: string[] }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
@@ -103,7 +103,7 @@ export function NewLiveForm({ events }: { events: EventOption[] }) {
       />
 
       <span className={labelCls}>公演と披露曲</span>
-      <SetlistEditor value={draft} onChange={setDraft} disabled={pending} />
+      <SetlistEditor value={draft} onChange={setDraft} disabled={pending} knownKeys={songKeys} />
 
       <div className="mt-5 flex items-center gap-3">
         <button

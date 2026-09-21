@@ -37,17 +37,8 @@ const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 /** 1 本のブログから提案する抜粋の上限 */
 export const MAX_EXCERPTS_PER_BLOG = 4;
 
-const SYSTEM_PROMPT = `あなたは日向坂46・坂井新奈のファンサイトの編集者です。
-本人のブログ本文から、指定された日のミート＆グリート（ミーグリ / お話し会）について
-書いている部分だけを抜き出します。
-
-抜き出す対象:
-- その日のミーグリの感想・お礼・振り返り
-- その日の衣装や髪型についての言及（「浴衣でした」など、ミーグリの話と地続きのもの）
-- ミーグリでのファンとのやりとりの描写
-
-抜き出さないもの:
-- 別の日の出来事、別の仕事や予定の話
+const commonRules = (otherDays: string) => `抜き出さないもの:
+- ${otherDays}、別の仕事や予定の話
 - 事務連絡・告知だけの部分
 - 挨拶だけの定型文（「こんにちは！」等）
 
@@ -57,6 +48,33 @@ const SYSTEM_PROMPT = `あなたは日向坂46・坂井新奈のファンサイ�
 - **本文に現れる順に返してください**
 - 段落の途中で切らず、文の切れ目で始めて文の切れ目で終わらせてください
 - 該当する部分が無ければ空の配列を返してください`;
+
+const SYSTEM_PROMPT = `あなたは日向坂46・坂井新奈のファンサイトの編集者です。
+本人のブログ本文から、指定された日のミート＆グリート（ミーグリ / お話し会）について
+書いている部分だけを抜き出します。
+
+抜き出す対象:
+- その日のミーグリの感想・お礼・振り返り
+- その日の衣装や髪型についての言及（「浴衣でした」など、ミーグリの話と地続きのもの）
+- ミーグリでのファンとのやりとりの描写
+
+${commonRules("別の日の出来事")}`;
+
+/** ライブ (#150)。対象の書き方が違うだけで、原文一致などの規則は同じ */
+const LIVE_SYSTEM_PROMPT = `あなたは日向坂46・坂井新奈のファンサイトの編集者です。
+本人のブログ本文から、指定されたライブ（コンサート・ツアー・フェス・配信ライブ）について
+書いている部分だけを抜き出します。ツアーは複数の公演があるので、どの公演の話でも対象です。
+
+抜き出す対象:
+- そのライブ・公演の感想・お礼・振り返り（会場、お客さん、メンバーとのやりとり）
+- そのライブの衣装・髪型・持ち物についての言及
+- 披露した曲、セットリスト、ポジション、センターについての言及
+- リハーサルやライブ当日の裏側の話
+
+${commonRules("そのライブ以外の日の出来事 (ツアーの別公演の話は対象)")}`;
+
+/** 抜粋の対象になる器の種類 */
+export type ExcerptTopicKind = "meetgreet" | "live";
 
 const RESPONSE_SCHEMA = {
   name: "meetgreet_excerpts",
@@ -180,11 +198,12 @@ export class ExcerptError extends Error {}
 
 /**
  * ブログ本文 1 本ぶんの抜粋案を返す。
- * `date` はそのミーグリの開催日 (JST の YYYY-MM-DD)、`formatLabel` は「オンライン」/「リアル」。
+ * `subject` は LLM に伝える対象 (「2026-08-01 のリアルミート＆グリート」や
+ * 「日向坂46 ARENA TOUR 2025「MONSTER GROOVE」（2025-09-20〜2025-11-21）」)。
  */
 export async function proposeExcerpts(
   content: string,
-  context: { date: string; formatLabel: string; blogTitle: string }
+  context: { subject: string; blogTitle: string; kind?: ExcerptTopicKind }
 ): Promise<ExcerptProposal[]> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new ExcerptError("OPENAI_API_KEY が未設定です");
@@ -198,13 +217,10 @@ export async function proposeExcerpts(
       // temperature は送らない (gpt-5 系は指定すると 400)。毎回同じ提案にはならなくなるが、
       // どのみち人が選んでから入れるので、決定性より原文一致率を取る
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
+        { role: "system", content: context.kind === "live" ? LIVE_SYSTEM_PROMPT : SYSTEM_PROMPT },
         {
           role: "user",
-          content:
-            `対象: ${context.date} の${context.formatLabel}ミート＆グリート\n` +
-            `ブログ: ${context.blogTitle}\n\n` +
-            `本文:\n${content}`,
+          content: `対象: ${context.subject}\n` + `ブログ: ${context.blogTitle}\n\n` + `本文:\n${content}`,
         },
       ],
       response_format: { type: "json_schema", json_schema: RESPONSE_SCHEMA },

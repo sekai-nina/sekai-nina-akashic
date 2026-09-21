@@ -12,7 +12,7 @@ import { CreateLiveSchema, projectLive } from "@/lib/live/api";
 import { projectCandidates } from "@/lib/meetgreet/api";
 import { formatZodError } from "@/lib/zod-error";
 
-/** 作成自体は速い。X の収集は POST /lives/:id/reports (PR2) で明示的に行う */
+/** 作成自体は速い。X の収集は POST /lives/:id/reports で明示的に行う */
 export const maxDuration = 60;
 
 export async function GET(request: Request) {

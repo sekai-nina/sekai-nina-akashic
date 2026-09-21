@@ -5,16 +5,24 @@ import { useState, useTransition } from "react";
 import { ExternalLink, RefreshCw } from "lucide-react";
 import type { MeetGreetKeeps } from "@/lib/domain/meetgreet-reports";
 import { formatDate } from "@/lib/utils";
-import { refetchReportsAction } from "../actions";
 import { Lightbox } from "@/components/lightbox";
+import { WORKFLOW_OWNER_NOUN, type WorkflowOwnerKind } from "./owner";
+
+/** 再収集の Server Action の返り (ミーグリ / ライブで同じ形) */
+export type RefetchResult =
+  | { ok: true; fetched: number; added: number }
+  | { ok: false; error: string };
 
 export function ReportsStep({
-  meetGreetId,
+  kind,
+  onRefetch,
   hasCollection,
   fetched,
   keeps,
 }: {
-  meetGreetId: string;
+  kind: WorkflowOwnerKind;
+  /** 器ごとの再収集 (Server Action を bind したもの) */
+  onRefetch: () => Promise<RefetchResult>;
   hasCollection: boolean;
   /** 一度でも収集したか。まだなら「収集する」を主導線にする */
   fetched: boolean;
@@ -31,7 +39,7 @@ export function ReportsStep({
   function refetch() {
     setMsg("収集中… 1 分ほどかかることがあります");
     startTransition(async () => {
-      const res = await refetchReportsAction(meetGreetId).catch((e: unknown) => ({
+      const res = await onRefetch().catch((e: unknown) => ({
         ok: false as const,
         error: e instanceof Error ? e.message : "通信に失敗しました",
       }));
@@ -68,7 +76,7 @@ export function ReportsStep({
 
       {keeps && !keeps.publishable && keeps.total > 0 && (
         <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-          機密レベルが高いため、採用にしても記事の本文には載りません（記事は公開リポジトリに push されるため）。収集かミーグリの機密レベルを下げてください。
+          機密レベルが高いため、採用にしても記事の本文には載りません（記事は公開リポジトリに push されるため）。収集か{WORKFLOW_OWNER_NOUN[kind]}の機密レベルを下げてください。
         </p>
       )}
 

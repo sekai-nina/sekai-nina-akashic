@@ -98,10 +98,15 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 | GET | `/lives` | read | ライブ（記事ワークフロー）一覧と進み具合 |
 | POST | `/lives` | write | ライブ作成（ドシエと X レポ収集を自動作成し、公演と曲を入れ、素材候補を返す） |
 | GET | `/lives/:id` | read | ライブ詳細 + 素材候補 |
-| PATCH | `/lives/:id` | write | ライブ名・補足の更新 |
+| PATCH | `/lives/:id` | write | ライブ名・補足・X レポのハッシュタグ・スケッチ追加指示の更新 |
 | DELETE | `/lives/:id` | write | ライブの行を消す（ドシエ・収集・エンティティは残る） |
 | PUT | `/lives/:id/setlist` | write | 公演と披露曲を丸ごと入れ替える |
 | POST | `/lives/:id/materials` | write | 素材候補のチェック結果をドシエに反映 |
+| POST | `/lives/:id/reports` | write | X レポの (再) 収集 |
+| POST | `/lives/:id/sketch` | write | 衣装スケッチの候補を生成（作り直しも） |
+| POST | `/lives/:id/sketch/crops` | write | 参照写真の切り抜き枠を保存 |
+| POST | `/lives/:id/sketch/select` | write | 候補の 1 枚を確定 |
+| GET | `/songs` | read | 曲マスタ（公式ディスコグラフィ + 公演で披露した曲）の一覧 |
 
 ---
 
@@ -1359,7 +1364,7 @@ keep / total は `GET /meetgreets/:id` の `repoCollection` で読む。判定�
 
 `Live` / `LivePerformance` / `LiveSong` は保護テーブル（`Live.classification`、既定 `internal`。子 2 つは親に従う）。一覧・詳細は API キーの持ち主の clearance で見える行だけ。`Song` は曲名しか持たない非保護のマスタで、**入力した曲名がそのまま find-or-create される**（表記揺れは別の曲になる。既存記事の表記に合わせる）。
 
-X レポの再収集・スケッチ・記事生成の API は PR2 / PR3（#150 / #151）で足す。それまで収集の実行は画面 `/repo/:id` から行う。
+X レポ・スケッチはミーグリと同じ仕組み（#150）。記事生成は #151。
 
 ### GET /lives
 
@@ -1383,6 +1388,7 @@ X レポの再収集・スケッチ・記事生成の API は PR2 / PR3（#150 /
       ],
       "dossier": {"id": "…", "title": "日向坂46 ARENA TOUR 2025「MONSTER GROOVE」", "itemCount": 0, "updatedAt": "…"},
       "dossierId": "…",
+      "reportTags": ["MONSTER_GROOVE"],
       "repoCollection": {"id": "…", "name": "… 坂井新奈", "lastFetchedAt": null, "keep": 0, "total": 0},
       "article": null,
       "sketch": {"key": null, "url": null, "candidates": [], "extraPrompt": ""},
@@ -1406,7 +1412,7 @@ X レポの再収集・スケッチ・記事生成の API は PR2 / PR3（#150 /
 
 1. event エンティティを決める。`entityId` があればそれ、無ければ**ライブ名と同名の event エンティティを find-or-create**（過去のライブは MV の取り込み等で既にあるので、名前を打ち直して別のエンティティを作らないよう `GET /entities?type=event` で探して渡す）。**`classification` が `confidential` 以上のときは作らない**（`Entity` は非保護でライブ名が全員に見えるため。`entityId` で既にあるものを選ぶのは可）
 2. ドシエをライブ名で作成。`viewMode` / `editMode` は `clearance`
-3. X レポ収集（`RepoCollection`）を `#坂井新奈` 単独の条件、期間 = 初日〜最終日の翌日 で作成する（**収集は走らせない**。ライブごとのハッシュタグは PR2 で `reportTags` に入れる）
+3. X レポ収集（`RepoCollection`）を `#坂井新奈` 単独の条件、期間 = 初日〜最終日の翌日 で作成する（**収集は走らせない**。ライブごとのハッシュタグは `PATCH /lives/:id` の `reportTags` で足す）
 4. 公演と曲を入れる（曲は `Song` に find-or-create）
 5. 素材候補（下記）を返す
 
@@ -1450,7 +1456,12 @@ X レポの再収集・スケッチ・記事生成の API は PR2 / PR3（#150 /
 
 ### PATCH /lives/:id
 
-`name` / `note` を部分更新（渡した項目だけ変わる）。更新項目が 1 つも無い（`{}`）なら 400。**作成済みのドシエ名・収集名・エンティティ名は変わらない**（それぞれの画面で変更する）。
+`name` / `note` / `reportTags` / `extraSketchPrompt` を部分更新（渡した項目だけ変わる）。更新項目が 1 つも無い（`{}`）なら 400。**作成済みのドシエ名・収集名・エンティティ名は変わらない**（それぞれの画面で変更する）。
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `reportTags` | string[] (≤10、各 ≤50) | X レポ収集のハッシュタグ。`#` は付けても付けなくてもよい。条件は **`坂井新奈 AND <タグ>` をタグごとに作り、タグ間は OR**。空なら `#坂井新奈` だけ。変えると紐づく `RepoCollection` の条件と期間（初日〜最終日の翌日）が追随する（`PUT /setlist` で公演を直したときも同じ） |
+| `extraSketchPrompt` | string (≤4000) | スケッチ生成の追加指示（ミーグリと同じ） |
 
 **レスポンス:** 更新後の行（`GET /lives` の 1 行と同じ形。`candidates` は付かない）。
 
@@ -1475,6 +1486,66 @@ X レポの再収集・スケッチ・記事生成の API は PR2 / PR3（#150 /
 `POST /meetgreets/:id/materials` と同じ（`{"assetIds": […]}` をドシエに `asset_ref` で入れる。1 回に 500 件、同じアセットは 2 回入らない、権限が無ければ 403、ドシエが消えていれば 404）。
 
 **レスポンス:** `{"added": 12, "skipped": 2, "dossierId": "…"}`
+
+### POST /lives/:id/reports
+
+`POST /meetgreets/:id/reports` と同じ（X レポの (再) 収集。収集が紐づいていなければ 409、X API の失敗は 502）。作成時には走らせないので、最初の収集もここ。X の recent search は直近 7 日までなので、ツアーは公演のたびに呼ぶ。
+
+### POST /lives/:id/sketch
+
+`POST /meetgreets/:id/sketch` と同じ本文・制限（参照 15 枚まで、`internal` 以下のみ、ライブ自体が `internal` を超えていると 400）。違いはプロンプトに「ステージ衣装。衣装が複数あれば補助スケッチに別の衣装」の指示が足されることと、生成物の置き場が `live/<id>/sketch/…` になること。参考画像のアップロードは画面だけ（`POST /api/lives/:id/sketch-refs`）。
+
+### POST /lives/:id/sketch/crops
+
+`POST /meetgreets/:id/sketch/crops` と同じ。
+
+### POST /lives/:id/sketch/select
+
+`POST /meetgreets/:id/sketch/select` と同じ（候補の 1 枚を `sketchKey` にする。**レスポンス:** 更新後の行）。
+
+---
+
+## 曲マスタ (Songs)
+
+公式ディスコグラフィ（Sony Music の JSON API。公式サイトが描画に使っているもの）を `pnpm cli:import-songs` で取り込んだ `Song` / `Release` / `ReleaseTrack` と、ライブの公演フォームで打った曲（find-or-create）の一覧（設計は #167）。曲名は `normalizedTitle`（NFKC → 小文字 → 空白・記号を落とす）で名寄せされる。3 テーブルとも公開情報なので非保護。**披露回数だけはキーの持ち主に見えるライブのぶん**（`LiveSong` は保護）。
+
+公開サイトのディスコグラフィ / 参加楽曲ページはここから作る想定（site リポで別 Issue）。編集（曲名・参加・メモ・統合）は画面 `/songs` のみで API は無い。
+
+### GET /songs
+
+```
+GET /api/v1/songs?q=ハニー&participation=member
+```
+
+| パラメータ | 説明 |
+|---|---|
+| `q` | 曲名の部分一致（≤100）。名寄せキー（NFKC → 小文字 → 空白・記号除去）で比べるので「HEY!OHISAMA!」でも「HEY！OHISAMA！」でも当たる。**ひらがな / カタカナは畳まない**（`はにー` では当たらない） |
+| `participation` | `unknown` / `member` / `none`（坂井新奈の参加楽曲か。人が付ける。省略で絞らない。曲の既定値は `unknown`） |
+| `orphan` | `1` でどの作品にも入っていない曲だけ（ライブ限定アレンジ・誤字の候補） |
+
+未知のパラメータは無視、空の値は「指定なし」。
+
+```json
+{
+  "items": [
+    {
+      "id": "…",
+      "title": "君はハニーデュー",
+      "artist": "日向坂46",
+      "participation": "unknown",
+      "note": "",
+      "firstRelease": {"id": "…", "title": "君はハニーデュー", "kind": "single", "releaseDate": "2024-05-08", "artist": "日向坂46", "trackNo": 1},
+      "releaseCount": 2,
+      "performanceCount": 3
+    }
+  ]
+}
+```
+
+- 並びは**初出の作品の新しい順 → その作品でのトラック順**。未収録の曲は末尾（題の順）。作品ごとに見出しを付けるならこの順のまま `firstRelease.id` でまとめればよい
+- `firstRelease` は発売日が最も古い収録作品。未収録なら `null`。`trackNo` はその作品でのトラック番号。`kind` は `single` / `album`（Sony の種別。「Kind of love」は Sony ではアルバムだが 17th シングルなので `single` に補正している）
+- `releaseCount` は収録作品数（アルバム再収録を含む）
+- 何枚目のシングルか（ordinal）は持たない
 
 ---
 

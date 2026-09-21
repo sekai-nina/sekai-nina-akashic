@@ -14,6 +14,7 @@ import { z } from "zod";
 import { isValidDateString } from "@/lib/utils";
 import {
   MAX_EXCERPTS_PER_APPLY,
+  MAX_EXTRA_SKETCH_PROMPT,
   MAX_REFERENCE_PHOTOS,
   MAX_SKETCH_SOURCES,
   maxReferencePhotos,
@@ -26,8 +27,7 @@ import { getR2PublicUrl } from "@/lib/r2";
 /** 作り直しの指示の長さ */
 export const MAX_REVISION_NOTE = 2000;
 
-/** 回ごとの追加指示の長さ */
-export const MAX_EXTRA_SKETCH_PROMPT = 4000;
+export { MAX_EXTRA_SKETCH_PROMPT };
 
 export const CreateMeetGreetSchema = z
   .object({

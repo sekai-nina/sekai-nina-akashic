@@ -75,11 +75,18 @@ export const MAX_PERFORMANCE_NOTE = 500;
 /** 1 つのライブに持てる公演の数 (ツアーでも 20 前後) */
 export const MAX_PERFORMANCES = 100;
 
+/** X レポ収集のハッシュタグの上限 (本数と 1 タグの長さ) (#150) */
+export const MAX_REPORT_TAGS = 10;
+export const MAX_REPORT_TAG_LENGTH = 50;
+
 /** 1 つの曲リストに入れられる曲数 */
 export const MAX_SONGS_PER_LIST = 100;
 
 /** 曲名の長さ */
 export const MAX_SONG_TITLE = 100;
+
+/** 曲マスタのメモの長さ (#167) */
+export const MAX_SONG_NOTE = 2000;
 
 /**
  * 「A / B / C」の 1 行入力を曲名の配列にする。

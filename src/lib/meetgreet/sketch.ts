@@ -335,7 +335,8 @@ async function callOpenAIEdits(
 }
 
 export interface GenerateSketchInput {
-  meetGreetId: string;
+  /** 生成物の置き場 (`sketchKeyPrefix`)。`meetgreet/<id>` か `live/<id>` */
+  keyPrefix: string;
   photos: SketchSourceImage[];
   /** 回ごとの追加指示 (どの髪型を中央にするか等) */
   extraPrompt: string;
@@ -390,7 +391,7 @@ export async function generateSketches(input: GenerateSketchInput): Promise<Gene
   const saved: GeneratedSketch[] = [];
   for (const [i, png] of raw.entries()) {
     const padded = await padToCardAspect(png);
-    const key = `meetgreet/${input.meetGreetId}/sketch/${stamp}-${i}.png`;
+    const key = `${input.keyPrefix}/sketch/${stamp}-${i}.png`;
     await uploadToR2(key, padded, "image/png");
     saved.push({ key, url: getR2PublicUrl(key) });
   }

@@ -1104,12 +1104,16 @@ model Live {
   /// X レポ収集のハッシュタグ (string[])。坂井新奈 AND 各タグ、タグ間は OR。空なら坂井新奈だけ
   reportTags Json @default("[]")
 
-  /// スケッチ候補の R2 key の配列 (PR2 で使う)
+  /// スケッチ候補の R2 key の配列 (`live/<id>/sketch/…`)
   sketchCandidates  Json    @default("[]")
   /// 確定したスケッチの R2 key。記事のサムネになる
   sketchKey         String?
   /// スケッチ生成時にプロンプト本体へ追記する、このライブだけの指示
   extraSketchPrompt String  @default("")
+  /// このライブだけの参考画像 (MeetGreet.sketchRefs と同じ形。`live/<id>/refs/…`)
+  sketchRefs        Json    @default("[]")
+  /// 参照写真の切り抜き枠 (MeetGreet.sketchCrops と同じ形)
+  sketchCrops       Json    @default("{}")
 
   /// 記事に足さないと決めたもののキー (MeetGreet.articleExclusions と同じ形式)
   articleExclusions Json @default("[]")
@@ -1211,8 +1215,9 @@ model Release {
 }
 
 /// 作品と曲の紐づけ。全盤の和集合なので、どの盤に入っているかは editions (品番の配列) に持つ。
-/// songId は Cascade (曲を消せば収録も消える)。**曲の統合 (/songs) では収録曲を消す側から
-/// 残す側へ付け替えてから消すこと** (消すだけだと次の取り込みで公式表記の曲が復活する)
+/// songId は Cascade (曲を消せば収録も消える)。取り込みは名寄せキーで曲を探すので、収録のある
+/// 曲を消す・キーが変わる改名をすると次回の取り込みで公式表記の曲が作り直される。
+/// **曲の統合 (/songs) の統合元にできるのは未収録の曲だけ** (mergeSongs が止める)
 model ReleaseTrack {
   id        String  @id @default(cuid())
   releaseId String

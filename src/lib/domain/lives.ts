@@ -22,8 +22,10 @@ import {
 } from "@/lib/utils";
 import { buildQuery } from "@/lib/twitter/x-search";
 import {
+  jsonStringArray,
   MATERIAL_WINDOW_DAYS,
   MAX_ARTICLE_CLEARANCE,
+  MAX_EXTRA_SKETCH_PROMPT,
   MEETGREET_PERSON_NAME,
   REPORT_WINDOW_DAYS,
 } from "@/lib/meetgreet/config";
@@ -32,6 +34,8 @@ import {
   liveKeywords,
   liveReportTagGroups,
   MAX_PERFORMANCES,
+  MAX_REPORT_TAG_LENGTH,
+  MAX_REPORT_TAGS,
   MAX_SONG_TITLE,
   MAX_SONGS_PER_LIST,
 } from "@/lib/live/config";
@@ -45,12 +49,14 @@ import {
   loadDossiers,
   loadMaterialInputs,
   loadNeedsSync,
+  refetchCollection,
   WorkflowInputError,
   type ActingUser,
   type DossierBrief,
+  type ReportFetchOutcome,
 } from "./article-workflow";
 
-export type { ActingUser, DossierBrief };
+export type { ActingUser, DossierBrief, ReportFetchOutcome };
 
 /** 入力が不正なことを呼び出し元 (REST の 400) に伝える */
 export class LiveInputError extends WorkflowInputError {}
@@ -221,6 +227,57 @@ function dateRange(performances: { date: string }[]): { first: string; last: str
   return { first: dates[0], last: dates[dates.length - 1] };
 }
 
+/** ハッシュタグの入力を整える (前後の空白と `#` を落とし、空と重複を除く) */
+function cleanReportTags(tags: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const raw of tags) {
+    const t = raw.trim().replace(/^#/, "").trim();
+    if (!t) continue;
+    if ([...t].length > MAX_REPORT_TAG_LENGTH) {
+      throw new LiveInputError(`ハッシュタグが長すぎます (${MAX_REPORT_TAG_LENGTH} 文字まで): ${t.slice(0, 20)}…`);
+    }
+    if (/\s/.test(t)) throw new LiveInputError(`ハッシュタグに空白は入れられません: ${t}`);
+    if (!out.includes(t)) out.push(t);
+  }
+  if (out.length > MAX_REPORT_TAGS) throw new LiveInputError(`ハッシュタグは ${MAX_REPORT_TAGS} 個までです`);
+  return out;
+}
+
+/**
+ * X レポ収集の条件と期間をライブに追随させる (#150)。
+ * 公演を直したとき (初日 / 最終日が動く) とハッシュタグを変えたときに呼ぶ。
+ * 収集が見えない (機密を上げられた / 消された) ときは何もしない
+ */
+async function syncReportCollection(tx: TransactionClient, liveId: string): Promise<void> {
+  const live = await tx.live.findUnique({
+    where: { id: liveId },
+    select: {
+      repoCollectionId: true,
+      reportTags: true,
+      performances: { select: { date: true } },
+    },
+  });
+  if (!live?.repoCollectionId || live.performances.length === 0) return;
+  // 既にある収集を紐づけた場合に、その収集側の設定 (RT 除外・日本語・追加条件) は壊さない
+  const collection = await tx.repoCollection.findUnique({
+    where: { id: live.repoCollectionId },
+    select: { id: true, excludeRetweets: true, langJa: true, extra: true },
+  });
+  if (!collection) return;
+  const groups = liveReportTagGroups(jsonStringArray(live.reportTags));
+  const range = dateRange(live.performances);
+  await tx.repoCollection.update({
+    where: { id: collection.id },
+    data: {
+      groups: groups as unknown as Prisma.InputJsonValue,
+      groupOp: "or",
+      query: buildQuery(groups, "or", collection.excludeRetweets, collection.langJa, collection.extra),
+      startDate: range.first,
+      endDate: addDaysToDateString(range.last, REPORT_WINDOW_DAYS),
+    },
+  });
+}
+
 /** 一覧・詳細の見出しに出す公演期間 (「2025年9月20日〜11月21日」)。公演が無ければその旨 */
 export function livePeriodLabel(live: { firstDate: string | null; lastDate: string | null }): string {
   if (!live.firstDate) return "公演未設定";
@@ -345,6 +402,8 @@ export async function createLive(user: ActingUser, input: CreateLiveInput): Prom
       live.performances.map((row, i) => ({ ...setlist.performances[i], id: row.id })),
       setlist.commonSongs
     );
+    // 既にある収集を紐づけたときも、条件と期間はこのライブに合わせる (作り直しと同じ扱い)
+    if (input.repoCollectionId) await syncReportCollection(tx, live.id);
     return { liveId: live.id, dossierId: dossier.id, collectionId: collection.id, entityId };
   });
 
@@ -494,28 +553,39 @@ export type LiveDetail = NonNullable<Awaited<ReturnType<typeof getLive>>>;
 export interface UpdateLiveInput {
   name?: string;
   note?: string;
+  /** X レポ収集のハッシュタグ (#150)。変えると収集の条件も追随する */
+  reportTags?: string[];
+  extraSketchPrompt?: string;
 }
 
 /**
- * 名前・補足の更新。作成済みのドシエ・収集・エンティティの名前は変えない
- * (それぞれの画面で変える。ミーグリの label と同じ扱い)
+ * 名前・補足・ハッシュタグ・スケッチの追加指示の更新。作成済みのドシエ・収集・エンティティの
+ * 名前は変えない (それぞれの画面で変える。ミーグリの label と同じ扱い)
  */
 export async function updateLive(user: ActingUser, id: string, input: UpdateLiveInput) {
   const fields = Object.keys(input).filter((k) => input[k as keyof UpdateLiveInput] !== undefined);
   if (fields.length === 0) throw new LiveInputError("更新項目がありません");
   const name = input.name?.trim();
   if (name !== undefined && !name) throw new LiveInputError("ライブ名を入れてください");
+  const reportTags = input.reportTags !== undefined ? cleanReportTags(input.reportTags) : undefined;
+  if (input.extraSketchPrompt !== undefined && [...input.extraSketchPrompt].length > MAX_EXTRA_SKETCH_PROMPT) {
+    throw new LiveInputError(`スケッチの追加指示が長すぎます (${MAX_EXTRA_SKETCH_PROMPT} 文字まで)`);
+  }
 
-  const row = await withClearance(user.clearance, (tx) =>
-    tx.live.update({
+  const row = await withClearance(user.clearance, async (tx) => {
+    const updated = await tx.live.update({
       where: { id },
       data: {
         ...(name !== undefined ? { name } : {}),
         ...(input.note !== undefined ? { note: input.note.trim() } : {}),
+        ...(reportTags !== undefined ? { reportTags } : {}),
+        ...(input.extraSketchPrompt !== undefined ? { extraSketchPrompt: input.extraSketchPrompt } : {}),
       },
-      select: { id: true, name: true, note: true },
-    })
-  );
+      select: { id: true, name: true, note: true, repoCollectionId: true },
+    });
+    if (reportTags !== undefined) await syncReportCollection(tx, id);
+    return updated;
+  });
   await logAudit({
     actorId: user.id,
     action: "live.update",
@@ -559,6 +629,8 @@ export async function replaceSetlist(user: ActingUser, live: { id: string }, inp
       written.push({ id: row.id, songs: p.songs, centerSongs: p.centerSongs });
     }
     await writeSetlist(tx, live.id, written, setlist.commonSongs);
+    // 初日 / 最終日が動くので収集の期間も追随させる
+    await syncReportCollection(tx, live.id);
     return { performances: written.length, removed: existing.size - keep.length };
   });
 
@@ -682,4 +754,34 @@ export async function applyMaterials(
     metadata: { ...result, requested: ids.length, dossierId: live.dossierId },
   });
   return result;
+}
+
+/** X レポを (再) 収集する (作成時には走らせないので、ここが最初の収集にもなる) */
+export async function refetchReports(
+  user: ActingUser,
+  live: { id: string; repoCollectionId: string | null }
+): Promise<ReportFetchOutcome> {
+  if (!live.repoCollectionId) return { ok: false, error: "X レポ収集が紐づいていません" };
+  return refetchCollection(live.repoCollectionId, user.clearance);
+}
+
+/** 抜粋の提案 / 反映 (excerpts.ts) に渡す器の情報。LLM にはライブ名と公演期間・会場を伝える */
+export function liveExcerptTarget(live: {
+  id: string;
+  dossierId: string;
+  name: string;
+  firstDate: string | null;
+  lastDate: string | null;
+  performances: { venue: string }[];
+}) {
+  const venues = [...new Set(live.performances.map((p) => p.venue.trim()).filter(Boolean))];
+  const period = live.firstDate ? `${live.firstDate}〜${live.lastDate ?? live.firstDate}` : "";
+  const detail = [period, venues.join(" / ")].filter(Boolean).join("、");
+  return {
+    kind: "live" as const,
+    id: live.id,
+    dossierId: live.dossierId,
+    subject: detail ? `${live.name}（${detail}）` : live.name,
+    inputError: LiveInputError,
+  };
 }

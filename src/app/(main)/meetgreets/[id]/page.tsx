@@ -14,16 +14,23 @@ import { MATERIAL_WINDOW_DAYS, REPORT_WINDOW_DAYS, TALK_SUGGEST_DAYS } from "@/l
 import { formatDate } from "@/lib/utils";
 import { MetaForm } from "./meta-form";
 import { MaterialsStep } from "@/components/materials-step";
-import { ArticleStep } from "@/components/article-step";
 import {
+  applyExcerptsAction,
   applyMaterialsAction,
+  generateSketchAction,
   previewArticleAction,
+  proposeExcerptsAction,
+  refetchReportsAction,
   restoreExclusionsAction,
   saveArticleAction,
+  saveExtraSketchPromptAction,
+  saveSketchCropsAction,
+  selectSketchAction,
 } from "../actions";
-import { ExcerptStep } from "./excerpt-step";
-import { ReportsStep } from "./reports-step";
-import { SketchStep } from "./sketch-step";
+import { ExcerptStep } from "@/components/workflow/excerpt-step";
+import { ReportsStep } from "@/components/workflow/reports-step";
+import { ArticleStep } from "@/components/workflow/article-step";
+import { SketchStep } from "@/components/workflow/sketch-step";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -117,7 +124,11 @@ export default async function MeetGreetDetailPage({ params, searchParams }: Prop
               topic="ミーグリ"
               onApply={applyMaterialsAction.bind(null, mg.id)}
             />
-            <ExcerptStep meetGreetId={mg.id} />
+            <ExcerptStep
+              kind="meetgreet"
+              onPropose={proposeExcerptsAction.bind(null, mg.id)}
+              onApply={applyExcerptsAction.bind(null, mg.id)}
+            />
           </>
         ) : (
           <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-3">
@@ -151,7 +162,8 @@ export default async function MeetGreetDetailPage({ params, searchParams }: Prop
           採用にしたツイートは記事生成がそのまま読みます。
         </p>
         <ReportsStep
-          meetGreetId={mg.id}
+          kind="meetgreet"
+          onRefetch={refetchReportsAction.bind(null, mg.id)}
           hasCollection={!!mg.repoCollectionId}
           fetched={!!mg.repoCollection?.lastFetchedAt}
           keeps={keeps}
@@ -179,7 +191,13 @@ export default async function MeetGreetDetailPage({ params, searchParams }: Prop
         }
       >
         <SketchStep
-          meetGreetId={mg.id}
+          owner={{ kind: "meetgreet", id: mg.id }}
+          actions={{
+            saveExtraPrompt: saveExtraSketchPromptAction.bind(null, mg.id),
+            generate: generateSketchAction.bind(null, mg.id),
+            saveCrops: saveSketchCropsAction.bind(null, mg.id),
+            select: selectSketchAction.bind(null, mg.id),
+          }}
           sources={sketchSources}
           candidates={sketchCandidates}
           selectedKey={mg.sketchKey}

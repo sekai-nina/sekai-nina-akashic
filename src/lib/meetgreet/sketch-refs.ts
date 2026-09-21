@@ -20,14 +20,25 @@ export interface SketchRef {
 /** 1 回あたりに持てる参考画像の数 (参照の上限そのものは maxReferencePhotos) */
 export const MAX_SKETCH_REFS = 20;
 
-/** この回の参考画像が置かれる場所か (他の回や無関係な R2 オブジェクトを弾く) */
-export function isRefKeyOf(meetGreetId: string, key: string): boolean {
-  return key.startsWith(`${refPrefix(meetGreetId)}/`);
+/**
+ * スケッチを持つ器の種類 (#150)。R2 のキーの名前空間になる
+ * (`meetgreet/<id>/…` はミーグリ、`live/<id>/…` はライブ)
+ */
+export type SketchOwnerKind = "meetgreet" | "live";
+
+/** 器の R2 の置き場 (`meetgreet/<id>`)。生成したスケッチも参考画像もこの下 */
+export function sketchKeyPrefix(kind: SketchOwnerKind, id: string): string {
+  return `${kind}/${id}`;
+}
+
+/** この器の参考画像が置かれる場所か (他の回や無関係な R2 オブジェクトを弾く) */
+export function isRefKeyOf(kind: SketchOwnerKind, id: string, key: string): boolean {
+  return key.startsWith(`${refPrefix(kind, id)}/`);
 }
 
 /** 参考画像の置き場 */
-export function refPrefix(meetGreetId: string): string {
-  return `meetgreet/${meetGreetId}/refs`;
+export function refPrefix(kind: SketchOwnerKind, id: string): string {
+  return `${sketchKeyPrefix(kind, id)}/refs`;
 }
 
 /**
