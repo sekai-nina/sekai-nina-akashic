@@ -6,7 +6,7 @@ import {
   quoteSituationalPrompt,
   renderQuoteSituationalArticle,
 } from "./quote-situational";
-import type { AiDraft, DossierRenderInput } from "./types";
+import { clampAiDraft, type AiDraft, type DossierRenderInput } from "./types";
 
 const BLOG_URL = "https://www.hinatazaka46.com/s/official/diary/detail/65722";
 const blog: ArticleAssetInput = {
@@ -67,5 +67,22 @@ describe("renderQuoteSituationalArticle", () => {
     expect(p.user).toContain("ドシエのタイトル (= 言葉の目安): yes, me now?");
     expect(p.user).toContain("> Yes, me now?");
     expect(p.included).toBe(1);
+  });
+});
+
+describe("clampAiDraft", () => {
+  it("タイトルは NFC・制御文字除去・trim、日付は暦に実在するものだけ", () => {
+    const c = clampAiDraft({ body: "b", tags: [" 大野愛実 ", ""], title: " Yes,\u0000 me now?\n ", date: "2025-13-45", dateDisplay: "  " });
+    expect(c.title).toBe("Yes, me now?");
+    expect(c.tags).toEqual(["大野愛実"]);
+    expect(c.date).toBeNull();
+    expect(c.dateDisplay).toBeNull();
+    expect(clampAiDraft({ body: "b", tags: [], title: "", date: "2025-09-01", dateDisplay: "2025年9月頃" })).toEqual({
+      body: "b",
+      tags: [],
+      title: null,
+      date: "2025-09-01",
+      dateDisplay: "2025年9月頃",
+    });
   });
 });

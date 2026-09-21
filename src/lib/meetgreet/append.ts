@@ -381,12 +381,15 @@ export function planAppend(input: {
     added.reports = freshReports.length;
   }
 
-  /** トークを時系列の正しい位置に差し込む (脚注番号は飛んでよい。順序 > 番号の連続性) */
-  const insertTalks = (sec: Section) => {
+  /**
+   * トークを時系列の正しい位置に差し込む (脚注番号は飛んでよい。順序 > 番号の連続性)。
+   * `fallback` は後ろに時刻の合う行が無いときの位置 (flat ではブログ画像の前、それ以外は末尾)
+   */
+  const insertTalks = (sec: Section, fallback: () => number = () => appendIndex(sec.lines)) => {
     for (const t of freshTalks) {
       const line = renumber(t.line, renumberMap);
       const key = talkSortKeyFromLine(t.line);
-      let at = appendIndex(sec.lines);
+      let at = fallback();
       if (key) {
         for (let i = 0; i < sec.lines.length; i++) {
           const k = talkSortKeyFromLine(sec.lines[i]);
@@ -408,15 +411,18 @@ export function planAppend(input: {
       const tiktokLines = freshTiktoks.map((u) => `![](${u})`);
       const imageLines = freshImages.map((b) => renumber(b.line, renumberMap));
       if (sec.lines.every((l) => l.trim() === "")) {
-        // 章を作ったばかり: フル生成と同じ形 (導入文 → 空行 → 箇条書き)。トークは時系列に
-        const talkLines = [...freshTalks]
-          .sort((x, y) => talkSortKeyFromLine(x.line).localeCompare(talkSortKeyFromLine(y.line)))
-          .map((t) => renumber(t.line, renumberMap));
+        // 章を作ったばかり: フル生成と同じ形 (導入文 → 空行 → 箇条書き)。`parts.talks` は時系列で来る
+        const talkLines = freshTalks.map((t) => renumber(t.line, renumberMap));
         sec.lines = ["", layout.media.lead, "", ...tiktokLines, ...talkLines, ...imageLines, ""];
         added.talks += freshTalks.length;
       } else {
         sec.lines.splice(appendIndex(sec.lines), 0, ...tiktokLines);
-        insertTalks(sec);
+        // トークはブログ画像より前 (フル生成の並び)。画像の行が無ければ末尾
+        const beforeImages = () => {
+          const i = sec.lines.findIndex((l) => /^- 【[^】]*・(画像|動画|音声|メディア)】/.test(l) && !l.startsWith("- 【トーク"));
+          return i >= 0 ? i : appendIndex(sec.lines);
+        };
+        insertTalks(sec, beforeImages);
         sec.lines.splice(appendIndex(sec.lines), 0, ...imageLines);
       }
       added.tiktoks = freshTiktoks.length;

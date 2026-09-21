@@ -21,7 +21,7 @@ import {
   type ArticleParts,
   type RenderedArticle,
 } from "../render";
-import { EDITORIAL_RULES, normalizeAiBody, normalizeAiTags } from "./shared";
+import { aiSystemPrompt, EDITORIAL_RULES, NO_QUOTES_APPEND_LAYOUT, normalizeAiBody, normalizeAiTags } from "./shared";
 import type { AiContext, AiDraft, AiPrompt, ArticleTemplateDef, DossierRenderInput } from "./types";
 
 /** AI が使えなかったときに本文に置くプレースホルダ。記事編集画面で人が置き換える */
@@ -77,8 +77,7 @@ const RULES = `あなたは日向坂46・坂井新奈のアーカイブサイト
 - 既存記事へのリンクは \`[[記事タイトル]]\`。**「既存記事のタイトル」に挙げたものだけ**
 
 ${EDITORIAL_RULES}
-
-- 他メンバーの言動は「坂井新奈の発言の状況説明に必要な範囲」でだけ書く (発言の相手・きっかけ・反応)
+4. 他メンバーの言動は「坂井新奈の発言の状況説明に必要な範囲」でだけ書く (発言の相手・きっかけ・反応)
 
 ## 出力
 
@@ -88,8 +87,9 @@ JSON で返す。
   時期を表すタグ (ninatalk / ブログ / 2026年 など) は付けない
 - title: 記事のタイトル = **実際の発言の表記**。ドシエのタイトルは目安なので、素材の原文に合わせて
   整える (例: ドシエ「yes, me now?」→ "Yes, me now?")。ドシエのタイトルで既に正しければ null
-- date: 発言の日 "YYYY-MM-DD"。日が分からなければその月の 1 日。月も分からなければ null
-- dateDisplay: 日が確かなら null。月までなら "2025年9月頃" のように
+- date: 発言の日 "YYYY-MM-DD"。日が分からなければ**その発言を紹介した素材の投稿日** (ブログ / トークの
+  日付)。それも無ければ null
+- dateDisplay: 発言の日が確かなら null。素材の投稿日で代用したときは "2025年9月頃" のように「頃」を付ける
 
 ## 見本 (既存記事。この形に揃える)
 
@@ -99,19 +99,8 @@ ${SAMPLES.map(
 ).join("\n\n")}
 `;
 
-/** システムプロンプト。鉄則・見本 と 語彙 を別ブロックに (前半のキャッシュを残す) */
 export function quoteSituationalSystemPrompt(context: AiContext): string[] {
-  return [
-    RULES,
-    [
-      "## 既存のタグ (tags はここから選ぶ)",
-      context.tagVocabulary.join("、") || "(なし)",
-      "",
-      "## 既存記事のタイトル ([[…]] でリンクしてよいのはこれだけ)",
-      context.existingTitles.map((t) => `- ${t}`).join("\n") || "(なし)",
-      "",
-    ].join("\n"),
-  ];
+  return aiSystemPrompt(RULES, context);
 }
 
 export function quoteSituationalPrompt(input: DossierRenderInput, context: AiContext): AiPrompt {
@@ -162,12 +151,8 @@ export const QUOTE_SITUATIONAL_TEMPLATE: ArticleTemplateDef = {
   key: "quote_situational",
   articleType: "quote",
   needsAi: true,
-  // 追記で足す章は無い (`parts` は常に空)。`AppendLayout.reports` が必須なので名前だけ置く
-  appendLayout: {
-    quotesHeading: null,
-    quoteAttribution: false,
-    reports: { heading: "## ファンの反応", lead: "ファンの投稿（X）。" },
-  },
+  // 追記で足す章は無い (`parts` は常に空)
+  appendLayout: NO_QUOTES_APPEND_LAYOUT,
   render: renderQuoteSituationalArticle,
   prompt: quoteSituationalPrompt,
 };

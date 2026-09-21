@@ -115,6 +115,13 @@ describe("renderOutingArticle", () => {
     expect(r.parts.blogImages).toHaveLength(1);
   });
 
+  it("AI が書いてしまった `## 関連メディア` は落として機械の章に置き換える", () => {
+    const r = renderOutingArticle(input([talk, blog]), { ...draft, body: "冒頭^[1]。\n\n## 関連メディア\n\n- 勝手に書いた" });
+    expect(r.body).toBe(
+      "冒頭^[1]。\n\n## 関連メディア\n\n坂井新奈が写っている、このおでかけに関する記録。\n\n- 【トーク・画像】坂井新奈トーク 2025.8.18 20:31^[2]\n"
+    );
+  });
+
   it("文章のトークは出典にはなるが関連メディアには載せない", () => {
     const textTalk = asset({
       id: "talk-text",
@@ -147,7 +154,9 @@ describe("renderOutingArticle", () => {
     expect(p.system[0]).toContain("編集の鉄則");
     expect(p.user).toContain("## 場所候補");
     expect(p.user).toContain("- べたなぎ / 神奈川県藤沢市 / https://maps.app.goo.gl/x");
-    expect(p.user).toContain("- 江ノ島金魚 / https://maps.app.goo.gl/y（未昇格）");
+    expect(p.user).toContain("- 江ノ島金魚 / https://maps.app.goo.gl/y");
+    // 編集メモは AI に渡さない
+    expect(p.user).not.toContain("未昇格");
     expect(p.user).toContain("### ^[1] 蔵盛妃那乃ブログ");
     expect(p.included).toBe(2);
   });
@@ -167,7 +176,8 @@ describe("outing の追記 (関連メディアは flat)", () => {
     expect(p.empty).toBe(false);
     expect(p.newSources.map((s) => s.sourceNo)).toEqual([2]);
     expect(p.body).not.toContain("### トーク");
-    expect(p.body).toContain("- 【ブログ・画像】蔵盛妃那乃ブログ「布団の中で眠りに就く頃には『蔵盛妃那乃』」 (1/2)^[1]\n- 【トーク・画像】坂井新奈トーク 2025.8.18 20:31^[2]\n");
+    // トークはブログ画像の前 (フル生成と同じ並び)
+    expect(p.body).toContain("- 【トーク・画像】坂井新奈トーク 2025.8.18 20:31^[2]\n- 【ブログ・画像】蔵盛妃那乃ブログ「布団の中で眠りに就く頃には『蔵盛妃那乃』」 (1/2)^[1]\n");
   });
 
   it("関連メディアの章が無い記事には章と導入文ごと足す", () => {

@@ -30,6 +30,13 @@ export default async function DossierDetailPage({ params }: DossierDetailProps) 
 
   const editable = canEditDossier(session.user, dossier);
   const manageable = canManageDossier(session.user, dossier);
+  // 器 (MeetGreet / Live) の素材とクリップのプールは、記事はそちらの画面で作る (#170)
+  const canMakeArticle =
+    dossier.kind === "general" &&
+    !dossier.meetGreet &&
+    !dossier.live &&
+    dossier.articleTemplate !== "meetgreet" &&
+    dossier.articleTemplate !== "live";
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6">
@@ -39,6 +46,7 @@ export default async function DossierDetailPage({ params }: DossierDetailProps) 
 
       <DossierHeader dossier={dossier} editable={editable} manageable={manageable} />
 
+      {(dossier.articles.length > 0 || canMakeArticle) && (
       <div className="mt-3 flex items-center justify-end gap-3 flex-wrap">
         {dossier.articles.length > 0 && (
           <p className="mr-auto text-xs text-slate-600 flex items-center gap-1.5 flex-wrap">
@@ -51,11 +59,7 @@ export default async function DossierDetailPage({ params }: DossierDetailProps) 
             ))}
           </p>
         )}
-        {dossier.kind === "general" &&
-          !dossier.meetGreet &&
-          !dossier.live &&
-          dossier.articleTemplate !== "meetgreet" &&
-          dossier.articleTemplate !== "live" && (
+        {canMakeArticle && (
           <Link
             href={`/dossiers/${dossier.id}/article`}
             className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-800"
@@ -65,6 +69,7 @@ export default async function DossierDetailPage({ params }: DossierDetailProps) 
           </Link>
         )}
       </div>
+      )}
 
       <section className="mt-6">
         <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1">

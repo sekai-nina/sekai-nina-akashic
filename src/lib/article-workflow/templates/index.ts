@@ -35,6 +35,7 @@ export const MEETGREET_TEMPLATE: ArticleTemplateDef = {
   render: null,
 };
 
+/** **この順で画面の選択肢と `selectableTemplates` に出る** (言葉の 2 つを隣に) */
 const TEMPLATES: Partial<Record<ArticleTemplate, ArticleTemplateDef>> = {
   meetgreet: MEETGREET_TEMPLATE,
   quote_blog: QUOTE_BLOG_TEMPLATE,

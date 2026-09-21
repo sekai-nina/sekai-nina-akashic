@@ -8,8 +8,7 @@
  * - `date` は持たない。tags は人物 / トピック
  * - 関連メディアの章は出さない (既存記事に無い)
  *
- * 本文は AI が書く (`needsAi`)。鉄則は sekai-nina-site の
- * `dossier-to-outing-article/SKILL.md` の「編集の鉄則」をそのまま持ち込む。
+ * 本文は AI が書く (`needsAi`)。鉄則は `shared.ts` の `EDITORIAL_RULES` (全 AI テンプレート共通)。
  * AI が使えないときは骨組み (出典だけ採番済み、本文はプレースホルダ) を返し、人が書く。
  */
 
@@ -22,7 +21,7 @@ import {
   type ArticleParts,
   type RenderedArticle,
 } from "../render";
-import { EDITORIAL_RULES, normalizeAiBody, normalizeAiTags } from "./shared";
+import { aiSystemPrompt, EDITORIAL_RULES, NO_QUOTES_APPEND_LAYOUT, normalizeAiBody, normalizeAiTags } from "./shared";
 import type { AiContext, AiDraft, AiPrompt, ArticleTemplateDef, DossierRenderInput } from "./types";
 
 /** AI が使えなかったときに本文に置くプレースホルダ。記事編集画面で人が置き換える */
@@ -94,23 +93,8 @@ JSON で返す。
 ${SAMPLES.map((s) => `### 「${s.title}」 (tags: ${s.tags.length ? s.tags.join(", ") : "なし"})\n${s.body}`).join("\n\n")}
 `;
 
-/**
- * システムプロンプト。鉄則・見本 (滅多に変わらない) と語彙 (既存タグ・既存記事タイトル。記事を保存すると
- * 変わる) を**別のブロック**にして、語彙が変わっても前半のキャッシュが残るようにする。
- * **ブロック内の順番を変えない** (先頭からの一致で prompt caching が効く)
- */
 export function attributeSystemPrompt(context: AiContext): string[] {
-  return [
-    RULES,
-    [
-      "## 既存のタグ (tags はここから選ぶ)",
-      context.tagVocabulary.join("、") || "(なし)",
-      "",
-      "## 既存記事のタイトル ([[…]] でリンクしてよいのはこれだけ)",
-      context.existingTitles.map((t) => `- ${t}`).join("\n") || "(なし)",
-      "",
-    ].join("\n"),
-  ];
+  return aiSystemPrompt(RULES, context);
 }
 
 export function attributePrompt(input: DossierRenderInput, context: AiContext): AiPrompt {
@@ -158,12 +142,8 @@ export const ATTRIBUTE_TEMPLATE: ArticleTemplateDef = {
   key: "attribute",
   articleType: "attribute",
   needsAi: true,
-  // 追記で足す章は無い (`parts` は常に空)。`AppendLayout.reports` が必須なので名前だけ置く
-  appendLayout: {
-    quotesHeading: null,
-    quoteAttribution: false,
-    reports: { heading: "## ファンの反応", lead: "ファンの投稿（X）。" },
-  },
+  // 追記で足す章は無い (`parts` は常に空)
+  appendLayout: NO_QUOTES_APPEND_LAYOUT,
   render: renderAttributeArticle,
   prompt: attributePrompt,
 };

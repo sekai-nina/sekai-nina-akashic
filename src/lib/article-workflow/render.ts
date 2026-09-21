@@ -79,7 +79,8 @@ export interface DossierSnapshot {
 
 /**
  * 記事の本文に載る日付まわり。テンプレートが決める
- * (ミーグリは開催日、言葉は無し、おでかけは AI の提案)。null は frontmatter に出さない
+ * (ミーグリは開催日、ブログの名言は無し、スナップは無し、おでかけ / 状況つきの言葉は AI の提案)。
+ * null は frontmatter に出さない
  */
 export interface RenderedDates {
   /** "YYYY-MM-DD" */
@@ -319,9 +320,6 @@ function blogImageLine(b: BlogGroup, a: ArticleAssetInput): string {
  * - `flat`: おでかけ記事の形。導入文 1 行のあと、トーク → ブログ画像を 1 つの箇条書きに並べる
  */
 export type RelatedMediaStyle = { kind: "sections" } | { kind: "flat"; lead: string };
-
-/** おでかけ記事の関連メディアの導入文 (`outing_brief.py` と同じ) */
-export const OUTING_MEDIA_LEAD = "坂井新奈が写っている、このおでかけに関する記録。";
 
 /** `## 関連メディア` の章 (トーク・ブログ画像はリンクのみ、TikTok は埋め込み)。何も無ければ空 */
 export function renderRelatedMediaSection(input: {

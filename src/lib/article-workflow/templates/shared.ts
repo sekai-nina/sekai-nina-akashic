@@ -1,9 +1,13 @@
 /**
  * 本文を AI が書くテンプレートが共有する部品 (#171 / #172)。
  *
- * 鉄則は sekai-nina-site の `dossier-to-outing-article/SKILL.md` の「編集の鉄則」をそのまま持ち込んだもの。
- * テンプレートごとのシステムプロンプトはこの文言を埋め込む (文言を変えるときはここだけ)。
+ * 鉄則は sekai-nina-site の `dossier-to-outing-article/SKILL.md` の「編集の鉄則」(1・2) に、
+ * 「素材に無いことは書かない」(3) を足したもの。テンプレートごとのシステムプロンプトは
+ * この文言を埋め込む (文言を変えるときはここだけ。変えると全テンプレートのキャッシュが 1 回外れる)。
  */
+
+import type { AppendLayout } from "@/lib/meetgreet/append";
+import type { AiContext } from "./types";
 
 /** 編集の鉄則。すべての AI テンプレートのシステムプロンプトに入る */
 export const EDITORIAL_RULES = `## 編集の鉄則 (最重要)
@@ -44,3 +48,32 @@ export function normalizeAiBody(body: string, sourceCount: number): string {
 export function normalizeAiTags(tags: string[]): string[] {
   return [...new Set(tags.map((t) => t.trim()).filter((t) => t.length > 0))];
 }
+
+/**
+ * システムプロンプトを 2 ブロックにする: テンプレートの鉄則・見本 (滅多に変わらない) と、
+ * 語彙 (既存タグ・既存記事タイトル。記事を保存すると変わる)。**前から順にキャッシュの区切り**になるので、
+ * 語彙が変わっても前半のキャッシュが残る。ブロック内の順番も変えない (先頭からの一致で効く)
+ */
+export function aiSystemPrompt(rules: string, context: AiContext): string[] {
+  return [
+    rules,
+    [
+      "## 既存のタグ (tags はここから選ぶ)",
+      context.tagVocabulary.join("、") || "(なし)",
+      "",
+      "## 既存記事のタイトル ([[…]] でリンクしてよいのはこれだけ)",
+      context.existingTitles.map((t) => `- ${t}`).join("\n") || "(なし)",
+      "",
+    ].join("\n"),
+  ];
+}
+
+/**
+ * 引用の章を持たないテンプレート (地の文は AI / 人が持つ) の追記の置き方。
+ * レポは載せないが `AppendLayout.reports` が必須なので名前だけ置く
+ */
+export const NO_QUOTES_APPEND_LAYOUT: AppendLayout = {
+  quotesHeading: null,
+  quoteAttribution: false,
+  reports: { heading: "## ファンの反応", lead: "ファンの投稿（X）。" },
+};

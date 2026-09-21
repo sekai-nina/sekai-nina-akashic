@@ -7,7 +7,8 @@
  *
  * - 本文 (AI): 冒頭 1〜2 文 (いつ・誰と・何をしたか) → 場所 / 行動ごとの `##` + 事実の箇条書き `^[n]`。
  *   引用しない
- * - `## 関連メディア` (機械): 坂井新奈が写るトーク / ブログの画像・動画をリンクだけで列挙 (flat)
+ * - `## 関連メディア` (機械): 画像・動画のトークとブログ画像をリンクで、TikTok を埋め込みで、1 つの箇条書きに (flat)。
+ *   文章のトークは出典にだけ使う
  * - `locations` (機械): 場所候補。聖地に昇格済みなら `place_id`、未昇格なら座標をインライン
  * - `date` / `date_display` / tags は AI の提案 (同行者 + カテゴリ)
  *
@@ -21,27 +22,40 @@ import {
   dossierSnapshot,
   joinBody,
   numberSources,
-  OUTING_MEDIA_LEAD,
   renderRelatedMediaSection,
   type RelatedMediaStyle,
   type RenderedArticle,
 } from "../render";
-import { EDITORIAL_RULES, normalizeAiBody, normalizeAiTags } from "./shared";
+import { aiSystemPrompt, EDITORIAL_RULES, NO_QUOTES_APPEND_LAYOUT, normalizeAiBody, normalizeAiTags } from "./shared";
 import type { AiContext, AiDraft, AiPrompt, ArticleTemplateDef, DossierPlace, DossierRenderInput } from "./types";
 
 /** AI が使えなかったときに本文に置くプレースホルダ。記事編集画面で人が置き換える */
 export const OUTING_BODY_PLACEHOLDER =
   "<!-- 本文: AI が使えなかったので、素材を読んで書いてください。冒頭 1〜2 文 + 場所 / 行動ごとの ## と事実の箇条書き、各事実に ^[n] で出典。引用はしない -->";
 
+/** 関連メディアの導入文 (`outing_brief.py` と同じ) */
+export const OUTING_MEDIA_LEAD = "坂井新奈が写っている、このおでかけに関する記録。";
 const OUTING_MEDIA_STYLE: RelatedMediaStyle = { kind: "flat", lead: OUTING_MEDIA_LEAD };
 
-/** 見本にする既存記事 (公開済み)。文体・粒度・章立て・出典の付け方を揃えるために丸ごと見せる */
-const SAMPLES = [
+interface OutingSample {
+  title: string;
+  date: string;
+  dateDisplay: string;
+  tags: string[];
+  body: string;
+}
+
+/**
+ * 見本にする既存記事 (公開済み)。文体・粒度・章立て・出典の付け方を揃えるために見せる。
+ * 江ノ島デートは外部サイト (食べログ / 水族館の案内) へのリンク行 2 本だけ落としてある
+ * (「URL は場所候補にあるものだけ」の規則と食い違うため)。それ以外は原文どおり
+ */
+const SAMPLES: OutingSample[] = [
   {
     title: "蔵盛妃那乃と江ノ島デート",
     date: "2025-08-01",
     dateDisplay: "2025年8月頃",
-    tags: [] as string[],
+    tags: [],
     body: `2025年8月頃、坂井新奈と蔵盛妃那乃は江ノ島にてデートをした。本記事では蔵盛妃那乃のブログを基に、時系列順にその内容についてまとめる。蔵盛曰く、「計画がほぼ全部上手く行かなくずっと笑っていた」デートだったらしく^[3]、坂井新奈も「江ノ島デート私たち可哀想だったけど本当に楽しかったよ!!」と述べている^[4]。
 
 ## 集合
@@ -72,6 +86,10 @@ const SAMPLES = [
 \t\t- 人が多くて埋もれていた^[2]
 \t- クラゲを見た^[2]
 \t- 触れ合いコーナーもぎりぎり間に合わなかった^[2]
+\t\t- ナマコやヒトデに触れるはずだったらしい^[2]
+\t- 体験コーナーではちょうど前の人で終わって驚いた^[2]
+\t\t- これは何の体験コーナーなのかは不明
+\t- 水族館レストランも3分間に合わなかった^[2]
 - 水族館を出る頃には店が閉まっていたので、ゆったり探索して帰った^[2]
 
 ## シャボン玉
@@ -90,7 +108,9 @@ const SAMPLES = [
 
 - この日はリハーサルがあり、パフェを食べてリハーサルを頑張ろうとしていた^[1]
 - 初めて一人でパフェを食べることに挑戦した^[2]
-\t- 訪れたのは[果実園リーベル 目黒店](https://maps.google.com/?cid=488658104780264921)である`,
+\t- 訪れたのは[果実園リーベル 目黒店](https://maps.google.com/?cid=488658104780264921)である
+\t- 初めての一人パフェで、結構大人になったような気持ちになったという^[2]
+- 後日（7月11日）、この日のひとりパフェの写真を自撮りしたものをTalkで公開した^[3]`,
   },
 ];
 
@@ -125,10 +145,10 @@ JSON で返す。
 - body: 本文 (Markdown)。上の形に従う
 - tags: 「既存のタグ」から 0〜4 個。**一緒に出かけた人物名 + カテゴリ** (飲食店 / レジャー / 映画 /
   ディズニー / クリスマス など)。出典の種類や時期を表すタグ (ninatalk / ブログ / 2026年 など) は付けない
-- date: 出来事の日 "YYYY-MM-DD"。日が分からなければ**その月の 1 日** (例: 2025年8月なら "2025-08-01")。
-  月も分からなければ null。素材の日付 (ブログ / トークの投稿日) と本文の「今日」「昨日」等から決める
-- dateDisplay: 日が確かなら null (日付がそのまま出る)。月までなら "2025年8月頃" のように。
-  date が null なら "2025年頃" のように分かる範囲で。何も分からなければ null
+- date: 出来事の日 "YYYY-MM-DD"。素材の日付 (ブログ / トークの投稿日) と本文の「今日」「昨日」等から
+  決める。日が分からなければ**その月の 1 日** (例: 2025年8月なら "2025-08-01")。月も分からなければ null
+- dateDisplay: 記事に出す日付の表記。"2026年7月" のように月まで (日が確かでもこの形でよい)。
+  日が分からず月の 1 日にしたときは "2025年8月頃" と「頃」を付ける。何も分からなければ null
 - title: null (記事のタイトルはドシエのタイトルを使う)
 
 ## 見本 (既存記事。この形に揃える)
@@ -139,29 +159,22 @@ ${SAMPLES.map(
 ).join("\n\n")}
 `;
 
-/** システムプロンプト。鉄則・見本 と 語彙 を別ブロックに (前半のキャッシュを残す) */
 export function outingSystemPrompt(context: AiContext): string[] {
-  return [
-    RULES,
-    [
-      "## 既存のタグ (tags はここから選ぶ)",
-      context.tagVocabulary.join("、") || "(なし)",
-      "",
-      "## 既存記事のタイトル ([[…]] でリンクしてよいのはこれだけ)",
-      context.existingTitles.map((t) => `- ${t}`).join("\n") || "(なし)",
-      "",
-    ].join("\n"),
-  ];
+  return aiSystemPrompt(RULES, context);
 }
 
+/**
+ * 場所候補をプロンプトに。渡すのは名前・住所・Google マップ URL だけ (`outing_brief.py` と同じ)。
+ * 編集メモ (`note`) は「本人の自宅近く」のような内部の注意書きが入りうるので**渡さない**
+ */
 function placesText(places: DossierPlace[]): string {
   if (places.length === 0) return "";
-  const lines = ["## 場所候補 (frontmatter の locations に反映済み。本文でリンクしてよい)", ""];
+  const lines = ["## 場所候補 (本文で `[名前](URL)` とリンクしてよい。聖地か座標があるものは locations にも入る)", ""];
   for (const p of places) {
     const bits = [p.name];
     if (p.address) bits.push(p.address);
     if (p.googleMapsUrl) bits.push(p.googleMapsUrl);
-    lines.push(`- ${bits.join(" / ")}${p.note ? `（${p.note}）` : ""}`);
+    lines.push(`- ${bits.join(" / ")}`);
   }
   return lines.join("\n") + "\n";
 }
@@ -200,6 +213,12 @@ export function outingLocations(places: DossierPlace[]): Record<string, unknown>
   return out;
 }
 
+/** AI が指示に反して `## 関連メディア` を書いてきたら落とす (機械が同じ章を足すので二重になる) */
+function stripRelatedMedia(body: string): string {
+  const at = body.indexOf("\n## 関連メディア");
+  return at >= 0 ? body.slice(0, at) : body.startsWith("## 関連メディア") ? "" : body;
+}
+
 export function renderOutingArticle(input: DossierRenderInput, draft?: AiDraft | null): RenderedArticle {
   const { blogs, talks } = classifyMaterials(input.assets);
   const { sources, talkSourceNo } = numberSources(blogs, talks);
@@ -208,7 +227,7 @@ export function renderOutingArticle(input: DossierRenderInput, draft?: AiDraft |
 
   const hasDraft = !!draft && draft.body.trim().length > 0;
   const body: string[] = [
-    hasDraft ? normalizeAiBody(draft.body, sources.length).trimEnd() : OUTING_BODY_PLACEHOLDER,
+    hasDraft ? stripRelatedMedia(normalizeAiBody(draft.body, sources.length)).trimEnd() : OUTING_BODY_PLACEHOLDER,
     "",
     ...renderRelatedMediaSection({ talks: mediaTalks, blogs, tiktoks: input.tiktoks, talkSourceNo, style: OUTING_MEDIA_STYLE }),
   ];
@@ -239,13 +258,7 @@ export const OUTING_TEMPLATE: ArticleTemplateDef = {
   key: "outing",
   articleType: "event",
   needsAi: true,
-  appendLayout: {
-    quotesHeading: null,
-    quoteAttribution: false,
-    // レポは載せないが `AppendLayout.reports` が必須なので名前だけ置く
-    reports: { heading: "## ファンの反応", lead: "ファンの投稿（X）。" },
-    media: OUTING_MEDIA_STYLE,
-  },
+  appendLayout: { ...NO_QUOTES_APPEND_LAYOUT, media: OUTING_MEDIA_STYLE },
   render: renderOutingArticle,
   prompt: outingPrompt,
 };

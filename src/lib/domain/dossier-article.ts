@@ -169,10 +169,11 @@ export async function setDossierTemplate(
 }
 
 /**
- * 紐づく記事の型から既定のテンプレートを推す。推せなければ null (画面で選ばせる)。
- * 器 (MeetGreet / Live) のドシエは `assertPlainDossier` が先に止めるのでここには来ない前提
+ * 紐づく記事の型から既定のテンプレートを推す。推せなければ null (画面で選ばせる)
  */
 export function suggestTemplate(dossier: DossierForArticle): ArticleTemplate | null {
+  // 器のドシエ (ミーグリの記事も type: event なので、見ないと outing を推してしまう)
+  if (dossier.container || isContainerTemplate(dossier.articleTemplate)) return null;
   const types = new Set(dossier.articles.map((a) => a.type));
   if (types.size !== 1) return null;
   const [type] = types;
