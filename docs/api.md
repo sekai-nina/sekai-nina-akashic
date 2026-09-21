@@ -106,6 +106,7 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 | POST | `/lives/:id/sketch` | write | 衣装スケッチの候補を生成（作り直しも） |
 | POST | `/lives/:id/sketch/crops` | write | 参照写真の切り抜き枠を保存 |
 | POST | `/lives/:id/sketch/select` | write | 候補の 1 枚を確定 |
+| POST | `/lives/:id/article` | write | ライブ記事を生成（既存があれば増えた分だけ追記。公演の表は毎回作り直す） |
 | GET | `/songs` | read | 曲マスタ（公式ディスコグラフィ + 公演で披露した曲）の一覧 |
 
 ---
@@ -1096,7 +1097,7 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 | `outing` | `event` | **AI が書く**: 冒頭 1〜2 文 + 場所 / 行動ごとの `##` と事実の箇条書き `^[n]`（引用しない）。そのあとに機械で `## 関連メディア`（画像・動画のトークとブログ画像をリンクで、TikTok を埋め込みで、1 つの箇条書きに。文章のトークは出典にだけ。AI が書いてしまった同名の章は落とす） | タイトル = ドシエのタイトル。`date` / `date_display` は AI の提案（日が分からなければ月の 1 日 + 「YYYY年M月頃」）。tags = 同行者 + カテゴリ。**`locations` は場所候補から**（聖地に昇格済みなら `{ name, place_id }`、未昇格で座標があれば `{ name, lat, lng, google_maps_url? }`、座標も無ければ落とす。**昇格先の聖地が `internal` を超える / 見えない候補は記事にも AI にも出さない**）。場所候補の名前・住所・Google マップ URL も AI に渡す（編集メモは渡さない）。`draft: true`。追記は関連メディアだけ足す（`locations` は追記で更新しない。場所候補を足したら記事の編集画面で） |
 | `quote_situational` | `quote` | **AI が書く**: 状況の地の文 → `>` 発言 → 反応 1 文 | **タイトルは AI が実際の発言の表記に整えてよい**（ドシエのタイトルは目安。`yes, me now?` → `Yes, me now?`。path もそのタイトルで決まる。同名の記事があれば 409）。`date` / `date_display` は発言の時期（分からなければ素材の投稿日 + 「頃」）、tags は関係するメンバー。関連メディアは出さない。`draft: true`。追記は本文に足すものが無い |
 
-（`live` は #151）
+（`meetgreet` / `live` は器側で組む: `POST /meetgreets/:id/article` / `POST /lives/:id/article`）
 
 ## ミーグリ記事ワークフロー (MeetGreets)
 
@@ -1372,7 +1373,7 @@ keep / total は `GET /meetgreets/:id` の `repoCollection` で読む。判定�
 
 `Live` / `LivePerformance` / `LiveSong` は保護テーブル（`Live.classification`、既定 `internal`。子 2 つは親に従う）。一覧・詳細は API キーの持ち主の clearance で見える行だけ。`Song` は曲名しか持たない非保護のマスタで、**入力した曲名がそのまま find-or-create される**（表記揺れは別の曲になる。既存記事の表記に合わせる）。
 
-X レポ・スケッチはミーグリと同じ仕組み（#150）。記事生成は #151。
+X レポ・スケッチはミーグリと同じ仕組み（#150）。記事生成は `POST /lives/:id/article`（#151）。
 
 ### GET /lives
 
@@ -1510,6 +1511,32 @@ X レポ・スケッチはミーグリと同じ仕組み（#150）。記事生�
 ### POST /lives/:id/sketch/select
 
 `POST /meetgreets/:id/sketch/select` と同じ（候補の 1 枚を `sketchKey` にする。**レスポンス:** 更新後の行）。
+
+### POST /lives/:id/article
+
+ライブ記事を生成する（#151）。本体・入力・応答は `POST /meetgreets/:id/article` と同じ（`dryRun` / `expectedDigest` / `exclude` / `restore`。実装も `handleArticleGenerate` を共用）。違いは記事の形だけ:
+
+- **1 記事 = 1 ライブ（ツアー）。** タイトル = `Live.name`、path `event/<name>.md`、tags `[ライブ]`、`date` = 初日、複数日なら `date_mode: range` と `date_display`「2025年9月20日〜11月21日」（同じ年なら後ろの年を省く。1 日なら単日）
+- 本文: サムネ（確定したスケッチ → ドシエの「サムネ」）→ イントロ（「YYYY年M月D日〜M月D日、<name> が開催された。坂井新奈は N 公演に参加した。」）→ `## 公演`（`Live.note` があればその段落 → **`<!-- live:performances -->` 〜 `<!-- /live:performances -->` の間に Markdown の表**: 日付 / 会場 / 追加曲 / センター曲 / 備考。空の列は出さない。同日の呼び分け `label` は日付の後ろ。表の下に「共通披露曲：A / B / C」）→ `## 本人の感想（ブログより）` → `## ファンによるライブレポ` → `## 関連メディア`（ミーグリと同じ規則）
+- **追記では公演の表の区間を毎回作り直す**（公演や曲を直したら記事にも反映される。区間の外は 1 行も触らない）。区間が無い記事（マーカーを消した / 旧い記事）には `## 公演` の章を作ってマーカーごと置く。他の章は「まだ無いものだけ足す」。表だけ変わったときも `dryRun` は `empty: false` で `addedLines` に差分が出る
+- frontmatter `live:`（サイトの `/live` ページが読む予定。スキーマは sekai-nina-site 側の Issue）:
+
+  ```yaml
+  live:
+    name: 日向坂46 ARENA TOUR 2025「MONSTER GROOVE」
+    common_songs: [NO WAR in the future 2020, キツネ]
+    performances:
+      - date: 2025-09-20
+        venue: セキスイハイムスーパーアリーナ（宮城）
+        label: ""
+        songs: []            # 公演限定の追加曲
+        center_songs: []
+        note: ""
+    outfit_image: https://r2.sekai-nina.com/...   # 確定したスケッチがあるとき
+  ```
+
+- `live:` ブロックも公演の表と同じく機械のもので、**追記のたびに作り直す**（`meetgreet:` / `locations` は新規作成時のまま）
+- 「今後足さない」は `Live.articleExclusions`、記事の紐づけは `Live.articleId`（+ `Article.dossierId`）。機密の上限（`internal`）はミーグリと同じで、ライブ自身・ドシエ・X レポ収集のそれぞれで見る
 
 ---
 
