@@ -70,6 +70,7 @@ const clearance = auth.clearance;
 - `MeetGreet`（ミーグリ記事ワークフロー。ドシエを include する読みは所有者判定が要るので `withSession`）
 - `SketchSetting`（スケッチ生成のプロンプトと画風の見本。**全体で 1 行**で、個人のデータではないので読み書きは固定のクリアランス（`MAX_EXTERNAL_AI_CLEARANCE`）で行う。操作者のクリアランスで読むと、低い人のときだけ無言で既定の文面に化ける）
 - `XMentionWatch`, `XMentionSetting`, `XMentionHit`（X 言及監視。cron は `prismaInternal`、`/mentions` は `withClearance`）
+- `Live`, `LivePerformance`, `LiveSong`（ライブ記事ワークフロー。`Live` は自前の classification、子 2 つは親 `Live` に従う。`MeetGreet` と同じく `withSession`）
 - `Anniversary`（記念日。出典アセットの本文は持たないが、機密アセットから作った記念日が漏れないよう自前の classification で守る）
 
 `Article.dossierId`（素材ドシエ。#41）は非保護テーブルから保護テーブルへのポインタ。記事詳細で **ドシエ本体を出すときは `withSession` で引き直す**（private なドシエは所有者にしか見えない = 見えなければ出さない。ID があるからといって `prisma.dossier` を素で触らない）。書くときは `prisma.$executeRaw` で `dossierId` だけ更新する（`prisma.article.update` は `updatedAt` を進めて編集画面の楽観ロックを偽の衝突にする。push の出力にも影響しないので `dirty` も立てない）。
@@ -94,6 +95,8 @@ const clearance = auth.clearance;
 既存分は `20260919020000_revoke_anon_on_unprotected`（`Job` / `JobRun` / `StatusCheckState` / `LlmUsageDaily` / `LlmCostDaily` / `CreditSnapshot`）と `20260919030000_revoke_anon_on_article`（`Article`）で塞いだ。**現在 RLS 非対象のテーブルはすべて PostgREST から閉じている**ので、足すときに書き忘れるとそこだけ穴になる。akashic の supabase クライアント（`src/lib/supabase/*`）は auth 専用でテーブルを触らないため、剥がしてもアプリには影響しない。
 
 `Announcement`（お知らせ `/announcements`）は公開サイトに出すための文章しか持たないので非保護（`Article` と同じ扱い。`20260920180000_announcement` で REVOKE 済み）。書けるのは admin / member（Server Action は `requireRole`、REST は write キー）。
+
+`Song`（ライブの披露曲のマスタ）は曲名しか持たない非保護テーブル。`LiveSong` 側は保護されるので「どのライブで何を歌ったか」は漏れないが、曲名そのものは全員に見える（公開情報なので問題ない）。`20260921000000_live` で `REVOKE` 済み。
 
 `LlmUsageDaily` / `LlmCostDaily` / `CreditSnapshot`（コスト管理 `/costs`）も非保護。金額とトークン数しか持たないが、**画面と Server Action は admin のみ**に絞る（口座の残高なので member / viewer には見せない）。`/status` のコストのチェックも admin にだけ表示し、Discord に流れる要約には金額を入れない。
 

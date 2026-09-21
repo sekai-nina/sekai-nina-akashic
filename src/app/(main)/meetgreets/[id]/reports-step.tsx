@@ -6,7 +6,7 @@ import { ExternalLink, RefreshCw } from "lucide-react";
 import type { MeetGreetKeeps } from "@/lib/domain/meetgreet-reports";
 import { formatDate } from "@/lib/utils";
 import { refetchReportsAction } from "../actions";
-import { Lightbox } from "./lightbox";
+import { Lightbox } from "@/components/lightbox";
 
 export function ReportsStep({
   meetGreetId,

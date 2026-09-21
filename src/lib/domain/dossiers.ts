@@ -289,18 +289,21 @@ export async function deleteDossier(user: ActingUser, id: string) {
   if (!canManageDossier(user, access)) {
     throw new Error("Only the owner can delete a dossier");
   }
-  // **ミーグリの素材置き場は先に回のほうを消してもらう (#112)。** 回はスケッチ・
-  // 切り抜き枠・記事の紐づけ・除外リストを持っていて、ここで巻き添えにすると戻せない
-  // (DB 側も Restrict で止まるが、生の外部キー違反を画面に出さない)
+  // **ミーグリ / ライブの素材置き場は先に器のほうを消してもらう (#112 / #149)。** 器はスケッチ・
+  // 切り抜き枠・記事の紐づけ・除外リスト (ライブは公演・曲も) を持っていて、ここで巻き添えに
+  // すると戻せない (DB 側も Restrict で止まるが、生の外部キー違反を画面に出さない)
   await withSession(user, async (tx) => {
-    const meetGreet = await tx.meetGreet.findUnique({
-      where: { dossierId: id },
-      select: { date: true },
-    });
+    const [meetGreet, live] = await Promise.all([
+      tx.meetGreet.findUnique({ where: { dossierId: id }, select: { date: true } }),
+      tx.live.findUnique({ where: { dossierId: id }, select: { name: true } }),
+    ]);
     if (meetGreet) {
       throw new Error(
         `${meetGreet.date} のミーグリで使われているドシエです。先にミーグリのほうを削除してください`
       );
+    }
+    if (live) {
+      throw new Error(`ライブ「${live.name}」で使われているドシエです。先にライブのほうを削除してください`);
     }
     await tx.dossier.delete({ where: { id } });
   });

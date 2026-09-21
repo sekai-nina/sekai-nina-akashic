@@ -93,6 +93,13 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 | POST | `/meetgreets/:id/sketch/crops` | write | 参照写真の切り抜き枠を保存 |
 | POST | `/meetgreets/:id/sketch/select` | write | 候補の 1 枚を確定 |
 | POST | `/meetgreets/:id/article` | write | 記事を生成（既存があれば増えた分だけ追記） |
+| GET | `/lives` | read | ライブ（記事ワークフロー）一覧と進み具合 |
+| POST | `/lives` | write | ライブ作成（ドシエと X レポ収集を自動作成し、公演と曲を入れ、素材候補を返す） |
+| GET | `/lives/:id` | read | ライブ詳細 + 素材候補 |
+| PATCH | `/lives/:id` | write | ライブ名・補足の更新 |
+| DELETE | `/lives/:id` | write | ライブの行を消す（ドシエ・収集・エンティティは残る） |
+| PUT | `/lives/:id/setlist` | write | 公演と披露曲を丸ごと入れ替える |
+| POST | `/lives/:id/materials` | write | 素材候補のチェック結果をドシエに反映 |
 
 ---
 
@@ -1296,6 +1303,131 @@ keep / total は `GET /meetgreets/:id` の `repoCollection` で読む。判定�
 - 生成しただけでは公開されない。`dirty` な記事になり、`/articles/push`（画面）で公開リポジトリに出る
 - **TikTok は短縮 URL を解決できたものだけ載せる。** 解決に失敗したものは落とす（短縮のままでは埋め込みにならず、video ID が無いので次の追記で重複するため）
 - TikTok の短縮 URL を解決するため外部に出る。数秒〜十数秒かかることがある
+
+---
+
+## ライブ記事ワークフロー (Lives)
+
+ライブ（ツアー）1 つ分の記事を作る手順（公演と曲 → 素材のドシエ → X レポ → スケッチ → 記事）を akashic で完結させるための器（設計は #148）。ミーグリ（上）と同じ作りで、**1 記事 = 1 ライブ**、公演は記事本文の表になる。`Live` 1 行が素材置き場の `Dossier`（1:1、作成時に自動生成）・X レポの `RepoCollection`・生成した `Article`・event `Entity` を束ね、公演（`LivePerformance`）と披露曲（`LiveSong` → `Song`）を持つ。
+
+`Live` / `LivePerformance` / `LiveSong` は保護テーブル（`Live.classification`、既定 `internal`。子 2 つは親に従う）。一覧・詳細は API キーの持ち主の clearance で見える行だけ。`Song` は曲名しか持たない非保護のマスタで、**入力した曲名がそのまま find-or-create される**（表記揺れは別の曲になる。既存記事の表記に合わせる）。
+
+X レポの再収集・スケッチ・記事生成の API は PR2 / PR3（#150 / #151）で足す。それまで収集の実行は画面 `/repo/:id` から行う。
+
+### GET /lives
+
+初日の新しい順の一覧。各行に進み具合（ドシエの件数 / keep 件数 / スケッチ有無 / 記事有無）が付く。
+
+```json
+{
+  "items": [
+    {
+      "id": "…",
+      "name": "日向坂46 ARENA TOUR 2025「MONSTER GROOVE」",
+      "note": "",
+      "classification": "internal",
+      "entity": {"id": "…", "name": "日向坂46 ARENA TOUR 2025「MONSTER GROOVE」"},
+      "firstDate": "2025-09-20",
+      "lastDate": "2025-11-21",
+      "commonSongs": ["NO WAR in the future 2020", "キツネ", "空飛ぶ車"],
+      "performances": [
+        {"id": "…", "date": "2025-09-20", "venue": "セキスイハイムスーパーアリーナ（宮城）", "label": "", "note": "", "songs": [], "centerSongs": []},
+        {"id": "…", "date": "2025-09-28", "venue": "広島サンプラザホール", "label": "", "note": "", "songs": ["One choice"], "centerSongs": []}
+      ],
+      "dossier": {"id": "…", "title": "日向坂46 ARENA TOUR 2025「MONSTER GROOVE」", "itemCount": 0, "updatedAt": "…"},
+      "dossierId": "…",
+      "repoCollection": {"id": "…", "name": "… 坂井新奈", "lastFetchedAt": null, "keep": 0, "total": 0},
+      "article": null,
+      "sketch": {"key": null, "url": null, "candidates": [], "extraPrompt": ""},
+      "createdBy": {"id": "…", "name": "…"},
+      "createdAt": "…",
+      "updatedAt": "…"
+    }
+  ]
+}
+```
+
+- `firstDate` / `lastDate` は公演の初日 / 最終日（JST の暦日）。公演が無ければ `null`
+- `entity` は **`null` になりうる**（`confidential` 以上で作ったライブは同名のエンティティを作らない。エンティティが消されたときも `SetNull`）
+- `commonSongs` は全公演で披露した曲、`performances[].songs` はその公演だけの追加曲、`performances[].centerSongs` はセンター曲。順番は入力順
+- `performances` は `sortOrder` 順（= 入力順。日付順とは限らない）
+- `dossier` / `repoCollection` が `null` になりうるのはミーグリと同じ（`GET /meetgreets` 参照）
+
+### POST /lives
+
+起点。1 回の呼び出しで次を行う:
+
+1. event エンティティを決める。`entityId` があればそれ、無ければ**ライブ名と同名の event エンティティを find-or-create**（過去のライブは MV の取り込み等で既にあるので、名前を打ち直して別のエンティティを作らないよう `GET /entities?type=event` で探して渡す）。**`classification` が `confidential` 以上のときは作らない**（`Entity` は非保護でライブ名が全員に見えるため。`entityId` で既にあるものを選ぶのは可）
+2. ドシエをライブ名で作成。`viewMode` / `editMode` は `clearance`
+3. X レポ収集（`RepoCollection`）を `#坂井新奈` 単独の条件、期間 = 初日〜最終日の翌日 で作成する（**収集は走らせない**。ライブごとのハッシュタグは PR2 で `reportTags` に入れる）
+4. 公演と曲を入れる（曲は `Song` に find-or-create）
+5. 素材候補（下記）を返す
+
+`dossierId` / `repoCollectionId` を渡すと、新しく作らず**既にあるものを使う**（別のライブ / ミーグリに使われているもの、クリップのプールは 400。そちらの `classification` は変えない）。作成は **1 トランザクション**。
+
+**冪等ではない**ので、応答が無いときは再送せず `GET /lives` で作成済みか確かめる。
+
+```json
+{
+  "name": "日向坂46 ARENA TOUR 2025「MONSTER GROOVE」",
+  "note": "",
+  "commonSongs": ["NO WAR in the future 2020", "キツネ"],
+  "performances": [
+    {"date": "2025-09-20", "venue": "セキスイハイムスーパーアリーナ（宮城）"},
+    {"date": "2025-09-28", "venue": "広島サンプラザホール", "songs": ["One choice"]}
+  ]
+}
+```
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `name` | string (≤80 文字) | ✓ | ライブ名。記事のタイトル（= ファイル名。255 バイト以内に収めるための上限）・ドシエ名・収集名・エンティティ名になる |
+| `performances` | array (1〜100) | ✓ | 公演。各要素は `date`（`YYYY-MM-DD`、必須）/ `venue`（≤200）/ `label`（≤50。「昼公演」等）/ `note`（≤500）/ `songs`（string[]。公演限定の追加曲）/ `centerSongs`（string[]）。**`id` は受け付けない**（`PUT /lives/:id/setlist` 用） |
+| `commonSongs` | string[] | | ライブ共通の披露曲。`songs` / `centerSongs` も同じ上限（各リスト ≤100 曲、曲名 ≤100 文字） |
+| `note` | string (≤2000) | | 補足。記事の公演の章の頭に出す |
+| `classification` | enum | | 既定 `internal`。キーの持ち主の clearance より上は 403。**Live・ドシエ・X レポ収集の 3 つに同じ値が付く** |
+| `entityId` | string | | 既にある event エンティティを使う。event 以外は 400 |
+| `dossierId` / `repoCollectionId` | string | | 既にあるものを使う。未指定なら新しく作る |
+
+未知のフィールドは 400（strict）。曲名は前後の空白を落とし、同じリスト内の重複は 1 つにする。
+
+**レスポンス（201）:** 一覧の 1 行と同じ形に `candidates`（`POST /meetgreets` と同じ形）が付く。
+
+- `candidates` は **各公演日〜10 日後**の坂井新奈が付いたアセット **∪ event エンティティが付いたアセット**を、出典で分類したもの（`kind`: `blog` / `staff` / `talk` / `other`）
+- `suggested`（「おすすめ」。#160 以降は初期チェックではなく、画面でまとめて入れる導線）は、本文にライブの話（ライブ / 公演 / ツアー / セトリ 等 + **ライブ名・鍵括弧の中・会場名**）があるブログ、どれかの公演日〜翌日のトーク画像 / 動画、本文にライブの話があるトークのテキスト
+- event エンティティ経由のアセットのうち、ブログ / トークでないもの（ライブ MV など。`kind: other`）は列挙されるがおすすめにしない
+
+### GET /lives/:id
+
+一覧の 1 行 + `candidates`（`POST` と同じ形。`inDossier` は現在のドシエの状態を反映）。
+
+### PATCH /lives/:id
+
+`name` / `note` を部分更新（渡した項目だけ変わる）。更新項目が 1 つも無い（`{}`）なら 400。**作成済みのドシエ名・収集名・エンティティ名は変わらない**（それぞれの画面で変更する）。
+
+**レスポンス:** 更新後の行（`GET /lives` の 1 行と同じ形。`candidates` は付かない）。
+
+### DELETE /lives/:id
+
+`Live` の行を消す（公演と曲の紐づけも消える）。**ドシエ・X レポ収集・event エンティティ・記事は残る**（それぞれの画面から消す）。204。
+
+消せるのは**作った人（キーの持ち主）か admin だけ**（ミーグリ #112 と同じ）。それ以外は 400。ドシエ側から先に消すことはできない（`Restrict`。ドシエの削除は「先にライブを消してください」で止まる）。
+
+### PUT /lives/:id/setlist
+
+公演と曲を**丸ごと入れ替える**。本文は `POST /lives` の `performances` / `commonSongs` と同じ形。
+
+- `performances[].id` を付けた行は残して更新する（公演の ID が変わらない）。付けない行は新しく作る。**本文に無い既存の公演は消える**
+- 同じ `id` を 2 回渡すと 400（既存のものでも未知のものでも）。他のライブの公演の `id` は「無いもの」として扱われ、新しい行が作られる
+- 曲は毎回 `LiveSong` を作り直す。`Song` は増えるだけで消えない
+
+**レスポンス:** 更新後の行（`GET /lives` の 1 行と同じ形）。
+
+### POST /lives/:id/materials
+
+`POST /meetgreets/:id/materials` と同じ（`{"assetIds": […]}` をドシエに `asset_ref` で入れる。1 回に 500 件、同じアセットは 2 回入らない、権限が無ければ 403、ドシエが消えていれば 404）。
+
+**レスポンス:** `{"added": 12, "skipped": 2, "dossierId": "…"}`
 
 ---
 

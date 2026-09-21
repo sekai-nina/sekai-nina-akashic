@@ -156,6 +156,36 @@ describe("classifyCandidates", () => {
     });
   });
 
+  it("開催日が複数 (ライブの公演 #148) なら、どれかの日〜翌日に入るトークをチェックする", () => {
+    const groups = classifyCandidates(
+      [
+        talkImg("t-a", "2026-08-02", "13:15"),
+        talkImg("t-between", "2026-08-05", "10:00"),
+        talkImg("t-b", "2026-08-10", "23:59"),
+      ],
+      opts({ date: "2026-08-01", dates: ["2026-08-01", "2026-08-09"] })
+    );
+    const byId = new Map(groups[0].assets.map((a) => [a.id, a.suggested]));
+    expect(byId.get("t-a")).toBe(true);
+    expect(byId.get("t-between")).toBe(false);
+    expect(byId.get("t-b")).toBe(true);
+  });
+
+  it("キーワードを差し替えられる (ライブはライブ名・会場名で判定する)", () => {
+    const text = asset({
+      id: "live-blog",
+      kind: "text",
+      canonicalDate: jst("2026-08-03"),
+      source: { url: BLOG_URL, title: "坂井新奈ブログ「宮城」" },
+      text: "セキスイハイムスーパーアリーナでのライブ、ありがとうございました",
+    });
+    // ミーグリのキーワードでは当たらない
+    expect(classifyCandidates([text], opts())[0].matched).toBe(false);
+    expect(
+      classifyCandidates([text], opts({ keywords: ["セキスイハイムスーパーアリーナ"] }))[0].matched
+    ).toBe(true);
+  });
+
   it("日付の無いトークはチェックしない", () => {
     const groups = classifyCandidates(
       [asset({ id: "t-null", hasTalkTag: true, canonicalDate: null })],
