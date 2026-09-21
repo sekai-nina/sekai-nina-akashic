@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
-import { getMeetGreet } from "@/lib/domain/meetgreets";
+import { getLive } from "@/lib/domain/lives";
 import { handleArticleGenerate } from "@/lib/domain/article-generate-route";
 import { ArticleGenerateSchema } from "@/lib/meetgreet/api";
 import { formatZodError } from "@/lib/zod-error";
@@ -11,10 +11,8 @@ type Params = { params: Promise<{ id: string }> };
 export const maxDuration = 120;
 
 /**
- * 記事を生成する。既存記事が紐づいていれば**増えた分だけ追記**、無ければ新規作成。
- * `dryRun: true` なら書き込まず、適用後の本文と増える行だけを返す。
- * `restore` だけを送ると、「今後足さない」の取り消しだけを行う (記事は触らない)。
- * 本体は `handleArticleGenerate` (ライブ・ドシエと共通)
+ * ライブ記事を生成する (#151)。本体は `POST /meetgreets/:id/article` と同じ
+ * (`dryRun` / `expectedDigest` / `exclude` / `restore`)。公演の表の区間は追記のたびに作り直す
  */
 export async function POST(request: Request, { params }: Params) {
   const auth = await requireApiAuth(request, "write");
@@ -33,8 +31,8 @@ export async function POST(request: Request, { params }: Params) {
     return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
   }
 
-  const mg = await getMeetGreet(auth, id);
-  if (!mg) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const live = await getLive(auth, id);
+  if (!live) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  return handleArticleGenerate(auth, { kind: "meetgreet", meetGreet: { ...mg, format: mg.format } }, parsed.data);
+  return handleArticleGenerate(auth, { kind: "live", live }, parsed.data);
 }
