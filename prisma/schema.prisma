@@ -207,6 +207,7 @@ model User {
   creditSnapshots     CreditSnapshot[]  @relation("CreditSnapshotCreatedBy")
   instaWatchTargets InstaWatchTarget[] @relation("InstaWatchTargetUpdatedBy")
   instaAccounts InstaAccount[] @relation("InstaAccountUpdatedBy")
+  instaStoryJobs InstaStoryJob[] @relation("InstaStoryJobRequestedBy")
 }
 
 model Asset {
@@ -1548,6 +1549,60 @@ enum InstaWatchTier {
   normal
   /// 低頻度 (bot 側の `~`)
   cold
+}
+
+/// story を iPad ワーカーに取りに行かせるジョブ (#178)。
+///
+/// story の実体はサーバから自動取得できない (内部 API は 429、/stories/ は
+/// scraping_warning に飛ぶ)。iPad 上のログイン済み環境 (Shortcuts の
+/// 「Instagram Download」) なら落とせるので、Akashic がジョブを持ち、Pushcut で
+/// iPad のラッパー Shortcut を起こし、落としたファイルを返してもらう。
+///
+/// 状態は pending → dispatched (Pushcut に送った) → processing (iPad が受け取った)
+/// → completed | failed。iPad は 1 台なので同時に走らせるのは 1 件だけ
+/// (`src/lib/domain/insta-jobs.ts` の dispatchNext)。
+model InstaStoryJob {
+  id     String              @id @default(cuid())
+  /// @ を除いた小文字のハンドル。url から取り出す
+  handle String
+  /// iPad に渡す story の URL (https://www.instagram.com/stories/<handle>/[<id>/])
+  url    String
+  status InstaStoryJobStatus @default(pending)
+
+  /// Pushcut に送った時刻。送れなかったときは null のまま pending に留まる
+  dispatchedAt DateTime?
+  /// iPad が start を叩いた時刻
+  startedAt    DateTime?
+  /// completed / failed になった時刻
+  completedAt  DateTime?
+  /// failed の理由 (iPad からの報告・失効・dispatch の失敗)。人が読む用
+  error        String    @default("")
+  /// 登録したファイルの一覧 (`InstaStoryJobResult`)。result を受けるたびに追記する
+  result       Json      @default("{\"files\":[]}")
+
+  /// 画面から手で作ったときの操作者。bot が API で作ったときはキーの持ち主
+  requestedById String?
+  requestedBy   User?   @relation("InstaStoryJobRequestedBy", fields: [requestedById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  classification ClearanceLevel @default(internal)
+
+  @@index([status, createdAt])
+  @@index([handle, createdAt])
+  @@index([createdAt])
+}
+
+enum InstaStoryJobStatus {
+  /// 作ったが iPad にまだ送っていない (前のジョブが走っている / Pushcut 未設定)
+  pending
+  /// Pushcut に送った。iPad からの start 待ち
+  dispatched
+  /// iPad が受け取って作業中
+  processing
+  completed
+  failed
 }
 
 model AiSetting {
