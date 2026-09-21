@@ -2,8 +2,7 @@ import { NextResponse } from "next/server";
 import { ArticleTemplate } from "@prisma/client";
 import * as z from "zod";
 import { requireApiAuth } from "@/lib/api-auth";
-import { previewArticle, restoreExclusions, saveArticle } from "@/lib/domain/article-generate";
-import { WorkflowInputError } from "@/lib/domain/article-workflow";
+import { articleGenerateErrorResponse, handleArticleGenerate } from "@/lib/domain/article-generate-route";
 import {
   assertPlainDossier,
   getDossierForArticle,
@@ -40,13 +39,6 @@ const DossierArticleSchema = z
     message: "aiDraft は保存のときだけ指定してください (dryRun / restore とは併用できません)",
   });
 
-function errorResponse(e: unknown) {
-  if (e instanceof WorkflowInputError) return NextResponse.json({ error: e.message }, { status: 400 });
-  if (e instanceof Error && e.message.includes("Access denied")) {
-    return NextResponse.json({ error: e.message }, { status: 403 });
-  }
-  throw e;
-}
 
 /** テンプレートと紐づく記事を返す (何を送ればよいかを外部が知るため) */
 export async function GET(request: Request, { params }: Params) {
@@ -115,46 +107,12 @@ export async function POST(request: Request, { params }: Params) {
       }
       dossier = { ...dossier, articleTemplate: parsed.data.template };
     }
-    const target = { kind: "dossier" as const, dossier, articleId: parsed.data.articleId ?? null };
-
-    // **`?.length` で見ない。** `restore: []` が偽になって保存に落ちる
-    if (parsed.data.restore !== undefined) {
-      const restored = await restoreExclusions(auth, target, parsed.data.restore);
-      return NextResponse.json({ restored });
-    }
-    if (parsed.data.dryRun) {
-      const preview = await previewArticle(auth, target, parsed.data.exclude ?? []);
-      return NextResponse.json({
-        mode: preview.mode,
-        title: preview.title,
-        body: preview.body,
-        digest: preview.digest,
-        addedLines: preview.addedLines,
-        newSources: preview.newSources,
-        droppedByClearance: preview.droppedByClearance,
-        additions: preview.additions,
-        excluded: preview.excluded,
-        empty: preview.empty,
-        shortId: preview.shortId,
-        ai: preview.ai,
-        aiDraft: preview.aiDraft,
-      });
-    }
-    const result = await saveArticle(
-      auth,
-      target,
-      parsed.data.expectedDigest,
-      parsed.data.exclude ?? [],
-      parsed.data.aiDraft
-    );
-    if (!result.ok) return NextResponse.json({ error: result.error }, { status: 409 });
-    return NextResponse.json({
-      mode: result.mode,
-      shortId: result.shortId,
-      added: result.added,
-      sources: result.sources,
-    });
   } catch (e) {
-    return errorResponse(e);
+    return articleGenerateErrorResponse(e);
   }
+  return handleArticleGenerate(
+    auth,
+    { kind: "dossier", dossier, articleId: parsed.data.articleId ?? null },
+    parsed.data
+  );
 }

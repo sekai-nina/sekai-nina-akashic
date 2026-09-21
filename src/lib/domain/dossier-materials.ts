@@ -10,12 +10,12 @@
  */
 
 import type { ClearanceLevel, Prisma, TextType } from "@prisma/client";
-import type { TransactionClient } from "@/lib/db";
+import { withSession, type TransactionClient } from "@/lib/db";
 import { getR2PublicUrl } from "@/lib/r2";
 import { toJstDateOnly } from "@/lib/utils";
 import { accessibleClassifications } from "@/lib/classification";
 import { MAX_ARTICLE_CLEARANCE, MAX_EXTERNAL_AI_CLEARANCE } from "@/lib/meetgreet/config";
-import type { ArticleAssetInput } from "@/lib/article-workflow/render";
+import { normalizeTweetUrl, type ArticleAssetInput } from "@/lib/article-workflow/render";
 import type { DossierPlace } from "@/lib/article-workflow/templates/types";
 
 /** 本文に載せてよい機密レベル */
@@ -359,4 +359,65 @@ export async function resolveTiktokUrl(url: string): Promise<string | null> {
 export async function resolveTiktoks(urls: string[]): Promise<string[]> {
   const resolved = await Promise.all(urls.map((u) => resolveTiktokUrl(u)));
   return resolved.filter((u): u is string => u !== null);
+}
+
+/**
+ * 器 (MeetGreet / Live) の素材をまとめて用意する: ドシエ (機密の入口チェック込み)・X レポ収集の keep・
+ * TikTok の解決。レポはドシエの `external_link` を先に、keep を後ろに足す (既存記事の並びを壊さず、
+ * 判定済みのぶんだけ増える形)。`RepoTweet` は自前の機密を持たず収集の機密に従うので、収集が上限を
+ * 超えていれば keep は落とす。
+ *
+ * 入力エラーは `inputError` で器ごとの型に (REST が 400 にできるように)
+ */
+export async function loadContainerMaterials(
+  user: { id: string; role: string; clearance: string },
+  input: { dossierId: string; repoCollectionId: string | null; includeKeeps: boolean },
+  inputError: (message: string) => Error
+): Promise<{
+  dossier: { id: string; updatedAt: string; itemCount: number };
+  materials: DossierMaterials;
+  tiktoks: string[];
+  reports: string[];
+}> {
+  const data = await withSession(user, async (tx) => {
+    const dossier = await loadDossierForArticle(tx, input.dossierId);
+    // ドシエが見えないのは権限の話なので、呼び出し側が 400 にできる形で投げる
+    if (!dossier) throw inputError("ドシエが見つかりません (権限がないか削除されています)");
+    if (!PUBLISHABLE.has(dossier.classification)) {
+      throw inputError(`ドシエが ${dossier.classification} なので記事にできません (サムネや外部リンクが公開リポジトリに載るため)`);
+    }
+    const collection = input.repoCollectionId
+      ? await tx.repoCollection.findUnique({ where: { id: input.repoCollectionId }, select: { classification: true } })
+      : null;
+    const keeps =
+      input.includeKeeps && input.repoCollectionId
+        ? await tx.repoTweet.findMany({
+            where: { collectionId: input.repoCollectionId, status: "keep" },
+            orderBy: [{ tweetedAt: "asc" }, { id: "asc" }],
+            select: { url: true },
+          })
+        : [];
+    return { dossier, keeps, collection };
+  });
+
+  const materials = shapeDossierMaterials(data.dossier);
+  // TikTok は埋め込みに video ID が要るので、短縮 URL をここで解決しておく
+  const tiktoks = await resolveTiktoks(materials.tiktoks);
+
+  const reports = [...materials.reports];
+  const keepsPublishable = !data.collection || PUBLISHABLE.has(data.collection.classification);
+  const seen = new Set(reports.map(normalizeTweetUrl));
+  for (const t of keepsPublishable ? data.keeps : []) {
+    const n = normalizeTweetUrl(t.url);
+    if (seen.has(n)) continue;
+    seen.add(n);
+    reports.push(t.url);
+  }
+
+  return {
+    dossier: { id: data.dossier.id, updatedAt: data.dossier.updatedAt.toISOString(), itemCount: data.dossier.itemCount },
+    materials,
+    tiktoks,
+    reports,
+  };
 }

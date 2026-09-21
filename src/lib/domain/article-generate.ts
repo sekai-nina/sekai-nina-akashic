@@ -2,7 +2,7 @@
  * ドシエから記事を組み立てて保存する、テンプレート共通の層 (#169 / #170)。
  *
  * ミーグリ記事の保存 (`meetgreet-article-save.ts`、#109) を「器 + テンプレート」で動く形にしたもの。
- * 器は 2 種類:
+ * 器は 3 種類:
  *
  * - **MeetGreet** (`ArticleTarget.kind = "meetgreet"`): 開催日などの構造化メタを持つ行。組み立ては
  *   `buildMeetGreetArticle`、記事の紐づけは `MeetGreet.articleId`、除外は `MeetGreet.articleExclusions`
@@ -10,7 +10,7 @@
  *   `Dossier.articleTemplate` が型を決め、組み立てはテンプレートの `render`、記事の紐づけは
  *   `Article.dossierId`、除外は `Dossier.articleExclusions`
  *
- * (Live は #151 で 3 つ目の器になる)
+ * - **Live** (`kind = "live"`): MeetGreet と同型 (公演・曲を持つ)。組み立ては `buildLiveArticle`
  *
  * 組み立て (`build`) と追記の計算 (`lib/meetgreet/append.ts`) は純粋関数で、ここが DB への反映を
  * 受け持つ。記事まわりの既存の仕組み (`createArticle` / `updateArticle` / `applyArticleSource`)
@@ -23,15 +23,16 @@
 
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
-import { prisma, withClearance, withSession } from "@/lib/db";
+import { prisma, withClearance, withSession, type TransactionClient } from "@/lib/db";
 import { EXCLUSION_KIND_LABELS, todayJst } from "@/lib/utils";
 import { canEditDossier } from "@/lib/auth/dossier-permissions";
 import { parseFrontmatterDate } from "@/lib/articles/frontmatter";
 import { jsonStringArray, MAX_ARTICLE_CLEARANCE } from "@/lib/meetgreet/config";
-import { planAppend, isPureAppend, appendDiff, type AppendLayout } from "@/lib/meetgreet/append";
+import { planAppend, isPureAppend, type AppendLayout } from "@/lib/meetgreet/append";
 import type { ArticleMode, ArticlePreview } from "@/lib/meetgreet/types";
 import type { RenderedArticle, RenderedSource } from "@/lib/article-workflow/render";
 import {
+  LIVE_TEMPLATE,
   MEETGREET_TEMPLATE,
   type AiDraft,
   type ArticleAiStatus,
@@ -47,6 +48,8 @@ import {
 } from "./articles";
 import { WorkflowInputError, type ActingUser } from "./article-workflow";
 import { buildMeetGreetArticle } from "./meetgreet-article";
+import { buildLiveArticle, type LiveForArticle } from "./live-article";
+import { LiveInputError } from "./lives";
 import {
   assertPlainDossier,
   buildDossierArticle,
@@ -90,6 +93,7 @@ export interface MeetGreetForArticle {
 /** 記事の器。どこから素材を取り、どこに記事を紐づけるか */
 export type ArticleTarget =
   | { kind: "meetgreet"; meetGreet: MeetGreetForArticle }
+  | { kind: "live"; live: LiveForArticle }
   | {
       kind: "dossier";
       dossier: DossierForArticle;
@@ -140,59 +144,108 @@ interface ResolvedTarget {
 
 function resolveTarget(user: ActingUser, target: ArticleTarget): ResolvedTarget {
   if (target.kind === "meetgreet") return resolveMeetGreet(user, target.meetGreet);
+  if (target.kind === "live") return resolveLive(user, target.live);
   return resolveDossier(user, target.dossier, target.articleId ?? null);
 }
 
-function resolveMeetGreet(user: ActingUser, meetGreet: MeetGreetForArticle): ResolvedTarget {
-  const template = MEETGREET_TEMPLATE;
+/**
+ * 器 (MeetGreet / Live) の共通部分。どちらも `articleId` / `dossierId` / `articleExclusions` /
+ * `classification` を同じ形で持ち、所有者は持たない (見えていれば書ける)。
+ * 違うのは行の読み書き (`store`) と組み立てだけ
+ */
+interface ContainerStore {
+  readExclusions: (tx: TransactionClient) => Promise<unknown>;
+  writeExclusions: (tx: TransactionClient, next: string[]) => Promise<unknown>;
+  linkArticle: (tx: TransactionClient, articleId: string) => Promise<unknown>;
+}
+
+function resolveContainer(
+  user: ActingUser,
+  input: {
+    template: ArticleTemplateDef;
+    row: { id: string; articleId: string | null; dossierId: string; articleExclusions: unknown };
+    store: ContainerStore;
+    build: () => Promise<BuiltArticle>;
+    inputError: (message: string) => Error;
+    audit: { targetType: string; prefix: string };
+  }
+): ResolvedTarget {
+  const { template, row, store } = input;
+  const stored = jsonStringArray(row.articleExclusions);
   return {
     template,
     layout: template.appendLayout,
-    articleId: meetGreet.articleId,
-    storedExclusions: jsonStringArray(meetGreet.articleExclusions),
-    build: () => buildMeetGreetArticle(user, meetGreet),
+    articleId: row.articleId,
+    storedExclusions: stored,
+    build: input.build,
     // 読み直しと書き込みを 1 トランザクションに収める (別タブで戻されたものを古い値で書き戻さない)
     addExclusions: async (keys) => {
       if (keys.length === 0) return [];
       return withClearance(user.clearance, async (tx) => {
-        const row = await tx.meetGreet.findUnique({
-          where: { id: meetGreet.id },
-          select: { articleExclusions: true },
-        });
-        const next = [...new Set([...jsonStringArray(row?.articleExclusions), ...keys])];
-        await tx.meetGreet.update({
-          where: { id: meetGreet.id },
-          data: { articleExclusions: next as unknown as Prisma.InputJsonValue },
-        });
+        const next = [...new Set([...jsonStringArray(await store.readExclusions(tx)), ...keys])];
+        await store.writeExclusions(tx, next);
         return next;
       });
     },
     removeExclusions: async (keys) => {
-      const stored = jsonStringArray(meetGreet.articleExclusions);
       const next = stored.filter((k) => !keys.includes(k));
       if (next.length === stored.length) return 0;
-      await withClearance(user.clearance, (tx) =>
-        tx.meetGreet.update({
-          where: { id: meetGreet.id },
-          data: { articleExclusions: next as unknown as Prisma.InputJsonValue },
-        })
-      );
+      await withClearance(user.clearance, (tx) => store.writeExclusions(tx, next));
       return stored.length - next.length;
     },
     link: async (articleId) => {
-      // **先に紐づける。** 出典や本文の書き込みで落ちたとき、記事だけできて MeetGreet に
-      // 繋がっていないと、次の実行が path_exists で止まり手当てのしようがなくなる
+      // **先に紐づける。** 出典や本文の書き込みで落ちたとき、記事だけできて器に繋がっていないと、
+      // 次の実行が path_exists で止まり手当てのしようがなくなる
       await withClearance(user.clearance, async (tx) => {
-        await tx.meetGreet.update({ where: { id: meetGreet.id }, data: { articleId } });
-        // 記事の素材ドシエ (#41) は回のドシエ。updatedAt を進めないよう素の SQL で書く
-        await tx.$executeRaw`UPDATE "Article" SET "dossierId" = ${meetGreet.dossierId} WHERE "id" = ${articleId} AND "dossierId" IS NULL`;
+        await store.linkArticle(tx, articleId);
+        // 記事の素材ドシエ (#41) は器のドシエ。updatedAt を進めないよう素の SQL で書く
+        await tx.$executeRaw`UPDATE "Article" SET "dossierId" = ${row.dossierId} WHERE "id" = ${articleId} AND "dossierId" IS NULL`;
       });
     },
-    // MeetGreet は所有者を持たない (classification だけ)。見えていれば書ける
+    // 器は所有者を持たない (classification だけ)。見えていれば書ける
     assertCanSave: () => {},
-    inputError: (message) => new MeetGreetInputError(message),
-    audit: { targetType: "MeetGreet", targetId: meetGreet.id, prefix: "meetgreet.article" },
+    inputError: input.inputError,
+    audit: { targetType: input.audit.targetType, targetId: row.id, prefix: input.audit.prefix },
   };
+}
+
+function resolveLive(user: ActingUser, live: LiveForArticle): ResolvedTarget {
+  return resolveContainer(user, {
+    template: LIVE_TEMPLATE,
+    row: live,
+    store: {
+      readExclusions: (tx) =>
+        tx.live.findUnique({ where: { id: live.id }, select: { articleExclusions: true } }).then((r) => r?.articleExclusions),
+      writeExclusions: (tx, next) =>
+        tx.live.update({ where: { id: live.id }, data: { articleExclusions: next as unknown as Prisma.InputJsonValue } }),
+      linkArticle: (tx, articleId) => tx.live.update({ where: { id: live.id }, data: { articleId } }),
+    },
+    build: () => buildLiveArticle(user, live),
+    inputError: (message) => new LiveInputError(message),
+    audit: { targetType: "Live", prefix: "live.article" },
+  });
+}
+
+function resolveMeetGreet(user: ActingUser, meetGreet: MeetGreetForArticle): ResolvedTarget {
+  return resolveContainer(user, {
+    template: MEETGREET_TEMPLATE,
+    row: meetGreet,
+    store: {
+      readExclusions: (tx) =>
+        tx.meetGreet
+          .findUnique({ where: { id: meetGreet.id }, select: { articleExclusions: true } })
+          .then((r) => r?.articleExclusions),
+      writeExclusions: (tx, next) =>
+        tx.meetGreet.update({
+          where: { id: meetGreet.id },
+          data: { articleExclusions: next as unknown as Prisma.InputJsonValue },
+        }),
+      linkArticle: (tx, articleId) => tx.meetGreet.update({ where: { id: meetGreet.id }, data: { articleId } }),
+    },
+    build: () => buildMeetGreetArticle(user, meetGreet),
+    inputError: (message) => new MeetGreetInputError(message),
+    audit: { targetType: "MeetGreet", prefix: "meetgreet.article" },
+  });
 }
 
 function resolveDossier(
@@ -332,10 +385,10 @@ export async function previewArticle(
     existingSources,
     layout: resolved.layout,
   };
-  const base = planAppend({ ...planArgs, excluded: stored });
+  const base = planOrThrow(resolved, { ...planArgs, excluded: stored });
   const plan =
     extraExclude.length > 0
-      ? planAppend({ ...planArgs, excluded: [...stored, ...extraExclude] })
+      ? planOrThrow(resolved, { ...planArgs, excluded: [...stored, ...extraExclude] })
       : base;
   return {
     mode: "append",
@@ -345,7 +398,7 @@ export async function previewArticle(
     // 照合するので (= 外すつもりを渡せば照合をすり抜けられる、を塞ぐため)、
     // 重ねて見せているときも指紋は base のものを返す
     digest: bodyDigest(base.body),
-    addedLines: appendDiff(article.body, plan.body).added,
+    addedLines: plan.changedLines,
     newSources: plan.newSources,
     droppedByClearance: rendered.droppedByClearance,
     // 一覧は外すつもりのものも含めて出す (チェックを戻せるように)
@@ -356,6 +409,16 @@ export async function previewArticle(
     ai: null,
     aiDraft: null,
   };
+}
+
+/** 追記の計画。区間のマーカーが壊れている等のテンプレートの入力エラーは器のエラーに包む (REST は 400) */
+function planOrThrow(resolved: ResolvedTarget, args: Parameters<typeof planAppend>[0]) {
+  try {
+    return planAppend(args);
+  } catch (e) {
+    if (e instanceof TemplateInputError) throw resolved.inputError(e.message);
+    throw e;
+  }
 }
 
 /**
@@ -530,6 +593,13 @@ function stableJson(value: unknown): string {
     return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableJson(v)}`).join(",")}}`;
   }
   return JSON.stringify(value) ?? "null";
+}
+
+/** 追記で書き直す frontmatterExtra: `dossier` + テンプレートが「機械のもの」と言うキー */
+function refreshedExtra(template: ArticleTemplateDef, extra: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { dossier: extra.dossier };
+  for (const key of template.refreshExtraOnAppend ?? []) if (key in extra) out[key] = extra[key];
+  return out;
 }
 
 /** frontmatter の dossier / meetgreet 等を入れ直す (push でそのまま復元される) */
@@ -738,7 +808,7 @@ export async function saveArticle(
 
   // **指紋は「見せたときと同じ条件」で照合する。** 除外を足すと本文が変わるので、
   // 除外を当てる前の結果と突き合わせる (除外を渡せば照合をすり抜けられる、を防ぐ)
-  const shown = planAppend({ ...planArgs, excluded: stored });
+  const shown = planOrThrow(resolved, { ...planArgs, excluded: stored });
   if (mismatch(bodyDigest(shown.body))) {
     return {
       ok: false,
@@ -748,7 +818,7 @@ export async function saveArticle(
 
   const plan =
     exclude.length > 0
-      ? planAppend({ ...planArgs, excluded: [...new Set([...stored, ...exclude])] })
+      ? planOrThrow(resolved, { ...planArgs, excluded: [...new Set([...stored, ...exclude])] })
       : shown;
   if (plan.empty) {
     // 全部外したケース。本文は変えないが、外した事実は覚える
@@ -764,12 +834,13 @@ export async function saveArticle(
     }
     // 本文が増えなくてもドシエは動いている (アイテム削除・抜粋の編集など)。
     // スナップショットを更新しないと「要反映」バッジが永久に消えない
-    await saveFrontmatterExtra(articleId, { dossier: rendered.frontmatterExtra.dossier });
+    await saveFrontmatterExtra(articleId, refreshedExtra(resolved.template, rendered.frontmatterExtra));
     return { ok: true, mode: "append", shortId: article.shortId, added: 0, sources: 0, failed: [] };
   }
 
-  // **既存行が 1 行でも消えていたら適用しない。** 手で入れた ![rep] や文面の調整を守る最後の砦
-  if (!isPureAppend(article.body, plan.body)) {
+  // **既存行が 1 行でも消えていたら適用しない。** 手で入れた ![rep] や文面の調整を守る最後の砦。
+  // 毎回作り直す区間 (ライブの公演の表) は差し替えたあとの本文 (`baseBody`) と比べる
+  if (!isPureAppend(plan.baseBody, plan.body)) {
     return { ok: false, error: "既存の本文が変化するため中止しました (純粋な追記になりません)" };
   }
 
@@ -810,14 +881,15 @@ export async function saveArticle(
     };
   }
 
-  // ドシエのスナップショットを今回の状態に更新する (要反映の判定に使う)
-  await saveFrontmatterExtra(articleId, { dossier: rendered.frontmatterExtra.dossier });
+  // ドシエのスナップショットを今回の状態に更新する (要反映の判定に使う)。
+  // 機械が持つブロック (ライブの `live:`) も作り直す。それ以外のキーは新規作成時のまま
+  await saveFrontmatterExtra(articleId, refreshedExtra(resolved.template, rendered.frontmatterExtra));
 
   // **除外を覚えるのは本文の保存に成功してから。** 先に書くと、衝突や純粋追記でない等で
   // 中止したときに「外した」だけが残り、戻す手段が無くなる
   await resolved.addExclusions(exclude);
 
-  const added = appendDiff(article.body, plan.body).added.length;
+  const added = plan.changedLines.length;
   await logAudit({
     actorId: user.id,
     action: `${resolved.audit.prefix}.append`,

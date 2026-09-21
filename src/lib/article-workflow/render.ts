@@ -56,6 +56,18 @@ export interface RenderedSource {
   assetId: string | null;
 }
 
+/**
+ * 毎回作り直す区間 (#151 のライブの公演の表)。`start` 〜 `end` の HTML コメントで囲み、追記のたびに
+ * 中身を差し替える。記事に区間が無ければ `section` の見出しを作ってそこに置く
+ */
+export interface MarkerBlock {
+  start: string;
+  end: string;
+  /** 区間の中身 (マーカーの行は含まない) */
+  lines: string[];
+  section: { heading: string; before: string[] };
+}
+
 /** 本文に出る項目の内訳。追記モードが「まだ無いもの」を選ぶのに使う */
 export interface ArticleParts {
   /** 本人の感想。ブログごとにまとめた引用 */
@@ -67,6 +79,8 @@ export interface ArticleParts {
   talks: { assetId: string; line: string; sortAt: string | null }[];
   /** 関連メディアのブログ画像 */
   blogImages: { assetId: string; line: string }[];
+  /** 毎回作り直す区間 (無いテンプレートは省略) */
+  blocks?: MarkerBlock[];
 }
 
 /** frontmatter の `dossier:` (由来ドシエのスナップショット。「要反映」の判定に使う) */
@@ -282,10 +296,13 @@ export function quotedBlogs(blogs: BlogGroup[]): BlogGroup[] {
   return blogs.filter((b) => b.excerpts.length > 0 && !b.staff);
 }
 
+/** 本人の感想の章の見出し (フル生成と追記で同じものを見る) */
+export const QUOTES_HEADING = "## 本人の感想（ブログより）";
+
 /** `## 本人の感想（ブログより）` の章。引用が無ければ空 */
 export function renderQuotesSection(quoted: BlogGroup[]): string[] {
   if (quoted.length === 0) return [];
-  const body: string[] = ["## 本人の感想（ブログより）", ""];
+  const body: string[] = [QUOTES_HEADING, ""];
   for (const b of quoted) {
     for (const ex of b.excerpts) body.push(blockquote(ex), "");
     // 引用が複数あっても出典行はブログごとに 1 回だけ
