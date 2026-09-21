@@ -22,8 +22,23 @@ export interface DossierRenderInput {
   tiktoks: string[];
   /** ドシエの「サムネ」(external_image) の URL */
   thumbnailUrl: string | null;
+  /**
+   * 場所候補 (`DossierPlaceCandidate`、ドシエの並び順)。おでかけ記事の `locations` になる。
+   * `placeId` があれば聖地に昇格済み (frontmatter は `place_id` だけ)、無ければ座標をインラインで持つ
+   */
+  places: DossierPlace[];
   /** published_at / synced_at に入れる JST の今日 */
   today: string;
+}
+
+export interface DossierPlace {
+  name: string;
+  placeId: string | null;
+  lat: number | null;
+  lng: number | null;
+  address: string | null;
+  googleMapsUrl: string | null;
+  note: string;
 }
 
 /**

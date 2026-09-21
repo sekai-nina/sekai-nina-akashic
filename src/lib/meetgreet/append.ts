@@ -14,6 +14,7 @@ import {
   type ArticleParts,
   type RenderedSource,
 } from "./article";
+import type { RelatedMediaStyle } from "@/lib/article-workflow/render";
 import type { ExclusionKind } from "./types";
 
 /**
@@ -30,6 +31,11 @@ export interface AppendLayout {
   quoteAttribution: boolean;
   /** ファンのレポの章 */
   reports: { heading: string; lead: string };
+  /**
+   * 関連メディアの章の形 (`renderRelatedMediaSection` と同じ)。省略は `sections`。
+   * `flat` は `### トーク` などの小見出しを作らず、`## 関連メディア` の箇条書きの末尾に足す
+   */
+  media?: RelatedMediaStyle;
 }
 
 export const MEETGREET_APPEND_LAYOUT: AppendLayout = {
@@ -375,17 +381,8 @@ export function planAppend(input: {
     added.reports = freshReports.length;
   }
 
-  if (freshTiktoks.length > 0) {
-    ensureSection(sections, H_MEDIA, []);
-    const sec = ensureSection(sections, H_TIKTOK, [H_TALK, H_BLOG_IMAGES]);
-    sec.lines.splice(appendIndex(sec.lines), 0, ...freshTiktoks.map((u) => `![](${u})`));
-    added.tiktoks = freshTiktoks.length;
-  }
-
-  // トークは時系列の正しい位置に差し込む (脚注番号は飛んでよい。順序 > 番号の連続性)
-  if (freshTalks.length > 0) {
-    ensureSection(sections, H_MEDIA, []);
-    const sec = ensureSection(sections, H_TALK, [H_BLOG_IMAGES]);
+  /** トークを時系列の正しい位置に差し込む (脚注番号は飛んでよい。順序 > 番号の連続性) */
+  const insertTalks = (sec: Section) => {
     for (const t of freshTalks) {
       const line = renumber(t.line, renumberMap);
       const key = talkSortKeyFromLine(t.line);
@@ -402,17 +399,52 @@ export function planAppend(input: {
       sec.lines.splice(at, 0, line);
       added.talks++;
     }
-  }
+  };
 
-  if (freshImages.length > 0) {
-    ensureSection(sections, H_MEDIA, []);
-    const sec = ensureSection(sections, H_BLOG_IMAGES, []);
-    sec.lines.splice(
-      appendIndex(sec.lines),
-      0,
-      ...freshImages.map((b) => renumber(b.line, renumberMap))
-    );
-    added.blogImages = freshImages.length;
+  if (layout.media?.kind === "flat") {
+    // おでかけ記事: 小見出し無しで `## 関連メディア` の箇条書きに足す
+    if (freshTiktoks.length > 0 || freshTalks.length > 0 || freshImages.length > 0) {
+      const sec = ensureSection(sections, H_MEDIA, []);
+      const tiktokLines = freshTiktoks.map((u) => `![](${u})`);
+      const imageLines = freshImages.map((b) => renumber(b.line, renumberMap));
+      if (sec.lines.every((l) => l.trim() === "")) {
+        // 章を作ったばかり: フル生成と同じ形 (導入文 → 空行 → 箇条書き)。トークは時系列に
+        const talkLines = [...freshTalks]
+          .sort((x, y) => talkSortKeyFromLine(x.line).localeCompare(talkSortKeyFromLine(y.line)))
+          .map((t) => renumber(t.line, renumberMap));
+        sec.lines = ["", layout.media.lead, "", ...tiktokLines, ...talkLines, ...imageLines, ""];
+        added.talks += freshTalks.length;
+      } else {
+        sec.lines.splice(appendIndex(sec.lines), 0, ...tiktokLines);
+        insertTalks(sec);
+        sec.lines.splice(appendIndex(sec.lines), 0, ...imageLines);
+      }
+      added.tiktoks = freshTiktoks.length;
+      added.blogImages = freshImages.length;
+    }
+  } else {
+    if (freshTiktoks.length > 0) {
+      ensureSection(sections, H_MEDIA, []);
+      const sec = ensureSection(sections, H_TIKTOK, [H_TALK, H_BLOG_IMAGES]);
+      sec.lines.splice(appendIndex(sec.lines), 0, ...freshTiktoks.map((u) => `![](${u})`));
+      added.tiktoks = freshTiktoks.length;
+    }
+
+    if (freshTalks.length > 0) {
+      ensureSection(sections, H_MEDIA, []);
+      insertTalks(ensureSection(sections, H_TALK, [H_BLOG_IMAGES]));
+    }
+
+    if (freshImages.length > 0) {
+      ensureSection(sections, H_MEDIA, []);
+      const sec = ensureSection(sections, H_BLOG_IMAGES, []);
+      sec.lines.splice(
+        appendIndex(sec.lines),
+        0,
+        ...freshImages.map((b) => renumber(b.line, renumberMap))
+      );
+      added.blogImages = freshImages.length;
+    }
   }
 
   const total = added.quotes + added.reports + added.talks + added.blogImages + added.tiktoks;
