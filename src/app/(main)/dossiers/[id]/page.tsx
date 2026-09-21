@@ -53,7 +53,11 @@ export default async function DossierDetailPage({ params }: DossierDetailProps) 
             ))}
           </p>
         )}
-        {dossier.kind === "general" && !dossier.meetGreet && !dossier.live && (
+        {dossier.kind === "general" &&
+          !dossier.meetGreet &&
+          !dossier.live &&
+          dossier.articleTemplate !== "meetgreet" &&
+          dossier.articleTemplate !== "live" && (
           <Link
             href={`/dossiers/${dossier.id}/article`}
             className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-800"

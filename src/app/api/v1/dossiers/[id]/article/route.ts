@@ -5,7 +5,9 @@ import { requireApiAuth } from "@/lib/api-auth";
 import { previewArticle, restoreExclusions, saveArticle } from "@/lib/domain/article-generate";
 import { WorkflowInputError } from "@/lib/domain/article-workflow";
 import {
+  assertPlainDossier,
   getDossierForArticle,
+  requireRenderableTemplate,
   setDossierTemplate,
   suggestTemplate,
 } from "@/lib/domain/dossier-article";
@@ -23,7 +25,7 @@ const DossierArticleSchema = z
   .object({
     ...ArticleGenerateSchema.shape,
     /** テンプレートを決める (未設定のときは必須)。記事を作った後は変えられない */
-    template: z.nativeEnum(ArticleTemplate).optional(),
+    template: z.enum(ArticleTemplate).optional(),
     /** 追記する記事。ドシエに記事が 2 本以上あるときに要る */
     articleId: z.string().min(1).optional(),
   })
@@ -52,9 +54,10 @@ export async function GET(request: Request, { params }: Params) {
   const def = dossier.articleTemplate ? getTemplate(dossier.articleTemplate) : null;
   return NextResponse.json({
     dossierId: dossier.id,
-    container: dossier.container,
+    container: dossier.container?.kind ?? null,
     template: dossier.articleTemplate,
-    templateSupported: !!def?.render,
+    // 器のテンプレート (meetgreet / live) は器側で組むので「対応済み」
+    templateSupported: def !== null,
     suggestedTemplate: suggestTemplate(dossier),
     selectableTemplates: selectableTemplates().map((t) => t.key),
     articles: dossier.articles.map((a) => ({
@@ -95,8 +98,15 @@ export async function POST(request: Request, { params }: Params) {
   if (!dossier) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   try {
+    const wantsWrite = !parsed.data.dryRun && parsed.data.restore === undefined;
     if (parsed.data.template && parsed.data.template !== dossier.articleTemplate) {
-      await setDossierTemplate(auth, dossier, parsed.data.template);
+      // **テンプレートを永続化するのは保存のときだけ。** dryRun / restore は「書き込まない」約束なので、
+      // 見せる間だけメモリ上で当てる (設定できないテンプレートは同じ検査で 400 にする)
+      if (wantsWrite) await setDossierTemplate(auth, dossier, parsed.data.template);
+      else {
+        assertPlainDossier(dossier);
+        requireRenderableTemplate(parsed.data.template);
+      }
       dossier = { ...dossier, articleTemplate: parsed.data.template };
     }
     const target = { kind: "dossier" as const, dossier, articleId: parsed.data.articleId ?? null };

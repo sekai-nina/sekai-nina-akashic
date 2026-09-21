@@ -40,6 +40,7 @@ import { logAudit } from "./audit";
 import {
   applyMaterialsToDossier,
   assertContainersFree,
+  claimDossierTemplate,
   keepCounts,
   loadDossiers,
   loadMaterialInputs,
@@ -255,6 +256,7 @@ export async function createLive(user: ActingUser, input: CreateLiveInput): Prom
     // 既にあるものを使う場合は、見えること・まだ他の器に使われていないこと・プールでないことを確かめる
     try {
       await assertContainersFree(tx, input, "live");
+      if (input.dossierId) await claimDossierTemplate(tx, user, input.dossierId, "live");
     } catch (e) {
       if (e instanceof WorkflowInputError) throw new LiveInputError(e.message);
       throw e;

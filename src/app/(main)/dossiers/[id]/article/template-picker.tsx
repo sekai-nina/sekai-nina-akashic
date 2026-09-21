@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import type { ArticleTemplate } from "@prisma/client";
 import { setTemplateAction } from "./actions";
 
 /**
@@ -14,17 +15,20 @@ export function TemplatePicker({
   suggested,
   options,
   locked,
+  editable,
 }: {
   dossierId: string;
-  current: string | null;
+  current: ArticleTemplate | null;
   /** 紐づく記事の型から推した既定値 */
-  suggested: string | null;
-  options: { key: string; label: string }[];
+  suggested: ArticleTemplate | null;
+  options: { key: ArticleTemplate; label: string }[];
   /** 記事を作った後は変えられない */
   locked: boolean;
+  /** ドシエの編集権限。無ければ決められない (保存もできない) */
+  editable: boolean;
 }) {
   const router = useRouter();
-  const [value, setValue] = useState(current ?? suggested ?? "");
+  const [value, setValue] = useState<ArticleTemplate | "">(current ?? suggested ?? "");
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -51,8 +55,8 @@ export function TemplatePicker({
         テンプレート
         <select
           value={value}
-          onChange={(e) => setValue(e.target.value)}
-          disabled={pending || locked}
+          onChange={(e) => setValue(e.target.value as ArticleTemplate | "")}
+          disabled={pending || locked || !editable}
           className="ml-2 h-8 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-800 disabled:opacity-60"
         >
           <option value="">選んでください</option>
@@ -63,7 +67,7 @@ export function TemplatePicker({
           ))}
         </select>
       </label>
-      {!locked && value && value !== current && (
+      {!locked && editable && value && value !== current && (
         <button
           type="button"
           onClick={save}
@@ -75,6 +79,9 @@ export function TemplatePicker({
       )}
       {locked && (
         <span className="text-[11px] text-slate-500">記事を作った後はテンプレートを変えられません</span>
+      )}
+      {!locked && !editable && (
+        <span className="text-[11px] text-slate-500">このドシエの編集権限が無いので、テンプレートの決定と保存はできません</span>
       )}
       {!current && suggested && value === suggested && (
         <span className="text-[11px] text-slate-500">紐づいている記事の型から推しています</span>

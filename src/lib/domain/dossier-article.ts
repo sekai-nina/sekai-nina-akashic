@@ -5,13 +5,14 @@
  * `Dossier.articleTemplate` だけで決まる。組み立てはテンプレートの `render` (純粋関数)。
  */
 
-import type { ArticleTemplate, ArticleType, DossierKind } from "@prisma/client";
+import type { ArticleTemplate, ArticleType, ClearanceLevel, DossierAccessMode, DossierKind } from "@prisma/client";
 import { withSession } from "@/lib/db";
-import { todayJst } from "@/lib/utils";
+import { ARTICLE_TEMPLATE_LABELS, todayJst } from "@/lib/utils";
 import { canEditDossier } from "@/lib/auth/dossier-permissions";
 import { MAX_ARTICLE_CLEARANCE } from "@/lib/meetgreet/config";
 import type { RenderedArticle } from "@/lib/article-workflow/render";
 import { getTemplate, type ArticleTemplateDef } from "@/lib/article-workflow/templates";
+import { isQuoteBlogTitle } from "@/lib/article-workflow/templates/quote-blog";
 import { TemplateInputError } from "@/lib/article-workflow/errors";
 import { WorkflowInputError, type ActingUser } from "./article-workflow";
 import { logAudit } from "./audit";
@@ -26,10 +27,18 @@ import {
 export interface DossierForArticle {
   id: string;
   title: string;
-  classification: string;
+  classification: ClearanceLevel;
   kind: DossierKind;
-  /** 器 (MeetGreet / Live) に使われているか。使われていればそちらの画面で記事にする */
-  container: "meetgreet" | "live" | null;
+  /** 編集権限の判定に使う (`canEditDossier`)。保存のたびに読み直さない */
+  ownerId: string;
+  viewMode: DossierAccessMode;
+  editMode: DossierAccessMode;
+  /**
+   * 器 (MeetGreet / Live) に使われているか。使われていればそちらの画面で記事にする。
+   * **器が自分より上の機密だと見えない** (RLS) ので、器の有無だけでなく `articleTemplate` も見る
+   * (`assertPlainDossier`)
+   */
+  container: { kind: "meetgreet" | "live"; id: string } | null;
   articleTemplate: ArticleTemplate | null;
   /** 「足さない」と決めたもののキー (#134) */
   articleExclusions: unknown;
@@ -50,6 +59,9 @@ export async function getDossierForArticle(
         title: true,
         classification: true,
         kind: true,
+        ownerId: true,
+        viewMode: true,
+        editMode: true,
         articleTemplate: true,
         articleExclusions: true,
         meetGreet: { select: { id: true } },
@@ -64,21 +76,46 @@ export async function getDossierForArticle(
   );
   if (!row) return null;
   const { meetGreet, live, ...rest } = row;
-  return { ...rest, container: meetGreet ? "meetgreet" : live ? "live" : null };
+  return {
+    ...rest,
+    container: meetGreet
+      ? { kind: "meetgreet", id: meetGreet.id }
+      : live
+        ? { kind: "live", id: live.id }
+        : null,
+  };
+}
+
+/** 器 (MeetGreet / Live) が組むテンプレートか (= `render` を持たない) */
+export function isContainerTemplate(template: ArticleTemplate | null): boolean {
+  return template !== null && getTemplate(template)?.render === null;
 }
 
 /**
  * 器 (MeetGreet / Live) に使われているドシエはそちらの画面で記事にする。
- * クリップのプールは記事にしない (#41: 全員共有のプール)
+ * クリップのプールは記事にしない (#41: 全員共有のプール)。
+ *
+ * 器が自分より上の機密だと `container` は null に見える (RLS) ので、**`articleTemplate` も見る**。
+ * 器は作成時にテンプレートを書く (`claimDossierTemplate`) ので、見えなくても型で分かる
  */
 export function assertPlainDossier(dossier: DossierForArticle): void {
   if (dossier.kind === "clips") throw new WorkflowInputError("クリップのプールは記事にできません");
-  if (dossier.container === "meetgreet") {
+  const container = dossier.container?.kind ?? (isContainerTemplate(dossier.articleTemplate) ? dossier.articleTemplate : null);
+  if (container === "meetgreet") {
     throw new WorkflowInputError("このドシエはミーグリの素材です。記事は /meetgreets から作ってください");
   }
-  if (dossier.container === "live") {
+  if (container === "live") {
     throw new WorkflowInputError("このドシエはライブの素材です。記事は /lives から作ってください");
   }
+}
+
+/** 実装済みで、素のドシエから組めるテンプレート。それ以外は入力エラー */
+export function requireRenderableTemplate(template: ArticleTemplate): ArticleTemplateDef {
+  const def = getTemplate(template);
+  if (!def || !def.render) {
+    throw new WorkflowInputError(`テンプレート「${ARTICLE_TEMPLATE_LABELS[template]}」はまだ使えません`);
+  }
+  return def;
 }
 
 /**
@@ -91,24 +128,22 @@ export async function setDossierTemplate(
   template: ArticleTemplate
 ): Promise<void> {
   assertPlainDossier(dossier);
-  const def = getTemplate(template);
-  if (!def || !def.render) throw new WorkflowInputError(`テンプレート ${template} はまだ使えません`);
-  if (dossier.articleTemplate && dossier.articleTemplate !== template && dossier.articles.length > 0) {
+  requireRenderableTemplate(template);
+  if (dossier.articleTemplate === template) return;
+  if (dossier.articleTemplate && dossier.articles.length > 0) {
     throw new WorkflowInputError(
       "既にこのドシエから記事を作っているのでテンプレートは変えられません (別のドシエを作ってください)"
     );
   }
-  await withSession(user, async (tx) => {
-    const access = await tx.dossier.findUnique({
-      where: { id: dossier.id },
-      select: { ownerId: true, classification: true, viewMode: true, editMode: true },
-    });
-    if (!access) throw new WorkflowInputError("ドシエが見つかりません (権限がないか削除されています)");
-    if (!canEditDossier(user, access)) {
-      throw new Error("Access denied: insufficient permission to edit this dossier");
-    }
-    await tx.dossier.update({ where: { id: dossier.id }, data: { articleTemplate: template } });
-  });
+  if (!canEditDossier(user, dossier)) {
+    throw new Error("Access denied: insufficient permission to edit this dossier");
+  }
+  // `updatedAt` を進めない (素の SQL)。frontmatter の `dossier.updated_at` と比べる「要反映」の判定を
+  // 素材が変わっていないのに動かさないため。RLS は素の SQL にも効く (0 行なら権限が変わった)
+  const written = await withSession(user, (tx) =>
+    tx.$executeRaw`UPDATE "Dossier" SET "articleTemplate" = ${template}::"ArticleTemplate" WHERE "id" = ${dossier.id}`
+  );
+  if (written === 0) throw new WorkflowInputError("ドシエを更新できませんでした (権限が変わったか削除されています)");
   await logAudit({
     actorId: user.id,
     action: "dossier.template.set",
@@ -126,7 +161,7 @@ export function suggestTemplate(dossier: DossierForArticle): ArticleTemplate | n
   const types = new Set(dossier.articles.map((a) => a.type));
   if (types.size !== 1) return null;
   const [type] = types;
-  if (type === "quote" && dossier.articles.every((a) => a.title.startsWith("ブログ「"))) return "quote_blog";
+  if (type === "quote" && dossier.articles.every((a) => isQuoteBlogTitle(a.title))) return "quote_blog";
   return null;
 }
 
@@ -149,6 +184,10 @@ export async function buildDossierArticle(
 
   const loaded = await withSession(user, (tx) => loadDossierForArticle(tx, dossier.id));
   if (!loaded) throw new TemplateInputError("ドシエが見つかりません (権限がないか削除されています)");
+  // 上の判定は呼び出し側のスナップショット。読み直した行でもう一度見る (機密を上げられた直後)
+  if (!PUBLISHABLE.has(loaded.classification)) {
+    throw new TemplateInputError(`ドシエが ${loaded.classification} なので記事にできません`);
+  }
 
   const materials = shapeDossierMaterials(loaded);
   const tiktoks = await resolveTiktoks(materials.tiktoks);

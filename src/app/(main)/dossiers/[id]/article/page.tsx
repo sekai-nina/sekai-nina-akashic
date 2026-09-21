@@ -2,7 +2,8 @@ import Link from "next/link";
 import { ArrowLeft, ExternalLink, FileText } from "lucide-react";
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { getDossierForArticle, suggestTemplate } from "@/lib/domain/dossier-article";
+import { canEditDossier } from "@/lib/auth/dossier-permissions";
+import { getDossierForArticle, isContainerTemplate, suggestTemplate } from "@/lib/domain/dossier-article";
 import { selectableTemplates } from "@/lib/article-workflow/templates";
 import { ARTICLE_TEMPLATE_LABELS, ARTICLE_TYPE_LABELS } from "@/lib/utils";
 import { ArticleStep } from "@/components/article-step";
@@ -36,6 +37,19 @@ export default async function DossierArticlePage({ params, searchParams }: Props
   if (!dossier) notFound();
   if (dossier.kind === "clips") redirect("/clips");
 
+  // 器 (MeetGreet / Live) の素材ならそちらへ。器が見えなくてもテンプレートで分かる (`assertPlainDossier` と同じ)
+  const containerKind =
+    dossier.container?.kind ?? (isContainerTemplate(dossier.articleTemplate) ? dossier.articleTemplate : null);
+  const container =
+    containerKind === "meetgreet" || containerKind === "live"
+      ? {
+          kind: containerKind,
+          href: dossier.container
+            ? `/${containerKind === "meetgreet" ? "meetgreets" : "lives"}/${dossier.container.id}`
+            : `/${containerKind === "meetgreet" ? "meetgreets" : "lives"}`,
+        }
+      : null;
+
   const templates = selectableTemplates().map((t) => ({
     key: t.key,
     label: ARTICLE_TEMPLATE_LABELS[t.key],
@@ -66,15 +80,11 @@ export default async function DossierArticlePage({ params, searchParams }: Props
       </h1>
       <p className="text-xs text-slate-500 mt-1">{dossier.title}</p>
 
-      {dossier.container ? (
+      {container ? (
         <p className="mt-6 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-          このドシエは{dossier.container === "meetgreet" ? "ミーグリ" : "ライブ"}
-          の素材です。記事は{" "}
-          <Link
-            href={dossier.container === "meetgreet" ? "/meetgreets" : "/lives"}
-            className="underline underline-offset-2"
-          >
-            {dossier.container === "meetgreet" ? "/meetgreets" : "/lives"}
+          このドシエは{ARTICLE_TEMPLATE_LABELS[container.kind]}の素材です。記事は{" "}
+          <Link href={container.href} className="underline underline-offset-2">
+            {container.href}
           </Link>{" "}
           の進行画面から作ってください。
         </p>
@@ -88,6 +98,7 @@ export default async function DossierArticlePage({ params, searchParams }: Props
               suggested={suggestTemplate(dossier)}
               options={templates}
               locked={!!current && dossier.articles.length > 0}
+              editable={canEditDossier(session.user, dossier)}
             />
             {current && !currentSelectable && (
               <p className="mt-2 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">

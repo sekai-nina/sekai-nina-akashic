@@ -448,3 +448,45 @@ describe("tiktokVideoId", () => {
     expect(tiktokVideoId("https://vt.tiktok.com/ZSabc/")).toBeNull();
   });
 });
+
+describe("planAppend の引用の置き方 (#170)", () => {
+  const quote = (excerpt: string): ArticleParts => ({
+    ...EMPTY_PARTS,
+    quotes: [{ sourceNo: 1, label: "ブログ", url: "https://example.com/1", date: "2026-08-02", excerpts: [excerpt] }],
+  });
+  const sources: RenderedSource[] = [
+    { sourceNo: 1, label: "ブログ", url: "https://example.com/1", date: "2026-08-02", assetId: "blog" },
+  ];
+  const existing = [{ sourceNo: 1, assetId: "blog", url: "https://example.com/1" }];
+
+  it("章を新しく作るときは見出しの直後の空行を残す (フル生成と同じ形)", () => {
+    const p = planAppend({ existingBody: "イントロ。\n", parts: quote("新しい"), sources, existingSources: [] });
+    expect(p.body).toBe(
+      "イントロ。\n\n## 本人の感想（ブログより）\n\n> 新しい\n*引用: [ブログ（2026-08-02）](https://example.com/1)*^[1]\n\n"
+    );
+  });
+
+  it("既にある章に足すときは前の引用と空行で区切る (1 つのブロックに繋げない)", () => {
+    const body =
+      "イントロ。\n\n## 本人の感想（ブログより）\n\n> 古い\n*引用: [ブログ（2026-08-02）](https://example.com/1)*^[1]\n\n## 関連メディア\n\n### トーク\n\n- 【トーク・画像】坂井新奈トーク 2026.8.2 13:15^[2]\n";
+    const p = planAppend({ existingBody: body, parts: quote("新しい"), sources, existingSources: existing });
+    expect(isPureAppend(body, p.body)).toBe(true);
+    expect(p.body).toContain("^[1]\n\n> 新しい\n*引用:");
+    expect(p.newSources).toHaveLength(0);
+  });
+
+  it("見出し無し (言葉記事) は地の文の末尾に、出典行を付けずに足す", () => {
+    const layout = { quotesHeading: null, quoteAttribution: false, reports: { heading: "## x", lead: "y" } };
+    const body = "坂井新奈ブログでの名言を紹介する。\n\n> 古い\n";
+    const p = planAppend({ existingBody: body, parts: quote("新しい"), sources, existingSources: existing, layout });
+    expect(p.body).toBe("坂井新奈ブログでの名言を紹介する。\n\n> 古い\n\n> 新しい\n\n");
+  });
+
+  it("見出し無しで地の文が無い (本文が見出しで始まる) なら、先頭見出しの上に割り込まず末尾の節に足す", () => {
+    const layout = { quotesHeading: null, quoteAttribution: false, reports: { heading: "## x", lead: "y" } };
+    const body = "## 名言\n\n> 古い\n";
+    const p = planAppend({ existingBody: body, parts: quote("新しい"), sources, existingSources: existing, layout });
+    expect(isPureAppend(body, p.body)).toBe(true);
+    expect(p.body).toBe("## 名言\n\n> 古い\n\n> 新しい\n\n");
+  });
+});

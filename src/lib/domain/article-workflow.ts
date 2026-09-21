@@ -35,12 +35,30 @@ export interface DossierBrief {
 }
 
 /**
+ * ドシエの編集権限を確かめる (呼び出し側の `withSession` の中で)。
+ * 見えなければ `WorkflowInputError` (REST は 404)、編集できなければ "Access denied" の Error (403)。
+ * RLS の `dossier_update` と同じ条件をアプリ層で先に見て、`update` が P2025 で落ちて 500 になるのを防ぐ
+ */
+export async function assertDossierEditable(
+  tx: TransactionClient,
+  user: ActingUser,
+  dossierId: string
+): Promise<void> {
+  const dossier = await tx.dossier.findUnique({
+    where: { id: dossierId },
+    select: { ownerId: true, classification: true, viewMode: true, editMode: true },
+  });
+  if (!dossier) throw new WorkflowInputError("ドシエが見つかりません");
+  if (!canEditDossier(user, dossier)) {
+    throw new Error("Access denied: insufficient permission to edit this dossier");
+  }
+}
+
+/**
  * 既にあるドシエ / X レポ収集を器に紐づける前の確認。見えること・**ミーグリにもライブにも**
  * まだ使われていないこと・クリップのプールでないこと (#41: 全員共有のプールを 1 つの器に
- * 紐づけると他人のクリップが素材として流れる) を確かめる。
- *
- * `template` を渡すと、ドシエの記事テンプレート (#170) が別の型に決まっていないことも確かめ、
- * 未設定なら器の型を書き込む (器がテンプレートを決める。同じトランザクションで行う)。
+ * 紐づけると他人のクリップが素材として流れる)・記事テンプレート (#170) が別の型に決まって
+ * いないことを確かめる。書かない (書くのは `claimDossierTemplate`)。
  *
  * 見えない器 (上位機密) に使われている場合はここでは分からず、`@unique` の違反で落ちる
  * (安全側。整合性は DB が守る)
@@ -65,15 +83,10 @@ export async function assertContainersFree(
     if (found.meetGreet) throw new WorkflowInputError("そのドシエは別のミーグリに使われています");
     if (found.live) throw new WorkflowInputError("そのドシエは別のライブに使われています");
     if (found.kind === "clips") throw new WorkflowInputError("クリップのプールは素材置き場に使えません");
-    if (template) {
-      if (found.articleTemplate && found.articleTemplate !== template) {
-        throw new WorkflowInputError(
-          `そのドシエは記事テンプレート「${ARTICLE_TEMPLATE_LABELS[found.articleTemplate]}」に決まっています`
-        );
-      }
-      if (!found.articleTemplate) {
-        await tx.dossier.update({ where: { id: found.id }, data: { articleTemplate: template } });
-      }
+    if (template && found.articleTemplate && found.articleTemplate !== template) {
+      throw new WorkflowInputError(
+        `そのドシエは記事テンプレート「${ARTICLE_TEMPLATE_LABELS[found.articleTemplate]}」に決まっています`
+      );
     }
   }
   if (input.repoCollectionId) {
@@ -85,6 +98,34 @@ export async function assertContainersFree(
     if (found.meetGreet) throw new WorkflowInputError("その収集は別のミーグリに使われています");
     if (found.live) throw new WorkflowInputError("その収集は別のライブに使われています");
   }
+}
+
+/**
+ * 既にあるドシエを器に紐づけるとき、記事テンプレート (#170) を器の型にする
+ * (`assertContainersFree` の後、同じトランザクションで)。既に同じ値なら何もしない。
+ *
+ * - **編集権限を先に見る。** 見えるが編集できないドシエ (`editMode: private` で所有者でない) を
+ *   `tx.dossier.update` で書くと RLS で 0 行になり P2025 → 500 になる。器の作成が
+ *   このドシエへの書き込みを要る以上、編集権限が無ければ入力エラーにする
+ * - `updatedAt` は進めない (素の SQL)。記事の frontmatter の `dossier.updated_at` と比べて
+ *   「要反映」を判定するので、素材が変わっていないのに動かさない
+ */
+export async function claimDossierTemplate(
+  tx: TransactionClient,
+  user: ActingUser,
+  dossierId: string,
+  template: ArticleTemplate
+): Promise<void> {
+  const found = await tx.dossier.findUnique({
+    where: { id: dossierId },
+    select: { articleTemplate: true, ownerId: true, classification: true, viewMode: true, editMode: true },
+  });
+  if (!found) throw new WorkflowInputError("指定されたドシエが見つかりません");
+  if (found.articleTemplate === template) return;
+  if (!canEditDossier(user, found)) {
+    throw new WorkflowInputError("そのドシエの編集権限が無いので素材置き場にできません (所有者に編集を許可してもらってください)");
+  }
+  await tx.$executeRaw`UPDATE "Dossier" SET "articleTemplate" = ${template}::"ArticleTemplate" WHERE "id" = ${dossierId}`;
 }
 
 /**
@@ -282,14 +323,7 @@ export async function applyMaterialsToDossier(
   if (ids.length === 0) return { added: 0, skipped: 0 };
 
   return withSession(user, async (tx) => {
-    const dossier = await tx.dossier.findUnique({
-      where: { id: dossierId },
-      select: { id: true, ownerId: true, classification: true, viewMode: true, editMode: true },
-    });
-    if (!dossier) throw new WorkflowInputError("ドシエが見つかりません");
-    if (!canEditDossier(user, dossier)) {
-      throw new Error("Access denied: insufficient permission to edit this dossier");
-    }
+    await assertDossierEditable(tx, user, dossierId);
 
     const [assets, existing, last] = await Promise.all([
       tx.asset.findMany({ where: { id: { in: ids } }, select: { id: true, title: true } }),

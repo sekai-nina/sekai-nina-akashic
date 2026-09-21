@@ -29,6 +29,7 @@ import { logAudit } from "./audit";
 import {
   applyMaterialsToDossier,
   assertContainersFree,
+  claimDossierTemplate,
   keepCounts,
   loadDossiers,
   loadMaterialInputs,
@@ -158,6 +159,7 @@ async function createInTransaction(
     // クリップのプールでないこと (#41) を確かめる
     try {
       await assertContainersFree(tx, input, "meetgreet");
+      if (input.dossierId) await claimDossierTemplate(tx, user, input.dossierId, "meetgreet");
     } catch (e) {
       if (e instanceof WorkflowInputError) throw new MeetGreetInputError(e.message);
       throw e;

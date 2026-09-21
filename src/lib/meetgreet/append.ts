@@ -338,8 +338,13 @@ export function planAppend(input: {
   // --- 3. 本文に差し込む ---
 
   if (freshQuotes.length > 0) {
-    // 見出しが無い形 (言葉記事) は先頭の節 = 地の文の末尾に足す
-    const sec = H_QUOTES ? ensureSection(sections, H_QUOTES, [H_REPORTS, H_MEDIA]) : sections[0];
+    // 見出しが無い形 (言葉記事) は先頭の節 = 地の文の末尾に足す。地の文が無い (本文が見出しで
+    // 始まる手書きの記事) なら、先頭見出しの上に割り込ませず末尾の節に足す
+    const sec = H_QUOTES
+      ? ensureSection(sections, H_QUOTES, [H_REPORTS, H_MEDIA])
+      : appendIndex(sections[0].lines) > 0
+        ? sections[0]
+        : sections[sections.length - 1];
     let at = appendIndex(sec.lines);
     const lines: string[] = [];
     // 引用はブロックなので、前の行と空行で区切る。区切らないと直前の引用と 1 つの

@@ -22,18 +22,16 @@
  */
 
 import { createHash } from "node:crypto";
-import type { ArticleTemplate } from "@prisma/client";
 import { Prisma } from "@prisma/client";
 import { prisma, withClearance, withSession } from "@/lib/db";
-import { todayJst } from "@/lib/utils";
+import { EXCLUSION_KIND_LABELS, todayJst } from "@/lib/utils";
 import { canEditDossier } from "@/lib/auth/dossier-permissions";
 import { parseFrontmatterDate } from "@/lib/articles/frontmatter";
-import { MAX_ARTICLE_CLEARANCE } from "@/lib/meetgreet/config";
+import { jsonStringArray, MAX_ARTICLE_CLEARANCE } from "@/lib/meetgreet/config";
 import { planAppend, isPureAppend, appendDiff, type AppendLayout } from "@/lib/meetgreet/append";
-import { jsonStringArray } from "@/lib/meetgreet/config";
 import type { ArticleMode, ArticlePreview } from "@/lib/meetgreet/types";
 import type { RenderedArticle, RenderedSource } from "@/lib/article-workflow/render";
-import { getTemplate, type ArticleTemplateDef } from "@/lib/article-workflow/templates";
+import { MEETGREET_TEMPLATE, type ArticleTemplateDef } from "@/lib/article-workflow/templates";
 import { TemplateInputError } from "@/lib/article-workflow/errors";
 import {
   addAssetToArticle,
@@ -44,11 +42,14 @@ import {
 } from "./articles";
 import { WorkflowInputError, type ActingUser } from "./article-workflow";
 import { buildMeetGreetArticle } from "./meetgreet-article";
-import { assertPlainDossier, buildDossierArticle, type DossierForArticle } from "./dossier-article";
+import {
+  assertPlainDossier,
+  buildDossierArticle,
+  requireRenderableTemplate,
+  type DossierForArticle,
+} from "./dossier-article";
 import { MeetGreetInputError } from "./meetgreets";
 import { logAudit } from "./audit";
-
-export type { ArticleMode, ArticlePreview };
 
 /** プレビューした内容と保存する内容が同じかを見るための指紋 */
 export function bodyDigest(body: string): string {
@@ -98,14 +99,14 @@ interface ResolvedTarget {
   /** 器のスナップショットにある除外キー */
   storedExclusions: string[];
   build: () => Promise<RenderedArticle & { droppedByClearance: number }>;
-  /** 除外キーを**読み直してから**足す (保存中に別タブで戻されたものを古い値で書き戻さない) */
+  /** 除外キーを**読み直してから**足す (1 トランザクション。保存中に別タブで戻されたものを古い値で書き戻さない) */
   addExclusions: (keys: readonly string[]) => Promise<string[]>;
   /** 除外キーを取り消す。戻した数を返す */
   removeExclusions: (keys: readonly string[]) => Promise<number>;
   /** 作った記事を器に紐づける */
   link: (articleId: string) => Promise<void>;
   /** 保存してよいか (ドシエは編集権限が要る)。だめなら投げる */
-  assertCanSave: () => Promise<void>;
+  assertCanSave: () => void;
   /** 入力エラーの型 (器ごとの REST が catch する) */
   inputError: (message: string) => Error;
   audit: { targetType: string; targetId: string; prefix: string };
@@ -117,35 +118,39 @@ function resolveTarget(user: ActingUser, target: ArticleTarget): ResolvedTarget 
 }
 
 function resolveMeetGreet(user: ActingUser, meetGreet: MeetGreetForArticle): ResolvedTarget {
-  const template = getTemplate("meetgreet")!;
-  const readExclusions = () =>
-    withClearance(user.clearance, (tx) =>
-      tx.meetGreet.findUnique({ where: { id: meetGreet.id }, select: { articleExclusions: true } })
-    ).then((row) => jsonStringArray(row?.articleExclusions));
-  const writeExclusions = (next: string[]) =>
-    withClearance(user.clearance, (tx) =>
-      tx.meetGreet.update({
-        where: { id: meetGreet.id },
-        data: { articleExclusions: next as unknown as Prisma.InputJsonValue },
-      })
-    ).then(() => undefined);
+  const template = MEETGREET_TEMPLATE;
   return {
     template,
     layout: template.appendLayout,
     articleId: meetGreet.articleId,
     storedExclusions: jsonStringArray(meetGreet.articleExclusions),
     build: () => buildMeetGreetArticle(user, meetGreet),
+    // 読み直しと書き込みを 1 トランザクションに収める (別タブで戻されたものを古い値で書き戻さない)
     addExclusions: async (keys) => {
       if (keys.length === 0) return [];
-      const next = [...new Set([...(await readExclusions()), ...keys])];
-      await writeExclusions(next);
-      return next;
+      return withClearance(user.clearance, async (tx) => {
+        const row = await tx.meetGreet.findUnique({
+          where: { id: meetGreet.id },
+          select: { articleExclusions: true },
+        });
+        const next = [...new Set([...jsonStringArray(row?.articleExclusions), ...keys])];
+        await tx.meetGreet.update({
+          where: { id: meetGreet.id },
+          data: { articleExclusions: next as unknown as Prisma.InputJsonValue },
+        });
+        return next;
+      });
     },
     removeExclusions: async (keys) => {
       const stored = jsonStringArray(meetGreet.articleExclusions);
       const next = stored.filter((k) => !keys.includes(k));
       if (next.length === stored.length) return 0;
-      await writeExclusions(next);
+      await withClearance(user.clearance, (tx) =>
+        tx.meetGreet.update({
+          where: { id: meetGreet.id },
+          data: { articleExclusions: next as unknown as Prisma.InputJsonValue },
+        })
+      );
       return stored.length - next.length;
     },
     link: async (articleId) => {
@@ -158,7 +163,7 @@ function resolveMeetGreet(user: ActingUser, meetGreet: MeetGreetForArticle): Res
       });
     },
     // MeetGreet は所有者を持たない (classification だけ)。見えていれば書ける
-    assertCanSave: async () => {},
+    assertCanSave: () => {},
     inputError: (message) => new MeetGreetInputError(message),
     audit: { targetType: "MeetGreet", targetId: meetGreet.id, prefix: "meetgreet.article" },
   };
@@ -170,12 +175,10 @@ function resolveDossier(
   chosenArticleId: string | null
 ): ResolvedTarget {
   assertPlainDossier(dossier);
-  const key: ArticleTemplate | null = dossier.articleTemplate;
-  if (!key) throw new DossierArticleError("記事テンプレートが未設定です。先にテンプレートを選んでください");
-  const template = getTemplate(key);
-  if (!template || !template.render) {
-    throw new DossierArticleError(`テンプレート ${key} はまだ使えません`);
+  if (!dossier.articleTemplate) {
+    throw new DossierArticleError("記事テンプレートが未設定です。先にテンプレートを選んでください");
   }
+  const template = requireRenderableTemplate(dossier.articleTemplate);
 
   // 追記先。ドシエは記事を複数持てるので、2 本以上なら選んでもらう
   let articleId: string | null = null;
@@ -192,28 +195,22 @@ function resolveDossier(
     );
   }
 
-  const readExclusions = () =>
-    withSession(user, (tx) =>
-      tx.dossier.findUnique({ where: { id: dossier.id }, select: { articleExclusions: true } })
-    ).then((row) => jsonStringArray(row?.articleExclusions));
-  const writeExclusions = (next: string[]) =>
-    withSession(user, (tx) =>
-      tx.dossier.update({
-        where: { id: dossier.id },
-        data: { articleExclusions: next as unknown as Prisma.InputJsonValue },
-      })
-    ).then(() => undefined);
-  const assertCanSave = async () => {
-    const access = await withSession(user, (tx) =>
-      tx.dossier.findUnique({
-        where: { id: dossier.id },
-        select: { ownerId: true, classification: true, viewMode: true, editMode: true },
-      })
-    );
-    if (!access) throw new DossierArticleError("ドシエが見つかりません (権限がないか削除されています)");
-    if (!canEditDossier(user, access)) {
+  // 編集権限は読み込んだ行で判定する (保存のたびに読み直さない)。RLS は書き込みにも効くので、
+  // 権限が変わっていれば素の SQL が 0 行になって下で止まる
+  const assertCanSave = () => {
+    if (!canEditDossier(user, dossier)) {
       throw new Error("Access denied: insufficient permission to edit this dossier");
     }
+  };
+  /**
+   * 除外キーの書き込み。**`updatedAt` を進めない** (素の SQL)。保存の直後に書くので、
+   * `tx.dossier.update` だと frontmatter に書いたばかりの `dossier.updated_at` が即座に古くなり、
+   * 何も変わらない push が積まれ続ける
+   */
+  const writeExclusions = async (tx: Parameters<Parameters<typeof withSession>[1]>[0], next: string[]) => {
+    const written =
+      await tx.$executeRaw`UPDATE "Dossier" SET "articleExclusions" = ${JSON.stringify(next)}::jsonb WHERE "id" = ${dossier.id}`;
+    if (written === 0) throw new DossierArticleError("ドシエを更新できませんでした (権限が変わったか削除されています)");
   };
   return {
     template,
@@ -221,18 +218,22 @@ function resolveDossier(
     articleId,
     storedExclusions: jsonStringArray(dossier.articleExclusions),
     build: () => buildDossierArticle(user, dossier, template),
+    // 読み直しと書き込みを 1 トランザクションに収める (別タブで戻されたものを古い値で書き戻さない)
     addExclusions: async (keys) => {
       if (keys.length === 0) return [];
-      const next = [...new Set([...(await readExclusions()), ...keys])];
-      await writeExclusions(next);
-      return next;
+      return withSession(user, async (tx) => {
+        const row = await tx.dossier.findUnique({ where: { id: dossier.id }, select: { articleExclusions: true } });
+        const next = [...new Set([...jsonStringArray(row?.articleExclusions), ...keys])];
+        await writeExclusions(tx, next);
+        return next;
+      });
     },
     removeExclusions: async (keys) => {
-      await assertCanSave();
+      assertCanSave();
       const stored = jsonStringArray(dossier.articleExclusions);
       const next = stored.filter((k) => !keys.includes(k));
       if (next.length === stored.length) return 0;
-      await writeExclusions(next);
+      await withSession(user, (tx) => writeExclusions(tx, next));
       return stored.length - next.length;
     },
     link: async (articleId) => {
@@ -344,9 +345,8 @@ function describeExclusions(
  */
 function staleLabel(key: string): string {
   const kind = key.split(":")[0];
-  const name =
-    kind === "report" ? "レポ" : kind === "tiktok" ? "TikTok" : kind === "quote" ? "引用" : "素材";
-  return `${name}（この回の素材にはもうありません: ${key}）`;
+  const name = (EXCLUSION_KIND_LABELS as Record<string, string>)[kind] ?? EXCLUSION_KIND_LABELS.asset;
+  return `${name}（この素材にはもうありません: ${key}）`;
 }
 
 /** 「今後足さない」を取り消す。次のプレビューからまた候補に出る (#134) */
@@ -539,7 +539,7 @@ export async function saveArticle(
 ): Promise<SaveArticleResult> {
   const actor: ArticleActor = { id: user.id };
   const resolved = resolveTarget(user, target);
-  await resolved.assertCanSave();
+  resolved.assertCanSave();
   const rendered = await buildOrThrow(resolved);
 
   const mismatch = (body: string) =>
@@ -559,6 +559,8 @@ export async function saveArticle(
       };
     }
     const today = todayJst();
+    // AI が書いた本文は人が見るまで下書き (#169)。機械で完成する型はテンプレートの値のまま
+    const draft = rendered.draft || resolved.template.needsAi;
     const created = await createArticle(
       {
         title: rendered.title,
@@ -570,7 +572,7 @@ export async function saveArticle(
         date: rendered.dates.date,
         publishedAt: today,
         articleUpdatedAt: today,
-        draft: rendered.draft,
+        draft,
       },
       actor
     );
@@ -617,7 +619,7 @@ export async function saveArticle(
         dateMode: rendered.dates.dateMode,
         publishedAt: parseFrontmatterDate(today),
         articleUpdatedAt: parseFrontmatterDate(today),
-        draft: rendered.draft,
+        draft,
         unlisted: false,
         ongoing: false,
       },
@@ -630,7 +632,7 @@ export async function saveArticle(
       };
     }
 
-    await saveFrontmatterExtra(articleId, rendered.frontmatterExtra as unknown as Record<string, unknown>);
+    await saveFrontmatterExtra(articleId, rendered.frontmatterExtra);
 
     await logAudit({
       actorId: user.id,
