@@ -25,12 +25,12 @@ import {
   ACTIVE_STATUSES,
   DIRECT_UPLOAD_TOO_LARGE_MESSAGE,
   DISCORD_MAX_FILES,
-  DISCORD_MAX_FILE_BYTES,
   InstaJobError,
   MAX_ASSET_LINKS,
-  dedupeFilename,
   MAX_DIRECT_UPLOAD_BYTES,
   MAX_FILE_BYTES,
+  dedupeFilename,
+  discordMaxFileBytes,
   formatCompletionMessage,
   parseJobResult,
   parseStoryUrl,
@@ -39,7 +39,8 @@ import {
   type InstaStoryJobFile,
   type InstaStoryJobResult,
 } from "@/lib/insta/jobs";
-import { postDiscordWebhookWithFiles, type DiscordAttachment } from "@/lib/status/discord";
+import { transcodeForDiscord } from "@/lib/insta/transcode";
+import { DiscordWebhookError, postDiscordWebhookWithFiles, type DiscordAttachment } from "@/lib/status/discord";
 import { generateAndUploadThumbnails } from "@/lib/thumbnails";
 import { formatDate, toJstDateOnly } from "@/lib/utils";
 
@@ -467,21 +468,27 @@ export async function registerStoryFile(
 
 export interface CompleteJobResult {
   job: InstaStoryJobView;
-  /** Discord に送れたか。未設定なら false (エラーではない) */
-  notified: boolean;
-  notifyError: string | null;
+  /** Discord に流す番か (completed になり、webhook が設定されている)。実際の送信は呼び出し側が after() で行う */
+  shouldNotify: boolean;
   /** 続けて送った次のジョブ */
   next: TickResult;
 }
 
 /**
  * iPad からの完了報告。ファイルが 1 件も無ければ failed にする (Shortcut が何も落とせなかった)。
- * Discord への通知は完了の後に行い、失敗してもジョブは completed のまま (エラー文だけ残す)。
+ *
+ * Discord への通知はここでは**やらない**。動画の変換と添付で数十秒〜数分かかるので、応答を返した
+ * 後に `notifyStoryJobCompleted` を after() で走らせる (route 側)。iPad の Shortcut は
+ * 応答を待っているだけなので、待たせない。
  */
 export async function completeStoryJob(id: string, clearance: string): Promise<CompleteJobResult> {
+  let alreadyCompleted = false;
   const job = await withClearance(clearance, async (tx) => {
     const row = await requireJob(tx, id);
-    if (row.status === "completed") return toView(row);
+    if (row.status === "completed") {
+      alreadyCompleted = true;
+      return toView(row);
+    }
     if (row.status === "failed") throw new InstaJobError("このジョブは failed です", 409);
     const files = parseJobResult(row.result).files;
     const now = new Date();
@@ -496,26 +503,11 @@ export async function completeStoryJob(id: string, clearance: string): Promise<C
     return toView(updated);
   });
 
-  // iPad は completed になった時点で空くので、Discord (添付の取得と送信で数十秒かかる) より先に
-  // 次のジョブを送る。途中で関数の上限に当たっても次が止まらない
+  // iPad は completed になった時点で空くので、先に次のジョブを送る
   const next = await tickStoryJobs();
-
-  let notified = false;
-  let notifyError: string | null = null;
-  if (job.status === "completed") {
-    try {
-      notified = await notifyStoryJobCompleted(job);
-    } catch (e) {
-      notifyError = e instanceof Error ? e.message : String(e);
-      console.error("insta job: Discord 通知に失敗:", e);
-      await prismaInternal.instaStoryJob.update({
-        where: { id },
-        data: { error: `Discord 通知に失敗: ${notifyError.slice(0, 200)}` },
-      });
-    }
-  }
-
-  return { job, notified, notifyError, next };
+  // 既に completed だった (冪等の再送) ときは通知し直さない
+  const shouldNotify = job.status === "completed" && !alreadyCompleted && isInstaDiscordConfigured();
+  return { job, shouldNotify, next };
 }
 
 /** iPad からの失敗報告 */
@@ -624,13 +616,26 @@ function appUrl(path: string): string {
   return base ? `${base}${path}` : path;
 }
 
+export interface NotifyResult {
+  notified: boolean;
+  attached: number;
+  error: string | null;
+}
+
 /**
- * 完了を Discord に流す。新規に登録した実体を添付する (8MiB 以下・10 件まで。超えたぶんは
- * 本文のリンクから辿れる)。webhook 未設定なら何もしないで false。
+ * 完了を Discord に流す。新規に登録した実体を添付する (10 件まで。超えたぶんは本文のリンクから辿れる)。
+ *
+ * - 動画は Instagram の VP9 のままだと Discord で再生できないので、Discord 用に H.264 / 幅 720 へ
+ *   変換して添付する (元の Asset は原本のまま)。変換に失敗したら添付しない
+ * - 添付の上限は `discordMaxFileBytes()` (既定 10MB = ブースト無し)。それでも Discord が 413 で弾いたら
+ *   大きい順に外して送り直す (サーバのブースト状況を知らなくても通る)
+ * - 失敗はジョブの error に残す (completed のまま)。webhook 未設定なら何もしない
+ *
+ * 応答を返した後 (after) に走らせる前提。数十秒〜数分かかる。
  */
-async function notifyStoryJobCompleted(job: InstaStoryJobView): Promise<boolean> {
+export async function notifyStoryJobCompleted(job: InstaStoryJobView): Promise<NotifyResult> {
   const url = process.env.DISCORD_INSTA_WEBHOOK_URL?.trim();
-  if (!url) return false;
+  if (!url) return { notified: false, attached: 0, error: null };
 
   const fresh = job.result.files.filter((f) => !f.duplicate);
   const content = formatCompletionMessage({
@@ -640,16 +645,48 @@ async function notifyStoryJobCompleted(job: InstaStoryJobView): Promise<boolean>
     assetLinks: fresh.slice(0, MAX_ASSET_LINKS).map((f) => appUrl(`/assets/${f.assetId}`)),
   });
 
-  const attachments: DiscordAttachment[] = [];
-  for (const f of fresh) {
-    if (attachments.length >= DISCORD_MAX_FILES) break;
-    if (!f.driveFileId || f.fileSize > DISCORD_MAX_FILE_BYTES) continue;
-    const data = await downloadFromDrive(f.driveFileId).catch(() => null);
-    if (!data || data.length > DISCORD_MAX_FILE_BYTES) continue;
-    attachments.push({ filename: f.filename, data, contentType: f.mimeType });
+  try {
+    const maxBytes = discordMaxFileBytes();
+    let attachments: DiscordAttachment[] = [];
+    for (const f of fresh) {
+      if (attachments.length >= DISCORD_MAX_FILES) break;
+      if (!f.driveFileId) continue;
+      const data = await downloadFromDrive(f.driveFileId).catch(() => null);
+      if (!data) continue;
+      let att: DiscordAttachment = { filename: f.filename, data, contentType: f.mimeType };
+      if (f.mimeType.startsWith("video/")) {
+        try {
+          const t = await transcodeForDiscord(data, f.filename);
+          att = { filename: t.filename, data: t.data, contentType: t.contentType };
+        } catch (e) {
+          console.warn("insta job: Discord 用の変換に失敗 (添付しない):", e);
+          continue;
+        }
+      }
+      if (att.data.length > maxBytes) continue;
+      attachments.push(att);
+    }
+
+    // 413 (添付が大きすぎる) は大きい順に外して送り直す
+    for (;;) {
+      try {
+        await postDiscordWebhookWithFiles(url, content, attachments);
+        break;
+      } catch (e) {
+        if (!(e instanceof DiscordWebhookError) || e.status !== 413 || attachments.length === 0) throw e;
+        const largest = attachments.reduce((a, b) => (b.data.length > a.data.length ? b : a));
+        attachments = attachments.filter((a) => a !== largest);
+      }
+    }
+    return { notified: true, attached: attachments.length, error: null };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error("insta job: Discord 通知に失敗:", e);
+    await prismaInternal.instaStoryJob
+      .update({ where: { id: job.id }, data: { error: `Discord 通知に失敗: ${message.slice(0, 200)}` } })
+      .catch(() => {});
+    return { notified: false, attached: 0, error: message };
   }
-  await postDiscordWebhookWithFiles(url, content, attachments);
-  return true;
 }
 
 // ---------------------------------------------------------------- 内部

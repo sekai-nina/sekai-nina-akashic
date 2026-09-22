@@ -225,8 +225,15 @@ export function dedupeFilename(filename: string): string {
   return filename.replace(/-\d+(?=\.[^.]+$)/, "");
 }
 
-/** Discord に添付する 1 ファイルの上限 (無料枠の 8MiB を下限に見る。bot 側と同じ) */
-export const DISCORD_MAX_FILE_BYTES = 8 * 1024 * 1024;
+/**
+ * Discord に添付する 1 ファイルの上限。ブースト無しのサーバは 10MB (Level 2 で 50MB、Level 3 で 100MB)。
+ * `DISCORD_INSTA_MAX_ATTACHMENT_MB` で上書きできる。超えた添付は Discord が 413 で弾くので、
+ * 送る側は大きい順に外して再送する (`notifyStoryJobCompleted`)
+ */
+export function discordMaxFileBytes(): number {
+  const mb = Number(process.env.DISCORD_INSTA_MAX_ATTACHMENT_MB);
+  return (Number.isFinite(mb) && mb > 0 ? mb : 10) * 1024 * 1024;
+}
 /** Discord の 1 メッセージあたりの添付上限 */
 export const DISCORD_MAX_FILES = 10;
 /** Discord 本文と管理画面に並べる Asset リンクの上限 */

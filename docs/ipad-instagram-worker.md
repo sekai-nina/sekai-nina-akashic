@@ -35,6 +35,7 @@ insta-watch (sekai)                         Akashic (Vercel)                    
                                             │      Asset 作成 (inbox)
                                             │◀──POST /jobs/:id/complete
                                             ├──▶ Discord (DISCORD_INSTA_WEBHOOK_URL) に実体つきで 1 通
+                                            │      (動画は H.264 / 幅 720 に変換して添付。VP9 のままだと再生できない)
                                             └──▶ 次の pending ジョブを Pushcut へ
 ```
 
@@ -77,6 +78,7 @@ insta-watch (sekai)                         Akashic (Vercel)                    
    | `PUSHCUT_SHORTCUT_NAME` | iPad に置いたラッパー Shortcut の名前 (例 `Akashic Story Worker`) |
    | `PUSHCUT_SERVER_ID` | 任意。Automation Server が複数あるときに端末名で絞る |
    | `DISCORD_INSTA_WEBHOOK_URL` | 完了を流す Discord の Incoming Webhook (`#instagram`) |
+| `DISCORD_INSTA_MAX_ATTACHMENT_MB` | 任意。添付 1 件の上限 (既定 10 = ブースト無し。Level 2 なら 50) |
 
    未設定でもジョブは作れる (pending のまま溜まり、`/admin/insta` に警告が出る)。
 
@@ -303,7 +305,7 @@ curl -s -X POST $API/<JOB>/result -H "$H" -H 'Content-Type: application/json' \
 | `dispatched` のまま 10 分で失敗 | Pushcut は受けたが Shortcut が start を叩けていない。iPad で Shortcut を手で走らせて `start` の応答を見る (401 ならキー、404 なら URL) |
 | `processing` のまま 20 分で失敗 | Shortcut が途中で止まった。iPad の Shortcuts アプリに残るエラーを見る。`415` は拡張子が画像・動画でない、`413` は multipart に 4MB 超を送った、`502` は Drive から読めない (PUT が完了していない) |
 | `failed`「ファイルが 1 件も届きませんでした」 | Instagram Download が何も保存しなかったか、フォルダ / 時刻のフィルタが合っていない。保存先フォルダの設定と手順 9〜10 を見直す |
-| `completed` だが Discord に来ない | `DISCORD_INSTA_WEBHOOK_URL` 未設定 (`notified: false`) か送信失敗 (`error` 欄に `Discord 通知に失敗`)。登録はできているので Asset は /inbox にある |
+| `completed` だが Discord に来ない | `DISCORD_INSTA_WEBHOOK_URL` 未設定か送信失敗 (`error` 欄に `Discord 通知に失敗`)。登録はできているので Asset は /inbox にある。動画は変換 (ffmpeg) してから送るので、完了から届くまで 1 本あたり数十秒かかる |
 
 ## セキュリティ
 

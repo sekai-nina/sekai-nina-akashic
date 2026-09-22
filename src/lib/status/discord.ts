@@ -134,6 +134,16 @@ function trimContent(content: string): string {
   return content.length > CONTENT_MAX_CHARS ? `${content.slice(0, CONTENT_MAX_CHARS)}\n…` : content;
 }
 
+/** Discord が 2xx 以外を返した。`status` で呼び出し側が分岐できる (413 = 添付が大きすぎる) */
+export class DiscordWebhookError extends Error {
+  constructor(
+    readonly status: number,
+    body: string,
+  ) {
+    super(`Discord webhook ${status}: ${body.slice(0, 200)}`);
+  }
+}
+
 async function sendWithRetry(send: () => Promise<Response>): Promise<void> {
   let res = await send();
   if (res.status === 429) {
@@ -142,5 +152,5 @@ async function sendWithRetry(send: () => Promise<Response>): Promise<void> {
     await new Promise((r) => setTimeout(r, waitMs));
     res = await send();
   }
-  if (!res.ok) throw new Error(`Discord webhook ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  if (!res.ok) throw new DiscordWebhookError(res.status, await res.text());
 }
