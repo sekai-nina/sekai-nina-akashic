@@ -47,8 +47,10 @@ insta-watch (sekai)                         Akashic (Vercel)                    
 - 登録される Asset: kind は MIME から、`status=inbox`、`sourceType=web`、`canonicalDate` はジョブを作った日 (JST)、
   タグ「日向坂46」+ source「日向坂46 Instagram」+ story URL の SourceRecord。**人物は付けない**
   (公式垢の story が全部落ちてくるので、誰が写っているかは /inbox で人が付ける)
-- 同じ実体が既にあれば (SHA256) 新しい Asset は作らず `duplicate` として記録し、Discord には添付しない
-  (「更新」で同じコマがもう一度落ちてきても二重登録にならない。同じ `driveFileId` を再送しても原本は消えない)
+- 同じ実体が既にあれば新しい Asset は作らず `duplicate` として記録し、Discord には添付しない
+  (「更新」で同じコマがもう一度落ちてきても二重登録にならない。同じ `driveFileId` を再送しても原本は消えない)。
+  判定は SHA256 と **同じハンドル + 同じファイル名** の両方 — Instagram Download は同じ story を落とし直すと
+  ファイル名とサイズは同じでも中身のバイト列が変わる (2026-09-22 実測) ので、名前 (投稿時刻由来) でも見る
 
 コードの置き場: 純粋な判定 `src/lib/insta/jobs.ts` (テストあり)、Pushcut 送信 `src/lib/insta/dispatch.ts`
 (ここだけ差し替えれば別の届け方にできる)、DB `src/lib/domain/insta-jobs.ts`、API `src/app/api/v1/insta/jobs/`。

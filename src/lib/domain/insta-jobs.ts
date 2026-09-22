@@ -308,10 +308,22 @@ export async function registerStoryFile(
   const sha256 = createHash("sha256").update(buffer).digest("hex");
   const kind = mimeType.startsWith("video/") ? "video" : "image";
 
-  const existing = await prismaInternal.asset.findFirst({
-    where: { sha256 },
-    select: { id: true, classification: true, storageKey: true },
-  });
+  // 重複は SHA256 で見るが、それだけでは足りない。Instagram Download は同じ story を落とし直すと
+  // ファイル名とサイズは同じでも中身のバイト列が変わる (変換のたびに違う。2026-09-22 実測)。
+  // 名前は投稿時刻から付く (`<handle> 2026-09-21T203634.mp4`) ので、同じハンドルの同じ名前は同じコマとみなす
+  const existing =
+    (await prismaInternal.asset.findFirst({
+      where: { sha256 },
+      select: { id: true, classification: true, storageKey: true },
+    })) ??
+    (await prismaInternal.asset.findFirst({
+      where: {
+        originalFilename: filename,
+        sourceRecords: { some: { metadata: { path: ["handle"], equals: job.handle } } },
+      },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, classification: true, storageKey: true },
+    }));
   let file: InstaStoryJobFile;
   if (existing) {
     // ジョブ (internal) に上位機密の Asset の ID / ハッシュを写さない。
