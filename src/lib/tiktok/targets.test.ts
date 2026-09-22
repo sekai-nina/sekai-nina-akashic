@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   TiktokTargetError,
+  captionMatches,
   isAllowedCoverUrl,
   normalizeHandle,
+  parseCaptionFilter,
   sourceEntityName,
   videoUrl,
 } from "@/lib/tiktok/targets";
@@ -45,5 +47,18 @@ describe("isAllowedCoverUrl", () => {
     expect(isAllowedCoverUrl("https://evil.com/tiktokcdn.com/x.jpeg")).toBe(false);
     expect(isAllowedCoverUrl("https://tiktokcdn.com.evil.com/x.jpeg")).toBe(false);
     expect(isAllowedCoverUrl("not a url")).toBe(false);
+  });
+});
+
+describe("captionMatches", () => {
+  it("空の絞り込みは全部合う", () => {
+    expect(parseCaptionFilter("")).toEqual([]);
+    expect(captionMatches("なんでも", "")).toBe(true);
+  });
+  it("| 区切りのいずれかを含めば合う (大文字小文字は区別しない)", () => {
+    expect(parseCaptionFilter(" 日向坂 | ひなた |")).toEqual(["日向坂", "ひなた"]);
+    expect(captionMatches("#日向坂46 の動画", "日向坂|ひなた")).toBe(true);
+    expect(captionMatches("#乃木坂46 の動画", "日向坂|ひなた")).toBe(false);
+    expect(captionMatches("Hinatazaka", "hinatazaka")).toBe(true);
   });
 });
