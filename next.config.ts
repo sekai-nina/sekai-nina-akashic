@@ -30,6 +30,8 @@ const nextConfig: NextConfig = {
   },
   outputFileTracingIncludes: {
     "/api/v1/stats/words": ["./data/kuromoji-dict/**/*"],
+    // Discord 用の動画変換 (ffmpeg-static のバイナリ。動的なパス組み立てなので自動追跡に乗らない)
+    "/api/v1/insta/jobs/[id]/complete": ["./node_modules/.pnpm/ffmpeg-static*/node_modules/ffmpeg-static/ffmpeg"],
   },
   experimental: {
     staleTimes: {

@@ -1,15 +1,17 @@
-import { NextResponse } from "next/server";
-import { completeStoryJob } from "@/lib/domain/insta-jobs";
+import { NextResponse, after } from "next/server";
+import { completeStoryJob, notifyStoryJobCompleted } from "@/lib/domain/insta-jobs";
 import { instaJobErrorResponse, instaJobToJson, requireInstaJobAuth } from "@/lib/insta/api";
 
 type Params = { params: Promise<{ id: string }> };
 
-// Discord へ添付を送る (Drive から読み直す) ので、動画数本ぶんの時間を見る
-export const maxDuration = 60;
+// 応答を返した後に Discord 用の動画変換 (ffmpeg) と添付の送信を after() で行う。
+// 動画 1 本 30 秒前後 × 最大 10 件を見込む
+export const maxDuration = 300;
 
 /**
  * 完了の報告。ファイルが 1 件も届いていなければ failed になる。
- * completed になったら Discord に流し、次の pending ジョブを iPad に送る。
+ * completed になったら次の pending ジョブを iPad に送り、応答を返してから Discord に流す
+ * (iPad の Shortcut を変換の間待たせない)。
  */
 export async function POST(request: Request, { params }: Params) {
   const auth = await requireInstaJobAuth(request, "worker");
@@ -18,10 +20,17 @@ export async function POST(request: Request, { params }: Params) {
   const { id } = await params;
   try {
     const res = await completeStoryJob(id, auth.clearance);
+    if (res.shouldNotify) {
+      after(async () => {
+        const r = await notifyStoryJobCompleted(res.job);
+        console.log(
+          `insta job ${res.job.id}: Discord notified=${r.notified} attached=${r.attached}${r.error ? ` error=${r.error}` : ""}`,
+        );
+      });
+    }
     return NextResponse.json({
       ...instaJobToJson(res.job),
-      notified: res.notified,
-      notifyError: res.notifyError,
+      notifyScheduled: res.shouldNotify,
       nextDispatchedId: res.next.dispatchedId,
     });
   } catch (e) {

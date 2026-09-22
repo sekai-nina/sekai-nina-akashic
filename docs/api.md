@@ -1845,12 +1845,15 @@ Google Drive に **直接 PUT する URL** を発行する。Vercel の本文上
 ### POST /insta/jobs/:id/complete
 
 完了の報告。ファイルが 1 件も届いていなければ `failed`（「ファイルが 1 件も届きませんでした」）。
-`completed` になったら次の `pending` ジョブを iPad に送り、続けて `DISCORD_INSTA_WEBHOOK_URL` に新規ファイルを添付して
-1 メッセージ流す（8MiB・10 件まで。超えたぶんは本文の Akashic リンクから辿る）。
-既に `completed` なら 200 を返すだけ（`notified: false`）。`failed` には 409。
+`completed` になったら次の `pending` ジョブを iPad に送り、**応答を返してから**（`after()`）`DISCORD_INSTA_WEBHOOK_URL` に
+新規ファイルを添付して 1 メッセージ流す。動画は Instagram の VP9 のままだと Discord で再生できないので、
+**Discord 用に H.264 / AAC・幅 720 に変換してから添付**する（元の Asset は原本のまま）。添付は 10 件まで、
+1 件の上限は `DISCORD_INSTA_MAX_ATTACHMENT_MB`（既定 10MB）。それでも Discord が 413 で弾いたら大きい順に外して
+送り直す。超えたぶんは本文の Akashic リンクから辿る。通知の失敗はジョブの `error` に残る（`completed` のまま）。
+既に `completed` なら 200 を返すだけ（`notifyScheduled: false`）。`failed` には 409。
 
 ```json
-{ "id": "…", "status": "completed", "notified": true, "notifyError": null, "nextDispatchedId": null, … }
+{ "id": "…", "status": "completed", "notifyScheduled": true, "nextDispatchedId": null, … }
 ```
 
 ### POST /insta/jobs/:id/error
