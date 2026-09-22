@@ -217,6 +217,14 @@ export function resolveMimeType(mimeType: string | null | undefined, filename: s
   return mime;
 }
 
+/**
+ * 重複判定に使う名前。Instagram Download は保存先に同名があると `-2` `-3` を付けて保存する
+ * (`hinatazaka46 2026-09-21T203634-2.mp4`)。同じコマなので、その連番を落として比べる。
+ */
+export function dedupeFilename(filename: string): string {
+  return filename.replace(/-\d+(?=\.[^.]+$)/, "");
+}
+
 /** Discord に添付する 1 ファイルの上限 (無料枠の 8MiB を下限に見る。bot 側と同じ) */
 export const DISCORD_MAX_FILE_BYTES = 8 * 1024 * 1024;
 /** Discord の 1 メッセージあたりの添付上限 */

@@ -6,6 +6,7 @@ import {
   PENDING_TIMEOUT_MS,
   PROCESSING_TIMEOUT_MS,
   buildWorkerInput,
+  dedupeFilename,
   formatCompletionMessage,
   parseJobResult,
   parseStoryUrl,
@@ -121,6 +122,18 @@ describe("resolveMimeType", () => {
   it("画像・動画以外は 415", () => {
     expect(() => resolveMimeType("text/html", "login.html")).toThrow(InstaJobError);
     expect(() => resolveMimeType("application/json", "x.json")).toThrow(expect.objectContaining({ status: 415 }));
+  });
+});
+
+describe("dedupeFilename", () => {
+  it("Instagram Download が付ける連番を落とす", () => {
+    expect(dedupeFilename("hinatazaka46 2026-09-21T203634-2.mp4")).toBe("hinatazaka46 2026-09-21T203634.mp4");
+    expect(dedupeFilename("hinatazaka46 2026-09-21T203634-12.jpg")).toBe("hinatazaka46 2026-09-21T203634.jpg");
+  });
+
+  it("連番が無ければそのまま", () => {
+    expect(dedupeFilename("hinatazaka46 2026-09-21T203634.mp4")).toBe("hinatazaka46 2026-09-21T203634.mp4");
+    expect(dedupeFilename("story")).toBe("story");
   });
 });
 

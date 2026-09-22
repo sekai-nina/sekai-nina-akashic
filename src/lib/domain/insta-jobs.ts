@@ -28,6 +28,7 @@ import {
   DISCORD_MAX_FILE_BYTES,
   InstaJobError,
   MAX_ASSET_LINKS,
+  dedupeFilename,
   MAX_DIRECT_UPLOAD_BYTES,
   MAX_FILE_BYTES,
   formatCompletionMessage,
@@ -310,7 +311,9 @@ export async function registerStoryFile(
 
   // 重複は SHA256 で見るが、それだけでは足りない。Instagram Download は同じ story を落とし直すと
   // ファイル名とサイズは同じでも中身のバイト列が変わる (変換のたびに違う。2026-09-22 実測)。
-  // 名前は投稿時刻から付く (`<handle> 2026-09-21T203634.mp4`) ので、同じハンドルの同じ名前は同じコマとみなす
+  // 名前は投稿時刻から付く (`<handle> 2026-09-21T203634.mp4`) ので、同じハンドルの同じ名前は同じコマとみなす。
+  // 保存先に同名が残っていると `-2` が付くので、それを落とした名前で比べ、Asset にもその名前で残す
+  const dedupeName = dedupeFilename(filename);
   const existing =
     (await prismaInternal.asset.findFirst({
       where: { sha256 },
@@ -318,7 +321,7 @@ export async function registerStoryFile(
     })) ??
     (await prismaInternal.asset.findFirst({
       where: {
-        originalFilename: filename,
+        originalFilename: dedupeName,
         sourceRecords: { some: { metadata: { path: ["handle"], equals: job.handle } } },
       },
       orderBy: { createdAt: "asc" },
@@ -389,7 +392,7 @@ export async function registerStoryFile(
         storageUrl,
         storageKey,
         sha256,
-        originalFilename: filename,
+        originalFilename: dedupeName,
         mimeType,
         fileSize: buffer.length,
         thumbnailUrl: kind === "image" ? storageUrl : null,
