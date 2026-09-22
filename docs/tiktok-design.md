@@ -45,6 +45,12 @@ insta-watch は bot のローカル state で「既知の投稿」を持ち、ak
 
 よって **一覧は Playwright、DL は yt-dlp** の二本立て。Playwright は 1 周に 1 ページ開くだけなので `sekai`（7.6GB RAM）で問題ない。
 
+配備後に分かったこと（2026-09-22 実測）:
+
+- **UA の OS は実行環境と一致させる。** Linux で Mac の UA を名乗ると `navigator.platform` と食い違い、`item_list` が 0 bytes で返る（他の条件は同じで Linux UA なら 48 本）
+- **短時間に新規セッションで開き続けると `item_list` が空になる**（数分に 5〜6 回で以後 0 bytes。IP ではなく端末単位で、40 分待っても持ち越した cookie の端末は空のまま、まっさらな端末なら通る）。bot は cookie を `state/browser-profile` に持ち越し、空応答なら捨てて 1 回だけ新規で開き直す
+- **cursor 付きの 3 ページ目以降は headless だと空応答**（headless shell は 3 ページ目から、新 headless は 5 ページ目から）。headful は最後まで通るが、`sekai` の Xvfb 上の headful でも空だった（GPU 無しの fingerprint か IP のスコア）。**過去 1,113 本の一覧は手元の Mac で `backfill --headful --max 0` を 1 回流して台帳に載せ、DL は sekai で `backfill --skip-list`** で回した。常駐の監視は 1 ページ目（直近 24〜48 本）で足りるので headless のまま
+
 ## 4. データモデル（2 つとも保護テーブル、既定 `internal`）
 
 | テーブル | 役割 | 要点 |
@@ -102,7 +108,8 @@ bot は `POST /upload` で mp4 をアセットにするだけ。中身は akashi
 - 巡回間隔は対象ごとの `intervalMinutes` に ±20% のジッター。TikTok の WAF は同一 IP からの規則的なアクセスに厳しいので、これより詰めない
 - 実体は yt-dlp が選ぶ最良 = **1080p の h265 (bytevc1)**（h264 は 720p までしか無い）。画質を優先する。Discord の添付は h265 を再生できないクライアントがあるが、TikTok の URL も並べてあるので困らない
 - yt-dlp は **venv のもの（`yt-dlp[default,curl-cffi]`）** を使う。TikTok は impersonation（curl_cffi）が無いと「Unexpected response from webpage」で落ちる（標準の単体バイナリ 2025.10 で実測）。更新は `uv lock --upgrade-package yt-dlp && uv sync` して再起動
-- `backfill <handle>` は profile を最後までスクロールして全ページを `sightings` に `backfill: true` で送り、返った `pending` を DL する。1 回の応答は 20 件なので `pending` が空になるまで繰り返す。Discord には流さない（`notify: false`）。**daemon を止めなくてよい**: 同じ pending を daemon も拾うことがあるが、register の原子性で二重登録・二重通知にはならず、DL が重なる分だけ無駄になる
+- `backfill <handle>` は 2 段: (1) profile を最後までスクロールし、ページが届くたびに `sightings` に `backfill: true` で送る（途中で止められても pending は残る。スクロールは 1 回 7 秒空ける）、(2) `pending` を 20 本ずつ引き、**1 本ごとに 45 秒 ±30%** 空けて DL・登録する（1,100 本で 14 時間ほど）。Discord には流さない（`notify: false`）。`--skip-list` で (1) を飛ばせる。**daemon を止めなくてよい**: daemon は新着を優先し、通知しない動画は 1 周に 3 本しか手伝わない（backfill と並走して詰めない。register の原子性で二重登録・二重通知にもならない）
+- 長く走らせるときは transient unit（`systemd-run --user --unit tiktok-backfill …`）。ログは `journalctl --user -u tiktok-backfill`
 
 ## 8. `/status` との関係
 
