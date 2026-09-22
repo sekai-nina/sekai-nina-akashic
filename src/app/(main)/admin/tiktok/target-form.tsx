@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { Loader2, Plus, RotateCcw, Trash2 } from "lucide-react";
 import {
+  CAPTION_FILTER_MAX,
   DEFAULT_INTERVAL_MINUTES,
   INTERVAL_MAX_MINUTES,
   INTERVAL_MIN_MINUTES,
@@ -22,6 +23,7 @@ export function TargetForm() {
   const [handle, setHandle] = useState("");
   const [sourceName, setSourceName] = useState("");
   const [official, setOfficial] = useState(true);
+  const [captionFilter, setCaptionFilter] = useState("");
   const [intervalMinutes, setIntervalMinutes] = useState(String(DEFAULT_INTERVAL_MINUTES));
   const [note, setNote] = useState("");
   const [state, setState] = useState<TiktokActionState | null>(null);
@@ -31,11 +33,19 @@ export function TargetForm() {
     e.preventDefault();
     if (isPending || !handle.trim()) return;
     startTransition(async () => {
-      const r = await addTiktokTargetAction({ handle, sourceName, official, intervalMinutes, note });
+      const r = await addTiktokTargetAction({
+        handle,
+        sourceName,
+        official,
+        captionFilter,
+        intervalMinutes,
+        note,
+      });
       setState(r);
       if (r.ok) {
         setHandle("");
         setSourceName("");
+        setCaptionFilter("");
         setNote("");
       }
     });
@@ -48,7 +58,9 @@ export function TargetForm() {
         <span className="font-medium">@ 付き・URL のまま貼っても大丈夫</span>です。
         追加した時点で見えている動画は「既知」として飛ばし、以降の新着だけ取り込みます
         （過去分は bot サーバで <span className="font-mono">tiktok-watch backfill</span>）。
-        一度外したハンドルを入れ直すと、そのまま再開します。
+        一度外したハンドルを入れ直すと、そのまま再開します（絞り込みは入れ直した値で上書き）。
+        「キャプションで絞る」を入れると、いずれかの語を含む動画だけ取り込み、合わないものは既知として台帳に載せます
+        （坂道グループ共通のチャンネルから日向坂の動画だけ拾うとき）。
       </p>
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex flex-col gap-1">
@@ -70,6 +82,17 @@ export function TargetForm() {
             placeholder="日向坂46 TikTok"
             maxLength={SOURCE_NAME_MAX}
             className="border border-slate-300 rounded px-2 py-1.5 text-sm w-44"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-slate-500">キャプションで絞る（任意、| 区切り）</span>
+          <input
+            type="text"
+            value={captionFilter}
+            onChange={(e) => setCaptionFilter(e.target.value)}
+            placeholder="日向坂|ひなた"
+            maxLength={CAPTION_FILTER_MAX}
+            className="border border-slate-300 rounded px-2 py-1.5 text-sm w-40"
           />
         </label>
         <label className="flex flex-col gap-1">

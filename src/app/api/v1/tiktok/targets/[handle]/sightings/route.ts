@@ -35,6 +35,8 @@ const Body = z
     secUid: z.string().max(200).nullable().optional(),
     videoCount: z.number().int().min(0).nullable().optional(),
     backfill: z.boolean().optional(),
+    // 既知として載せるだけ (DL しない)。backfill の「この日より前は要らない」用
+    skip: z.boolean().optional(),
   })
   .strict();
 
@@ -64,6 +66,7 @@ export async function POST(request: Request, { params }: Params) {
         secUid: parsed.data.secUid ?? null,
         videoCount: parsed.data.videoCount ?? null,
         backfill: parsed.data.backfill,
+        skip: parsed.data.skip,
       },
       auth.clearance,
     );

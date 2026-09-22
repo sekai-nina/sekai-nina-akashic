@@ -23,6 +23,7 @@ export async function addTiktokTargetAction(input: {
   handle: string;
   sourceName: string;
   official: boolean;
+  captionFilter: string;
   intervalMinutes: string;
   note: string;
 }): Promise<TiktokActionState> {
@@ -36,6 +37,7 @@ export async function addTiktokTargetAction(input: {
         handle: input.handle,
         sourceName: input.sourceName,
         official: input.official,
+        captionFilter: input.captionFilter,
         intervalMinutes: minutes,
         note: input.note,
       },
@@ -47,7 +49,12 @@ export async function addTiktokTargetAction(input: {
       action: "tiktok.target.add",
       targetType: "TiktokWatchTarget",
       targetId: row.id,
-      metadata: { handle: row.handle, intervalMinutes: row.intervalMinutes, official: row.official },
+      metadata: {
+        handle: row.handle,
+        intervalMinutes: row.intervalMinutes,
+        official: row.official,
+        captionFilter: row.captionFilter,
+      },
     });
     revalidatePath("/admin/tiktok");
     return { ok: true, message: `${row.handle} を追加しました（${row.intervalMinutes} 分ごと）` };

@@ -55,13 +55,16 @@ insta-watch は bot のローカル state で「既知の投稿」を持ち、ak
 
 | テーブル | 役割 | 要点 |
 |---|---|---|
-| `TiktokWatchTarget` | 監視対象 | `handle`（unique・小文字）/ `sourceName`（出典エンティティ名。空なら `TikTok @handle`）/ `official`（trustLevel を official にするか）/ `intervalMinutes`（既定 30）/ `enabled` / `note`。bot が報告する `secUid` / `videoCount` / `lastCheckedAt` / `lastError` |
+| `TiktokWatchTarget` | 監視対象 | `handle`（unique・小文字）/ `sourceName`（出典エンティティ名。空なら `TikTok @handle`）/ `official`（trustLevel を official にするか）/ `captionFilter`（`|` 区切り。いずれかを含む動画だけ取り込む。空なら全部）/ `intervalMinutes`（既定 30）/ `enabled` / `note`。bot が報告する `secUid` / `videoCount` / `lastCheckedAt` / `lastError` |
 | `TiktokVideo` | 見えた動画 1 本 = 1 行 | `videoId`（unique）/ `createTime` / `caption` / `coverUrl` / `status` / `notify`（登録できたら Discord に流すか。新着だけ true）/ `attempts` / `lastError` / `assetId`（unique、登録済みなら）/ `notifiedAt` |
 
 `status` の遷移:
 
 ```
-(初回接触で見えた)  skipped_initial ──backfill / 画面「取り込む」──▶ pending
+(初回接触で見えた / 絞り込みに合わない / skip で載せた)
+                    skipped_initial ──backfill / 画面「取り込む」──▶ pending
+(backfill で「この日より前は要らない」= sightings skip:true)
+                    pending ──▶ skipped_initial
 (以降の新着)        pending ──register──▶ registered
                     pending ──failed──▶ failed ──(attempts < 3 なら次の周で再び pending 扱い)──▶ …
                     failed (attempts ≥ 3) ──画面「再試行」──▶ pending

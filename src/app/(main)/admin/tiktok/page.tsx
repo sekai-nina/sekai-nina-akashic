@@ -128,6 +128,7 @@ export default async function AdminTiktokPage() {
                   <div className="text-xs text-slate-400 mt-0.5">
                     出典: {sourceEntityName(t)}
                     {t.official && <span className="ml-1">/ 公式</span>}
+                    {t.captionFilter && <span className="ml-1">/ 絞り込み「{t.captionFilter}」</span>}
                     {t.videoCount != null && <span className="ml-1">/ プロフィール {t.videoCount} 本</span>}
                   </div>
                 </td>

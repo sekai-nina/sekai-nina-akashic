@@ -1564,6 +1564,9 @@ model TiktokWatchTarget {
   sourceName String  @default("")
   /// 公式アカウントなら true → 登録したアセットの trustLevel を official にする
   official   Boolean @default(true)
+  /// 取り込む動画をキャプションで絞る。空なら全部。`|` 区切りでいずれかを含むものだけ
+  /// (例: 坂道グループ共通のチャンネルで `日向坂` の動画だけ)。合わないものは既知 (skipped_initial) で載せる
+  captionFilter String @default("")
   /// 巡回の間隔 (分)。TikTok は WAF が強いので既定 30 分
   intervalMinutes Int     @default(30)
   /// 外すときは消さずにこれを false にする (履歴とメモを残すため)

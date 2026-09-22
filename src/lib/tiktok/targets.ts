@@ -29,6 +29,7 @@ export const RECENT_VIDEOS_LIMIT = 50;
 
 /** 文字数の上限 (画面の maxLength / zod / ドメインで共用) */
 export const SOURCE_NAME_MAX = 100;
+export const CAPTION_FILTER_MAX = 200;
 export const NOTE_MAX = 200;
 export const ERROR_MAX = 300;
 export const CAPTION_MAX = 5000;
@@ -60,6 +61,22 @@ export function videoUrl(handle: string, videoId: string): string {
 
 export function profileUrl(handle: string): string {
   return `https://www.tiktok.com/@${handle}`;
+}
+
+/** キャプションの絞り込み (`|` 区切り) を語の配列に。空なら [] = 絞らない */
+export function parseCaptionFilter(raw: string): string[] {
+  return raw
+    .split("|")
+    .map((w) => w.trim())
+    .filter((w) => w.length > 0);
+}
+
+/** 絞り込みに合うか。語が無ければ全部合う。いずれかを含めば合う (大文字小文字は区別しない) */
+export function captionMatches(caption: string, filter: string): boolean {
+  const words = parseCaptionFilter(filter);
+  if (words.length === 0) return true;
+  const c = caption.toLowerCase();
+  return words.some((w) => c.includes(w.toLowerCase()));
 }
 
 /** 出典エンティティの名前。対象に sourceName が無ければハンドルから組む */

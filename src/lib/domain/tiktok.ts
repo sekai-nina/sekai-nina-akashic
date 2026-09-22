@@ -5,6 +5,8 @@ import { updateAsset } from "@/lib/domain/assets";
 import { findOrCreateEntity } from "@/lib/domain/entities";
 import { deriveTitle, extractMemberNames, HIGHLIGHT_MEMBER } from "@/lib/tiktok/caption";
 import {
+  CAPTION_FILTER_MAX,
+  captionMatches,
   ERROR_MAX,
   INTERVAL_MAX_MINUTES,
   INTERVAL_MIN_MINUTES,
@@ -53,6 +55,7 @@ export interface TiktokTargetView {
   handle: string;
   sourceName: string;
   official: boolean;
+  captionFilter: string;
   intervalMinutes: number;
   enabled: boolean;
   note: string;
@@ -72,6 +75,7 @@ const TARGET_SELECT = {
   handle: true,
   sourceName: true,
   official: true,
+  captionFilter: true,
   intervalMinutes: true,
   enabled: true,
   note: true,
@@ -96,6 +100,7 @@ function toTargetView(row: TargetRow, counts: Record<TiktokVideoStatus, number>)
     handle: row.handle,
     sourceName: row.sourceName,
     official: row.official,
+    captionFilter: row.captionFilter,
     intervalMinutes: row.intervalMinutes,
     enabled: row.enabled,
     note: row.note,
@@ -134,6 +139,7 @@ export interface TiktokTargetInput {
   handle: string;
   sourceName: string;
   official: boolean;
+  captionFilter: string;
   intervalMinutes: number;
   note: string;
 }
@@ -159,6 +165,7 @@ export async function addTiktokTarget(
   validateInterval(input.intervalMinutes);
   const sourceName = input.sourceName.trim().slice(0, SOURCE_NAME_MAX);
   const note = input.note.trim().slice(0, NOTE_MAX);
+  const captionFilter = input.captionFilter.trim().slice(0, CAPTION_FILTER_MAX);
   const row = await withClearance(clearance, (tx) =>
     tx.tiktokWatchTarget.upsert({
       where: { handle },
@@ -166,6 +173,7 @@ export async function addTiktokTarget(
         handle,
         sourceName,
         official: input.official,
+        captionFilter,
         intervalMinutes: input.intervalMinutes,
         note,
         updatedById: userId,
@@ -173,6 +181,7 @@ export async function addTiktokTarget(
       update: {
         ...(sourceName ? { sourceName } : {}),
         official: input.official,
+        captionFilter,
         intervalMinutes: input.intervalMinutes,
         ...(note ? { note } : {}),
         enabled: true,
@@ -329,6 +338,11 @@ export interface SightingsInput {
   videoCount?: number | null;
   /** 過去分を取りに来ている (初回接触扱いにしない。skipped_initial も pending に戻す) */
   backfill?: boolean;
+  /**
+   * 見えた動画を既知として載せるだけ (DL しない)。新しい行は skipped_initial、既に pending の行も
+   * skipped_initial に戻す。backfill の「この日より前は要らない」に使う
+   */
+  skip?: boolean;
 }
 
 export interface PendingVideo {
@@ -370,13 +384,21 @@ export async function recordTiktokSightings(
   clearance: string,
 ): Promise<SightingsResult> {
   const h = normalizeHandle(handle);
-  const backfill = input.backfill === true;
+  const backfill = input.backfill === true && input.skip !== true;
+  const skip = input.skip === true;
   return withClearance(clearance, async (tx) => {
-    const target = await tx.tiktokWatchTarget.findUnique({ where: { handle: h }, select: { id: true } });
+    const target = await tx.tiktokWatchTarget.findUnique({
+      where: { handle: h },
+      select: { id: true, captionFilter: true },
+    });
     if (!target) throw new TiktokNotFoundError(`監視対象にありません: ${h}`);
 
     const existingCount = await tx.tiktokVideo.count({ where: { targetId: target.id } });
-    const initial = existingCount === 0 && !backfill;
+    const initial = existingCount === 0 && !backfill && !skip;
+    // 取り込む (pending) か既知で載せるだけ (skipped_initial) か。
+    // 初回接触・skip・キャプションの絞り込みに合わないものは既知
+    const wanted = (caption: string) =>
+      !initial && !skip && captionMatches(caption, target.captionFilter);
 
     const ids = input.videos.map((v) => v.videoId);
     const existing = ids.length
@@ -404,8 +426,9 @@ export async function recordTiktokSightings(
           caption: v.caption,
           durationSec: v.durationSec ?? null,
           coverUrl: v.coverUrl && isAllowedCoverUrl(v.coverUrl) ? v.coverUrl : null,
-          status: initial ? "skipped_initial" : "pending",
-          notify: !initial,
+          status: wanted(v.caption) ? "pending" : "skipped_initial",
+          // 通知するのは新着として取り込む行だけ (backfill / skip / 絞り込み外は流さない)
+          notify: !initial && !backfill && wanted(v.caption),
         })),
         skipDuplicates: true,
       });
@@ -425,9 +448,21 @@ export async function recordTiktokSightings(
     }
 
     if (backfill && ids.length > 0) {
+      // 絞り込みがあるときは合うものだけ pending に戻す (createMany と同じ判定をアプリ側で)
+      const flip = input.videos
+        .filter((v) => captionMatches(v.caption, target.captionFilter))
+        .map((v) => v.videoId);
+      if (flip.length > 0) {
+        await tx.tiktokVideo.updateMany({
+          where: { targetId: target.id, videoId: { in: flip }, status: "skipped_initial" },
+          data: { status: "pending", attempts: 0, lastError: "" },
+        });
+      }
+    }
+    if (skip && ids.length > 0) {
       await tx.tiktokVideo.updateMany({
-        where: { targetId: target.id, videoId: { in: ids }, status: "skipped_initial" },
-        data: { status: "pending", attempts: 0, lastError: "" },
+        where: { targetId: target.id, videoId: { in: ids }, status: "pending" },
+        data: { status: "skipped_initial" },
       });
     }
 
