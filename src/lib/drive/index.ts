@@ -363,16 +363,62 @@ export async function createResumableUploadSession(
 }
 
 /**
- * Drive のファイルを消す (ゴミ箱ではなく完全削除)。
+ * Drive のファイルをゴミ箱に入れる (30 日は戻せる。完全削除はしない)。
  *
- * iPad ワーカーが resumable 経路で上げた実体が SHA256 で既存と重複していたときに、
- * フォルダに孤児を残さないための後始末。失敗しても呼び出し側は握りつぶしてよい。
+ * iPad ワーカーが resumable 経路で上げた実体が既存と重複していたときに、フォルダに孤児を
+ * 残さないための後始末。失敗しても呼び出し側は握りつぶしてよい。
  */
-export async function deleteFromDrive(fileId: string): Promise<void> {
+export async function trashDriveFile(fileId: string): Promise<void> {
   const auth = getAuth();
   if (!auth) return;
   const drive = google.drive({ version: "v3", auth: auth as Parameters<typeof google.drive>[0]["auth"] });
-  await drive.files.delete({ fileId, supportsAllDrives: true });
+  await drive.files.update({ fileId, requestBody: { trashed: true }, supportsAllDrives: true });
+}
+
+export interface DriveFileMeta {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number | null;
+  /** Drive が計算した SHA256 (hex)。大きなファイルを落とさずに重複判定に使える */
+  sha256: string | null;
+  parents: string[];
+  createdTime: Date | null;
+  trashed: boolean;
+}
+
+/**
+ * ファイルのメタデータだけ読む (実体は落とさない)。無ければ null。
+ * `sha256Checksum` は Drive 側で計算済みの値。resumable 経路の直後でも入っている。
+ */
+export async function getDriveFileMeta(fileId: string): Promise<DriveFileMeta | null> {
+  const auth = getAuth();
+  if (!auth) return null;
+  const drive = google.drive({ version: "v3", auth: auth as Parameters<typeof google.drive>[0]["auth"] });
+  try {
+    const res = await drive.files.get({
+      fileId,
+      fields: "id,name,mimeType,size,sha256Checksum,parents,createdTime,trashed",
+      supportsAllDrives: true,
+    });
+    const d = res.data;
+    if (!d.id) return null;
+    return {
+      id: d.id,
+      name: d.name ?? "",
+      mimeType: d.mimeType ?? "",
+      size: d.size != null ? Number(d.size) : null,
+      sha256: d.sha256Checksum ?? null,
+      parents: d.parents ?? [],
+      createdTime: d.createdTime ? new Date(d.createdTime) : null,
+      trashed: d.trashed === true,
+    };
+  } catch (err) {
+    // gaxios は HTTP ステータスを status に、JSON 本文の error.code を code に入れる
+    const e = err as { status?: number; code?: number | string };
+    if (e.status === 404 || e.code === 404 || e.code === "404") return null;
+    throw err;
+  }
 }
 
 /**

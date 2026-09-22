@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { authenticateApiKey, type ApiKeyUser } from "@/lib/api-auth";
+import { requireApiAuth, type ApiKeyUser } from "@/lib/api-auth";
 import { InstaJobError, WORKER_PERMISSION } from "@/lib/insta/jobs";
 import type { InstaStoryJobView } from "@/lib/domain/insta-jobs";
 
@@ -26,21 +26,8 @@ const ALLOWED: Record<InstaJobAuthMode, readonly string[]> = {
   worker: [WORKER_PERMISSION, "write"],
 };
 
-export async function requireInstaJobAuth(
-  request: Request,
-  mode: InstaJobAuthMode,
-): Promise<ApiKeyUser | NextResponse> {
-  const user = await authenticateApiKey(request);
-  if (!user) {
-    return NextResponse.json({ error: "Invalid or missing API key" }, { status: 401 });
-  }
-  if (!ALLOWED[mode].some((p) => user.permissions.includes(p))) {
-    return NextResponse.json(
-      { error: `Missing permission: ${ALLOWED[mode].join(" or ")}` },
-      { status: 403 },
-    );
-  }
-  return user;
+export function requireInstaJobAuth(request: Request, mode: InstaJobAuthMode): Promise<ApiKeyUser | NextResponse> {
+  return requireApiAuth(request, ALLOWED[mode]);
 }
 
 /** ドメイン層の例外を HTTP に写す。想定外はログに残して 500 */

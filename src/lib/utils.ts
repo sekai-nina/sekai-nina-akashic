@@ -8,6 +8,7 @@ import {
   type ArticleTemplate,
   type ArticleType,
   type InstaStoryJobStatus,
+  type InstaWatchTier,
   type JobRunStatus,
   type LlmProvider,
   type LlmUsageSource,
@@ -237,6 +238,13 @@ export const ANNOUNCEMENT_KIND_LABELS: Record<AnnouncementKind, string> = {
   feature: "機能",
   article: "記事",
   info: "運営",
+};
+
+/** insta-watch の巡回頻度帯。/admin/insta の一覧に出す (フォームは既定の分数込みの文言を別に持つ) */
+export const INSTA_WATCH_TIER_LABELS: Record<InstaWatchTier, string> = {
+  hot: "高頻度",
+  normal: "通常",
+  cold: "低頻度",
 };
 
 /** story ジョブ (#178) の状態。/admin/insta の一覧に出す */

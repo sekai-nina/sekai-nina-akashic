@@ -17,7 +17,10 @@ export const ACTIVE_STATUSES: readonly InstaStoryJobStatus[] = ["pending", "disp
 
 /** Pushcut に送ってから iPad が start を叩くまでの猶予。過ぎたら iPad が受け取れなかったとみなす */
 export const DISPATCH_TIMEOUT_MS = 10 * 60 * 1000;
-/** iPad が start してから complete / error までの猶予。Instagram Download は動画の変換で数分かかる */
+/**
+ * processing のまま最後の動き (start か、直近の result) から complete / error が来ないときの猶予。
+ * Instagram Download は動画の変換で数分かかり、コマが多いと result の間隔も伸びる
+ */
 export const PROCESSING_TIMEOUT_MS = 20 * 60 * 1000;
 /** pending のまま送れない (Pushcut 未設定・iPad 不在) ジョブを諦めるまで。story 自体が 24h で消える */
 export const PENDING_TIMEOUT_MS = 24 * 60 * 60 * 1000;
@@ -180,11 +183,18 @@ export function parseJobResult(raw: unknown): InstaStoryJobResult {
  * 期限切れの判定。過ぎていれば failed にする理由を返す。
  *
  * - dispatched のまま start が来ない → iPad が受け取れなかった (Pushcut 未起動・圏外)
- * - processing のまま終わらない → Shortcut が途中で止まった (iPad の画面ロック等)
+ * - processing のまま **最後の動き** (start か直近の result = updatedAt) から音沙汰が無い
+ *   → Shortcut が途中で止まった (iPad の画面ロック等)。コマが多くて result が続いている間は失効させない
  * - pending のまま送れない → Pushcut 未設定か iPad がずっと不在。story は 24h で消える
  */
 export function staleReason(
-  job: { status: InstaStoryJobStatus; createdAt: Date; dispatchedAt: Date | null; startedAt: Date | null },
+  job: {
+    status: InstaStoryJobStatus;
+    createdAt: Date;
+    dispatchedAt: Date | null;
+    startedAt: Date | null;
+    updatedAt?: Date | null;
+  },
   now: Date,
 ): string | null {
   const t = now.getTime();
@@ -194,8 +204,11 @@ export function staleReason(
       return t - since > DISPATCH_TIMEOUT_MS ? "iPad が受け取りませんでした (start が来ないまま 10 分)" : null;
     }
     case "processing": {
-      const since = (job.startedAt ?? job.dispatchedAt ?? job.createdAt).getTime();
-      return t - since > PROCESSING_TIMEOUT_MS ? "iPad が完了を報告しませんでした (20 分)" : null;
+      const since = Math.max(
+        (job.startedAt ?? job.dispatchedAt ?? job.createdAt).getTime(),
+        job.updatedAt?.getTime() ?? 0,
+      );
+      return t - since > PROCESSING_TIMEOUT_MS ? "iPad からの報告が 20 分途絶えました" : null;
     }
     case "pending":
       return t - job.createdAt.getTime() > PENDING_TIMEOUT_MS ? "24 時間以内に iPad へ送れませんでした" : null;

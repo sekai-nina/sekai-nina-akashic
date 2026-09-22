@@ -1743,7 +1743,7 @@ iPad 側の作り方は [docs/ipad-instagram-worker.md](./ipad-instagram-worker.
 
 状態は `pending`（作った）→ `dispatched`（Pushcut に送った）→ `processing`（iPad が受け取った）→ `completed` | `failed`。
 **iPad は 1 台**なので同時に走るのは 1 件だけで、complete / error / 失効のたびに次の `pending` を送る。
-`dispatched` のまま 10 分・`processing` のまま 20 分・`pending` のまま 24 時間で失効（`failed`）。
+`dispatched` のまま 10 分・`processing` で最後の報告（start / result）から 20 分・`pending` のまま 24 時間で失効（`failed`）。
 失効の回収と再送は `/api/cron/insta-jobs`（10 分ごと・`CRON_SECRET`）でも行う。
 
 必要な環境変数: `PUSHCUT_API_KEY` / `PUSHCUT_SHORTCUT_NAME`（任意で `PUSHCUT_SERVER_ID`）、通知は `DISCORD_INSTA_WEBHOOK_URL`。
@@ -1835,11 +1835,14 @@ Google Drive に **直接 PUT する URL** を発行する。Vercel の本文上
 
 - `multipart/form-data` — `file` フィールド。**4MB まで**（超えると 413。動画は上の経路へ）
 
+Drive 経路では **実体を落とさず Drive のメタデータ（`sha256Checksum` / `size`）で判定**し、本体を読むのは画像のサムネイルを作るときだけ。
+また `driveFileId` は **`upload-url` で発行した先のもの**（このアプリの Drive フォルダ直下で、ジョブの開始後に作られたファイル）しか受け付けない（それ以外は 400）。
+
 1 件ごとに Asset を作る（kind は MIME から、`status=inbox`、`sourceType=web`、`canonicalDate` はジョブ作成日（JST の日付のみ）、
 タグ「日向坂46」+ source「日向坂46 Instagram」+ story URL の SourceRecord。**人物は付けない**ので /inbox で人が付ける）。
 同じ実体が既にあれば（SHA256 が同じ、**または同じハンドルで同じファイル名** — Instagram Download は落とし直すたびに
 バイト列が変わるので名前でも見る）新しい Asset は作らず `duplicate: true` で記録する（Drive に上げた実体は、どの Asset からも
-参照されていなければ消す。同じ `driveFileId` を再送しても直前に作った Asset の原本は消えない）。既存の Asset が
+参照されていなければゴミ箱へ。同じ `driveFileId` を再送しても直前に作った Asset の原本は消えない）。既存の Asset が
 `internal` より上位なら 403。応答は 201 でジョブ全体 + 今回の `file`。
 
 ### POST /insta/jobs/:id/complete
