@@ -1772,10 +1772,12 @@ profile で見えた動画を報告し、DL すべき一覧を受け取る（**w
 |---|---|---|
 | `videos[]` | ○ | 見えた動画（最大 500）。`videoId` は URL 末尾の数字、`createTime` は ISO 8601（**タイムゾーン必須**: `Z` か `+09:00`）、`caption` は 5,000 字で切って受ける |
 | `secUid` / `videoCount` | | プロフィールから取れたら付ける（対象に保存する） |
-| `backfill` | | `true` なら過去分の取得。**初回接触扱いにせず**、`skipped_initial` の動画も `pending` に戻す |
+| `backfill` | | `true` なら過去分の取得。**初回接触扱いにせず**、`skipped_initial` の動画も `pending` に戻す（対象に「キャプションの絞り込み」があれば合うものだけ） |
+| `skip` | | `true` なら見えた動画を**既知として載せるだけ**（新しい行は `skipped_initial`、既に `pending` の行も `skipped_initial` に戻す）。backfill の「この日より前は要らない」に使う。`backfill` より優先 |
 
 - **台帳が空の対象への最初の報告（`backfill` なし）は初回接触**: 見えた動画を全件 `skipped_initial` にして `pending` は返さない（対象を足した瞬間に過去 1,000 本を落とし始めない）。この行は `notify: false` で、後で backfill / 画面の「取り込む」で `pending` に戻しても Discord には流さない
 - 既に載っている動画は、変わったキャプション等だけ更新する（status・createTime は触らない。空のキャプションで上書きしない）
+- 対象に**キャプションの絞り込み**（`/admin/tiktok` の「キャプションで絞る」、`|` 区切りでいずれかを含む）があれば、合わない動画は新着でも `skipped_initial` で載せる（通知もしない）。坂道グループ共通のチャンネル（`@lemino_sakamichi`）から日向坂の動画だけ拾う用
 - 対象の `lastCheckedAt` を進め、`lastError` を消す
 - `coverUrl` は TikTok の CDN（`*.tiktokcdn.com` 等）の https だけ受け付ける（それ以外は捨てる。サーバが取りに行くため）
 
