@@ -6,16 +6,7 @@ import { createAsset, updateAsset, type CreateAssetData } from "@/lib/domain/ass
 import { logAudit } from "@/lib/domain/audit";
 import { generateAndUploadThumbnails } from "@/lib/thumbnails";
 import type { AssetKind, AssetStatus, StorageProvider, SourceType } from "@prisma/client";
-
-function guessMimeKind(mimeType: string): AssetKind {
-  if (mimeType.startsWith("image/")) return "image";
-  if (mimeType.startsWith("video/")) return "video";
-  if (mimeType.startsWith("audio/")) return "audio";
-  if (mimeType.startsWith("text/")) return "text";
-  if (mimeType.includes("pdf") || mimeType.includes("document"))
-    return "document";
-  return "other";
-}
+import { guessMimeKind } from "@/lib/mime";
 
 export async function POST(request: Request) {
   const auth = await requireApiAuth(request, "write");

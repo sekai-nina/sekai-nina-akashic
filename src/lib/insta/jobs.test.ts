@@ -86,10 +86,14 @@ describe("staleReason", () => {
     expect(staleReason(noStamp, at(DISPATCH_TIMEOUT_MS + 1))).toMatch(/受け取りません/);
   });
 
-  it("processing は 20 分で失効", () => {
+  it("processing は最後の動きから 20 分で失効", () => {
     const job = { status: "processing" as const, createdAt: base, dispatchedAt: base, startedAt: at(60_000) };
     expect(staleReason(job, at(60_000 + PROCESSING_TIMEOUT_MS - 1))).toBeNull();
-    expect(staleReason(job, at(60_000 + PROCESSING_TIMEOUT_MS + 1))).toMatch(/完了を報告しません/);
+    expect(staleReason(job, at(60_000 + PROCESSING_TIMEOUT_MS + 1))).toMatch(/報告が 20 分途絶え/);
+    // result が届いている (updatedAt が進んでいる) 間は失効させない
+    const busy = { ...job, updatedAt: at(15 * 60_000) };
+    expect(staleReason(busy, at(60_000 + PROCESSING_TIMEOUT_MS + 1))).toBeNull();
+    expect(staleReason(busy, at(15 * 60_000 + PROCESSING_TIMEOUT_MS + 1))).toMatch(/途絶え/);
   });
 
   it("pending は 24 時間で諦める (story が消える)", () => {

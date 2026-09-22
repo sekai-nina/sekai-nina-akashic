@@ -8,11 +8,12 @@ import { parseDateOnly } from "@/lib/domain/coverage";
 import { findOrCreateEntity } from "@/lib/domain/entities";
 import {
   createResumableUploadSession,
-  deleteFromDrive,
   downloadFromDrive,
   fetchDriveThumbnail,
   finalizeDriveUpload,
+  getDriveFileMeta,
   isDriveEnabled,
+  trashDriveFile,
   uploadToDrive,
 } from "@/lib/drive";
 import {
@@ -41,6 +42,7 @@ import {
 } from "@/lib/insta/jobs";
 import { transcodeForDiscord } from "@/lib/insta/transcode";
 import { DiscordWebhookError, postDiscordWebhookWithFiles, type DiscordAttachment } from "@/lib/status/discord";
+import { guessMimeKind } from "@/lib/mime";
 import { generateAndUploadThumbnails } from "@/lib/thumbnails";
 import { formatDate, toJstDateOnly } from "@/lib/utils";
 
@@ -152,6 +154,8 @@ export async function createStoryJob(
   }
 
   const { row, existing } = await withClearance(actor.clearance, async (tx) => {
+    // 同じハンドルの作成を直列化する (bot の「出現」と「更新」が同時に来ても 2 件作らない)
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"insta_story_job:" + parsed.handle}))`;
     const active = await tx.instaStoryJob.findFirst({
       where: { handle: parsed.handle, status: { in: [...ACTIVE_STATUSES] } },
       orderBy: { createdAt: "asc" },
@@ -289,26 +293,49 @@ export async function registerStoryFile(
 
   const filename = safeFilename(source.filename);
   const mimeType = resolveMimeType(source.mimeType, filename);
+  const kind = guessMimeKind(mimeType);
 
-  let buffer: Buffer;
-  if (source.kind === "buffer") {
-    buffer = source.buffer;
-    if (buffer.length > MAX_DIRECT_UPLOAD_BYTES) {
-      throw new InstaJobError(DIRECT_UPLOAD_TOO_LARGE_MESSAGE, 413);
-    }
-  } else {
-    if (source.fileSize != null && source.fileSize > MAX_FILE_BYTES) {
-      throw new InstaJobError("ファイルが大きすぎます", 413);
-    }
+  // 実体は必要になるまで落とさない。Drive 経路は Drive が計算した SHA256 とサイズで判定でき、
+  // 本体を読むのは画像のサムネイルを作るときだけ (動画を 200MB まで丸ごと読んでいたのをやめた。#182)
+  let sha256: string;
+  let fileSize: number;
+  let cachedBuffer: Buffer | null = null;
+  const getBuffer = async (): Promise<Buffer> => {
+    if (cachedBuffer) return cachedBuffer;
+    if (source.kind === "buffer") return (cachedBuffer = source.buffer);
     const downloaded = await downloadFromDrive(source.driveFileId).catch(() => null);
     if (!downloaded) throw new InstaJobError("Drive からファイルを読めませんでした", 502);
-    buffer = downloaded;
-    if (buffer.length > MAX_FILE_BYTES) throw new InstaJobError("ファイルが大きすぎます", 413);
-  }
-  if (buffer.length === 0) throw new InstaJobError("空のファイルです");
+    return (cachedBuffer = downloaded);
+  };
 
-  const sha256 = createHash("sha256").update(buffer).digest("hex");
-  const kind = mimeType.startsWith("video/") ? "video" : "image";
+  if (source.kind === "buffer") {
+    if (source.buffer.length > MAX_DIRECT_UPLOAD_BYTES) {
+      throw new InstaJobError(DIRECT_UPLOAD_TOO_LARGE_MESSAGE, 413);
+    }
+    fileSize = source.buffer.length;
+    sha256 = createHash("sha256").update(source.buffer).digest("hex");
+  } else {
+    const meta = await getDriveFileMeta(source.driveFileId);
+    if (!meta) throw new InstaJobError("Drive にそのファイルがありません (upload-url への PUT が終わっていない?)", 502);
+    // upload-url で発行した先 (このアプリのフォルダ、このジョブの後に作られたもの) しか信用しない。
+    // 任意の driveFileId を渡されて、別のファイルを公開・登録する口にしない
+    const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID ?? "";
+    const since = (job.startedAt ?? job.createdAt).getTime() - 60_000;
+    if (!meta.parents.includes(folderId) || !meta.createdTime || meta.createdTime.getTime() < since) {
+      throw new InstaJobError("そのファイルは upload-url で発行した先のものではありません");
+    }
+    fileSize = meta.size ?? 0;
+    if (meta.sha256) {
+      sha256 = meta.sha256.toLowerCase();
+    } else {
+      // まれに Drive が計算前のことがあるので本体から出す
+      const buf = await getBuffer();
+      fileSize = buf.length;
+      sha256 = createHash("sha256").update(buf).digest("hex");
+    }
+  }
+  if (fileSize > MAX_FILE_BYTES) throw new InstaJobError("ファイルが大きすぎます", 413);
+  if (fileSize === 0) throw new InstaJobError("空のファイルです");
 
   // 重複は SHA256 で見るが、それだけでは足りない。Instagram Download は同じ story を落とし直すと
   // ファイル名とサイズは同じでも中身のバイト列が変わる (変換のたびに違う。2026-09-22 実測)。
@@ -341,15 +368,15 @@ export async function registerStoryFile(
       throw new InstaJobError("Forbidden", 403);
     }
     if (source.kind === "drive") {
-      // 上げてもらった実体は要らないので Drive に孤児を残さない。
-      // **ただし、どれかの Asset がその ID を実体として指しているなら消さない。**
+      // 上げてもらった実体は要らないのでゴミ箱へ (孤児を残さない。30 日は戻せる)。
+      // **ただし、どれかの Asset がその ID を実体として指しているなら触らない。**
       // 同じ driveFileId で result を再送されると (Shortcut のリトライ)、直前に作った Asset の
-      // 原本を消してしまう。deleteFromDrive はゴミ箱ではなく完全削除なので、ここは慎重に
+      // 原本を消してしまうため
       const referenced =
         existing.storageKey === source.driveFileId ||
         (await prismaInternal.asset.count({ where: { storageKey: source.driveFileId } })) > 0;
       if (!referenced) {
-        await deleteFromDrive(source.driveFileId).catch((e) => console.warn("insta job: 重複ファイルの削除に失敗:", e));
+        await trashDriveFile(source.driveFileId).catch((e) => console.warn("insta job: 重複ファイルの片付けに失敗:", e));
       }
     }
     file = {
@@ -358,7 +385,7 @@ export async function registerStoryFile(
       driveFileId: null,
       filename,
       mimeType,
-      fileSize: buffer.length,
+      fileSize,
       sha256,
       receivedAt: new Date().toISOString(),
     };
@@ -371,16 +398,13 @@ export async function registerStoryFile(
       storageKey = finalized.fileId;
       storageUrl = finalized.webViewLink;
     } else {
-      const uploaded = await uploadToDrive(buffer, filename, mimeType);
+      const uploaded = await uploadToDrive(await getBuffer(), filename, mimeType);
       if (!uploaded) throw new InstaJobError("Drive へのアップロードに失敗しました", 502);
       storageKey = uploaded.fileId;
       storageUrl = uploaded.webViewLink;
     }
 
-    const [tag, sourceEntity] = await Promise.all([
-      findOrCreateEntity("tag", GROUP_TAG_NAME),
-      findOrCreateEntity("source", SOURCE_ENTITY_NAME),
-    ]);
+    const { tag, sourceEntity } = await storyEntities();
     const asset = await createAsset(
       {
         kind,
@@ -395,7 +419,7 @@ export async function registerStoryFile(
         sha256,
         originalFilename: dedupeName,
         mimeType,
-        fileSize: buffer.length,
+        fileSize,
         thumbnailUrl: kind === "image" ? storageUrl : null,
         // story の撮影時刻は取れないので、検知してジョブを作った日 (JST) を使う。
         // canonicalDate は「YYYY-MM-DD の UTC 00:00」で持つ規約 (時刻付きで入れると UTC で切る
@@ -423,7 +447,7 @@ export async function registerStoryFile(
     // サムネイル。画像は原本から、動画は Drive の生成物から (直後は無いことが多い。
     // 取れなければ `pnpm cli:thumbnails --kind=video` で後から埋める)
     try {
-      const src = kind === "image" ? buffer : await fetchDriveThumbnail(storageKey);
+      const src = kind === "image" ? await getBuffer() : await fetchDriveThumbnail(storageKey);
       const r2Url = src ? await generateAndUploadThumbnails(asset.id, src) : null;
       if (r2Url) {
         await withClearance(actor.clearance, (tx) =>
@@ -448,7 +472,7 @@ export async function registerStoryFile(
       driveFileId: storageKey,
       filename,
       mimeType,
-      fileSize: buffer.length,
+      fileSize,
       sha256,
       receivedAt: new Date().toISOString(),
     };
@@ -551,6 +575,9 @@ export interface TickResult {
  * 2 件を送らない)。Pushcut への HTTP はロックの外で行い、失敗したら pending に戻す。
  */
 export async function tickStoryJobs(now: Date = new Date()): Promise<TickResult> {
+  // prismaInternal は DIRECT_URL が無いと DATABASE_URL (app_runtime) に無言で落ち、RLS で 0 行 =
+  // 「送るジョブはありません」と成功報告してしまう。ここは fail-loud にする
+  if (!process.env.DIRECT_URL?.trim()) throw new Error("DIRECT_URL が未設定です (キューは prismaInternal で回す)");
   const expired = await expireStaleJobs(now);
   const configured = isDispatcherConfigured();
   if (!configured) return { expired, dispatchedId: null, dispatch: null, dispatcherConfigured: false };
@@ -589,7 +616,7 @@ export async function tickStoryJobs(now: Date = new Date()): Promise<TickResult>
 async function expireStaleJobs(now: Date): Promise<string[]> {
   const active = await prismaInternal.instaStoryJob.findMany({
     where: { status: { in: [...ACTIVE_STATUSES] } },
-    select: { id: true, status: true, createdAt: true, dispatchedAt: true, startedAt: true },
+    select: { id: true, status: true, createdAt: true, dispatchedAt: true, startedAt: true, updatedAt: true },
   });
   const expired: string[] = [];
   for (const job of active) {
@@ -690,6 +717,21 @@ export async function notifyStoryJobCompleted(job: InstaStoryJobView): Promise<N
 }
 
 // ---------------------------------------------------------------- 内部
+
+/** 毎ファイル 2 回 upsert していたのを 1 度だけに。失敗したら次回また引く */
+let storyEntitiesPromise: Promise<{ tag: { id: string }; sourceEntity: { id: string } }> | null = null;
+function storyEntities() {
+  storyEntitiesPromise ??= Promise.all([
+    findOrCreateEntity("tag", GROUP_TAG_NAME),
+    findOrCreateEntity("source", SOURCE_ENTITY_NAME),
+  ])
+    .then(([tag, sourceEntity]) => ({ tag, sourceEntity }))
+    .catch((e) => {
+      storyEntitiesPromise = null;
+      throw e;
+    });
+  return storyEntitiesPromise;
+}
 
 async function requireJob(tx: TransactionClient, id: string): Promise<Row> {
   const row = await tx.instaStoryJob.findUnique({ where: { id }, select: SELECT });

@@ -363,16 +363,66 @@ export async function createResumableUploadSession(
 }
 
 /**
- * Drive のファイルを消す (ゴミ箱ではなく完全削除)。
+ * Drive のファイルをゴミ箱に入れる (30 日は戻せる。完全削除はしない)。
  *
- * iPad ワーカーが resumable 経路で上げた実体が SHA256 で既存と重複していたときに、
- * フォルダに孤児を残さないための後始末。失敗しても呼び出し側は握りつぶしてよい。
+ * iPad ワーカーが resumable 経路で上げた実体が既存と重複していたときに、フォルダに孤児を
+ * 残さないための後始末。失敗しても呼び出し側は握りつぶしてよい。
  */
+export async function trashDriveFile(fileId: string): Promise<void> {
+  const auth = getAuth();
+  if (!auth) return;
+  const drive = google.drive({ version: "v3", auth: auth as Parameters<typeof google.drive>[0]["auth"] });
+  await drive.files.update({ fileId, requestBody: { trashed: true }, supportsAllDrives: true });
+}
+
+/** Drive のファイルを完全に消す (CLI の片付け用。アプリからは trashDriveFile を使う) */
 export async function deleteFromDrive(fileId: string): Promise<void> {
   const auth = getAuth();
   if (!auth) return;
   const drive = google.drive({ version: "v3", auth: auth as Parameters<typeof google.drive>[0]["auth"] });
   await drive.files.delete({ fileId, supportsAllDrives: true });
+}
+
+export interface DriveFileMeta {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number | null;
+  /** Drive が計算した SHA256 (hex)。大きなファイルを落とさずに重複判定に使える */
+  sha256: string | null;
+  parents: string[];
+  createdTime: Date | null;
+}
+
+/**
+ * ファイルのメタデータだけ読む (実体は落とさない)。無ければ null。
+ * `sha256Checksum` は Drive 側で計算済みの値。resumable 経路の直後でも入っている。
+ */
+export async function getDriveFileMeta(fileId: string): Promise<DriveFileMeta | null> {
+  const auth = getAuth();
+  if (!auth) return null;
+  const drive = google.drive({ version: "v3", auth: auth as Parameters<typeof google.drive>[0]["auth"] });
+  try {
+    const res = await drive.files.get({
+      fileId,
+      fields: "id,name,mimeType,size,sha256Checksum,parents,createdTime",
+      supportsAllDrives: true,
+    });
+    const d = res.data;
+    if (!d.id) return null;
+    return {
+      id: d.id,
+      name: d.name ?? "",
+      mimeType: d.mimeType ?? "",
+      size: d.size != null ? Number(d.size) : null,
+      sha256: d.sha256Checksum ?? null,
+      parents: d.parents ?? [],
+      createdTime: d.createdTime ? new Date(d.createdTime) : null,
+    };
+  } catch (err) {
+    if ((err as { code?: number }).code === 404) return null;
+    throw err;
+  }
 }
 
 /**

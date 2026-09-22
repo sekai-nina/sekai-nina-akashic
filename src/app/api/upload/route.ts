@@ -5,15 +5,7 @@ import { generateAndUploadThumbnails } from "@/lib/thumbnails";
 import { createHash } from "crypto";
 import { NextResponse } from "next/server";
 import type { AssetKind, StorageProvider } from "@prisma/client";
-
-function guessMimeKind(mimeType: string): AssetKind {
-  if (mimeType.startsWith("image/")) return "image";
-  if (mimeType.startsWith("video/")) return "video";
-  if (mimeType.startsWith("audio/")) return "audio";
-  if (mimeType.startsWith("text/")) return "text";
-  if (mimeType.includes("pdf") || mimeType.includes("document")) return "document";
-  return "other";
-}
+import { guessMimeKind } from "@/lib/mime";
 
 export async function POST(request: Request) {
   const session = await auth();

@@ -59,10 +59,13 @@ export async function authenticateApiKey(
 
 /**
  * APIルートで使うヘルパー。認証失敗時はエラーレスポンスを返す。
+ *
+ * `requiredPermission` に配列を渡すと **いずれか 1 つ**を持っていれば通す
+ * (例: `["insta_worker", "write"]` = iPad ワーカーのキーでも通常の write キーでも叩ける)。
  */
 export async function requireApiAuth(
   request: Request,
-  requiredPermission?: string
+  requiredPermission?: string | readonly string[]
 ): Promise<ApiKeyUser | NextResponse> {
   const user = await authenticateApiKey(request);
   if (!user) {
@@ -71,9 +74,15 @@ export async function requireApiAuth(
       { status: 401 }
     );
   }
-  if (requiredPermission && !user.permissions.includes(requiredPermission)) {
+  const required =
+    requiredPermission == null
+      ? []
+      : typeof requiredPermission === "string"
+        ? [requiredPermission]
+        : requiredPermission;
+  if (required.length > 0 && !required.some((p) => user.permissions.includes(p))) {
     return NextResponse.json(
-      { error: `Missing permission: ${requiredPermission}` },
+      { error: `Missing permission: ${required.join(" or ")}` },
       { status: 403 }
     );
   }

@@ -6,7 +6,7 @@ import { getInstaAccount } from "@/lib/domain/insta-account";
 import { LIST_DEFAULT_LIMIT, isInstaDiscordConfigured, listStoryJobs } from "@/lib/domain/insta-jobs";
 import { DISPATCHER_NOT_CONFIGURED_MESSAGE, isDispatcherConfigured } from "@/lib/insta/dispatch";
 import { MAX_ASSET_LINKS } from "@/lib/insta/jobs";
-import { ASSET_KIND_LABELS, INSTA_STORY_JOB_STATUS_LABELS, formatDate } from "@/lib/utils";
+import { ASSET_KIND_LABELS, INSTA_STORY_JOB_STATUS_LABELS, INSTA_WATCH_TIER_LABELS, formatDate } from "@/lib/utils";
 import { AccountForm } from "./account-form";
 import { JobForm } from "./job-form";
 import { RowActions, TargetForm } from "./target-form";
@@ -21,12 +21,6 @@ import { RowActions, TargetForm } from "./target-form";
  */
 export const dynamic = "force-dynamic";
 
-const TIER_LABELS = {
-  hot: "高頻度",
-  normal: "通常",
-  cold: "低頻度",
-} as const;
-
 const JOB_STATUS_CLASS: Record<InstaStoryJobStatus, string> = {
   pending: "text-slate-500",
   dispatched: "text-blue-700",
@@ -35,9 +29,6 @@ const JOB_STATUS_CLASS: Record<InstaStoryJobStatus, string> = {
   failed: "text-red-700",
 };
 
-function formatJst(date: Date): string {
-  return formatDate(date, true);
-}
 
 export default async function AdminInstaPage() {
   const session = await auth();
@@ -94,13 +85,13 @@ export default async function AdminInstaPage() {
           {account.sessionCheckedAt && (
             <div>
               <dt className="inline text-slate-400">最終確認: </dt>
-              <dd className="inline">{formatJst(account.sessionCheckedAt)}</dd>
+              <dd className="inline">{formatDate(account.sessionCheckedAt, true)}</dd>
             </div>
           )}
           {account.lastLoginAt && (
             <div>
               <dt className="inline text-slate-400">最終ログイン: </dt>
-              <dd className="inline">{formatJst(account.lastLoginAt)}</dd>
+              <dd className="inline">{formatDate(account.lastLoginAt, true)}</dd>
             </div>
           )}
           {account.lastError && (
@@ -144,7 +135,7 @@ export default async function AdminInstaPage() {
                   </a>
                   {!t.enabled && <span className="ml-2 text-xs">（停止中）</span>}
                 </td>
-                <td className="px-4 py-2">{TIER_LABELS[t.tier]}</td>
+                <td className="px-4 py-2">{INSTA_WATCH_TIER_LABELS[t.tier]}</td>
                 <td className="px-4 py-2">
                   {t.effectiveMinutes} 分
                   {t.intervalMinutes == null && (
@@ -153,7 +144,7 @@ export default async function AdminInstaPage() {
                 </td>
                 <td className="px-4 py-2 text-slate-500">{t.note}</td>
                 <td className="px-4 py-2 text-xs text-slate-400">
-                  {formatJst(t.updatedAt)}
+                  {formatDate(t.updatedAt, true)}
                   {t.updatedByName && <> / {t.updatedByName}</>}
                 </td>
                 <td className="px-4 py-2 text-right">
@@ -226,11 +217,11 @@ export default async function AdminInstaPage() {
                     </a>
                   </td>
                   <td className="px-4 py-2 text-xs text-slate-500 whitespace-nowrap">
-                    {formatJst(j.createdAt)}
+                    {formatDate(j.createdAt, true)}
                     {j.requestedByName && <span className="block text-slate-400">{j.requestedByName}</span>}
                   </td>
                   <td className="px-4 py-2 text-xs text-slate-500 whitespace-nowrap">
-                    {j.completedAt ? formatJst(j.completedAt) : "—"}
+                    {j.completedAt ? formatDate(j.completedAt, true) : "—"}
                   </td>
                   <td className="px-4 py-2 text-xs">
                     {j.result.files.length === 0 ? (

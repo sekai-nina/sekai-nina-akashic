@@ -41,7 +41,7 @@ insta-watch (sekai)                         Akashic (Vercel)                    
 
 - ジョブの状態: `pending` → `dispatched` (Pushcut に送った) → `processing` (iPad が受け取った) → `completed` | `failed`
 - **iPad は 1 台**なので同時に走るのは 1 件だけ。complete / error / 失効のたびに次の pending を送る
-- 失効: `dispatched` のまま 10 分 (iPad が受け取れなかった)、`processing` のまま 20 分 (Shortcut が途中で止まった)、
+- 失効: `dispatched` のまま 10 分 (iPad が受け取れなかった)、`processing` で最後の報告から 20 分 (Shortcut が途中で止まった)、
   `pending` のまま 24 時間 (story が消える)。`/api/cron/insta-jobs` (10 分ごと) でも回収し、取り残された pending を送り直す
 - 動画は Vercel の本文上限 (4.5MB) を超えるので、**iPad が Google Drive に直接 PUT** する
   (`upload-url` → PUT → `result`)。4MB 以下なら `result` に multipart で直接送ってもよい
@@ -303,7 +303,7 @@ curl -s -X POST $API/<JOB>/result -H "$H" -H 'Content-Type: application/json' \
 |---|---|
 | `pending` のまま | Pushcut 未設定 (`/admin/insta` に警告) / 前のジョブが `dispatched` `processing` のまま (失効を待つか「キューを進める」) / `error` 欄に `送信に失敗: Pushcut 401` (キー違い) `404` (Shortcut 名・サーバ名違い) `502` `504` (iPad が Automation Server として繋がっていない) |
 | `dispatched` のまま 10 分で失敗 | Pushcut は受けたが Shortcut が start を叩けていない。iPad で Shortcut を手で走らせて `start` の応答を見る (401 ならキー、404 なら URL) |
-| `processing` のまま 20 分で失敗 | Shortcut が途中で止まった。iPad の Shortcuts アプリに残るエラーを見る。`415` は拡張子が画像・動画でない、`413` は multipart に 4MB 超を送った、`502` は Drive から読めない (PUT が完了していない) |
+| `processing` で報告が 20 分途絶えて失敗 | Shortcut が途中で止まった。iPad の Shortcuts アプリに残るエラーを見る。`415` は拡張子が画像・動画でない、`413` は multipart に 4MB 超を送った、`502` は Drive から読めない (PUT が完了していない) |
 | `failed`「ファイルが 1 件も届きませんでした」 | Instagram Download が何も保存しなかったか、フォルダ / 時刻のフィルタが合っていない。保存先フォルダの設定と手順 9〜10 を見直す |
 | `completed` だが Discord に来ない | `DISCORD_INSTA_WEBHOOK_URL` 未設定か送信失敗 (`error` 欄に `Discord 通知に失敗`)。登録はできているので Asset は /inbox にある。動画は変換 (ffmpeg) してから送るので、完了から届くまで 1 本あたり数十秒かかる |
 
@@ -317,7 +317,9 @@ curl -s -X POST $API/<JOB>/result -H "$H" -H 'Content-Type: application/json' \
 - サーバは story の URL を **一切 fetch しない** (SSRF の口が無い)。サーバが外に出るのは Pushcut・Drive・Discord だけで、
   宛先はすべて固定
 - 受け取るファイルは MIME (拡張子) を画像・動画に限り、multipart は 4MB、Drive 経路は 200MB で切る。
-  ファイル名はパス区切りと制御文字を落として 120 字に詰める
+  ファイル名はパス区切りと制御文字を落として 120 字に詰める。Drive 経路の `driveFileId` は
+  **このアプリのフォルダ直下でジョブ開始後に作られたファイル**しか受け付けない (任意の Drive ファイルを
+  公開・登録させる口にしない)
 - `jobId` を推測しても、キー無しでは何もできない。同じジョブへの二重アップロードは SHA256 で `duplicate` になり
   Asset は増えない。`driveFileId` に既存 Asset の実体を指定されても、参照されている実体は消さない
 - Pushcut の API キーはサーバ側の環境変数にだけ置く。iPad から Akashic を叩く経路にも Pushcut のキーは不要
