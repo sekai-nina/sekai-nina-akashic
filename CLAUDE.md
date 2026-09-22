@@ -100,7 +100,7 @@ withSession({ id, clearance }, tx => …)    // 上記 + app.user_id — Dossier
 
 ### 保護テーブル
 
-`Asset`, `AssetText`, `AssetEntity`, `AssetRelation`, `SourceRecord`, `Annotation`, `Testimonial`, `Dossier`, `DossierItem`, `DossierPlaceCandidate`, `Place`, `RepoCollection`, `RepoTweet`, `RepoTweetMedia`, `Lens`, `DataSource`, `Coverage`, `LensItemCheck`, `ArticleSource`, `MeetGreet`, `InstaWatchTarget`, `InstaAccount`, `SketchSetting`, `Anniversary`, `XMentionWatch`, `XMentionSetting`, `XMentionHit`, `Live`, `LivePerformance`, `LiveSong`, `TiktokWatchTarget`, `TiktokVideo`
+`Asset`, `AssetText`, `AssetEntity`, `AssetRelation`, `SourceRecord`, `Annotation`, `Testimonial`, `Dossier`, `DossierItem`, `DossierPlaceCandidate`, `Place`, `RepoCollection`, `RepoTweet`, `RepoTweetMedia`, `Lens`, `DataSource`, `Coverage`, `LensItemCheck`, `ArticleSource`, `MeetGreet`, `InstaWatchTarget`, `InstaAccount`, `InstaStoryJob`, `SketchSetting`, `Anniversary`, `XMentionWatch`, `XMentionSetting`, `XMentionHit`, `Live`, `LivePerformance`, `LiveSong`, `TiktokWatchTarget`, `TiktokVideo`
 
 RLS は `clearance_rank(classification::text) <= clearance_rank(current_setting('app.clearance', true))`。`clearance_rank()` は未知/未設定を `-1` にして **fail-closed**。全テーブル `ENABLE` + `FORCE ROW LEVEL SECURITY`。
 
@@ -109,6 +109,7 @@ RLS は `clearance_rank(classification::text) <= clearance_rank(current_setting(
 - Supabase Auth（`@supabase/ssr`）。招待制。**MFA 全ユーザー必須**（`src/middleware.ts` が未登録/未検証をリダイレクト）
 - `auth()` は `React.cache` でリクエスト内 1 回、DB 引きは 5 分キャッシュ
 - 外部システム向けは API キー認証（`Authorization: Bearer ak_<64hex>`）。`requireApiAuth(request, "read"|"write")` は **`ApiKeyUser | NextResponse` を返すので分岐が必須**
+- iPad の story ワーカー（`/api/v1/insta/jobs/*`）は permission `insta_worker` だけのキーで叩く（read / write を持たせない）。ジョブの状態遷移は `src/lib/insta/jobs.ts`（純粋）、Pushcut への送信は `src/lib/insta/dispatch.ts` に閉じる → `docs/ipad-instagram-worker.md`
 - AI アシスタント向けは MCP サーバー（`POST /api/mcp`）。認証は同じ API キーで、**キーの `permissions` によって `tools/list` に出るツールが変わる** → `docs/mcp.md`
 
 ## 構成
@@ -183,7 +184,7 @@ src/
 
 - **Web: Vercel**。`vercel.json` で **region `hnd1` 固定**（Supabase ap-northeast-1 とのコロケーション。既定の iad1 だとページ読み込みが 5-8 秒かかった）
 - **CI**: `.github/workflows/ci.yml` が push to `main` で `pnpm typecheck` を回すだけ（Discord bot は撤去済み）
-- **Vercel Cron**: `vercel.json` の `*/15 * * * *` が `GET /api/cron/status`、`0 3 * * *`（UTC = 12:00 JST）が `GET /api/cron/costs`、`0 0 * * *`（09:00 JST）が `GET /api/cron/mentions` を呼ぶ（すべて `CRON_SECRET` 必須。未設定なら 503 で何もしない。認証は `src/lib/cron/auth.ts`）
+- **Vercel Cron**: `vercel.json` の `*/15 * * * *` が `GET /api/cron/status`、`*/10 * * * *` が `GET /api/cron/insta-jobs`（story ジョブの失効回収と再送）、`0 3 * * *`（UTC = 12:00 JST）が `GET /api/cron/costs`、`0 0 * * *`（09:00 JST）が `GET /api/cron/mentions` を呼ぶ（すべて `CRON_SECRET` 必須。未設定なら 503 で何もしない。認証は `src/lib/cron/auth.ts`）
 - `instrumentation.ts` が起動時に Prisma を事前接続（pooler の ~800ms コールドコネクト回避）
 
 ## ドキュメント
@@ -196,6 +197,7 @@ src/
 | `docs/coverage-design.md` | 収集カバレッジ設計書 |
 | `docs/status-design.md` | パイプライン監視（`/status`・ハートビート API・Cron 評価・Discord 通知）設計書 |
 | `docs/mentions-design.md` | X 言及監視（`/mentions`・日次 cron・除外ユーザー・Discord 通知）設計書 |
+| `docs/ipad-instagram-worker.md` | Instagram story を iPad（Pushcut + Shortcuts）で取る仕組みと、ラッパー Shortcut の作り方 |
 | `docs/tiktok-design.md` | TikTok 監視（`/admin/tiktok`・tiktok-watch bot・台帳 API・Discord 通知）設計書 |
 | `docs/costs-design.md` | LLM コスト管理（`/costs`・利用量の自己申告・プロバイダ取り込み・残クレジット判定）設計書 |
 | `docs/security.md` / `docs/security-admin.md` | 非エンジニア / 管理者向け |

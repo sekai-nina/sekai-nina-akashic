@@ -7,6 +7,7 @@ import {
   type AnnouncementKind,
   type ArticleTemplate,
   type ArticleType,
+  type InstaStoryJobStatus,
   type JobRunStatus,
   type LlmProvider,
   type LlmUsageSource,
@@ -236,6 +237,15 @@ export const ANNOUNCEMENT_KIND_LABELS: Record<AnnouncementKind, string> = {
   feature: "機能",
   article: "記事",
   info: "運営",
+};
+
+/** story ジョブ (#178) の状態。/admin/insta の一覧に出す */
+export const INSTA_STORY_JOB_STATUS_LABELS: Record<InstaStoryJobStatus, string> = {
+  pending: "待機",
+  dispatched: "送信済み",
+  processing: "iPad で処理中",
+  completed: "完了",
+  failed: "失敗",
 };
 
 /**

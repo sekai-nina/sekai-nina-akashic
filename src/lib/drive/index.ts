@@ -345,6 +345,9 @@ export async function createResumableUploadSession(
       body: JSON.stringify({
         name: filename,
         parents: [folderId],
+        // PUT 側が Content-Type を付け忘れても (Shortcuts は octet-stream で送ることがある)
+        // Drive 上の MIME が正しくなるように、メタデータにも入れておく
+        mimeType,
       }),
     }
   );
@@ -357,6 +360,19 @@ export async function createResumableUploadSession(
   }
 
   return res.headers.get("location");
+}
+
+/**
+ * Drive のファイルを消す (ゴミ箱ではなく完全削除)。
+ *
+ * iPad ワーカーが resumable 経路で上げた実体が SHA256 で既存と重複していたときに、
+ * フォルダに孤児を残さないための後始末。失敗しても呼び出し側は握りつぶしてよい。
+ */
+export async function deleteFromDrive(fileId: string): Promise<void> {
+  const auth = getAuth();
+  if (!auth) return;
+  const drive = google.drive({ version: "v3", auth: auth as Parameters<typeof google.drive>[0]["auth"] });
+  await drive.files.delete({ fileId, supportsAllDrives: true });
 }
 
 /**

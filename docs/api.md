@@ -18,7 +18,7 @@ http://<host>:3000/api/v1
 Authorization: Bearer ak_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
-APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キーは発行時に一度だけ表示され、以降は復元できない。
+APIキーは `pnpm cli:keygen <user-email> <key-name> [permissions]` で発行する。キーは発行時に一度だけ表示され、以降は復元できない。
 
 ### パーミッション
 
@@ -26,6 +26,7 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 
 - `read`: GET系のエンドポイント
 - `write`: POST / PATCH / ファイルアップロード
+- `insta_worker`: iPad の story ワーカー専用（`/insta/jobs/:id/start` 等の報告と、自分のジョブの参照だけ）。`pnpm cli:keygen <email> "ipad-insta-worker" insta_worker` で **read / write を持たないキー**を作って iPad に置く。permission はルートを絞るだけで RLS の範囲は持ち主のクリアランスのままなので、**clearance が internal の専用ユーザー**に発行する。なお `GET /insta/targets` `/insta/account` `/ai-status` は「キーが有効なら誰でも読める」設計なので、このキーからも読める
 
 ### エラーレスポンス
 
@@ -82,6 +83,16 @@ APIキーは `pnpm cli:keygen <user-email> <key-name>` で発行する。キー�
 | PATCH | `/articles/:shortId` | write | 記事の部分更新（`updatedAt` 必須の楽観ロック） |
 | POST | `/articles/:shortId/sources/:sourceId/apply` | write | 紐づけを反映済みにする（公開判断。internal 以下のみ） |
 | POST | `/jobs/:key/runs` | write | ハートビート（bot / ワーカーのジョブが実行結果を報告する） |
+| GET | `/insta/targets` | 有効なキー | insta-watch が見張るハンドルの一覧 |
+| GET / POST | `/insta/account` | 有効なキー / write | story 取得に使うアカウントの状態 |
+| GET | `/insta/jobs` | read | story ジョブ一覧（iPad ワーカー） |
+| POST | `/insta/jobs` | write | story ジョブ作成（空いていれば即 Pushcut で iPad に送る） |
+| GET | `/insta/jobs/:id` | read or insta_worker | story ジョブ詳細 |
+| POST | `/insta/jobs/:id/start` | insta_worker or write | iPad が受け取った報告（→ processing） |
+| POST | `/insta/jobs/:id/upload-url` | insta_worker or write | Drive へ直接 PUT する URL を発行 |
+| POST | `/insta/jobs/:id/result` | insta_worker or write | 落としたファイル 1 件を登録（JSON か multipart） |
+| POST | `/insta/jobs/:id/complete` | insta_worker or write | 完了（Discord 通知・次のジョブを送る） |
+| POST | `/insta/jobs/:id/error` | insta_worker or write | 失敗の報告 |
 | POST | `/usage` | write | LLM の利用量の自己申告（トークン数を送ると akashic が金額に換算する） |
 | GET | `/meetgreets` | read | ミーグリ（記事ワークフロー）一覧と進み具合 |
 | POST | `/meetgreets` | write | ミーグリ作成（ドシエと X レポ収集を自動作成し収集を 1 回実行、素材候補を返す） |
@@ -1722,6 +1733,132 @@ bot がセッションの生死を報告する（**write 権限**）。`/admin/i
 | `valid` | ○ | セッションが使えるか |
 | `error` | | 使えないときの理由（300 字まで。人が読む用） |
 | `loggedInAt` | | login し直した時刻（ISO 8601） |
+
+## story ジョブ（iPad ワーカー）
+
+story の実体はサーバから自動取得できない（内部 API は 429、`/stories/` は `scraping_warning` にリダイレクト）。
+そこで **iPad をワーカーにする**: Akashic がジョブを持ち、Pushcut Automation Server で iPad 上のラッパー Shortcut を
+起こし、Shortcut が RoutineHub の「Instagram Download」で落としたファイルを Akashic に返す。
+iPad 側の作り方は [docs/ipad-instagram-worker.md](./ipad-instagram-worker.md)。
+
+状態は `pending`（作った）→ `dispatched`（Pushcut に送った）→ `processing`（iPad が受け取った）→ `completed` | `failed`。
+**iPad は 1 台**なので同時に走るのは 1 件だけで、complete / error / 失効のたびに次の `pending` を送る。
+`dispatched` のまま 10 分・`processing` のまま 20 分・`pending` のまま 24 時間で失効（`failed`）。
+失効の回収と再送は `/api/cron/insta-jobs`（10 分ごと・`CRON_SECRET`）でも行う。
+
+必要な環境変数: `PUSHCUT_API_KEY` / `PUSHCUT_SHORTCUT_NAME`（任意で `PUSHCUT_SERVER_ID`）、通知は `DISCORD_INSTA_WEBHOOK_URL`。
+
+### POST /insta/jobs
+
+insta-watch が story を検知したら叩く（**write 権限**）。`url` は
+`https://www.instagram.com/stories/<handle>/` または `.../stories/<handle>/<id>/` だけ受け付ける
+（ハンドルだけでも可。**instagram.com の story 以外は 400** — iPad に任意の URL を開かせない）。
+
+```json
+{ "url": "https://www.instagram.com/stories/hinatazaka46/" }
+```
+
+同じハンドルのジョブが進行中ならそれを返す（200・`existing: true`。それが `pending` のまま送れていなければ、
+この呼び出しを機に送り直す）。新規なら 201。キーの持ち主の clearance が `internal` 未満なら 403。
+
+```json
+{
+  "id": "cmg…",
+  "handle": "hinatazaka46",
+  "url": "https://www.instagram.com/stories/hinatazaka46/",
+  "status": "dispatched",
+  "result": { "files": [] },
+  "error": null,
+  "createdAt": "2026-09-22T00:00:00.000Z",
+  "dispatchedAt": "2026-09-22T00:00:01.000Z",
+  "startedAt": null,
+  "completedAt": null,
+  "existing": false,
+  "dispatch": { "ok": true, "dispatcher": "pushcut" }
+}
+```
+
+`dispatch` は作成直後に送った結果。送る番でなければ（前のジョブが走っている）`null`、Pushcut が
+未設定・失敗なら `{ "ok": false, "error": "…" }` でジョブは `pending` のまま残る。
+
+### GET /insta/jobs
+
+一覧（新しい順）。クエリ `status` / `handle` / `limit`（既定 30・最大 100）。`read` 権限（ワーカーのキーでは読めない。
+ワーカーは Pushcut から受け取った `jobId` で `GET /insta/jobs/:id` を見る）。
+
+```json
+{ "jobs": [ { "id": "…", "handle": "…", "status": "completed", "result": { "files": [ … ] }, … } ] }
+```
+
+### GET /insta/jobs/:id
+
+詳細（`read` か `insta_worker`）。`result.files[]` の各要素:
+
+| フィールド | 内容 |
+|---|---|
+| `assetId` | 登録した（または既にあった）Asset |
+| `duplicate` | 同じ実体が既にあった（SHA256）。新しい Asset は作っていない |
+| `driveFileId` | Drive のファイル ID（duplicate のときは null） |
+| `filename` / `mimeType` / `fileSize` / `sha256` | 受け取った実体 |
+| `receivedAt` | 受け取った時刻 |
+
+### POST /insta/jobs/:id/start
+
+iPad のラッパー Shortcut がジョブを受け取った報告。`dispatched` → `processing`。冪等（processing なら何もしない）。
+`pending` からも通す（Pushcut を経ずに手で Shortcut を走らせたとき）。終わったジョブには 409。
+
+### POST /insta/jobs/:id/upload-url
+
+Google Drive に **直接 PUT する URL** を発行する。Vercel の本文上限（4.5MB）を避ける経路で、動画はこちら。
+
+```json
+{ "filename": "story.mp4", "mimeType": "video/mp4" }
+```
+```json
+{ "uploadUrl": "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=…", "mimeType": "video/mp4" }
+```
+
+`uploadUrl` にファイルをそのまま `PUT` すると Drive が `{ "id": "…", "name": "…" }` を返す。
+その `id` を `result` に `driveFileId` として送る。URL は Drive のセッションで守られている（Authorization 不要・1 回きり）。
+`mimeType` は `image/jpeg` `image/png` `image/webp` `image/heic` `image/heif` `video/mp4` `video/quicktime` のいずれか
+（空や `application/octet-stream` なら拡張子 jpg / jpeg / png / webp / heic / heif / mp4 / m4v / mov から補う。それ以外は 415）。
+
+### POST /insta/jobs/:id/result
+
+落としたファイル **1 件** を登録する。ファイルの数だけ呼び、最後に `complete` を叩く。本文は 2 通り:
+
+- `application/json` — `upload-url` で Drive に PUT した後
+
+  ```json
+  { "driveFileId": "1AbC…", "filename": "story.mp4", "mimeType": "video/mp4", "fileSize": 6712345 }
+  ```
+
+- `multipart/form-data` — `file` フィールド。**4MB まで**（超えると 413。動画は上の経路へ）
+
+1 件ごとに Asset を作る（kind は MIME から、`status=inbox`、`sourceType=web`、`canonicalDate` はジョブ作成日（JST の日付のみ）、
+タグ「日向坂46」+ source「日向坂46 Instagram」+ story URL の SourceRecord。**人物は付けない**ので /inbox で人が付ける）。
+同じ実体が既にあれば新しい Asset は作らず `duplicate: true` で記録する（Drive に上げた実体は、どの Asset からも
+参照されていなければ消す。同じ `driveFileId` を再送しても直前に作った Asset の原本は消えない）。既存の Asset が
+`internal` より上位なら 403。応答は 201 でジョブ全体 + 今回の `file`。
+
+### POST /insta/jobs/:id/complete
+
+完了の報告。ファイルが 1 件も届いていなければ `failed`（「ファイルが 1 件も届きませんでした」）。
+`completed` になったら次の `pending` ジョブを iPad に送り、続けて `DISCORD_INSTA_WEBHOOK_URL` に新規ファイルを添付して
+1 メッセージ流す（8MiB・10 件まで。超えたぶんは本文の Akashic リンクから辿る）。
+既に `completed` なら 200 を返すだけ（`notified: false`）。`failed` には 409。
+
+```json
+{ "id": "…", "status": "completed", "notified": true, "notifyError": null, "nextDispatchedId": null, … }
+```
+
+### POST /insta/jobs/:id/error
+
+失敗の報告。`failed` にして次の `pending` を送る。本文は省略可（500 字を超えるぶんは切る）。終わったジョブには 409。
+
+```json
+{ "error": "Instagram Download が何も保存しなかった" }
+```
 
 ## TikTok の監視 (#179)
 

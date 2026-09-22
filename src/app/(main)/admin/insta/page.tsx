@@ -1,8 +1,14 @@
+import type { InstaStoryJobStatus } from "@prisma/client";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { listInstaTargets, TIER_DEFAULT_MINUTES } from "@/lib/domain/insta-targets";
 import { getInstaAccount } from "@/lib/domain/insta-account";
+import { LIST_DEFAULT_LIMIT, isInstaDiscordConfigured, listStoryJobs } from "@/lib/domain/insta-jobs";
+import { DISPATCHER_NOT_CONFIGURED_MESSAGE, isDispatcherConfigured } from "@/lib/insta/dispatch";
+import { MAX_ASSET_LINKS } from "@/lib/insta/jobs";
+import { ASSET_KIND_LABELS, INSTA_STORY_JOB_STATUS_LABELS, formatDate } from "@/lib/utils";
 import { AccountForm } from "./account-form";
+import { JobForm } from "./job-form";
 import { RowActions, TargetForm } from "./target-form";
 
 /**
@@ -21,11 +27,16 @@ const TIER_LABELS = {
   cold: "低頻度",
 } as const;
 
+const JOB_STATUS_CLASS: Record<InstaStoryJobStatus, string> = {
+  pending: "text-slate-500",
+  dispatched: "text-blue-700",
+  processing: "text-blue-700 font-medium",
+  completed: "text-emerald-700",
+  failed: "text-red-700",
+};
+
 function formatJst(date: Date): string {
-  return new Intl.DateTimeFormat("ja-JP", {
-    timeZone: "Asia/Tokyo",
-    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
-  }).format(date);
+  return formatDate(date, true);
 }
 
 export default async function AdminInstaPage() {
@@ -33,11 +44,14 @@ export default async function AdminInstaPage() {
   if (!session?.user) notFound();
   if (session.user.role !== "admin") notFound();
 
-  const [targets, account] = await Promise.all([
+  const [targets, account, jobs] = await Promise.all([
     listInstaTargets(session.user.clearance),
     getInstaAccount(session.user.clearance),
+    listStoryJobs({ limit: LIST_DEFAULT_LIMIT }, session.user.clearance),
   ]);
   const enabled = targets.filter((t) => t.enabled);
+  const dispatcherConfigured = isDispatcherConfigured();
+  const discordConfigured = isInstaDiscordConfigured();
 
   return (
     <div className="max-w-3xl">
@@ -155,6 +169,95 @@ export default async function AdminInstaPage() {
         有効 {enabled.length} 件 / 全 {targets.length} 件。既定の間隔は
         高頻度 {TIER_DEFAULT_MINUTES.hot} 分・通常 {TIER_DEFAULT_MINUTES.normal} 分・
         低頻度 {TIER_DEFAULT_MINUTES.cold} 分です。
+      </p>
+
+      <div className="mt-10 mb-4">
+        <h2 className="text-lg font-semibold text-slate-900">story のジョブ（iPad ワーカー）</h2>
+        <p className="text-slate-500 text-sm mt-1">
+          story の実体はサーバから取れないので、検知したら iPad に Pushcut で知らせ、iPad 上の
+          Shortcut が落として Akashic に返します。手順は
+          <span className="font-mono"> docs/ipad-instagram-worker.md</span>。
+          {!dispatcherConfigured && (
+            <span className="block mt-1 text-amber-700 font-medium">
+              {DISPATCHER_NOT_CONFIGURED_MESSAGE}。ジョブは作れますが送られません。
+            </span>
+          )}
+          {!discordConfigured && (
+            <span className="block mt-1 text-amber-700">
+              DISCORD_INSTA_WEBHOOK_URL が未設定なので、完了しても Discord には流れません。
+            </span>
+          )}
+        </p>
+      </div>
+
+      <JobForm />
+
+      <div className="mt-6 border border-slate-200 rounded-lg overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-slate-500 text-xs">
+            <tr>
+              <th className="text-left font-medium px-4 py-2">状態</th>
+              <th className="text-left font-medium px-4 py-2">ハンドル</th>
+              <th className="text-left font-medium px-4 py-2">作成</th>
+              <th className="text-left font-medium px-4 py-2">完了</th>
+              <th className="text-left font-medium px-4 py-2">ファイル</th>
+              <th className="text-left font-medium px-4 py-2">備考</th>
+            </tr>
+          </thead>
+          <tbody>
+            {jobs.length === 0 && (
+              <tr>
+                <td colSpan={6} className="px-4 py-6 text-center text-slate-400">
+                  まだジョブはありません
+                </td>
+              </tr>
+            )}
+            {jobs.map((j) => {
+              const fresh = j.result.files.filter((f) => !f.duplicate);
+              const dup = j.result.files.length - fresh.length;
+              return (
+                <tr key={j.id} className="border-t border-slate-100 align-top">
+                  <td className="px-4 py-2 whitespace-nowrap">
+                    <span className={JOB_STATUS_CLASS[j.status]}>{INSTA_STORY_JOB_STATUS_LABELS[j.status]}</span>
+                  </td>
+                  <td className="px-4 py-2 font-mono">
+                    <a href={j.url} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                      {j.handle}
+                    </a>
+                  </td>
+                  <td className="px-4 py-2 text-xs text-slate-500 whitespace-nowrap">
+                    {formatJst(j.createdAt)}
+                    {j.requestedByName && <span className="block text-slate-400">{j.requestedByName}</span>}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-slate-500 whitespace-nowrap">
+                    {j.completedAt ? formatJst(j.completedAt) : "—"}
+                  </td>
+                  <td className="px-4 py-2 text-xs">
+                    {j.result.files.length === 0 ? (
+                      <span className="text-slate-400">—</span>
+                    ) : (
+                      <span className="flex flex-wrap gap-x-2 gap-y-0.5">
+                        {fresh.slice(0, MAX_ASSET_LINKS).map((f) => (
+                          <a key={f.assetId} href={`/assets/${f.assetId}`} className="text-blue-700 hover:underline">
+                            {ASSET_KIND_LABELS[f.mimeType.startsWith("video/") ? "video" : "image"]}
+                          </a>
+                        ))}
+                        {fresh.length > MAX_ASSET_LINKS && (
+                          <span className="text-slate-400">…他 {fresh.length - MAX_ASSET_LINKS} 件</span>
+                        )}
+                        {dup > 0 && <span className="text-slate-400">登録済み {dup} 件</span>}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-red-700 max-w-xs break-words">{j.error}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-slate-400 mt-3">
+        直近 {LIST_DEFAULT_LIMIT} 件。API からは GET /api/v1/insta/jobs で見られます。
       </p>
     </div>
   );

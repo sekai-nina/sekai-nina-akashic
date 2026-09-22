@@ -15,6 +15,10 @@
     {
       "path": "/api/cron/mentions",
       "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/cron/insta-jobs",
+      "schedule": "*/10 * * * *"
     }
   ]
 }
