@@ -240,7 +240,7 @@ export const ANNOUNCEMENT_KIND_LABELS: Record<AnnouncementKind, string> = {
   info: "運営",
 };
 
-/** insta-watch の巡回頻度帯。/admin/insta の一覧とフォームに出す */
+/** insta-watch の巡回頻度帯。/admin/insta の一覧に出す (フォームは既定の分数込みの文言を別に持つ) */
 export const INSTA_WATCH_TIER_LABELS: Record<InstaWatchTier, string> = {
   hot: "高頻度",
   normal: "通常",

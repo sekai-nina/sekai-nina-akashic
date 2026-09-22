@@ -145,6 +145,7 @@ export async function createStoryJob(
   input: { url: string },
   actor: { id: string | null; clearance: string },
 ): Promise<CreateJobResult> {
+  assertInternalDb();
   const parsed = parseStoryUrl(input.url);
   // RLS の INSERT ポリシーに当たると素の Prisma エラー (500) になるので、先にアプリ層で 403 にする
   try {
@@ -255,6 +256,8 @@ export async function createStoryUploadUrl(
   await withClearance(clearance, async (tx) => {
     const row = await requireJob(tx, id);
     await ensureProcessing(tx, row);
+    // 大きい動画の PUT が長引いても「報告が途絶えた」と見なさないよう、ここも最終活動として刻む
+    await tx.$executeRaw`UPDATE "InstaStoryJob" SET "updatedAt" = NOW() WHERE "id" = ${id}`;
   });
   const mimeType = resolveMimeType(input.mimeType, input.filename);
   if (!isDriveEnabled()) throw new InstaJobError("Google Drive が未設定です", 503);
@@ -286,6 +289,7 @@ export async function registerStoryFile(
   source: StoryFileSource,
   actor: { id: string; clearance: string },
 ): Promise<RegisterFileResult> {
+  assertInternalDb();
   const job = await withClearance(actor.clearance, async (tx) => {
     const row = await requireJob(tx, id);
     return ensureProcessing(tx, row);
@@ -308,6 +312,7 @@ export async function registerStoryFile(
     return (cachedBuffer = downloaded);
   };
 
+  if (!isDriveEnabled()) throw new InstaJobError("Google Drive が未設定です", 503);
   if (source.kind === "buffer") {
     if (source.buffer.length > MAX_DIRECT_UPLOAD_BYTES) {
       throw new InstaJobError(DIRECT_UPLOAD_TOO_LARGE_MESSAGE, 413);
@@ -315,20 +320,30 @@ export async function registerStoryFile(
     fileSize = source.buffer.length;
     sha256 = createHash("sha256").update(source.buffer).digest("hex");
   } else {
+    // 申告サイズで先に弾く (Drive を見に行く前)
+    if (source.fileSize != null && source.fileSize > MAX_FILE_BYTES) {
+      throw new InstaJobError("ファイルが大きすぎます", 413);
+    }
     const meta = await getDriveFileMeta(source.driveFileId);
     if (!meta) throw new InstaJobError("Drive にそのファイルがありません (upload-url への PUT が終わっていない?)", 502);
     // upload-url で発行した先 (このアプリのフォルダ、このジョブの後に作られたもの) しか信用しない。
     // 任意の driveFileId を渡されて、別のファイルを公開・登録する口にしない
     const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID ?? "";
     const since = (job.startedAt ?? job.createdAt).getTime() - 60_000;
-    if (!meta.parents.includes(folderId) || !meta.createdTime || meta.createdTime.getTime() < since) {
+    if (
+      meta.trashed ||
+      !meta.parents.includes(folderId) ||
+      !meta.createdTime ||
+      meta.createdTime.getTime() < since
+    ) {
       throw new InstaJobError("そのファイルは upload-url で発行した先のものではありません");
     }
-    fileSize = meta.size ?? 0;
-    if (meta.sha256) {
+    // サイズは本体を読む前に判定する (本体を読むのは Drive が SHA256 をまだ出していないときだけ)
+    if (meta.size != null && meta.size > MAX_FILE_BYTES) throw new InstaJobError("ファイルが大きすぎます", 413);
+    if (meta.sha256 && meta.size != null) {
       sha256 = meta.sha256.toLowerCase();
+      fileSize = meta.size;
     } else {
-      // まれに Drive が計算前のことがあるので本体から出す
       const buf = await getBuffer();
       fileSize = buf.length;
       sha256 = createHash("sha256").update(buf).digest("hex");
@@ -390,7 +405,6 @@ export async function registerStoryFile(
       receivedAt: new Date().toISOString(),
     };
   } else {
-    if (!isDriveEnabled()) throw new InstaJobError("Google Drive が未設定です", 503);
     let storageKey: string;
     let storageUrl: string;
     if (source.kind === "drive") {
@@ -405,7 +419,8 @@ export async function registerStoryFile(
     }
 
     const { tag, sourceEntity } = await storyEntities();
-    const asset = await createAsset(
+    // Entity が消されていた (merge-entities 等) ときは FK で落ちるので、メモを捨てて 1 回だけ引き直す
+    const asset = await createAssetWithStoryEntities(async () => createAsset(
       {
         kind,
         classification: "internal",
@@ -442,7 +457,7 @@ export async function registerStoryFile(
       },
       actor.id,
       actor.clearance,
-    );
+    ));
 
     // サムネイル。画像は原本から、動画は Drive の生成物から (直後は無いことが多い。
     // 取れなければ `pnpm cli:thumbnails --kind=video` で後から埋める)
@@ -506,6 +521,7 @@ export interface CompleteJobResult {
  * 応答を待っているだけなので、待たせない。
  */
 export async function completeStoryJob(id: string, clearance: string): Promise<CompleteJobResult> {
+  assertInternalDb();
   let alreadyCompleted = false;
   const job = await withClearance(clearance, async (tx) => {
     const row = await requireJob(tx, id);
@@ -575,9 +591,7 @@ export interface TickResult {
  * 2 件を送らない)。Pushcut への HTTP はロックの外で行い、失敗したら pending に戻す。
  */
 export async function tickStoryJobs(now: Date = new Date()): Promise<TickResult> {
-  // prismaInternal は DIRECT_URL が無いと DATABASE_URL (app_runtime) に無言で落ち、RLS で 0 行 =
-  // 「送るジョブはありません」と成功報告してしまう。ここは fail-loud にする
-  if (!process.env.DIRECT_URL?.trim()) throw new Error("DIRECT_URL が未設定です (キューは prismaInternal で回す)");
+  assertInternalDb();
   const expired = await expireStaleJobs(now);
   const configured = isDispatcherConfigured();
   if (!configured) return { expired, dispatchedId: null, dispatch: null, dispatcherConfigured: false };
@@ -731,6 +745,30 @@ function storyEntities() {
       throw e;
     });
   return storyEntitiesPromise;
+}
+
+/**
+ * メモした Entity が消されていると (`pnpm cli:merge-entities` 等) createAsset が FK 違反 (P2003) で落ちる。
+ * そのときはメモを捨てて呼び出し側にもう 1 度組み立てさせる
+ */
+async function createAssetWithStoryEntities<T>(create: () => Promise<T>): Promise<T> {
+  try {
+    return await create();
+  } catch (e) {
+    if ((e as { code?: string }).code === "P2003" && storyEntitiesPromise) {
+      storyEntitiesPromise = null;
+      return create();
+    }
+    throw e;
+  }
+}
+
+/**
+ * prismaInternal は DIRECT_URL が無いと DATABASE_URL (app_runtime) に無言で落ち、RLS で 0 行になる
+ * (重複判定が効かず二重登録、キューは「送るジョブはありません」と成功報告)。入口で fail-loud にする
+ */
+function assertInternalDb(): void {
+  if (!process.env.DIRECT_URL?.trim()) throw new Error("DIRECT_URL が未設定です (story ジョブは prismaInternal を使う)");
 }
 
 async function requireJob(tx: TransactionClient, id: string): Promise<Row> {

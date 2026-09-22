@@ -29,7 +29,6 @@ const JOB_STATUS_CLASS: Record<InstaStoryJobStatus, string> = {
   failed: "text-red-700",
 };
 
-
 export default async function AdminInstaPage() {
   const session = await auth();
   if (!session?.user) notFound();

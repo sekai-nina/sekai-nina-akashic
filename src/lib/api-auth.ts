@@ -74,15 +74,16 @@ export async function requireApiAuth(
       { status: 401 }
     );
   }
+  // undefined = 認証だけ。空配列は「何も許可しない」(組み立てミスで全開にしない)
   const required =
     requiredPermission == null
-      ? []
+      ? null
       : typeof requiredPermission === "string"
         ? [requiredPermission]
         : requiredPermission;
-  if (required.length > 0 && !required.some((p) => user.permissions.includes(p))) {
+  if (required && !required.some((p) => user.permissions.includes(p))) {
     return NextResponse.json(
-      { error: `Missing permission: ${required.join(" or ")}` },
+      { error: `Missing permission: ${required.join(" or ") || "(none)"}` },
       { status: 403 }
     );
   }

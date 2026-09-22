@@ -375,14 +375,6 @@ export async function trashDriveFile(fileId: string): Promise<void> {
   await drive.files.update({ fileId, requestBody: { trashed: true }, supportsAllDrives: true });
 }
 
-/** Drive のファイルを完全に消す (CLI の片付け用。アプリからは trashDriveFile を使う) */
-export async function deleteFromDrive(fileId: string): Promise<void> {
-  const auth = getAuth();
-  if (!auth) return;
-  const drive = google.drive({ version: "v3", auth: auth as Parameters<typeof google.drive>[0]["auth"] });
-  await drive.files.delete({ fileId, supportsAllDrives: true });
-}
-
 export interface DriveFileMeta {
   id: string;
   name: string;
@@ -392,6 +384,7 @@ export interface DriveFileMeta {
   sha256: string | null;
   parents: string[];
   createdTime: Date | null;
+  trashed: boolean;
 }
 
 /**
@@ -405,7 +398,7 @@ export async function getDriveFileMeta(fileId: string): Promise<DriveFileMeta | 
   try {
     const res = await drive.files.get({
       fileId,
-      fields: "id,name,mimeType,size,sha256Checksum,parents,createdTime",
+      fields: "id,name,mimeType,size,sha256Checksum,parents,createdTime,trashed",
       supportsAllDrives: true,
     });
     const d = res.data;
@@ -418,9 +411,12 @@ export async function getDriveFileMeta(fileId: string): Promise<DriveFileMeta | 
       sha256: d.sha256Checksum ?? null,
       parents: d.parents ?? [],
       createdTime: d.createdTime ? new Date(d.createdTime) : null,
+      trashed: d.trashed === true,
     };
   } catch (err) {
-    if ((err as { code?: number }).code === 404) return null;
+    // gaxios は HTTP ステータスを status に、JSON 本文の error.code を code に入れる
+    const e = err as { status?: number; code?: number | string };
+    if (e.status === 404 || e.code === 404 || e.code === "404") return null;
     throw err;
   }
 }
