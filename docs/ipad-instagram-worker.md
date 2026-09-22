@@ -81,6 +81,10 @@ insta-watch (sekai)                         Akashic (Vercel)                    
 
 ## iPad 側の準備
 
+「iPad」と書いているが **iOS 15 以上なら iPhone でも同じ** (設計に iPad 固有のものは無い)。
+Pushcut の Automation Server は **Pushcut が前面に表示されている端末でしか動かない**ので、画面を点けっぱなしにする
+専用機になる。普段使う端末ではなく、余っている iPhone を電源につないで使うのがよい。
+
 ### 入れるもの
 
 | アプリ | 用途 |
@@ -95,19 +99,34 @@ insta-watch (sekai)                         Akashic (Vercel)                    
 
 Shortcuts アプリから Instagram Download を直接実行すると設定画面が出る。以下にする:
 
-- **Save to Files: オン**、保存先フォルダを固定する (例 `Shortcuts/Instagram Download`)。ラッパーはこのフォルダの
-  **差分**で落としたファイルを見つけるので、Photos 保存ではなく Files 保存にする
+- **Save to Files: オン**、保存先フォルダを固定する。ラッパーはこのフォルダの **差分**で落としたファイルを
+  見つけるので、Photos 保存ではなく Files 保存にする
+- 保存先は **「このiPhone内」(On My iPhone) にフォルダを作って選ぶ** (例 `Instagram Download`)。iCloud Drive だと
+  story の実体が Apple のサーバに同期され (容量も食う)、同期のタイミングで Shortcut から「まだ無い」ように
+  見えることがある。ローカルなら保存した瞬間に見え、片付けも端末内で終わる
 - 動画の形式は H.264 か HEVC (VP9 のままだと Photos に保存できず Files に落ちる。Akashic 側は mp4 / mov コンテナなら
   中身が VP9 でも受けるが、`.webm` は受けない)
 - 一度、共有シートから手で story を落として、フォルダにファイルが出ることを確かめておく
 
 ### Pushcut Automation Server
 
-1. Pushcut > Automation Server > **Start Server**。iPad の名前 (例 `Nao's iPad`) が `PUSHCUT_SERVER_ID` になる
+1. Pushcut > Automation Server > **Start Server**。端末の名前 (例 `Nao's iPad`) が `PUSHCUT_SERVER_ID` になる
+   (端末が 1 台なら省略可)。Account > API Keys でキーを作り、`PUSHCUT_API_KEY` に入れる
 2. **Pushcut を前面に開いたままにする。** Automation Server は Pushcut が前面にいる間だけ Shortcut を実行できる。
-   設定 > 画面表示と明るさ > 自動ロック を「なし」にし、電源に繋いでおく
+   設定 > 画面表示と明るさ > 自動ロック を「なし」にし (低電力モードがオンだと「なし」が選べない)、電源に繋いでおく。
+   有機 EL なら明るさを最低にし、ダークモードにしておく
 3. ラッパー Shortcut の最後に **「App を開く: Pushcut」** を置いて、Instagram Download が Scriptable / a-Shell に
    切り替えた後でも Pushcut に戻るようにする (後述の手順 14)
+4. つながっているかは Mac から `curl -s https://api.pushcut.io/v2/servers -H "API-Key: <キー>"` で見る
+   (`"isConnected": true`)。アプリ側の表示が「pending」でも、これが true なら届く
+
+Pushcut の仕様で押さえておくこと ([support/automation-server](https://www.pushcut.io/support/automation-server)):
+
+- 要求は **5 分以内に処理されないと Pushcut 側で自動的に失敗**する (akashic の `dispatched` 失効 10 分より短いので、
+  iPad が不在なら先に Pushcut が落とし、akashic は 10 分で failed にして次へ進む)
+- 無料枠は **1 日 100 リクエスト・10MB**。story のジョブ数なら足りる
+- **60 秒を超えて走る Shortcut があると、バックエンドが一時的に「切断」と報告する**ことがある。ラッパーは動画があると
+  数分走るので、ジョブのたびに一瞬「pending」に見えるのは正常。次の要求は復帰後に届く
 
 ## ラッパー Shortcut の作り方
 
@@ -127,7 +146,7 @@ HTTP が失敗すると **その場で Shortcut が止まる** — サーバ側�
 1. **辞書** — 名前 `Config`。以下のキーを入れる
    - `base` = `https://akashic.sekai-nina.com/api/v1/insta/jobs`
    - `token` = `ak_…` (ワーカー用キー)
-   - `folder` = Instagram Download の保存先フォルダ (Files 上の相対パス。例 `Shortcuts/Instagram Download`)
+   - (保存先フォルダは文字で持たない。手順 9 でフォルダピッカーから直接選ぶ)
 
 ### 1. 入力を読む
 
@@ -167,7 +186,8 @@ HTTP が失敗すると **その場で Shortcut が止まる** — サーバ側�
 
 ### 5. 落ちたファイルを見つける
 
-9. **フォルダの内容を取得** — `《Config.folder》` (Shortcuts の iCloud Drive 配下)。「再帰的」はオン
+9. **フォルダの内容を取得** — フォルダは **ピッカーで「このiPhone内 > (Instagram Download の保存先)」を選ぶ**。
+   「再帰的」はオン。文字でパスを書くと iCloud Drive の `Shortcuts/` 配下として解釈され、ローカルのフォルダには届かない
 10. **ファイルにフィルタを適用** — 条件: `最終更新日` が `《startedAt》` **より後**。並び順: 最終更新日
 11. **カウント** — `《フィルタ済みファイル》` の項目数 → 変数 `count`
     - **if** `count` が 0 → **URL の内容を取得** POST `《Config.base》/《jobId》/error`、
