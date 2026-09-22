@@ -36,6 +36,14 @@ export interface ArticleAssetInput {
   source: { kind: string; title: string; url: string | null; publishedAt: string | null } | null;
   /** 抜粋 (本人の感想)。同じアセットから複数あることがある */
   excerpts: string[];
+  /**
+   * AI に渡す素材 (#171)。本文を AI が書くテンプレートのときだけ読み込む (`withTexts`)。
+   * `text` はブログ / トークの本文全文 (body / message_body)。`caption` はドシエのアイテムの
+   * キャプション、`people` はアセットに付いた人物エンティティ名
+   */
+  text?: string | null;
+  caption?: string;
+  people?: string[];
 }
 
 export interface RenderedSource {
@@ -46,6 +54,18 @@ export interface RenderedSource {
   date: string | null;
   /** 出典が指すアセット */
   assetId: string | null;
+}
+
+/**
+ * 毎回作り直す区間 (#151 のライブの公演の表)。`start` 〜 `end` の HTML コメントで囲み、追記のたびに
+ * 中身を差し替える。記事に区間が無ければ `section` の見出しを作ってそこに置く
+ */
+export interface MarkerBlock {
+  start: string;
+  end: string;
+  /** 区間の中身 (マーカーの行は含まない) */
+  lines: string[];
+  section: { heading: string; before: string[] };
 }
 
 /** 本文に出る項目の内訳。追記モードが「まだ無いもの」を選ぶのに使う */
@@ -59,6 +79,8 @@ export interface ArticleParts {
   talks: { assetId: string; line: string; sortAt: string | null }[];
   /** 関連メディアのブログ画像 */
   blogImages: { assetId: string; line: string }[];
+  /** 毎回作り直す区間 (無いテンプレートは省略) */
+  blocks?: MarkerBlock[];
 }
 
 /** frontmatter の `dossier:` (由来ドシエのスナップショット。「要反映」の判定に使う) */
@@ -71,7 +93,8 @@ export interface DossierSnapshot {
 
 /**
  * 記事の本文に載る日付まわり。テンプレートが決める
- * (ミーグリは開催日、言葉は無し、おでかけは AI の提案)。null は frontmatter に出さない
+ * (ミーグリは開催日、ブログの名言は無し、スナップは無し、おでかけ / 状況つきの言葉は AI の提案)。
+ * null は frontmatter に出さない
  */
 export interface RenderedDates {
   /** "YYYY-MM-DD" */
@@ -149,6 +172,11 @@ export function isTalk(a: ArticleAssetInput): boolean {
   return false;
 }
 
+/** `坂井新奈ブログ「…」` / `高井俐香ブログ「…」` の形か (取り込みが付けるアセットの題) */
+export function isBlogAssetTitle(title: string): boolean {
+  return /^.+?ブログ「.*」\s*$/.test(title);
+}
+
 /** 1 本のブログ (本文 + 画像 + 抜粋) */
 export interface BlogGroup {
   url: string | null;
@@ -189,6 +217,10 @@ export function classifyMaterials(assets: ArticleAssetInput[]): {
     };
     if (a.kind === "text") {
       group.ref = a.id;
+      // 出典のタイトルは古い取り込みだと素のブログ題 (「自分を変える」) で、誰のブログか分からない。
+      // アセットの題が「〜ブログ「…」」の形ならそちらを出典ラベルにする (既存記事の frontmatter と同じ形)
+      // ひなたぼっこ日記は `blogLabel` が名前を付けるので触らない (二重に包まない)
+      if (!group.staff && isBlogAssetTitle(a.title)) group.title = a.title;
       // 同じブログから複数箇所を抜粋していることがある (全部拾う)
       for (const ex of a.excerpts) if (ex && !group.excerpts.includes(ex)) group.excerpts.push(ex);
     } else {
@@ -264,10 +296,13 @@ export function quotedBlogs(blogs: BlogGroup[]): BlogGroup[] {
   return blogs.filter((b) => b.excerpts.length > 0 && !b.staff);
 }
 
+/** 本人の感想の章の見出し (フル生成と追記で同じものを見る) */
+export const QUOTES_HEADING = "## 本人の感想（ブログより）";
+
 /** `## 本人の感想（ブログより）` の章。引用が無ければ空 */
 export function renderQuotesSection(quoted: BlogGroup[]): string[] {
   if (quoted.length === 0) return [];
-  const body: string[] = ["## 本人の感想（ブログより）", ""];
+  const body: string[] = [QUOTES_HEADING, ""];
   for (const b of quoted) {
     for (const ex of b.excerpts) body.push(blockquote(ex), "");
     // 引用が複数あっても出典行はブログごとに 1 回だけ
@@ -296,15 +331,32 @@ function blogImageLine(b: BlogGroup, a: ArticleAssetInput): string {
   return `- 【${b.staff ? STAFF_BLOG_NAME : "ブログ"}・画像】${a.title}^[${b.sourceNo}]`;
 }
 
+/**
+ * 関連メディアの章の形。
+ * - `sections`: ミーグリ記事の形。`### TikTok` / `### トーク` / `### ブログ（画像）` に分ける
+ * - `flat`: おでかけ記事の形。導入文 1 行のあと、トーク → ブログ画像を 1 つの箇条書きに並べる
+ */
+export type RelatedMediaStyle = { kind: "sections" } | { kind: "flat"; lead: string };
+
 /** `## 関連メディア` の章 (トーク・ブログ画像はリンクのみ、TikTok は埋め込み)。何も無ければ空 */
 export function renderRelatedMediaSection(input: {
   talks: ArticleAssetInput[];
   blogs: BlogGroup[];
   tiktoks: string[];
   talkSourceNo: Map<string, number>;
+  style?: RelatedMediaStyle;
 }): string[] {
   const blogsWithImages = input.blogs.filter((b) => b.images.length > 0);
   if (input.talks.length === 0 && blogsWithImages.length === 0 && input.tiktoks.length === 0) return [];
+  const style = input.style ?? { kind: "sections" };
+  if (style.kind === "flat") {
+    const body: string[] = ["## 関連メディア", "", style.lead, ""];
+    body.push(...input.tiktoks.map((u) => `![](${u})`));
+    for (const a of input.talks) body.push(talkLine(a, input.talkSourceNo.get(a.id)));
+    for (const b of blogsWithImages) for (const a of b.images) body.push(blogImageLine(b, a));
+    body.push("");
+    return body;
+  }
   const body: string[] = ["## 関連メディア", ""];
   if (input.tiktoks.length > 0) {
     // 埋め込みで目を引くので先頭に置く

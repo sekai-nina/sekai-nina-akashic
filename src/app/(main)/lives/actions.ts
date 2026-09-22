@@ -14,11 +14,13 @@ import {
   updateLive,
   type SetlistInput,
 } from "@/lib/domain/lives";
+import { previewArticle, restoreExclusions, saveArticle } from "@/lib/domain/article-generate";
 import { applyExcerpts, proposeExcerptsForDossier } from "@/lib/domain/excerpts";
 import { generateSketch, saveSketchCrops, selectSketch } from "@/lib/domain/live-sketch";
 import { CreateLiveSchema, SetlistSchema, UpdateLiveSchema } from "@/lib/live/api";
 import {
   ApplyExcerptsSchema,
+  ExclusionKeysSchema,
   GenerateSketchSchema,
   MAX_MATERIALS_PER_APPLY,
   SketchCropsSchema,
@@ -222,6 +224,62 @@ export async function selectSketchAction(id: string, key: string) {
     revalidatePath(`/lives/${id}`);
     revalidatePath("/lives");
     return { ok: true as const };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+// --- 記事の生成 (#151。ミーグリ #109 と同じ入口) ---
+
+export async function previewArticleAction(id: string, extraExclude: string[] = []) {
+  const user = await requireMember();
+  const parsed = ExclusionKeysSchema.safeParse(extraExclude);
+  if (!parsed.success) return { ok: false as const, error: formatZodError(parsed.error) };
+  try {
+    const live = await getLive(user, id);
+    if (!live) throw new Error("見つかりません");
+    const preview = await previewArticle(user, { kind: "live", live }, parsed.data);
+    return { ok: true as const, preview };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+/** 「今後足さない」を取り消す (#134) */
+export async function restoreExclusionsAction(id: string, keys: string[]) {
+  const user = await requireMember();
+  const parsed = ExclusionKeysSchema.safeParse(keys);
+  if (!parsed.success) return { ok: false as const, error: formatZodError(parsed.error) };
+  try {
+    const live = await getLive(user, id);
+    if (!live) throw new Error("見つかりません");
+    const restored = await restoreExclusions(user, { kind: "live", live }, parsed.data);
+    revalidatePath(`/lives/${id}`);
+    return { ok: true as const, restored };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+export async function saveArticleAction(id: string, expectedDigest?: string, exclude: string[] = []) {
+  const user = await requireMember();
+  const parsed = ExclusionKeysSchema.safeParse(exclude);
+  if (!parsed.success) return { ok: false as const, error: formatZodError(parsed.error) };
+  try {
+    const live = await getLive(user, id);
+    if (!live) throw new Error("見つかりません");
+    const result = await saveArticle(user, { kind: "live", live }, expectedDigest, parsed.data);
+    if (!result.ok) return { ok: false as const, error: result.error };
+    revalidatePath(`/lives/${id}`);
+    revalidatePath("/lives");
+    revalidatePath("/articles");
+    return {
+      ok: true as const,
+      mode: result.mode,
+      shortId: result.shortId,
+      added: result.added,
+      sources: result.sources,
+    };
   } catch (e) {
     return { ok: false as const, error: errorMessage(e) };
   }

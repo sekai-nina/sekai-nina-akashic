@@ -34,6 +34,7 @@ const input = (assets: ArticleAssetInput[]): DossierRenderInput => ({
   reports: [],
   tiktoks: [],
   thumbnailUrl: null,
+  places: [],
   today: "2026-09-22",
 });
 

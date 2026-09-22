@@ -12,6 +12,7 @@
  */
 
 import { TemplateInputError } from "../errors";
+import { NO_QUOTES_APPEND_LAYOUT } from "./shared";
 import {
   blockquote,
   buildParts,
@@ -74,12 +75,7 @@ export const QUOTE_BLOG_TEMPLATE: ArticleTemplateDef = {
   key: "quote_blog",
   articleType: "quote",
   needsAi: false,
-  appendLayout: {
-    // 引用そのものが本文。見出しも出典行も付けず、地の文の末尾に足す
-    quotesHeading: null,
-    quoteAttribution: false,
-    // レポは載せないが、万一 external_link に X があっても章の名前は要る
-    reports: { heading: "## ファンの反応", lead: "ファンの投稿（X）。" },
-  },
+  // 引用そのものが本文。見出しも出典行も付けず、地の文の末尾に足す
+  appendLayout: NO_QUOTES_APPEND_LAYOUT,
   render: renderQuoteBlogArticle,
 };

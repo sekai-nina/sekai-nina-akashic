@@ -6,17 +6,32 @@
  */
 
 import type { ArticleTemplate, ArticleType, ClearanceLevel, DossierAccessMode, DossierKind } from "@prisma/client";
-import { withSession } from "@/lib/db";
+import { prisma, withSession } from "@/lib/db";
 import { ARTICLE_TEMPLATE_LABELS, todayJst } from "@/lib/utils";
 import { canEditDossier } from "@/lib/auth/dossier-permissions";
-import { MAX_ARTICLE_CLEARANCE } from "@/lib/meetgreet/config";
+import { MAX_ARTICLE_CLEARANCE, MAX_EXTERNAL_AI_CLEARANCE } from "@/lib/meetgreet/config";
 import type { RenderedArticle } from "@/lib/article-workflow/render";
-import { getTemplate, type ArticleTemplateDef } from "@/lib/article-workflow/templates";
+import {
+  getTemplate,
+  type AiDraft,
+  type ArticleAiStatus,
+  type ArticleTemplateDef,
+  type DossierRenderInput,
+} from "@/lib/article-workflow/templates";
 import { isQuoteBlogTitle } from "@/lib/article-workflow/templates/quote-blog";
 import { TemplateInputError } from "@/lib/article-workflow/errors";
+import {
+  ARTICLE_AI_FEATURE,
+  ArticleAiError,
+  generateArticleDraft,
+  isArticleAiConfigured,
+} from "@/lib/article-workflow/llm";
+import { recordUsage } from "@/lib/costs/usage";
+import { listArticleTags } from "./articles";
 import { WorkflowInputError, type ActingUser } from "./article-workflow";
 import { logAudit } from "./audit";
 import {
+  EXTERNAL_AI_OK,
   loadDossierForArticle,
   PUBLISHABLE,
   resolveTiktoks,
@@ -154,24 +169,44 @@ export async function setDossierTemplate(
 }
 
 /**
- * 紐づく記事の型から既定のテンプレートを推す (#172 で outing / quote_situational を足す)。
- * 推せなければ null (画面で選ばせる)
+ * 紐づく記事の型から既定のテンプレートを推す。推せなければ null (画面で選ばせる)
  */
 export function suggestTemplate(dossier: DossierForArticle): ArticleTemplate | null {
+  // 器のドシエ (ミーグリの記事も type: event なので、見ないと outing を推してしまう)
+  if (dossier.container || isContainerTemplate(dossier.articleTemplate)) return null;
   const types = new Set(dossier.articles.map((a) => a.type));
   if (types.size !== 1) return null;
   const [type] = types;
-  if (type === "quote" && dossier.articles.every((a) => isQuoteBlogTitle(a.title))) return "quote_blog";
+  if (type === "attribute") return "attribute";
+  if (type === "event") return "outing";
+  if (type === "quote") {
+    return dossier.articles.every((a) => isQuoteBlogTitle(a.title)) ? "quote_blog" : "quote_situational";
+  }
   return null;
 }
 
-/** ドシエの素材からテンプレートで記事を組み立てる。DB には書かない */
+export interface BuiltDossierArticle extends RenderedArticle {
+  droppedByClearance: number;
+  /** `needsAi` のテンプレートだけ。それ以外は null */
+  ai: ArticleAiStatus | null;
+  /** 保存に渡す下書き。AI が使えなかったときは null (骨組みで保存する) */
+  aiDraft: AiDraft | null | undefined;
+}
+
+/**
+ * ドシエの素材からテンプレートで記事を組み立てる。DB には書かない。
+ *
+ * 本文を AI が書くテンプレートは、`aiDraft` が渡されていればそれを差し込み (保存時)、
+ * `undefined` なら Claude に書かせる (プレビュー時)、`null` なら骨組みだけにする。
+ * AI が失敗したら**止めずに骨組みに落とす** (`ai.status = "unavailable"`)。Vercel Preview には
+ * キーが無く、人が本文を書く道も残しておきたいため
+ */
 export async function buildDossierArticle(
   user: ActingUser,
   dossier: { id: string; title: string; classification: string },
   template: ArticleTemplateDef,
-  options: { today?: string } = {}
-): Promise<RenderedArticle & { droppedByClearance: number }> {
+  options: { today?: string; aiDraft?: AiDraft | null } = {}
+): Promise<BuiltDossierArticle> {
   if (!template.render) throw new TemplateInputError(`テンプレート ${template.key} は器が要ります`);
 
   // **記事の本文は公開リポジトリに載る。** アセット単位の絞り込み (PUBLISHABLE) だけでは
@@ -181,8 +216,19 @@ export async function buildDossierArticle(
       `ドシエが ${dossier.classification} なので記事にできません (公開リポジトリに載るため ${MAX_ARTICLE_CLEARANCE} 以下のみ)`
     );
   }
+  // 本文を AI が書くテンプレートは、ドシエの中身 (タイトル・抜粋・キャプション) を外部に出す
+  if (template.needsAi && !EXTERNAL_AI_OK.has(dossier.classification)) {
+    throw new TemplateInputError(
+      `ドシエが ${dossier.classification} なので AI に渡せません (${MAX_EXTERNAL_AI_CLEARANCE} 以下のみ)`
+    );
+  }
 
-  const loaded = await withSession(user, (tx) => loadDossierForArticle(tx, dossier.id));
+  // 生成するときだけ本文全文を読む。画像しか無いブログの本文アセットは出典の宛先になるので、
+  // 保存時 (下書きを持っている) も同じに読んで、プレビューと出典がずれないようにする
+  const generating = template.needsAi && options.aiDraft === undefined;
+  const loaded = await withSession(user, (tx) =>
+    loadDossierForArticle(tx, dossier.id, { withTexts: generating, withExtraBlogTexts: template.needsAi })
+  );
   if (!loaded) throw new TemplateInputError("ドシエが見つかりません (権限がないか削除されています)");
   // 上の判定は呼び出し側のスナップショット。読み直した行でもう一度見る (機密を上げられた直後)
   if (!PUBLISHABLE.has(loaded.classification)) {
@@ -191,21 +237,126 @@ export async function buildDossierArticle(
 
   const materials = shapeDossierMaterials(loaded);
   const tiktoks = await resolveTiktoks(materials.tiktoks);
-
-  return {
-    ...template.render({
-      dossier: {
-        id: loaded.id,
-        title: loaded.title,
-        updatedAt: loaded.updatedAt.toISOString(),
-        itemCount: loaded.itemCount,
-      },
-      assets: materials.assets,
-      reports: materials.reports,
-      tiktoks,
-      thumbnailUrl: materials.dossierThumb,
-      today: options.today ?? todayJst(),
-    }),
-    droppedByClearance: materials.droppedByClearance,
+  const input: DossierRenderInput = {
+    dossier: {
+      id: loaded.id,
+      title: loaded.title,
+      updatedAt: loaded.updatedAt.toISOString(),
+      itemCount: loaded.itemCount,
+    },
+    assets: materials.assets,
+    reports: materials.reports,
+    tiktoks,
+    thumbnailUrl: materials.dossierThumb,
+    places: materials.places,
+    today: options.today ?? todayJst(),
   };
+
+  if (!template.needsAi) {
+    return { ...template.render(input), droppedByClearance: materials.droppedByClearance, ai: null, aiDraft: undefined };
+  }
+
+  const { draft, ai } = await draftForTemplate(user, template, input, options.aiDraft);
+  return {
+    ...template.render(input, draft),
+    droppedByClearance: materials.droppedByClearance,
+    ai,
+    aiDraft: draft,
+  };
+}
+
+/** `ArticleAiStatus` を組む (null の項目を毎回書かない) */
+function aiStatus(
+  status: ArticleAiStatus["status"],
+  over: Partial<ArticleAiStatus> & { included: number; truncated: number }
+): ArticleAiStatus {
+  return { status, model: null, reason: null, usage: null, costUsd: null, ...over };
+}
+
+/** 下書きを用意する: 渡されたものを使う / Claude に書かせる / 使えなければ null */
+async function draftForTemplate(
+  user: ActingUser,
+  template: ArticleTemplateDef & { needsAi: true },
+  input: DossierRenderInput,
+  given: AiDraft | null | undefined
+): Promise<{ draft: AiDraft | null; ai: ArticleAiStatus }> {
+  // 渡された下書き (保存時) は素材を読み直していないので件数は分からない
+  if (given !== undefined) {
+    const counts = { included: 0, truncated: 0 };
+    return {
+      draft: given,
+      ai: given
+        ? aiStatus("given", counts)
+        : aiStatus("unavailable", { ...counts, reason: "AI を使わずに骨組みだけで保存します" }),
+    };
+  }
+
+  // 語彙は記事 (非保護テーブル) から。wikilink は公開済みの記事にだけ張らせる (下書きへの
+  // リンクは公開サイトで宛先が無い)
+  const [titles, tags] = await Promise.all([listPublishedTitles(), listArticleTags()]);
+  const prompt = template.prompt(input, { existingTitles: titles, tagVocabulary: tags });
+  const counts = { included: prompt.included, truncated: prompt.truncated };
+
+  if (!isArticleAiConfigured()) {
+    return { draft: null, ai: aiStatus("unavailable", { ...counts, reason: "ANTHROPIC_API_KEY が未設定です" }) };
+  }
+  if (prompt.included === 0) {
+    return {
+      draft: null,
+      ai: aiStatus("unavailable", { ...counts, reason: "本文のある素材 (ブログ / トーク) がドシエにありません" }),
+    };
+  }
+
+  let generated;
+  try {
+    generated = await generateArticleDraft(prompt);
+  } catch (e) {
+    if (e instanceof ArticleAiError) {
+      return { draft: null, ai: aiStatus("unavailable", { ...counts, reason: e.message }) };
+    }
+    throw e;
+  }
+
+  // **費用と監査は落ちても生成結果を返す** (払ったぶんを捨ててもう 1 回払わせない)。
+  // プロバイダの内訳はキー単位なので、機能名を付けるにはこちらで積む
+  let costUsd: number | null = null;
+  try {
+    const recorded = await recordUsage({
+      provider: "anthropic",
+      model: generated.model,
+      feature: ARTICLE_AI_FEATURE,
+      inputTokens: generated.usage.inputTokens,
+      cachedInputTokens: generated.usage.cachedInputTokens,
+      outputTokens: generated.usage.outputTokens,
+      requests: 1,
+    });
+    costUsd = recorded.costUsd;
+  } catch (e) {
+    console.error("[dossier-article] recordUsage failed", e);
+  }
+  try {
+    await logAudit({
+      actorId: user.id,
+      action: "dossier.article.ai",
+      targetType: "Dossier",
+      targetId: input.dossier.id,
+      metadata: { template: template.key, model: generated.model, ...generated.usage, costUsd, ...counts },
+    });
+  } catch (e) {
+    console.error("[dossier-article] logAudit failed", e);
+  }
+  return {
+    draft: generated.draft,
+    ai: aiStatus("generated", { ...counts, model: generated.model, usage: generated.usage, costUsd }),
+  };
+}
+
+/** 公開済み記事のタイトル (wikilink の宛先候補)。Article は非保護なので素の prisma */
+async function listPublishedTitles(): Promise<string[]> {
+  const rows = await prisma.article.findMany({
+    where: { draft: false },
+    select: { title: true },
+    orderBy: { shortId: "asc" },
+  });
+  return [...new Set(rows.map((r) => r.title).filter((t) => t.length > 0))];
 }

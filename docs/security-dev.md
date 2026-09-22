@@ -73,6 +73,7 @@ const clearance = auth.clearance;
 - `Live`, `LivePerformance`, `LiveSong`（ライブ記事ワークフロー。`Live` は自前の classification、子 2 つは親 `Live` に従う。`MeetGreet` と同じく `withSession`。参考画像 `sketchRefs` とスケッチ候補も `MeetGreet` と同じ扱い → 下の「外部の AI に渡すもの」）
 - `Anniversary`（記念日。出典アセットの本文は持たないが、機密アセットから作った記念日が漏れないよう自前の classification で守る）
 - `InstaWatchTarget`, `InstaAccount`, `InstaStoryJob`（Instagram 監視。`InstaStoryJob` は iPad ワーカーのジョブで、人 / API キーからの読み書きは `withClearance`、キューの操作（失効・次の送信）は cron からも走るので `prismaInternal`）
+- `TiktokWatchTarget`, `TiktokVideo`（TikTok 監視 #179。対象と「どの動画を取ったか」の台帳。画面 `/admin/tiktok` も bot 向け API `/api/v1/tiktok/*` も `withClearance`。`prismaInternal` で回す経路は無い）
 
 `Article.dossierId`（素材ドシエ。#41）は非保護テーブルから保護テーブルへのポインタ。記事詳細で **ドシエ本体を出すときは `withSession` で引き直す**（private なドシエは所有者にしか見えない = 見えなければ出さない。ID があるからといって `prisma.dossier` を素で触らない）。書くときは `prisma.$executeRaw` で `dossierId` だけ更新する（`prisma.article.update` は `updatedAt` を進めて編集画面の楽観ロックを偽の衝突にする。push の出力にも影響しないので `dirty` も立てない）。
 
@@ -143,12 +144,16 @@ RLS があるので読み取り時は不要ですが、**書き込み時のク�
 ミーグリとライブ（#150 で同じ仕組みを共用）の 2 つの機能は、**アセットの中身そのものを OpenAI に送ります**。
 処理本体は `src/lib/domain/sketch.ts` / `src/lib/domain/excerpts.ts` で、器（`MeetGreet` / `Live`）ごとの書き込み先だけを差し替えています。以下「ミーグリ」と書いてある縛りはすべてライブにも同じに効きます。
 
-| 機能 | 送るもの |
-|---|---|
-| 抜粋の提案（`src/lib/meetgreet/excerpt.ts`） | ドシエに入っている本人ブログの**本文全文** |
-| スケッチ生成（`src/lib/meetgreet/sketch.ts`） | ドシエで選んだ**画像**（Drive の原本を 1280px に縮小したもの）+ 基準スケッチ |
+| 機能 | 送るもの | 送り先 |
+|---|---|---|
+| 抜粋の提案（`src/lib/meetgreet/excerpt.ts`） | ドシエに入っている本人ブログの**本文全文** | OpenAI |
+| スケッチ生成（`src/lib/meetgreet/sketch.ts`） | ドシエで選んだ**画像**（Drive の原本を 1280px に縮小したもの）+ 基準スケッチ | OpenAI |
+| 記事本文の生成（`src/lib/article-workflow/llm.ts`、#171 / #172。器を持たないドシエのスナップ・おでかけ・言葉） | ドシエのアイテムの**本文全文**（ブログ / トーク / 番組の文字起こし・説明）・抜粋・メディアのキャプション・人物エンティティ名・ドシエのタイトル。**画像しか入っていないブログは同じ URL の本文アセットも**（RLS 下で引くので見えない分は入らない）。おでかけは**場所候補**（名前・住所・Google マップ URL。編集メモは渡さない。昇格先の聖地が上限を超えるものは渡さない）も。加えて公開済み記事の**タイトル一覧**と**タグ一覧** | Anthropic |
 
 **送ってよいのは `internal` 以下だけです** → `src/lib/meetgreet/config.ts` の `MAX_EXTERNAL_AI_CLEARANCE`。
+記事本文の生成は `shapeDossierMaterials` が本文 (`text`) を付けるときにこの上限で見ており（`dossier-materials.ts`）、
+上限を超えるアセットは記事にも載らない（`MAX_ARTICLE_CLEARANCE`）ので素材からも落ちます。
+ドシエ自体が `internal` を超える場合は入口で止まります。
 
 同じ理由で、**生成する記事の本文に載せてよいのも `internal` 以下だけ**です → `MAX_ARTICLE_CLEARANCE`。
 `Article` は非保護テーブルで、本文（引用・トーク名・画像名）は push でそのまま公開リポジトリに載ります。

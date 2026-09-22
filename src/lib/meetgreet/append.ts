@@ -14,6 +14,8 @@ import {
   type ArticleParts,
   type RenderedSource,
 } from "./article";
+import { QUOTES_HEADING, type MarkerBlock, type RelatedMediaStyle } from "@/lib/article-workflow/render";
+import { TemplateInputError } from "@/lib/article-workflow/errors";
 import type { ExclusionKind } from "./types";
 
 /**
@@ -30,10 +32,15 @@ export interface AppendLayout {
   quoteAttribution: boolean;
   /** ファンのレポの章 */
   reports: { heading: string; lead: string };
+  /**
+   * 関連メディアの章の形 (`renderRelatedMediaSection` と同じ)。省略は `sections`。
+   * `flat` は `### トーク` などの小見出しを作らず、`## 関連メディア` の箇条書きの末尾に足す
+   */
+  media?: RelatedMediaStyle;
 }
 
 export const MEETGREET_APPEND_LAYOUT: AppendLayout = {
-  quotesHeading: "## 本人の感想（ブログより）",
+  quotesHeading: QUOTES_HEADING,
   quoteAttribution: true,
   reports: MEETGREET_REPORTS_LAYOUT,
 };
@@ -160,12 +167,24 @@ export interface AppendItem {
 
 export interface AppendPlan {
   body: string;
+  /**
+   * 「純粋な追記」の比較元。毎回作り直す区間 (`parts.blocks`) を差し替えたあとの既存本文で、
+   * 区間が無いテンプレートでは `existingBody` そのもの。`isPureAppend(baseBody, body)` で検査する
+   */
+  baseBody: string;
   /** 追加する出典 (sourceNo は採番済み) */
   newSources: RenderedSource[];
   added: { quotes: number; reports: number; talks: number; blogImages: number; tiktoks: number };
   /** 足されるものの一覧。ここから外したものを除外リストに入れる */
   additions: AppendItem[];
-  /** 何も増えなかった */
+  /** 毎回作り直す区間の中身が変わった (公演や曲を直した) */
+  blocksChanged: boolean;
+  /**
+   * 画面で色を付ける行 (`body` の 0 始まりの位置): 足した行 + 差し替えた区間の中身。
+   * `appendDiff(existingBody, body)` は区間の中で行が変わる / 減ると以降を全部「増えた」にしてしまうので使わない
+   */
+  changedLines: number[];
+  /** 何も増えなかった (区間の変化も無い) */
   empty: boolean;
 }
 
@@ -228,10 +247,14 @@ export function planAppend(input: {
   /** 章の置き方。省略時はミーグリ記事の形 */
   layout?: AppendLayout;
 }): AppendPlan {
-  const { existingBody, parts } = input;
   const layout = input.layout ?? MEETGREET_APPEND_LAYOUT;
   const H_QUOTES = layout.quotesHeading;
   const H_REPORTS = layout.reports.heading;
+  const { parts } = input;
+
+  // --- 0. 毎回作り直す区間を差し替える (公演の表)。以降はこれを「既存の本文」として扱う ---
+  const replaced = replaceBlocks(input.existingBody, parts.blocks ?? []);
+  const existingBody = replaced.body;
   const excluded = new Set(input.excluded ?? []);
   const additions: AppendItem[] = [];
   /** 除外されていなければ一覧に足して true を返す */
@@ -375,21 +398,15 @@ export function planAppend(input: {
     added.reports = freshReports.length;
   }
 
-  if (freshTiktoks.length > 0) {
-    ensureSection(sections, H_MEDIA, []);
-    const sec = ensureSection(sections, H_TIKTOK, [H_TALK, H_BLOG_IMAGES]);
-    sec.lines.splice(appendIndex(sec.lines), 0, ...freshTiktoks.map((u) => `![](${u})`));
-    added.tiktoks = freshTiktoks.length;
-  }
-
-  // トークは時系列の正しい位置に差し込む (脚注番号は飛んでよい。順序 > 番号の連続性)
-  if (freshTalks.length > 0) {
-    ensureSection(sections, H_MEDIA, []);
-    const sec = ensureSection(sections, H_TALK, [H_BLOG_IMAGES]);
+  /**
+   * トークを時系列の正しい位置に差し込む (脚注番号は飛んでよい。順序 > 番号の連続性)。
+   * `fallback` は後ろに時刻の合う行が無いときの位置 (flat ではブログ画像の前、それ以外は末尾)
+   */
+  const insertTalks = (sec: Section, fallback: () => number = () => appendIndex(sec.lines)) => {
     for (const t of freshTalks) {
       const line = renumber(t.line, renumberMap);
       const key = talkSortKeyFromLine(t.line);
-      let at = appendIndex(sec.lines);
+      let at = fallback();
       if (key) {
         for (let i = 0; i < sec.lines.length; i++) {
           const k = talkSortKeyFromLine(sec.lines[i]);
@@ -402,27 +419,126 @@ export function planAppend(input: {
       sec.lines.splice(at, 0, line);
       added.talks++;
     }
-  }
+  };
 
-  if (freshImages.length > 0) {
-    ensureSection(sections, H_MEDIA, []);
-    const sec = ensureSection(sections, H_BLOG_IMAGES, []);
-    sec.lines.splice(
-      appendIndex(sec.lines),
-      0,
-      ...freshImages.map((b) => renumber(b.line, renumberMap))
-    );
-    added.blogImages = freshImages.length;
+  if (layout.media?.kind === "flat") {
+    // おでかけ記事: 小見出し無しで `## 関連メディア` の箇条書きに足す
+    if (freshTiktoks.length > 0 || freshTalks.length > 0 || freshImages.length > 0) {
+      const sec = ensureSection(sections, H_MEDIA, []);
+      const tiktokLines = freshTiktoks.map((u) => `![](${u})`);
+      const imageLines = freshImages.map((b) => renumber(b.line, renumberMap));
+      if (sec.lines.every((l) => l.trim() === "")) {
+        // 章を作ったばかり: フル生成と同じ形 (導入文 → 空行 → 箇条書き)。`parts.talks` は時系列で来る
+        const talkLines = freshTalks.map((t) => renumber(t.line, renumberMap));
+        sec.lines = ["", layout.media.lead, "", ...tiktokLines, ...talkLines, ...imageLines, ""];
+        added.talks += freshTalks.length;
+      } else {
+        sec.lines.splice(appendIndex(sec.lines), 0, ...tiktokLines);
+        // トークはブログ画像より前 (フル生成の並び)。画像の行が無ければ末尾
+        const beforeImages = () => {
+          const i = sec.lines.findIndex((l) => /^- 【[^】]*・(画像|動画|音声|メディア)】/.test(l) && !l.startsWith("- 【トーク"));
+          return i >= 0 ? i : appendIndex(sec.lines);
+        };
+        insertTalks(sec, beforeImages);
+        sec.lines.splice(appendIndex(sec.lines), 0, ...imageLines);
+      }
+      added.tiktoks = freshTiktoks.length;
+      added.blogImages = freshImages.length;
+    }
+  } else {
+    if (freshTiktoks.length > 0) {
+      ensureSection(sections, H_MEDIA, []);
+      const sec = ensureSection(sections, H_TIKTOK, [H_TALK, H_BLOG_IMAGES]);
+      sec.lines.splice(appendIndex(sec.lines), 0, ...freshTiktoks.map((u) => `![](${u})`));
+      added.tiktoks = freshTiktoks.length;
+    }
+
+    if (freshTalks.length > 0) {
+      ensureSection(sections, H_MEDIA, []);
+      insertTalks(ensureSection(sections, H_TALK, [H_BLOG_IMAGES]));
+    }
+
+    if (freshImages.length > 0) {
+      ensureSection(sections, H_MEDIA, []);
+      const sec = ensureSection(sections, H_BLOG_IMAGES, []);
+      sec.lines.splice(
+        appendIndex(sec.lines),
+        0,
+        ...freshImages.map((b) => renumber(b.line, renumberMap))
+      );
+      added.blogImages = freshImages.length;
+    }
   }
 
   const total = added.quotes + added.reports + added.talks + added.blogImages + added.tiktoks;
+  const body = toBody(sections);
   return {
-    body: toBody(sections),
+    body,
+    baseBody: existingBody,
     newSources,
     added,
     additions,
-    empty: total === 0 && newSources.length === 0,
+    blocksChanged: replaced.changed,
+    changedLines: changedLineIndices(existingBody, body, replaced.changed ? (parts.blocks ?? []) : []),
+    empty: total === 0 && newSources.length === 0 && !replaced.changed,
   };
+}
+
+/** 足した行 (差し替え後の本文との差分) と、変わった区間の中身の行 */
+function changedLineIndices(baseBody: string, body: string, changedBlocks: MarkerBlock[]): number[] {
+  const out = new Set(appendDiff(baseBody, body).added);
+  if (changedBlocks.length > 0) {
+    const lines = body.split("\n");
+    for (const block of changedBlocks) {
+      const start = lines.findIndex((l) => l.trim() === block.start);
+      const end = start >= 0 ? lines.findIndex((l, i) => i > start && l.trim() === block.end) : -1;
+      if (start >= 0 && end > start) for (let i = start + 1; i < end; i++) out.add(i);
+    }
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
+/**
+ * 毎回作り直す区間 (`MarkerBlock`) を既存の本文に当てる。
+ * - 区間が両方のマーカーごとあれば、中身だけ差し替える (マーカーの外は一切さわらない)
+ * - 無ければ、`section.heading` の章を (無ければ作って) その末尾にマーカーごと置く
+ * 返す `changed` は「中身が変わった / 新しく置いた」
+ */
+function replaceBlocks(existingBody: string, blocks: MarkerBlock[]): { body: string; changed: boolean } {
+  if (blocks.length === 0) return { body: existingBody, changed: false };
+  let lines = existingBody.split("\n");
+  let changed = false;
+  for (const block of blocks) {
+    const start = lines.findIndex((l) => l.trim() === block.start);
+    const end = start >= 0 ? lines.findIndex((l, i) => i > start && l.trim() === block.end) : -1;
+    if (start >= 0 && end > start) {
+      const current = lines.slice(start + 1, end);
+      if (current.join("\n") !== block.lines.join("\n")) changed = true;
+      lines = [...lines.slice(0, start + 1), ...block.lines, ...lines.slice(end)];
+      continue;
+    }
+    // **開始だけ残っている区間は止める。** 末尾に区間をもう 1 つ足すと、次の追記で「古い開始 〜 新しい終了」が
+    // 区間と見なされ、間に人が書いた文章ごと差し替えてしまう
+    if (start >= 0) {
+      throw new TemplateInputError(
+        `${block.start} はあるのに ${block.end} が見つかりません。記事の編集画面で終了のマーカーを戻すか、開始のマーカーも消してください`
+      );
+    }
+    // 区間が無い (両方のマーカーを消された / 旧い記事): 章の末尾にマーカーごと置く。
+    // 形はフル生成と同じ (前の行と空行で区切り、区間の後ろに空行 1 つ)
+    const sections = parseSections(lines.join("\n"));
+    const sec = ensureSection(sections, block.section.heading, block.section.before);
+    const at = appendIndex(sec.lines);
+    const fresh = at === 0;
+    const gap = !fresh && sec.lines[at - 1].trim() !== "" ? [""] : [];
+    const after = sec.lines[at]?.trim() === "" ? [] : [""];
+    if (fresh) sec.lines = ["", block.start, ...block.lines, block.end, ""];
+    else sec.lines.splice(at, 0, ...gap, block.start, ...block.lines, block.end, ...after);
+    lines = toBody(sections).split("\n");
+    changed = true;
+  }
+  const body = lines.join("\n");
+  return { body: body.endsWith("\n") ? body : `${body}\n`, changed };
 }
 
 /**

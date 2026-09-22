@@ -3,22 +3,15 @@
  *
  * ドシエと X レポから記事の本文・出典を組み立てる。組み立て自体は純粋関数
  * (`src/lib/meetgreet/article.ts`) で、ここは DB からの入力の用意に徹する。
- * ドシエの読み方・機密の絞り込み・TikTok の解決は器に依らないので
- * `dossier-materials.ts` にある (#170)。ここに残るのは X レポ収集の keep の合流だけ。
+ * ドシエの読み方・機密の絞り込み・X レポ収集の keep の合流・TikTok の解決は器に依らないので
+ * `dossier-materials.ts` (`loadContainerMaterials`) にある (#170 / #151)。
  */
 
-import { withSession } from "@/lib/db";
 import { getR2PublicUrl } from "@/lib/r2";
 import { todayJst } from "@/lib/utils";
 import { MAX_ARTICLE_CLEARANCE } from "@/lib/meetgreet/config";
-import { normalizeTweetUrl } from "@/lib/article-workflow/render";
 import { renderMeetGreetArticle, type RenderedMeetGreetArticle } from "@/lib/meetgreet/article";
-import {
-  loadDossierForArticle,
-  PUBLISHABLE,
-  resolveTiktoks,
-  shapeDossierMaterials,
-} from "./dossier-materials";
+import { loadContainerMaterials, PUBLISHABLE } from "./dossier-materials";
 import { MeetGreetInputError, type ActingUser } from "./meetgreets";
 
 export interface BuildArticleOptions {
@@ -60,50 +53,11 @@ export async function buildMeetGreetArticle(
     );
   }
 
-  const data = await withSession(user, async (tx) => {
-    const dossier = await loadDossierForArticle(tx, meetGreet.dossierId);
-    // ドシエが見えないのは権限の話なので、呼び出し側が 400 にできる形で投げる
-    if (!dossier) throw new MeetGreetInputError("ドシエが見つかりません (権限がないか削除されています)");
-
-    const collection = meetGreet.repoCollectionId
-      ? await tx.repoCollection.findUnique({
-          where: { id: meetGreet.repoCollectionId },
-          select: { classification: true },
-        })
-      : null;
-
-    const keeps =
-      includeKeeps && meetGreet.repoCollectionId
-        ? await tx.repoTweet.findMany({
-            where: { collectionId: meetGreet.repoCollectionId, status: "keep" },
-            orderBy: [{ tweetedAt: "asc" }, { id: "asc" }],
-            select: { url: true },
-          })
-        : [];
-    if (!PUBLISHABLE.has(dossier.classification)) {
-      throw new MeetGreetInputError(
-        `ドシエが ${dossier.classification} なので記事にできません (サムネや外部リンクが公開リポジトリに載るため)`
-      );
-    }
-    return { dossier, keeps, collection };
-  });
-
-  const materials = shapeDossierMaterials(data.dossier);
-
-  // TikTok は埋め込みに video ID が要るので、短縮 URL をここで解決しておく
-  const tiktoks = await resolveTiktoks(materials.tiktoks);
-
-  // keep を後ろに足す (ドシエに既にある URL は重複させない)。
-  // RepoTweet は自前の機密を持たず収集の機密に従うので、ここで見る
-  const reports = [...materials.reports];
-  const keepsPublishable = !data.collection || PUBLISHABLE.has(data.collection.classification);
-  const seen = new Set(reports.map(normalizeTweetUrl));
-  for (const t of keepsPublishable ? data.keeps : []) {
-    const n = normalizeTweetUrl(t.url);
-    if (seen.has(n)) continue;
-    seen.add(n);
-    reports.push(t.url);
-  }
+  const loaded = await loadContainerMaterials(
+    user,
+    { dossierId: meetGreet.dossierId, repoCollectionId: meetGreet.repoCollectionId, includeKeeps },
+    (message) => new MeetGreetInputError(message)
+  );
 
   return {
     ...renderMeetGreetArticle({
@@ -114,17 +68,13 @@ export async function buildMeetGreetArticle(
       // 別記事が新規作成されてしまう。会場名は venue に入れる
       venue: meetGreet.venue?.trim() || null,
       single: meetGreet.single,
-      assets: materials.assets,
-      reports,
-      tiktoks,
-      thumbnailUrl: meetGreet.sketchKey ? getR2PublicUrl(meetGreet.sketchKey) : materials.dossierThumb,
-      dossier: {
-        id: data.dossier.id,
-        updatedAt: data.dossier.updatedAt.toISOString(),
-        itemCount: data.dossier.itemCount,
-      },
+      assets: loaded.materials.assets,
+      reports: loaded.reports,
+      tiktoks: loaded.tiktoks,
+      thumbnailUrl: meetGreet.sketchKey ? getR2PublicUrl(meetGreet.sketchKey) : loaded.materials.dossierThumb,
+      dossier: loaded.dossier,
       today: options.today ?? todayJst(),
     }),
-    droppedByClearance: materials.droppedByClearance,
+    droppedByClearance: loaded.materials.droppedByClearance,
   };
 }

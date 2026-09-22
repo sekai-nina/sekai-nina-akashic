@@ -117,6 +117,7 @@ APIキーは `pnpm cli:keygen <user-email> <key-name> [permissions]` で発行�
 | POST | `/lives/:id/sketch` | write | 衣装スケッチの候補を生成（作り直しも） |
 | POST | `/lives/:id/sketch/crops` | write | 参照写真の切り抜き枠を保存 |
 | POST | `/lives/:id/sketch/select` | write | 候補の 1 枚を確定 |
+| POST | `/lives/:id/article` | write | ライブ記事を生成（既存があれば増えた分だけ追記。公演の表は毎回作り直す） |
 | GET | `/songs` | read | 曲マスタ（公式ディスコグラフィ + 公演で披露した曲）の一覧 |
 
 ---
@@ -1067,15 +1068,15 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
   "template": "quote_blog",
   "templateSupported": true,
   "suggestedTemplate": "quote_blog",
-  "selectableTemplates": ["quote_blog"],
+  "selectableTemplates": ["quote_blog", "quote_situational", "attribute", "outing"],
   "articles": [{"id": "…", "shortId": "HtP8cV6", "title": "ブログ「だいすき！」", "type": "quote", "draft": false}]
 }
 ```
 
 - `container` は `meetgreet` / `live` / `null`。**器に使われているドシエは `/meetgreets/:id/article` から作る**（`POST` は 400）。器が呼び出し側の機密より上だと `null` に見えるが、その場合も `template` が `meetgreet` / `live` なので `POST` は 400
 - `template` は `Dossier.articleTemplate`（`meetgreet` / `live` / `outing` / `quote_blog` / `quote_situational` / `attribute`、未設定は `null`）。`templateSupported` が `false` なら、決まってはいるがまだ組み立てに対応していない（`meetgreet` / `live` は器側で組むので `true`）
-- `suggestedTemplate` は紐づく記事の型から推した既定値（推せなければ `null`）
-- `selectableTemplates` は器を持たないドシエが `POST` の `template` に指定できるもの（実装済みのものだけ。現在は `quote_blog`）
+- `suggestedTemplate` は紐づく記事の型から推した既定値（`attribute` → `attribute`、`event` → `outing`、`quote` → タイトルが「ブログ「」で始まれば `quote_blog`、それ以外 `quote_situational`。推せなければ `null`）
+- `selectableTemplates` は器を持たないドシエが `POST` の `template` に指定できるもの（実装済みのものだけ。`quote_blog` / `quote_situational` / `attribute` / `outing`。`meetgreet` / `live` は器側）
 
 ### POST /dossiers/:id/article
 
@@ -1085,6 +1086,7 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 |---|---|---|---|
 | `template` | string | 未設定なら必須 | 記事テンプレート。`selectableTemplates` のいずれか。未設定のドシエに決める（監査ログ `dossier.template.set`）。**記事を作った後は別の型に変えられない**（400）。既に同じ値ならそのまま。**永続化されるのは保存のときだけ**で、`dryRun` / `restore` と併せたときはその要求の間だけ当てる（`dryRun` は書き込まない、の約束を守る） |
 | `articleId` | string | 記事が 2 本以上のとき必須 | 追記する記事。`GET` の `articles[].id`。1 本ならそれに追記、0 本なら新規作成 |
+| `aiDraft` | object \| null | | **本文を AI が書くテンプレート**（`attribute` / `outing` / `quote_situational`）の新規作成で、`dryRun` が返した `aiDraft` をそのまま渡す（`{ body, tags, title, date, dateDisplay }`。`body` ≤ 20,000 字、`tags` ≤ 10）。保存で生成し直すと別の文になり `expectedDigest` が合わないため。`null` か省略なら AI を使わず骨組み（出典だけ採番、本文はプレースホルダ）で作る。`dryRun` / `restore` とは併用できない（400） |
 
 - テンプレートが未設定のまま送ると 400（`template` で決めてから）
 - クリップのプール（`kind = clips`）は 400。器に使われているドシエも 400
@@ -1092,14 +1094,21 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 - 作った記事は `Article.dossierId` でドシエに紐づく（`GET /dossiers/:id/article` の `articles[]` で辿れる）
 - 「今後足さない」は `Dossier.articleExclusions` に覚える（形式は MeetGreet と同じ）。**ドシエ単位で 1 つ**なので、同じドシエから記事を 2 本作っている場合は両方に効く
 - 本文に載る機密レベルの上限（`internal`）、出典の作り方、`dirty` の扱いはミーグリと同じ
+- **本文を AI が書くテンプレートの `dryRun` は Claude を 1 回呼ぶ**（数十秒・数十円。`/costs` に `akashic.article_body` で積まれ、監査ログ `dossier.article.ai` が残る。`dryRun` で書き込むのはこの 2 つだけ）。**ドシエの編集権限が要る**（見えるだけの人に費用を使わせない。403）。`dryRun` の応答は常に `ai` と `aiDraft` を持ち、AI を使わないテンプレート（`quote_blog` / ミーグリ）では両方 `null`。`ai` は `{ status: "generated" | "unavailable", model, reason, included, truncated, usage: { inputTokens, cachedInputTokens, outputTokens } | null, costUsd }`。`ANTHROPIC_API_KEY` が無い・Claude が失敗したときは `status: "unavailable"` で本文がプレースホルダの骨組みになる（保存はできる）。追記では AI を呼ばない（地の文は人のもの）
+- **新規作成の `expectedDigest` は本文 + 出典で取る**（AI の本文は素材と独立なので、本文だけだと `dryRun` のあとで素材が増減して脚注の宛先がずれても気づけない）。`dryRun` の `digest` をそのまま渡せばよい
+- `aiDraft.body` の `^[n]` は出典に無い番号（AI が作った / 古い下書き）を落として保存する。宛先の無い脚注を公開リポジトリに出さないため
+- AI が書いた記事は **`draft: true` で保存される。** 記事の編集画面で読んで直し、下書きを外してから push する
 
 テンプレートごとの形:
 
 | template | 記事の型 | 本文 | 備考 |
 |---|---|---|---|
 | `quote_blog` | `quote` | 「坂井新奈ブログでの名言を紹介する。」+ ドシエの抜粋を `>` の引用ブロックで併記 | 本人ブログ **1 本**の抜粋だけを使う（抜粋のあるブログが 2 本以上なら 400、ひなたぼっこ日記は数えない）。タイトルは `坂井新奈ブログ「X」` → `ブログ「X」`。`date` / 関連メディアは持たない。追記は増えた抜粋を末尾に足す |
+| `attribute` | `attribute` | **AI（Claude）が書く**: リード 1 文 + 事実の箇条書き、各事実に `^[n]`（出典番号は素材と同じ採番: ブログ → トーク） | タイトル = ドシエのタイトル。`date` 無し。tags は既存タグから選ぶよう AI に指示する（保証はしない。他メンバー名可）。`[[…]]` は公開済み記事のタイトルにだけ張るよう指示する。**ドシエに画像しか入っていないブログは、同じ URL の本文アセットを素材に足して出典の宛先にする**（人はブログを読んで書くため。RLS と機密の上限は同じに効く。`outing` / `quote_situational` も同じ）。`draft: true` で保存。追記は本文に足すものが無い（新しい素材を反映するには記事の編集画面で手で書く。作り直しは後続） |
+| `outing` | `event` | **AI が書く**: 冒頭 1〜2 文 + 場所 / 行動ごとの `##` と事実の箇条書き `^[n]`（引用しない）。そのあとに機械で `## 関連メディア`（画像・動画のトークとブログ画像をリンクで、TikTok を埋め込みで、1 つの箇条書きに。文章のトークは出典にだけ。AI が書いてしまった同名の章は落とす） | タイトル = ドシエのタイトル。`date` / `date_display` は AI の提案（日が分からなければ月の 1 日 + 「YYYY年M月頃」）。tags = 同行者 + カテゴリ。**`locations` は場所候補から**（聖地に昇格済みなら `{ name, place_id }`、未昇格で座標があれば `{ name, lat, lng, google_maps_url? }`、座標も無ければ落とす。**昇格先の聖地が `internal` を超える / 見えない候補は記事にも AI にも出さない**）。場所候補の名前・住所・Google マップ URL も AI に渡す（編集メモは渡さない）。`draft: true`。追記は関連メディアだけ足す（`locations` は追記で更新しない。場所候補を足したら記事の編集画面で） |
+| `quote_situational` | `quote` | **AI が書く**: 状況の地の文 → `>` 発言 → 反応 1 文 | **タイトルは AI が実際の発言の表記に整えてよい**（ドシエのタイトルは目安。`yes, me now?` → `Yes, me now?`。path もそのタイトルで決まる。同名の記事があれば 409）。`date` / `date_display` は発言の時期（分からなければ素材の投稿日 + 「頃」）、tags は関係するメンバー。関連メディアは出さない。`draft: true`。追記は本文に足すものが無い |
 
-（`attribute` / `outing` / `quote_situational` は #171 / #172、`live` は #151）
+（`meetgreet` / `live` は器側で組む: `POST /meetgreets/:id/article` / `POST /lives/:id/article`）
 
 ## ミーグリ記事ワークフロー (MeetGreets)
 
@@ -1375,7 +1384,7 @@ keep / total は `GET /meetgreets/:id` の `repoCollection` で読む。判定�
 
 `Live` / `LivePerformance` / `LiveSong` は保護テーブル（`Live.classification`、既定 `internal`。子 2 つは親に従う）。一覧・詳細は API キーの持ち主の clearance で見える行だけ。`Song` は曲名しか持たない非保護のマスタで、**入力した曲名がそのまま find-or-create される**（表記揺れは別の曲になる。既存記事の表記に合わせる）。
 
-X レポ・スケッチはミーグリと同じ仕組み（#150）。記事生成は #151。
+X レポ・スケッチはミーグリと同じ仕組み（#150）。記事生成は `POST /lives/:id/article`（#151）。
 
 ### GET /lives
 
@@ -1513,6 +1522,32 @@ X レポ・スケッチはミーグリと同じ仕組み（#150）。記事生�
 ### POST /lives/:id/sketch/select
 
 `POST /meetgreets/:id/sketch/select` と同じ（候補の 1 枚を `sketchKey` にする。**レスポンス:** 更新後の行）。
+
+### POST /lives/:id/article
+
+ライブ記事を生成する（#151）。本体・入力・応答は `POST /meetgreets/:id/article` と同じ（`dryRun` / `expectedDigest` / `exclude` / `restore`。実装も `handleArticleGenerate` を共用）。違いは記事の形だけ:
+
+- **1 記事 = 1 ライブ（ツアー）。** タイトル = `Live.name`、path `event/<name>.md`、tags `[ライブ]`、`date` = 初日、複数日なら `date_mode: range` と `date_display`「2025年9月20日〜11月21日」（同じ年なら後ろの年を省く。1 日なら単日）
+- 本文: サムネ（確定したスケッチ → ドシエの「サムネ」）→ イントロ（「YYYY年M月D日〜M月D日、<name> が開催された。坂井新奈は N 公演に参加した。」）→ `## 公演`（`Live.note` があればその段落 → **`<!-- live:performances -->` 〜 `<!-- /live:performances -->` の間に Markdown の表**: 日付 / 会場 / 追加曲 / センター曲 / 備考。空の列は出さない。同日の呼び分け `label` は日付の後ろ。表の下に「共通披露曲：A / B / C」）→ `## 本人の感想（ブログより）` → `## ファンによるライブレポ` → `## 関連メディア`（ミーグリと同じ規則）
+- **追記では公演の表の区間を毎回作り直す**（公演や曲を直したら記事にも反映される。区間の外は 1 行も触らない）。区間が無い記事（マーカーを消した / 旧い記事）には `## 公演` の章を作ってマーカーごと置く。他の章は「まだ無いものだけ足す」。表だけ変わったときも `dryRun` は `empty: false` で、`addedLines` は「足した行 + 区間の中身」（区間の中で行が減っても以降の行を差分扱いにしない）。開始マーカーだけ残して終了マーカーを消した記事は 400（次の追記で間の文章を巻き込むため）
+- frontmatter `live:`（サイトの `/live` ページが読む予定。スキーマは sekai-nina-site 側の Issue）:
+
+  ```yaml
+  live:
+    name: 日向坂46 ARENA TOUR 2025「MONSTER GROOVE」
+    common_songs: [NO WAR in the future 2020, キツネ]
+    performances:
+      - date: 2025-09-20
+        venue: セキスイハイムスーパーアリーナ（宮城）
+        label: ""
+        songs: []            # 公演限定の追加曲
+        center_songs: []
+        note: ""
+    outfit_image: https://r2.sekai-nina.com/...   # 確定したスケッチ、無ければドシエの「サムネ」。どちらも無ければ出ない
+  ```
+
+- `live:` ブロックも公演の表と同じく機械のもので、**追記のたびに作り直す**（`meetgreet:` / `locations` は新規作成時のまま）
+- 「今後足さない」は `Live.articleExclusions`、記事の紐づけは `Live.articleId`（+ `Article.dossierId`）。機密の上限（`internal`）はミーグリと同じで、ライブ自身・ドシエ・X レポ収集のそれぞれで見る
 
 ---
 
@@ -1824,6 +1859,136 @@ Google Drive に **直接 PUT する URL** を発行する。Vercel の本文上
 ```json
 { "error": "Instagram Download が何も保存しなかった" }
 ```
+
+## TikTok の監視 (#179)
+
+tiktok-watch (bot) が公式 TikTok の新着を見張り、DL して登録し、Discord に流すための API。
+**「どの動画を取ったか」の台帳は akashic が持つ。** bot は見えた動画を報告し、akashic が
+「これを DL して」と返した分だけ DL する（bot の state を失っても二重登録・二重通知しない）。
+設計は `docs/tiktok-design.md`。
+
+流れ: `GET /tiktok/targets` → 対象ごとに `POST /tiktok/targets/{handle}/sightings` → 返った
+`pending` を yt-dlp で DL → `POST /upload`（4MB 超は `/upload/initiate` → `/upload/complete`）→
+`POST /tiktok/videos/{videoId}/register` → Discord → `POST /tiktok/videos/{videoId}/notified`。
+1 周ごとに `POST /jobs/bot.tiktok_watch/runs`。
+
+### GET /tiktok/targets
+
+有効な監視対象。認証は API キー（読むだけなので read / write の別は問わない）。
+
+```json
+{ "targets": [ { "handle": "hinatazakanews", "intervalMinutes": 30, "secUid": "MS4wLjAB..." } ] }
+```
+
+| フィールド | 内容 |
+|---|---|
+| `handle` | `@` を除いた小文字のハンドル |
+| `intervalMinutes` | 巡回間隔（分） |
+| `secUid` | bot が報告した secUid（初回は `null`） |
+
+対象は `/admin/tiktok`（admin のみ）から登録する。
+
+### POST /tiktok/targets/{handle}/sightings
+
+profile で見えた動画を報告し、DL すべき一覧を受け取る（**write 権限**）。
+
+```json
+{
+  "videos": [
+    { "videoId": "7687944101915823380", "createTime": "2026-09-21T10:29:38Z",
+      "caption": "「IDOL RUNWAY COLLECTION」ありがとうございました💖 片山紗希🐰 #日向坂46",
+      "durationSec": 33, "coverUrl": "https://p16-sign.tiktokcdn.com/..." }
+  ],
+  "secUid": "MS4wLjAB...",
+  "videoCount": 1113,
+  "backfill": false
+}
+```
+
+| フィールド | 必須 | 内容 |
+|---|---|---|
+| `videos[]` | ○ | 見えた動画（最大 500）。`videoId` は URL 末尾の数字、`createTime` は ISO 8601（**タイムゾーン必須**: `Z` か `+09:00`）、`caption` は 5,000 字で切って受ける |
+| `secUid` / `videoCount` | | プロフィールから取れたら付ける（対象に保存する） |
+| `backfill` | | `true` なら過去分の取得。**初回接触扱いにせず**、`skipped_initial` の動画も `pending` に戻す（対象に「キャプションの絞り込み」があれば合うものだけ） |
+| `skip` | | `true` なら見えた動画を**既知として載せるだけ**（新しい行は `skipped_initial`、既に `pending` の行も `skipped_initial` に戻す）。backfill の「この日より前は要らない」に使う。`backfill` より優先 |
+
+- **台帳が空の対象への最初の報告（`backfill` なし）は初回接触**: 見えた動画を全件 `skipped_initial` にして `pending` は返さない（対象を足した瞬間に過去 1,000 本を落とし始めない）。この行は `notify: false` で、後で backfill / 画面の「取り込む」で `pending` に戻しても Discord には流さない
+- 既に載っている動画は、変わったキャプション等だけ更新する（status・createTime は触らない。空のキャプションで上書きしない）
+- 対象に**キャプションの絞り込み**（`/admin/tiktok` の「キャプションで絞る」、`|` 区切りでいずれかを含む）があれば、合わない動画は新着でも `skipped_initial` で載せる（通知もしない）。坂道グループ共通のチャンネル（`@lemino_sakamichi`）から日向坂の動画だけ拾う用
+- 対象の `lastCheckedAt` を進め、`lastError` を消す
+- `coverUrl` は TikTok の CDN（`*.tiktokcdn.com` 等）の https だけ受け付ける（それ以外は捨てる。サーバが取りに行くため）
+
+**レスポンス:**
+
+```json
+{
+  "initial": false,
+  "added": 1,
+  "counts": { "skipped_initial": 48, "pending": 1, "registered": 12, "failed": 0 },
+  "pending": [
+    { "videoId": "7687944101915823380", "url": "https://www.tiktok.com/@hinatazakanews/video/7687944101915823380",
+      "createTime": "2026-09-21T11:09:38.000Z", "caption": "...", "notify": true }
+  ]
+}
+```
+
+`pending` は**今回見えた分に限らず**、その対象で `pending` のもの全部と、`failed` で試行回数が上限（3）未満かつ前回の失敗から 15 分経ったもの。新しい順に最大 20 件（backfill はこれを繰り返して減らす）。`notify` は登録できたら Discord に流すか（新着だけ `true`。bot はこれに従い、自分が backfill かどうかで判断しない）。
+
+### POST /tiktok/targets/{handle}/report
+
+巡回そのものの失敗（profile が開けない等）を対象に残す（**write 権限**）。次に成功した `sightings` で消える。
+
+```json
+{ "error": "playwright: timeout while loading profile" }
+```
+
+**レスポンス:** `{ "ok": true }`
+
+### POST /tiktok/videos/{videoId}/register
+
+`POST /upload` で作ったアセットを TikTok の動画として整える（**write 権限**）。
+
+```json
+{ "assetId": "cm..." }
+```
+
+akashic 側で付けるもの: `title`（ハッシュタグを除いて実のある最初の行を 80 字。無ければ `@handle YYYY/MM/DD`）/ `description`（キャプション全文）/ `canonicalDate`（投稿時刻）/ `sourceType: web` / `trustLevel: official`（対象が公式のとき）/ `SourceRecord`（`publisher: "TikTok"`、動画 URL）/ 出典エンティティ（対象の `sourceName`、既定 `TikTok @handle`）/ **キャプションにフルネームが含まれるメンバーの person エンティティ**（`src/lib/members.ts` の名簿）/ cover 画像からの R2 サムネイル（取れなければ `pnpm cli:thumbnails --kind=video` が後で埋める）。
+
+**先に台帳の行を `pending` / `failed` → `registered` に取ってから整える。** daemon と `watch --once` / backfill が同じ動画を同時に持ってきても、整えるのは 1 回、`alreadyRegistered: false` が返るのも 1 回（通知も 1 回）。整える途中で失敗したら行を `failed` に戻す。
+
+**レスポンス:**
+
+```json
+{ "assetId": "cm...", "title": "「IDOL RUNWAY COLLECTION」ありがとうございました💖 片山紗希🐰",
+  "url": "https://www.tiktok.com/@hinatazakanews/video/7687944101915823380",
+  "members": ["片山紗希", "佐藤優羽"], "highlight": false, "notify": true, "alreadyRegistered": false }
+```
+
+`highlight` は坂井新奈が入っているか（Discord で目立たせる用）。`notify` は台帳の値（`false` なら流さない）。`upload` の SHA256 dedup で既存アセットが返ったときも同じ `assetId` で呼んでよい（既に `registered` なら `alreadyRegistered: true` で何もしない。**その場合も通知しない**）。
+
+- 409: その動画が**別のアセット**で登録済み、またはそのアセットが**別の動画**に紐づいている（dedup で同じファイルが返った）。再試行しても解決しないので bot は `failed` で残す
+
+### POST /tiktok/videos/{videoId}/notified
+
+Discord に送れたことを台帳に残す（**write 権限**）。本文なし。**レスポンス:** `{ "ok": true }`
+
+### POST /tiktok/videos/{videoId}/failed
+
+DL か登録の失敗（**write 権限**）。`attempts` が進み、3 回で `pending` に返さなくなる（`/admin/tiktok` の「再試行」で戻す）。
+
+```json
+{ "error": "yt-dlp: HTTP Error 403" }
+```
+
+**レスポンス:** `{ "ok": true, "attempts": 1, "willRetry": true }`。既に `registered` の行には効かない（bot 側のタイムアウトで実は登録が済んでいた行を壊さない。`willRetry: false` で返る）
+
+### エラー
+
+| 状態 | 意味 |
+|---|---|
+| 400 | 本文の形式（zod）/ `videoId` や `handle` の形式が不正 |
+| 404 | `handle` が監視対象に無い / `videoId` が台帳に無い / `assetId` が見えない |
+| 409 | `register` の台帳との食い違い（上記） |
 
 ## 典型的な利用パターン
 

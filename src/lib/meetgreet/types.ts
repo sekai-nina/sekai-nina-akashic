@@ -7,6 +7,7 @@
  */
 
 import type { AssetKind } from "@prisma/client";
+import type { AiDraft, ArticleAiStatus } from "@/lib/article-workflow/templates/types";
 
 /**
  * 「足さない」と決めたものの種別 (#134)。
@@ -77,4 +78,8 @@ export interface ArticlePreview {
   empty: boolean;
   /** 既存記事がある場合の shortId */
   shortId: string | null;
+  /** 本文を AI が書くテンプレートの新規作成のとき (#171)。それ以外は null */
+  ai: ArticleAiStatus | null;
+  /** 保存に渡す下書き。AI が使えなかった (骨組み) なら null */
+  aiDraft: AiDraft | null;
 }
