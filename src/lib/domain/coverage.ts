@@ -435,9 +435,9 @@ async function computeDerivedItemsSerialized(
 /**
  * ソースの導出アイテムをキャッシュ付きで返す（v2.2 P2028 対策）。
  *
- * ブログ導出（13.9k SourceRecord の集約）はローカル→Supabase のレイテンシ込みで
- * Prisma interactive tx の既定 5s を超えうるため、導出は**キャッシュ付きの独立した
- * 小さいトランザクション**で実行し、buildMatrix / listItems の tx には相乗りさせない。
+ * ブログ・トーク導出は重い集約で、Postgres のキャッシュが冷えていると withClearance の
+ * 既定 15s を超えうるため、導出は**キャッシュ付きの独立した小さいトランザクション**
+ * （タイムアウト DERIVE_TX_TIMEOUT_MS）で実行し、buildMatrix / listItems の tx には相乗りさせない。
  * チェック操作でアイテム集合は変わらないので invalidate は TTL（90秒）任せで十分。
  * key は source×clearance（RLS の見え方が clearance で変わるため）。
  */
@@ -541,10 +541,34 @@ interface BuiltMatrix {
  * セル単位のクエリは発行しない（設計書 §4）。
  *
  * P2028 対策: 以前は全ソースの導出を1つの withClearance tx 内で直列実行しており、
- * ブログ導出だけで interactive tx の既定 5s を超えることがあった。現在は
+ * ブログ導出だけで interactive tx のタイムアウトを超えることがあった。現在は
  * 「メタ＋チェック集計」だけを小さい tx で取り、導出はソースごとに
- * getDerivedItems（キャッシュ付き独立トランザクション）を並列で呼ぶ。
+ * getDerivedItems（キャッシュ付き独立トランザクション）を呼ぶ。
+ * 全ソースを一度に並列にすると接続プール（Vercel 上で ~5 本）の待ちがあふれて
+ * 「Unable to start a transaction in the given time」になるため、同時実行数を
+ * DERIVE_CONCURRENCY に絞る（2026-09-23）。
  */
+/** buildMatrix で同時に張る導出 tx の上限。接続プールの一部を他のクエリに残す。 */
+const DERIVE_CONCURRENCY = 3;
+
+/** items を最大 limit 件ずつ並行に fn へ通す。結果は items と同じ順序で返す。 */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 async function buildMatrix(
   clearance: string,
   options: { publicOnly?: boolean } = {}
@@ -584,12 +608,12 @@ async function buildMatrix(
     }
   );
 
-  // 2) ソース別にアイテム導出（各ソース = キャッシュ付き独立 tx。並列）
-  //    manual は常に空なので tx を張らない（並列 tx が増えるほど接続プールを食い合う）
-  const derivedLists = await Promise.all(
-    dataSources.map((ds) =>
-      ds.itemRule === "manual" ? Promise.resolve([]) : getDerivedItems(ds.key, clearance)
-    )
+  // 2) ソース別にアイテム導出（各ソース = キャッシュ付き独立 tx。同時実行数を制限）
+  //    manual は常に空なので tx を張らない（deriveItems も manual は [] を返す）
+  const derivedLists = await mapWithConcurrency(dataSources, DERIVE_CONCURRENCY, (ds) =>
+    ds.itemRule === "manual"
+      ? Promise.resolve<DerivedItem[]>([])
+      : getDerivedItems(ds.key, clearance)
   );
   const derivedBySource = new Map<string, DerivedItem[]>();
   dataSources.forEach((ds, i) => derivedBySource.set(ds.id, derivedLists[i]));
