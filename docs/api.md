@@ -1263,7 +1263,7 @@ keep / total は `GET /meetgreets/:id` の `repoCollection` で読む。判定�
 
 ### POST /meetgreets/:id/sketch
 
-その日の服装スケッチ（記事のサムネ / OGP 画像）の候補を生成する。ドシエに入っている写真を参照に、シリーズの画風をそろえるための**基準スケッチ**を添えて OpenAI の画像編集 API（`gpt-image-1`）に投げる。
+その日の服装スケッチ（記事のサムネ / OGP 画像）の候補を生成する。ドシエに入っている写真を参照に、シリーズの画風をそろえるための**基準スケッチ**を添えて OpenAI の画像編集 API（`gpt-image-2.5-sunburst`）に投げる。
 
 ```json
 {"assetIds": ["…", "…"], "revisionOf": "meetgreet/…/sketch/1789…-0.png", "revisionNote": "袖のふくらみをもっと大きく"}

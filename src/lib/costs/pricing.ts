@@ -52,6 +52,8 @@ export const PRICING: Record<LlmProvider, Record<string, ModelPricing>> = {
     // usage API はどちらも input_tokens にまとめて返す**ので、高いほう (画像入力) で見積もる。
     // 実測 (2026-09-19, 入力 43,836 / 出力 12,416): この表で $0.935、OpenAI の確定額は $0.912
     "gpt-image-1": { input: 10, cachedInput: 2.5, output: 40 },
+    // 2026-09-24 からのスケッチ生成。テキスト入力 $5 / 画像入力 $8 (キャッシュ $1.25 / $2)。同上の理由で画像入力で見積もる
+    "gpt-image-2.5-sunburst": { input: 8, cachedInput: 2, output: 30 },
   },
   anthropic: {
     "claude-opus-5": anthropic(5, 25),

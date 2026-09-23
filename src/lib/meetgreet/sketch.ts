@@ -2,7 +2,7 @@
  * 服装スケッチの生成 (#108)。
  *
  * ドシエで選んだその日の写真と、シリーズの画風をそろえるための「基準スケッチ」を
- * OpenAI の画像編集 API (gpt-image-1) に渡し、候補を 2 枚作って R2 に置く。
+ * OpenAI の画像編集 API (gpt-image-2.5-sunburst) に渡し、候補を 2 枚作って R2 に置く。
  * 人が 1 枚選んで確定するか、修正指示を書いて作り直す。
  *
  * **基準スケッチは回をまたいで同じ 1 枚**（既定は R2 の `STYLE_REFERENCE_KEY`）。直前の生成結果を
@@ -20,7 +20,11 @@ import { buildSketchPrompt } from "./sketch-prompt";
 /** 画風の見本。回をまたいで固定で使う */
 export const STYLE_REFERENCE_KEY = "meetgreet/style-reference/base.png";
 
-const OPENAI_IMAGE_MODEL = "gpt-image-1";
+/**
+ * 2026-09-24 に gpt-image-1 から上げた。gpt-image-1 は写真にない小物を描き足したり、
+ * 写っていない下半身を補完したりと、プロンプトの禁止事項を守らなかった
+ */
+const OPENAI_IMAGE_MODEL = "gpt-image-2.5-sunburst";
 const OPENAI_EDITS_URL = "https://api.openai.com/v1/images/edits";
 
 /**
@@ -254,7 +258,7 @@ export async function padToCardAspect(png: Buffer): Promise<Buffer> {
 
 interface OpenAIImageResponse {
   data?: { b64_json?: string }[];
-  /** gpt-image-1 はトークン課金なので利用量が返る (/costs への自己申告に使う) */
+  /** 画像モデルはトークン課金なので利用量が返る (/costs への自己申告に使う) */
   usage?: { input_tokens?: number; output_tokens?: number };
   error?: { message?: string };
 }
@@ -279,8 +283,7 @@ async function callOpenAIEdits(
   form.append("prompt", prompt);
   form.append("size", `${GENERATED_WIDTH}x${GENERATED_HEIGHT}`);
   form.append("quality", "high");
-  // 服の構造・小物を元写真から拾わせる
-  form.append("input_fidelity", "high");
+  // input_fidelity は gpt-image-2.5-sunburst では 400 になる (gpt-image-1 専用) ので送らない
   form.append("n", String(count));
   form.append("output_format", "png");
   for (const img of [...photos, styleReference]) {
