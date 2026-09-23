@@ -216,6 +216,9 @@ export function AddToDossier({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
+              // IME 変換確定の Enter で作成されないようにする。Safari は確定の Enter で
+              // isComposing が false になるので keyCode 229 も見る
+              if (e.nativeEvent.isComposing || e.keyCode === 229) return;
               // 一致するドシエが1つも無いなら、Enter でそのまま作成
               if (e.key === "Enter" && canQuickCreate && filtered.length === 0) {
                 e.preventDefault();
@@ -290,6 +293,7 @@ export function AddToDossier({
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
             onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing || e.keyCode === 229) return;
               if (e.key === "Enter" && newTitle.trim() && !isPending) {
                 e.preventDefault();
                 createAndAdd(newTitle);
