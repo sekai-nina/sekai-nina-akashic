@@ -405,21 +405,31 @@ interface SerializedDerivedItem {
   itemTitle: string | null;
 }
 
+/**
+ * 導出 tx のタイムアウト。温まっていればトークでも ~1s だが、本番で Postgres の
+ * キャッシュが冷えていると 22s かかって既定 15s の P2028 になった（2026-09-23）。
+ */
+const DERIVE_TX_TIMEOUT_MS = 30_000;
+
 /** 自前の小さい withClearance tx で1ソース分だけ導出する（大きい tx に相乗りしない）。 */
 async function computeDerivedItemsSerialized(
   sourceKey: string,
   clearance: string
 ): Promise<SerializedDerivedItem[]> {
-  return withClearance(clearance, async (tx) => {
-    const ds = await tx.dataSource.findUnique({ where: { key: sourceKey } });
-    if (!ds) return [];
-    const items = await deriveItems(tx, ds);
-    return items.map((i) => ({
-      itemKey: i.itemKey,
-      itemDate: toDateOnlyString(i.itemDate),
-      itemTitle: i.itemTitle,
-    }));
-  });
+  return withClearance(
+    clearance,
+    async (tx) => {
+      const ds = await tx.dataSource.findUnique({ where: { key: sourceKey } });
+      if (!ds) return [];
+      const items = await deriveItems(tx, ds);
+      return items.map((i) => ({
+        itemKey: i.itemKey,
+        itemDate: toDateOnlyString(i.itemDate),
+        itemTitle: i.itemTitle,
+      }));
+    },
+    { timeout: DERIVE_TX_TIMEOUT_MS }
+  );
 }
 
 /**
@@ -575,8 +585,11 @@ async function buildMatrix(
   );
 
   // 2) ソース別にアイテム導出（各ソース = キャッシュ付き独立 tx。並列）
+  //    manual は常に空なので tx を張らない（並列 tx が増えるほど接続プールを食い合う）
   const derivedLists = await Promise.all(
-    dataSources.map((ds) => getDerivedItems(ds.key, clearance))
+    dataSources.map((ds) =>
+      ds.itemRule === "manual" ? Promise.resolve([]) : getDerivedItems(ds.key, clearance)
+    )
   );
   const derivedBySource = new Map<string, DerivedItem[]>();
   dataSources.forEach((ds, i) => derivedBySource.set(ds.id, derivedLists[i]));

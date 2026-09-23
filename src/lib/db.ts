@@ -41,6 +41,13 @@ export interface TxOptions {
 const DEFAULT_TX_TIMEOUT_MS = 15_000;
 
 /**
+ * プールから接続を取るまでの待ち時間。Prisma 既定の 2000ms だと、/coverage の
+ * ソース別導出のように tx を並列に張る経路で接続待ちがあふれて
+ * P2028 (Unable to start a transaction in the given time) になるため引き上げる。
+ */
+const DEFAULT_TX_MAX_WAIT_MS = 10_000;
+
+/**
  * Execute a function within a transaction with RLS clearance set.
  * All queries through `tx` will be filtered by the user's clearance level.
  *
@@ -57,7 +64,7 @@ export async function withClearance<T>(
       await tx.$executeRaw`SELECT set_config('app.clearance', ${clearance}, true)`;
       return fn(tx);
     },
-    { timeout: opts?.timeout ?? DEFAULT_TX_TIMEOUT_MS }
+    { timeout: opts?.timeout ?? DEFAULT_TX_TIMEOUT_MS, maxWait: DEFAULT_TX_MAX_WAIT_MS }
   );
 }
 
@@ -78,7 +85,7 @@ export async function withSession<T>(
       await tx.$executeRaw`SELECT set_config('app.clearance', ${user.clearance}, true)`;
       return fn(tx);
     },
-    { timeout: opts?.timeout ?? DEFAULT_TX_TIMEOUT_MS }
+    { timeout: opts?.timeout ?? DEFAULT_TX_TIMEOUT_MS, maxWait: DEFAULT_TX_MAX_WAIT_MS }
   );
 }
 
