@@ -12,6 +12,7 @@ import {
   addExternalLinkItem as addExternalLinkItemDomain,
   updateDossierItem as updateDossierItemDomain,
   removeDossierItem as removeDossierItemDomain,
+  removeAssetFromDossier as removeAssetFromDossierDomain,
   reorderDossierItems as reorderDossierItemsDomain,
   addPlaceCandidate as addPlaceCandidateDomain,
   updatePlaceCandidate as updatePlaceCandidateDomain,
@@ -100,6 +101,17 @@ export async function addAssetToDossierAction(
   });
   invalidateDossiers();
   revalidatePath(`/dossiers/${dossierId}`);
+  // アセット詳細の「含まれているドシエ」を追従させる
+  revalidatePath(`/assets/${assetId}`);
+}
+
+/** ドシエからアセットを外す (抜粋ごとの重複もまとめて)。アセット詳細のピッカー / パネルから呼ぶ */
+export async function removeAssetFromDossierAction(dossierId: string, assetId: string) {
+  const user = await requireUser();
+  await removeAssetFromDossierDomain(user, dossierId, assetId);
+  invalidateDossiers();
+  revalidatePath(`/dossiers/${dossierId}`);
+  revalidatePath(`/assets/${assetId}`);
 }
 
 /**
@@ -124,6 +136,7 @@ export async function createDossierWithAssetAction(
   invalidateDossiers();
   revalidatePath("/dossiers");
   revalidatePath(`/dossiers/${dossier.id}`);
+  revalidatePath(`/assets/${assetId}`);
   return { dossierId: dossier.id, title: dossier.title };
 }
 

@@ -82,6 +82,27 @@ export async function listEditableDossiers(user: ActingUser, opts?: { withArticl
   return all.filter((d) => canEditDossier(user, d));
 }
 
+/**
+ * このアセットを含むドシエ (アセット詳細の「含まれているドシエ」用)。
+ * 見えるかどうかは Dossier / DossierItem の RLS に任せる。クリップのプールは /clips が
+ * 別に出すので除く。同じアセットを抜粋ごとに複数回入れられるので、件数も返す
+ */
+export async function listDossiersContainingAsset(user: ActingUser, assetId: string) {
+  const items = await withSession(user, (tx) =>
+    tx.dossierItem.findMany({
+      where: { assetId, dossier: NOT_CLIP_POOL },
+      select: { dossier: { select: { id: true, title: true, updatedAt: true } } },
+    })
+  );
+  const byId = new Map<string, { id: string; title: string; updatedAt: Date; itemCount: number }>();
+  for (const { dossier } of items) {
+    const row = byId.get(dossier.id);
+    if (row) row.itemCount++;
+    else byId.set(dossier.id, { ...dossier, itemCount: 1 });
+  }
+  return [...byId.values()].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+}
+
 /** ドシエの種別だけ引く (詳細ページがプールを /clips へ逃がすとき、アイテム全件を読む前に見る) */
 export async function getDossierKind(user: ActingUser, id: string): Promise<DossierKind | null> {
   const row = await withSession(user, (tx) => tx.dossier.findUnique({ where: { id }, select: { kind: true } }));
@@ -555,6 +576,26 @@ export async function removeDossierItem(user: ActingUser, itemId: string) {
     targetType: "DossierItem",
     targetId: itemId,
   });
+}
+
+/**
+ * ドシエからこのアセットを外す (アセット詳細の「ドシエに追加」の取り消し)。
+ * 抜粋ごとに複数回入っていることがあるので、そのアセットのアイテムはまとめて消す。
+ * クリップのプールは /clips で扱うので対象外 (requireEditAccess が弾く)
+ */
+export async function removeAssetFromDossier(user: ActingUser, dossierId: string, assetId: string) {
+  await requireEditAccess(user, dossierId);
+  const { count } = await withSession(user, (tx) =>
+    tx.dossierItem.deleteMany({ where: { dossierId, assetId } })
+  );
+  await logAudit({
+    actorId: user.id,
+    action: "dossier.item.remove",
+    targetType: "Dossier",
+    targetId: dossierId,
+    metadata: { assetId, count },
+  });
+  return count;
 }
 
 export async function reorderDossierItems(

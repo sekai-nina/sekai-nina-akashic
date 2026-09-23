@@ -2,8 +2,12 @@
 
 import { useState, useTransition, useRef, useEffect, useCallback, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
-import { Plus, Check, Loader2, FolderSearch } from "lucide-react";
-import { addAssetToDossierAction, createDossierWithAssetAction } from "@/app/(main)/dossiers/actions";
+import { Plus, Check, Loader2, FolderSearch, X } from "lucide-react";
+import {
+  addAssetToDossierAction,
+  createDossierWithAssetAction,
+  removeAssetFromDossierAction,
+} from "@/app/(main)/dossiers/actions";
 
 /** パネルの実寸。位置計算に使うので Tailwind のクラスと揃えること。 */
 const PANEL_WIDTH = 256; // w-64
@@ -35,6 +39,11 @@ interface AddToDossierProps {
   size?: "sm" | "md";
   /** Called after an asset is successfully added to an existing dossier. */
   onAdded?: (dossierId: string, dossierTitle: string) => void;
+  /**
+   * 追加済みのドシエをもう一度押すと外せるようにする (アセット詳細用)。
+   * 抜粋ごとのアイテムもまとめて消えるので、抜粋フローでは有効にしない
+   */
+  allowRemove?: boolean;
 }
 
 export function AddToDossier({
@@ -46,6 +55,7 @@ export function AddToDossier({
   alreadyAdded = [],
   size = "sm",
   onAdded,
+  allowRemove = false,
 }: AddToDossierProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -125,6 +135,24 @@ export function AddToDossier({
           onAdded(dossierId, target?.title || "(無題)");
           setOpen(false);
         }
+      } finally {
+        setPendingId(null);
+      }
+    });
+  }
+
+  function removeFrom(dossierId: string) {
+    const target = dossiers.find((d) => d.id === dossierId);
+    if (!confirm(`「${target?.title || "(無題)"}」からこのアセットを外しますか？\n(抜粋として複数回入っている場合はすべて外れます)`)) return;
+    setPendingId(dossierId);
+    startTransition(async () => {
+      try {
+        await removeAssetFromDossierAction(dossierId, assetId);
+        setAddedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(dossierId);
+          return next;
+        });
       } finally {
         setPendingId(null);
       }
@@ -234,23 +262,32 @@ export function AddToDossier({
             )}
             {filtered.map((d) => {
               const added = addedIds.has(d.id);
+              const removable = added && allowRemove;
               return (
                 <li key={d.id}>
                   <button
                     type="button"
-                    onClick={() => addToExisting(d.id)}
-                    disabled={added || isPending}
-                    className={`w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded text-xs ${
-                      added
-                        ? "text-slate-400 cursor-default"
-                        : "text-slate-700 hover:bg-indigo-50"
+                    onClick={() => (removable ? removeFrom(d.id) : addToExisting(d.id))}
+                    disabled={(added && !removable) || isPending}
+                    title={removable ? "押すとこのドシエから外す" : undefined}
+                    className={`group w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded text-xs ${
+                      removable
+                        ? "text-slate-500 hover:bg-red-50 hover:text-red-700"
+                        : added
+                          ? "text-slate-400 cursor-default"
+                          : "text-slate-700 hover:bg-indigo-50"
                     }`}
                   >
                     <span className="truncate">{d.title || "(無題)"}</span>
-                    {added ? (
-                      <Check className="h-3 w-3 text-emerald-500 shrink-0" />
-                    ) : pendingId === d.id ? (
+                    {pendingId === d.id ? (
                       <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                    ) : removable ? (
+                      <>
+                        <Check className="h-3 w-3 text-emerald-500 shrink-0 group-hover:hidden" />
+                        <X className="h-3 w-3 shrink-0 hidden group-hover:block" />
+                      </>
+                    ) : added ? (
+                      <Check className="h-3 w-3 text-emerald-500 shrink-0" />
                     ) : null}
                   </button>
                 </li>

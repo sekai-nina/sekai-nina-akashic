@@ -1,6 +1,6 @@
 import { withClearance, withSession } from "@/lib/db";
 import { auth } from "@/lib/auth";
-import { listEditableDossiers } from "@/lib/domain/dossiers";
+import { listDossiersContainingAsset, listEditableDossiers } from "@/lib/domain/dossiers";
 import { listArticlesForPicker, listArticleReferencesForAsset } from "@/lib/domain/articles";
 import { excerptOf, listClipsForAsset } from "@/lib/domain/clips";
 import { AddToDossier } from "@/components/add-to-dossier";
@@ -240,15 +240,10 @@ export default async function AssetDetailPage({
   const assetAnniversaries = await listAnniversariesForAsset(id, session.user.clearance);
   // ブログ / トーク (text) なら、開催予定のミーグリへの予告コーデ入力を出す (#203)
   const previewTargets = asset.kind === "text" ? await listPreviewTargets(session.user, id) : null;
-  const dossiersContainingAsset = editableDossiers.length
-    ? await withSession(session.user, (tx) =>
-        tx.dossierItem.findMany({
-          where: { assetId: id, dossierId: { in: editableDossiers.map((d) => d.id) } },
-          select: { dossierId: true },
-        })
-      )
-    : [];
-  const dossierIdsContaining = dossiersContainingAsset.map((r) => r.dossierId);
+  // このアセットを含むドシエ (見えるもの全部)。ピッカーの「追加済み」はこのうち編集できるもの
+  const containingDossiers = await listDossiersContainingAsset(session.user, id);
+  const containingIds = new Set(containingDossiers.map((d) => d.id));
+  const dossierIdsContaining = editableDossiers.filter((d) => containingIds.has(d.id)).map((d) => d.id);
   // `?dossier=` は抜粋の追加先 (/progress/blog の「記事を作る」から来たとき, #206)。編集できるドシエだけ
   const targetDossier = sp.dossier ? (editableDossiers.find((d) => d.id === sp.dossier) ?? null) : null;
   const targetExcerptCount = targetDossier
@@ -382,6 +377,7 @@ export default async function AssetDetailPage({
             dossiers={editableDossiers}
             defaultCaption={asset.title || ""}
             alreadyAdded={dossierIdsContaining}
+            allowRemove
             variant="button"
           />
           <AddToArticle
@@ -649,10 +645,17 @@ export default async function AssetDetailPage({
           {/* Status */}
           <StatusWorkflow assetId={id} initialStatus={asset.status} />
 
-          {/* 記事での参照 + クリップ (#41): 「ここはもう記事に書いた / 取ってある」を見せる */}
-          {(articleRefs.length > 0 || clips.length > 0) && (
+          {/* 記事での参照 + 含まれているドシエ + クリップ (#41): 「ここはもう記事に書いた / 取ってある」を見せる */}
+          {(articleRefs.length > 0 || containingDossiers.length > 0 || clips.length > 0) && (
             <AssetReferencesPanel
+              assetId={asset.id}
               references={articleRefs}
+              dossiers={containingDossiers.map((d) => ({
+                id: d.id,
+                title: d.title,
+                itemCount: d.itemCount,
+                canRemove: dossierIdsContaining.includes(d.id),
+              }))}
               clips={clips.map((c) => ({
                 id: c.id,
                 note: c.note,
