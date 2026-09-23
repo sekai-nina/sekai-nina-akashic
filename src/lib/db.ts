@@ -33,12 +33,21 @@ export type TransactionClient = Parameters<
  * Interactive transaction options. Prisma の既定タイムアウトは 5000ms で、
  * ローカル→Supabase のレイテンシ込みの重い集約（例: ブログ導出 13.9k SourceRecord）で
  * P2028 (Transaction already closed) になるため、既定を 15s に引き上げる。
+ * 接続待ち (maxWait) も既定 2000ms から引き上げる（DEFAULT_TX_MAX_WAIT_MS）。
  */
 export interface TxOptions {
   timeout?: number; // ms
+  maxWait?: number; // ms
 }
 
 const DEFAULT_TX_TIMEOUT_MS = 15_000;
+
+/**
+ * プールから接続を取るまでの待ち時間。Prisma 既定の 2000ms だと、/coverage の
+ * ソース別導出のように tx を並列に張る経路で接続待ちがあふれて
+ * P2028 (Unable to start a transaction in the given time) になるため引き上げる。
+ */
+const DEFAULT_TX_MAX_WAIT_MS = 10_000;
 
 /**
  * Execute a function within a transaction with RLS clearance set.
@@ -57,7 +66,10 @@ export async function withClearance<T>(
       await tx.$executeRaw`SELECT set_config('app.clearance', ${clearance}, true)`;
       return fn(tx);
     },
-    { timeout: opts?.timeout ?? DEFAULT_TX_TIMEOUT_MS }
+    {
+      timeout: opts?.timeout ?? DEFAULT_TX_TIMEOUT_MS,
+      maxWait: opts?.maxWait ?? DEFAULT_TX_MAX_WAIT_MS,
+    }
   );
 }
 
@@ -78,7 +90,10 @@ export async function withSession<T>(
       await tx.$executeRaw`SELECT set_config('app.clearance', ${user.clearance}, true)`;
       return fn(tx);
     },
-    { timeout: opts?.timeout ?? DEFAULT_TX_TIMEOUT_MS }
+    {
+      timeout: opts?.timeout ?? DEFAULT_TX_TIMEOUT_MS,
+      maxWait: opts?.maxWait ?? DEFAULT_TX_MAX_WAIT_MS,
+    }
   );
 }
 
