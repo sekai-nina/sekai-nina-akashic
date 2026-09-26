@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ALLOWED_MEDIA_HOST_SUFFIXES,
   DISPATCH_TIMEOUT_MS,
   InstaJobError,
   PENDING_TIMEOUT_MS,
@@ -9,6 +10,7 @@ import {
   dedupeFilename,
   formatCompletionMessage,
   parseJobResult,
+  parseMediaUrl,
   parseStoryUrl,
   resolveMimeType,
   staleReason,
@@ -63,6 +65,33 @@ describe("parseStoryUrl", () => {
 
   it("ハンドルの形式が不正なら弾く", () => {
     expect(() => parseStoryUrl("https://www.instagram.com/stories/a%20b/")).toThrow(InstaJobError);
+  });
+});
+
+describe("parseMediaUrl", () => {
+  it("Instagram の CDN の https URL だけ通し、ファイル名を取り出す", () => {
+    expect(
+      parseMediaUrl("https://scontent-nrt6-1.cdninstagram.com/v/t51.82787-15/819581039_1820.jpg?stp=x&_nc=1"),
+    ).toEqual({
+      url: "https://scontent-nrt6-1.cdninstagram.com/v/t51.82787-15/819581039_1820.jpg?stp=x&_nc=1",
+      filename: "819581039_1820.jpg",
+    });
+    expect(parseMediaUrl("https://instagram.fnrt1-1.fna.fbcdn.net/o1/v/t2/f2/m86/a.mp4").filename).toBe("a.mp4");
+  });
+
+  it("CDN 以外・http・認証情報つきは弾く (任意の URL を取りに行く口にしない)", () => {
+    expect(() => parseMediaUrl("https://example.com/a.jpg")).toThrow(InstaJobError);
+    // 末尾一致のすり抜け (cdninstagram.com.evil.io)
+    expect(() => parseMediaUrl("https://cdninstagram.com.evil.io/a.jpg")).toThrow(InstaJobError);
+    expect(() => parseMediaUrl("http://scontent.cdninstagram.com/a.jpg")).toThrow(InstaJobError);
+    expect(() => parseMediaUrl("https://u:p@scontent.cdninstagram.com/a.jpg")).toThrow(InstaJobError);
+    expect(() => parseMediaUrl("https://127.0.0.1/a.jpg")).toThrow(InstaJobError);
+    expect(() => parseMediaUrl("")).toThrow(InstaJobError);
+    expect(() => parseMediaUrl("not a url")).toThrow(InstaJobError);
+  });
+
+  it("許可するホストは Instagram の CDN 2 つだけ", () => {
+    expect([...ALLOWED_MEDIA_HOST_SUFFIXES]).toEqual([".cdninstagram.com", ".fbcdn.net"]);
   });
 });
 

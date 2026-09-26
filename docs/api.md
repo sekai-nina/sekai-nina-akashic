@@ -89,7 +89,8 @@ APIキーは `pnpm cli:keygen <user-email> <key-name> [permissions]` で発行�
 | POST | `/insta/jobs` | write | story ジョブ作成（空いていれば即 Pushcut で iPad に送る） |
 | GET | `/insta/jobs/:id` | read or insta_worker | story ジョブ詳細 |
 | POST | `/insta/jobs/:id/start` | insta_worker or write | iPad が受け取った報告（→ processing） |
-| POST | `/insta/jobs/:id/upload-url` | insta_worker or write | Drive へ直接 PUT する URL を発行 |
+| POST | `/insta/jobs/:id/media-urls` | insta_worker or write | 媒体 URL を渡してサーバに取得・登録させる（既定の経路） |
+| POST | `/insta/jobs/:id/upload-url` | insta_worker or write | Drive へ直接 PUT する URL を発行（端末から上げる経路） |
 | POST | `/insta/jobs/:id/result` | insta_worker or write | 落としたファイル 1 件を登録（JSON か multipart） |
 | POST | `/insta/jobs/:id/complete` | insta_worker or write | 完了（Discord 通知・次のジョブを送る） |
 | POST | `/insta/jobs/:id/error` | insta_worker or write | 失敗の報告 |
@@ -1806,6 +1807,35 @@ insta-watch が story を検知したら叩く（**write 権限**）。`url` は
 
 iPad のラッパー Shortcut がジョブを受け取った報告。`dispatched` → `processing`。冪等（processing なら何もしない）。
 `pending` からも通す（Pushcut を経ずに手で Shortcut を走らせたとき）。終わったジョブには 409。
+
+### POST /insta/jobs/:id/media-urls
+
+iPhone が見つけた媒体の URL を渡し、**サーバが取りに行って** Asset にする（**既定の経路**）。
+
+端末に落とさせると、Instagram の CDN はホスト名が変わるので iOS の許可ダイアログ
+（許可は「ショートカット × ドメイン」単位で記録される）が出るたびに Shortcut が止まる。
+署名付きの CDN URL は cookie 無しで取れるので、実体の取得はサーバでやる。
+
+```json
+{ "urls": ["https://scontent-nrt6-1.cdninstagram.com/v/t51.../819581039_1820.jpg?stp=..."] }
+```
+
+- 受け付けるのは **https** で、ホストが `*.cdninstagram.com` / `*.fbcdn.net` のものだけ（それ以外は取りに行かない）。
+  リダイレクトは追わない
+- 1 回につき 30 件まで。同じ URL が 2 度あっても 1 回しか取りに行かない
+- **1 本ごとに独立**して扱い、失敗したものは `failed` に入れて残りを続ける（1 コマの失効で story 全体を落とさない）
+- 登録の形・重複判定は `result` と同じ。`SourceRecord.metadata.mediaUrl` に取得元が残る
+
+```json
+{
+  "id": "cmg…", "status": "processing",
+  "registered": 2,
+  "files": [ { "assetId": "…", "duplicate": false, "filename": "819581039_1820.jpg", … } ],
+  "failed": [ { "url": "https://…", "error": "CDN が 403 を返しました (URL の期限切れ?)" } ]
+}
+```
+
+1 件でも登録できれば 201、全部失敗なら 207。
 
 ### POST /insta/jobs/:id/upload-url
 
