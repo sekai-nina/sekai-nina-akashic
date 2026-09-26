@@ -72,6 +72,27 @@ export function parseMediaUrl(raw: string): ParsedMediaUrl {
   return { url: parsed.toString(), filename: safeMediaFilename(base) };
 }
 
+/**
+ * テキストから媒体の URL を拾う (#197)。
+ *
+ * Shortcuts 側で「配列の JSON を組み立てる」のは壊れやすい (空配列が飛んでくる) ので、
+ * **Shortcut の結果をそのまま送れる**ようにする。改行区切りでも、JSON でも、前後にゴミが
+ * 付いていても、http(s) の URL だけ拾えればよい。順番は保ち、重複は落とす。
+ */
+export function extractMediaUrls(text: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  // URL に使える ASCII だけを拾う (括弧や引用符、全角の句読点で切れる)
+  for (const m of (text ?? "").matchAll(/https?:\/\/[A-Za-z0-9\-._~:/?#@!$&*+,;=%]+/g)) {
+    // 末尾に付きがちな区切りを落とす
+    const url = m[0].replace(/[.,;:!]+$/, "");
+    if (seen.has(url)) continue;
+    seen.add(url);
+    out.push(url);
+  }
+  return out;
+}
+
 /** CDN のパス末尾からファイル名を作る。拡張子が無ければ付けない (MIME から決める) */
 function safeMediaFilename(base: string): string {
   const cleaned = decodeURIComponent(base)

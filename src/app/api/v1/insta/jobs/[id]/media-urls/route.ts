@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { registerStoryMediaUrls } from "@/lib/domain/insta-jobs";
+import { noteStoryJobError, registerStoryMediaUrls } from "@/lib/domain/insta-jobs";
 import { instaJobErrorResponse, instaJobToJson, requireInstaJobAuth } from "@/lib/insta/api";
-import { MAX_MEDIA_URLS } from "@/lib/insta/jobs";
+import { MAX_MEDIA_URLS, extractMediaUrls } from "@/lib/insta/jobs";
 import { formatZodError } from "@/lib/zod-error";
 
 type Params = { params: Promise<{ id: string }> };
@@ -10,8 +10,15 @@ type Params = { params: Promise<{ id: string }> };
 // CDN からの取得 + Drive へのアップロード + サムネイル生成を URL の本数ぶん行う
 export const maxDuration = 300;
 
+/**
+ * `urls` (配列) でも `text` (Shortcut の結果をそのまま) でも受ける。
+ * Shortcuts で JSON の配列を組み立てるのは壊れやすく、空配列が飛んできて原因も分からないため
+ */
 const Body = z
-  .object({ urls: z.array(z.string().min(1).max(2000)).min(1).max(MAX_MEDIA_URLS) })
+  .object({
+    urls: z.array(z.string().max(2000)).max(MAX_MEDIA_URLS).optional(),
+    text: z.string().max(100_000).optional(),
+  })
   .strict();
 
 /**
@@ -37,8 +44,19 @@ export async function POST(request: Request, { params }: Params) {
     return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
   }
 
+  // 配列とテキストの両方から拾って混ぜる (どちらか一方でよい)
+  const fromText = parsed.data.text ? extractMediaUrls(parsed.data.text) : [];
+  const urls = [...new Set([...(parsed.data.urls ?? []).map((u) => u.trim()).filter(Boolean), ...fromText])];
+  if (urls.length === 0) {
+    // **何が届いたかをジョブに残す。** 空配列が飛んでくる原因 (Shortcut 側の組み立て) を
+    // 端末を覗かずに追えるようにする
+    const received = JSON.stringify(raw).slice(0, 300);
+    await noteStoryJobError(id, `media-urls に URL が 1 件も入っていませんでした: ${received}`).catch(() => {});
+    return NextResponse.json({ error: "URL が 1 件もありません", received }, { status: 400 });
+  }
+
   try {
-    const res = await registerStoryMediaUrls(id, parsed.data.urls, { id: auth.id, clearance: auth.clearance });
+    const res = await registerStoryMediaUrls(id, urls, { id: auth.id, clearance: auth.clearance });
     return NextResponse.json(
       { ...instaJobToJson(res.job), registered: res.files.length, files: res.files, failed: res.failed },
       { status: res.files.length > 0 ? 201 : 207 },
