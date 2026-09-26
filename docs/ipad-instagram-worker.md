@@ -43,8 +43,12 @@ insta-watch (sekai)                         Akashic (Vercel)                    
 - **iPad は 1 台**なので同時に走るのは 1 件だけ。complete / error / 失効のたびに次の pending を送る
 - 失効: `dispatched` のまま 10 分 (iPad が受け取れなかった)、`processing` で最後の報告から 20 分 (Shortcut が途中で止まった)、
   `pending` のまま 24 時間 (story が消える)。`/api/cron/insta-jobs` (10 分ごと) でも回収し、取り残された pending を送り直す
-- 動画は Vercel の本文上限 (4.5MB) を超えるので、**iPad が Google Drive に直接 PUT** する
-  (`upload-url` → PUT → `result`)。4MB 以下なら `result` に multipart で直接送ってもよい
+- **実体を落とすのはサーバ** (#196)。iPhone は媒体の URL を `media-urls` に渡すだけ。
+  端末に落とさせると、Instagram の CDN はホスト名が変わるたびに iOS の許可ダイアログ
+  (許可は「ショートカット × ドメイン」単位で記録される) で Shortcut が止まるため。
+  署名付きの CDN URL は cookie 無しで取れる
+- 端末から実体を上げる経路も残してある (`upload-url` → Drive へ PUT → `result`、または 4MB 以下なら
+  `result` に multipart)。Instagram Download に落とさせたファイルを送りたいときはこちら
 - 登録される Asset: kind は MIME から、`status=inbox`、`sourceType=web`、`canonicalDate` はジョブを作った日 (JST)、
   タグ「日向坂46」+ source「日向坂46 Instagram」+ story URL の SourceRecord。**人物は付けない**
   (公式垢の story が全部落ちてくるので、誰が写っているかは /inbox で人が付ける)

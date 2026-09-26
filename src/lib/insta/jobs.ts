@@ -34,6 +34,54 @@ export const MAX_DIRECT_UPLOAD_BYTES = 4 * 1024 * 1024;
 export const MAX_FILE_BYTES = 200 * 1024 * 1024;
 
 /**
+ * サーバから直接取りに行ってよいホストの末尾 (#196)。**Instagram の CDN だけ。**
+ *
+ * iPhone は CDN のホスト名が変わるたびに iOS の許可ダイアログで止まる (許可は
+ * 「ショートカット × ドメイン」単位で記録されるため)。署名付きの CDN URL は cookie 無しで
+ * 取れるので、実体の取得はサーバでやる。**任意の URL を取りに行く口にはしない。**
+ */
+export const ALLOWED_MEDIA_HOST_SUFFIXES: readonly string[] = [".cdninstagram.com", ".fbcdn.net"];
+/** 1 回の報告で受け付ける URL の数。story は多くても十数コマ */
+export const MAX_MEDIA_URLS = 30;
+
+export interface ParsedMediaUrl {
+  url: string;
+  /** CDN のパス末尾。同じコマなら安定するので重複判定の手がかりになる */
+  filename: string;
+}
+
+/**
+ * iPhone から報告された媒体 URL を検証する。https で、Instagram の CDN のものだけ通す。
+ */
+export function parseMediaUrl(raw: string): ParsedMediaUrl {
+  const input = (raw ?? "").trim();
+  if (!input) throw new InstaJobError("URL が空です");
+  let parsed: URL;
+  try {
+    parsed = new URL(input);
+  } catch {
+    throw new InstaJobError(`URL の形式が不正です: ${input.slice(0, 80)}`);
+  }
+  if (parsed.protocol !== "https:") throw new InstaJobError("https の URL だけ受け付けます");
+  if (parsed.username || parsed.password) throw new InstaJobError("認証情報つきの URL は受け付けません");
+  const host = parsed.hostname;
+  if (!ALLOWED_MEDIA_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix))) {
+    throw new InstaJobError(`Instagram の CDN 以外は取りに行きません: ${host}`);
+  }
+  const base = parsed.pathname.split("/").filter(Boolean).pop() ?? "";
+  return { url: parsed.toString(), filename: safeMediaFilename(base) };
+}
+
+/** CDN のパス末尾からファイル名を作る。拡張子が無ければ付けない (MIME から決める) */
+function safeMediaFilename(base: string): string {
+  const cleaned = decodeURIComponent(base)
+    .replace(/[\\/\0-\x1f\x7f]/g, "_")
+    .trim()
+    .slice(0, 120);
+  return cleaned || "story";
+}
+
+/**
  * 受け付ける MIME。Instagram Download が落とすのは jpg / mp4 が主で、iPad 経由だと
  * heic / mov になることもある。それ以外 (html / json 等) はワーカーの取り違えなので弾く
  */

@@ -30,8 +30,10 @@ import {
   MAX_ASSET_LINKS,
   MAX_DIRECT_UPLOAD_BYTES,
   MAX_FILE_BYTES,
+  MAX_MEDIA_URLS,
   dedupeFilename,
   discordMaxFileBytes,
+  parseMediaUrl,
   formatCompletionMessage,
   parseJobResult,
   parseStoryUrl,
@@ -268,7 +270,9 @@ export async function createStoryUploadUrl(
 
 export type StoryFileSource =
   | { kind: "drive"; driveFileId: string; filename: string; mimeType: string | null; fileSize: number | null }
-  | { kind: "buffer"; buffer: Buffer; filename: string; mimeType: string | null };
+  | { kind: "buffer"; buffer: Buffer; filename: string; mimeType: string | null }
+  /** サーバが CDN から取ってきた実体 (#196)。multipart の 4MB 制限は掛からない */
+  | { kind: "remote"; buffer: Buffer; filename: string; mimeType: string | null; sourceUrl: string };
 
 export interface RegisterFileResult {
   job: InstaStoryJobView;
@@ -306,15 +310,15 @@ export async function registerStoryFile(
   let cachedBuffer: Buffer | null = null;
   const getBuffer = async (): Promise<Buffer> => {
     if (cachedBuffer) return cachedBuffer;
-    if (source.kind === "buffer") return (cachedBuffer = source.buffer);
+    if (source.kind !== "drive") return (cachedBuffer = source.buffer);
     const downloaded = await downloadFromDrive(source.driveFileId).catch(() => null);
     if (!downloaded) throw new InstaJobError("Drive からファイルを読めませんでした", 502);
     return (cachedBuffer = downloaded);
   };
 
   if (!isDriveEnabled()) throw new InstaJobError("Google Drive が未設定です", 503);
-  if (source.kind === "buffer") {
-    if (source.buffer.length > MAX_DIRECT_UPLOAD_BYTES) {
+  if (source.kind !== "drive") {
+    if (source.kind === "buffer" && source.buffer.length > MAX_DIRECT_UPLOAD_BYTES) {
       throw new InstaJobError(DIRECT_UPLOAD_TOO_LARGE_MESSAGE, 413);
     }
     fileSize = source.buffer.length;
@@ -451,7 +455,11 @@ export async function registerStoryFile(
             url: job.url,
             publisher: "Instagram",
             publishedAt: job.createdAt,
-            metadata: { instaStoryJobId: job.id, handle: job.handle },
+            metadata: {
+              instaStoryJobId: job.id,
+              handle: job.handle,
+              ...(source.kind === "remote" ? { mediaUrl: source.sourceUrl } : {}),
+            },
           },
         ],
       },
@@ -503,6 +511,91 @@ export async function registerStoryFile(
     return requireJob(tx, id);
   });
   return { job: toView(updated), file };
+}
+
+/** CDN から実体を取るときの待ち時間。動画 1 本でも 1 分あれば足りる */
+const MEDIA_FETCH_TIMEOUT_MS = 60_000;
+/** 実体を取りに行くときに名乗る UA。CDN は UA 無しを嫌うことがある */
+const MEDIA_FETCH_UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15";
+
+export interface MediaUrlFailure {
+  url: string;
+  error: string;
+}
+
+export interface RegisterMediaUrlsResult {
+  job: InstaStoryJobView;
+  files: InstaStoryJobFile[];
+  failed: MediaUrlFailure[];
+}
+
+/**
+ * iPhone が見つけた媒体 URL を **サーバが取りに行って** Asset にする (#196)。
+ *
+ * iPhone に落とさせると、CDN のホスト名が変わるたびに iOS の許可ダイアログで止まる
+ * (許可は「ショートカット × ドメイン」単位)。署名付きの CDN URL は cookie 無しで取れるので、
+ * 実体の取得はサーバでやる。ホストは Instagram の CDN に限る (`parseMediaUrl`)。
+ *
+ * 1 本ごとに独立して扱い、失敗したものは `failed` に入れて残りを続ける
+ * (1 コマの失効で story 全体を落とさない)。
+ */
+export async function registerStoryMediaUrls(
+  id: string,
+  urls: string[],
+  actor: { id: string; clearance: string },
+): Promise<RegisterMediaUrlsResult> {
+  assertInternalDb();
+  if (urls.length === 0) throw new InstaJobError("urls が空です");
+  if (urls.length > MAX_MEDIA_URLS) throw new InstaJobError(`URL は ${MAX_MEDIA_URLS} 件までです`);
+
+  const files: InstaStoryJobFile[] = [];
+  const failed: MediaUrlFailure[] = [];
+  let job = await getStoryJob(id, actor.clearance);
+  if (!job) throw new InstaJobError("ジョブが見つかりません", 404);
+
+  // 同じ URL が 2 度来ても 1 回しか取りに行かない (Shortcut の作りで重複しやすい)
+  for (const raw of [...new Set(urls)]) {
+    try {
+      const { url, filename } = parseMediaUrl(raw);
+      const { buffer, contentType } = await fetchStoryMedia(url);
+      const res = await registerStoryFile(
+        id,
+        { kind: "remote", buffer, filename, mimeType: contentType, sourceUrl: url },
+        actor,
+      );
+      job = res.job;
+      files.push(res.file);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.warn("insta job: 媒体の取得に失敗:", raw.slice(0, 120), message);
+      failed.push({ url: raw.slice(0, 300), error: message.slice(0, 300) });
+    }
+  }
+  return { job, files, failed };
+}
+
+/** 署名付きの CDN URL を cookie 無しで取る。リダイレクトは追わない (別ホストに飛ばされない) */
+async function fetchStoryMedia(url: string): Promise<{ buffer: Buffer; contentType: string | null }> {
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      redirect: "error",
+      headers: { "User-Agent": MEDIA_FETCH_UA, Accept: "*/*" },
+      signal: AbortSignal.timeout(MEDIA_FETCH_TIMEOUT_MS),
+    });
+  } catch (e) {
+    throw new InstaJobError(`CDN に繋がりません: ${e instanceof Error ? e.message : String(e)}`, 502);
+  }
+  if (!res.ok) throw new InstaJobError(`CDN が ${res.status} を返しました (URL の期限切れ?)`, 502);
+  const declared = Number(res.headers.get("content-length") ?? "");
+  if (Number.isFinite(declared) && declared > MAX_FILE_BYTES) {
+    throw new InstaJobError("ファイルが大きすぎます", 413);
+  }
+  const buffer = Buffer.from(await res.arrayBuffer());
+  if (buffer.length > MAX_FILE_BYTES) throw new InstaJobError("ファイルが大きすぎます", 413);
+  if (buffer.length === 0) throw new InstaJobError("空のファイルです");
+  return { buffer, contentType: res.headers.get("content-type") };
 }
 
 export interface CompleteJobResult {
