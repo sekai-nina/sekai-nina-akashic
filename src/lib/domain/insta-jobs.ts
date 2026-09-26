@@ -575,6 +575,15 @@ export async function registerStoryMediaUrls(
   return { job, files, failed };
 }
 
+/**
+ * ジョブに「人が読むための理由」を残す (状態は変えない)。
+ * iPhone から届いた本文がおかしかったときなど、端末を覗かずに原因を追うために使う
+ */
+export async function noteStoryJobError(id: string, message: string): Promise<void> {
+  assertInternalDb();
+  await prismaInternal.instaStoryJob.updateMany({ where: { id }, data: { error: message.slice(0, 500) } });
+}
+
 /** 署名付きの CDN URL を cookie 無しで取る。リダイレクトは追わない (別ホストに飛ばされない) */
 async function fetchStoryMedia(url: string): Promise<{ buffer: Buffer; contentType: string | null }> {
   let res: Response;

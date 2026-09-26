@@ -8,6 +8,7 @@ import {
   PROCESSING_TIMEOUT_MS,
   buildWorkerInput,
   dedupeFilename,
+  extractMediaUrls,
   formatCompletionMessage,
   parseJobResult,
   parseMediaUrl,
@@ -92,6 +93,26 @@ describe("parseMediaUrl", () => {
 
   it("許可するホストは Instagram の CDN 2 つだけ", () => {
     expect([...ALLOWED_MEDIA_HOST_SUFFIXES]).toEqual([".cdninstagram.com", ".fbcdn.net"]);
+  });
+});
+
+describe("extractMediaUrls", () => {
+  const a = "https://scontent-nrt6-1.cdninstagram.com/v/t51/1.jpg?x=1";
+  const b = "https://instagram.fnrt1-1.fna.fbcdn.net/o1/v/t2/2.mp4";
+
+  it("改行区切りのテキストから拾う", () => {
+    expect(extractMediaUrls(`${a}\n${b}\n`)).toEqual([a, b]);
+  });
+
+  it("JSON でも前後にゴミがあっても拾う", () => {
+    expect(extractMediaUrls(`{"urls":["${a}","${b}"]}`)).toEqual([a, b]);
+    expect(extractMediaUrls(`1件目: ${a} 、2件目: ${b}。`)).toEqual([a, b]);
+  });
+
+  it("同じ URL は 1 回だけ、URL が無ければ空", () => {
+    expect(extractMediaUrls(`${a} ${a}`)).toEqual([a]);
+    expect(extractMediaUrls("")).toEqual([]);
+    expect(extractMediaUrls("なにも無い")).toEqual([]);
   });
 });
 
