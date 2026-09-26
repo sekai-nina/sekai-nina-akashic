@@ -34,10 +34,16 @@ const oauth2ClientOOB = new google.auth.OAuth2(
   "http://localhost"
 );
 
+// drive.file だと「このアプリで作ったファイル」しか触れず、別アカウントが上げた既存の
+// ファイル（akashic フォルダには sekainina.project が上げた分がある）を読めない。
+// 本番のトークンも drive で発行している
 const authUrl = oauth2ClientOOB.generateAuthUrl({
   access_type: "offline",
   prompt: "consent",
-  scope: ["https://www.googleapis.com/auth/drive.file"],
+  scope: ["https://www.googleapis.com/auth/drive"],
+  // アップロードの容量はトークンのアカウントに付く。akashic フォルダの持ち主
+  // (容量の大きいプランのアカウント) で発行する
+  ...(process.env.GOOGLE_DRIVE_LOGIN_HINT && { login_hint: process.env.GOOGLE_DRIVE_LOGIN_HINT }),
 });
 
 console.log("\n以下の URL をブラウザで開いて認証してください:\n");
