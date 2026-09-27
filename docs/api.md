@@ -1912,9 +1912,11 @@ Drive 経路では **実体を落とさず Drive のメタデータ（`sha256Che
 完了の報告。ファイルが 1 件も届いていなければ `failed`（「ファイルが 1 件も届きませんでした」）。
 `completed` になったら次の `pending` ジョブを iPad に送り、**応答を返してから**（`after()`）`DISCORD_INSTA_WEBHOOK_URL` に
 新規ファイルを添付して 1 メッセージ流す。動画は Instagram の VP9 のままだと Discord で再生できないので、
-**Discord 用に H.264 / AAC・幅 720 に変換してから添付**する（元の Asset は原本のまま）。添付は 10 件まで、
-1 件の上限は `DISCORD_INSTA_MAX_ATTACHMENT_MB`（既定 10MB）。それでも Discord が 413 で弾いたら大きい順に外して
-送り直す。超えたぶんは本文の Akashic リンクから辿る。通知の失敗はジョブの `error` に残る（`completed` のまま）。
+**Discord 用に H.264 / AAC・幅 720 に変換してから添付**する（元の Asset は原本のまま）。
+1 件の上限は `DISCORD_INSTA_MAX_ATTACHMENT_MB`（既定 10MB）で、**件数（10）と合計サイズ（上限の 9 割）で
+小分けにして複数メッセージ**で送る（1 リクエストの合計上限を超えると 413 でメッセージ全体が落ちるため。
+2 通目以降は「（続き 2/4）」）。本文の Asset リンクは全件載せ、文字数の枠に収まらないぶんは「…他 N 件」。
+通知の失敗はジョブの `error` に残る（`completed` のまま）。
 既に `completed` なら 200 を返すだけ（`notifyScheduled: false`）。`failed` には 409。
 
 ```json
