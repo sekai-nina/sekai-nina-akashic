@@ -1865,6 +1865,9 @@ Shortcut の結果をそのまま入れれば、中の `http(s)` の URL を拾�
 - `mark` は「どの仕込み位置から来たか」の目印。ジョブの `error` に `media-urls mark=ashell に N 件届きました`
   として残るので、実機でどこが通ったかを端末を覗かずに追える
 - 処理中のジョブが無ければ **409**
+- **1 件でも登録できたらジョブを完了にする**（Discord への通知と次のジョブの送信もここから）。
+  ラッパーの `complete` が内側の POST より先に走ると 0 件で `failed` になってしまうため、完了の判断をこちらに寄せている。
+  ラッパーは `start` → Run Shortcut → Pushcut に戻る、だけでよい
 
 ### POST /insta/jobs/:id/upload-url
 

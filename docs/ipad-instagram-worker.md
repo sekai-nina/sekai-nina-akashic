@@ -45,6 +45,9 @@ insta-watch (sekai)                         Akashic (Vercel)                    
   `pending` のまま 24 時間 (story が消える)。`/api/cron/insta-jobs` (10 分ごと) でも回収し、取り残された pending を送り直す
 - **実体を落とすのはサーバ** (#196)。iPhone は媒体の URL を `media-urls` に渡すだけ。
   渡し方は **「Instagram Download」の中に仕込んだ POST** (`/api/v1/insta/media-urls`、jobId 不要)。
+  1 件でも登録できればサーバがそのままジョブを完了にするので、**ラッパーは start → Run Shortcut →
+  Pushcut に戻る、だけでよい** (`complete` も要らない。ラッパーの complete が内側の POST より
+  先に走ると 0 件で failed になるため)。
   Shortcuts の「ショートカットを実行」は入れ子・自己再入で出力が呼び出し元に戻らないため、
   「URL を返してもらう」作りは実機で成立しなかった (#198)
   端末に落とさせると、Instagram の CDN はホスト名が変わるたびに iOS の許可ダイアログ

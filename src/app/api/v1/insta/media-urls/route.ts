@@ -1,8 +1,10 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { z } from "zod";
 import {
+  completeStoryJob,
   getCurrentWorkerJob,
   noteStoryJobError,
+  notifyStoryJobCompleted,
   registerStoryMediaUrls,
 } from "@/lib/domain/insta-jobs";
 import { instaJobErrorResponse, instaJobToJson, requireInstaJobAuth } from "@/lib/insta/api";
@@ -22,6 +24,10 @@ export const maxDuration = 300;
  *
  * そこで **内側の Shortcut が自分でここに POST する**。iPad は 1 台で同時に 1 件しか走らないので、
  * 「いま processing のジョブ」で宛先は一意に決まる。
+ *
+ * 1 件でも登録できたら **そのままジョブを完了にする** (#199)。ラッパーの `complete` が内側の POST より
+ * 先に走ると 0 件で failed になってしまうため、完了の判断をこちらに寄せる
+ * (ラッパーは start → Run Shortcut → Pushcut に戻る、だけでよくなる)。
  */
 const Body = z
   .object({
@@ -68,9 +74,32 @@ export async function POST(request: Request) {
   await noteStoryJobError(job.id, `media-urls${mark} に ${urls.length} 件届きました`).catch(() => {});
   try {
     const res = await registerStoryMediaUrls(job.id, urls, { id: auth.id, clearance: auth.clearance });
+    if (res.files.length === 0) {
+      return NextResponse.json(
+        { ...instaJobToJson(res.job), registered: 0, files: [], failed: res.failed },
+        { status: 207 },
+      );
+    }
+    // 1 件でも入ったら完了にする (Discord と次のジョブの送信もここから。完了は冪等)
+    const done = await completeStoryJob(job.id, auth.clearance);
+    if (done.shouldNotify) {
+      after(async () => {
+        const r = await notifyStoryJobCompleted(done.job);
+        console.log(
+          `insta job ${done.job.id}: Discord notified=${r.notified} attached=${r.attached}${r.error ? ` error=${r.error}` : ""}`,
+        );
+      });
+    }
     return NextResponse.json(
-      { ...instaJobToJson(res.job), registered: res.files.length, files: res.files, failed: res.failed },
-      { status: res.files.length > 0 ? 201 : 207 },
+      {
+        ...instaJobToJson(done.job),
+        registered: res.files.length,
+        files: res.files,
+        failed: res.failed,
+        notifyScheduled: done.shouldNotify,
+        nextDispatchedId: done.next.dispatchedId,
+      },
+      { status: 201 },
     );
   } catch (e) {
     return instaJobErrorResponse(e);
