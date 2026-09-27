@@ -576,6 +576,26 @@ export async function registerStoryMediaUrls(
 }
 
 /**
+ * いま iPad が処理しているジョブを返す (#198)。
+ *
+ * ラッパー Shortcut から呼び出される内側の Shortcut は **jobId を知らない**
+ * (Instagram Download は URL しか受け取らない)。iPad は 1 台で同時に 1 件しか走らないので、
+ * 「いま processing のいちばん新しいジョブ」で一意に決まる。無ければ dispatched も見る
+ * (start の報告が前後したとき)。
+ */
+export async function getCurrentWorkerJob(clearance: string): Promise<InstaStoryJobView | null> {
+  const rows = await withClearance(clearance, (tx) =>
+    tx.instaStoryJob.findMany({
+      where: { status: { in: ["processing", "dispatched"] } },
+      orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+      take: 1,
+      select: SELECT,
+    }),
+  );
+  return rows[0] ? toView(rows[0]) : null;
+}
+
+/**
  * ジョブに「人が読むための理由」を残す (状態は変えない)。
  * iPhone から届いた本文がおかしかったときなど、端末を覗かずに原因を追うために使う
  */

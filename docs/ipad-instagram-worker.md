@@ -44,6 +44,9 @@ insta-watch (sekai)                         Akashic (Vercel)                    
 - 失効: `dispatched` のまま 10 分 (iPad が受け取れなかった)、`processing` で最後の報告から 20 分 (Shortcut が途中で止まった)、
   `pending` のまま 24 時間 (story が消える)。`/api/cron/insta-jobs` (10 分ごと) でも回収し、取り残された pending を送り直す
 - **実体を落とすのはサーバ** (#196)。iPhone は媒体の URL を `media-urls` に渡すだけ。
+  渡し方は **「Instagram Download」の中に仕込んだ POST** (`/api/v1/insta/media-urls`、jobId 不要)。
+  Shortcuts の「ショートカットを実行」は入れ子・自己再入で出力が呼び出し元に戻らないため、
+  「URL を返してもらう」作りは実機で成立しなかった (#198)
   端末に落とさせると、Instagram の CDN はホスト名が変わるたびに iOS の許可ダイアログ
   (許可は「ショートカット × ドメイン」単位で記録される) で Shortcut が止まるため。
   署名付きの CDN URL は cookie 無しで取れる
