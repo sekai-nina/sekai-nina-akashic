@@ -25,12 +25,11 @@ import {
 import {
   ACTIVE_STATUSES,
   DIRECT_UPLOAD_TOO_LARGE_MESSAGE,
-  DISCORD_MAX_FILES,
   InstaJobError,
-  MAX_ASSET_LINKS,
   MAX_DIRECT_UPLOAD_BYTES,
   MAX_FILE_BYTES,
   MAX_MEDIA_URLS,
+  chunkAttachments,
   dedupeFilename,
   discordMaxFileBytes,
   parseMediaUrl,
@@ -66,6 +65,11 @@ export { InstaJobError } from "@/lib/insta/jobs";
 
 /** ジョブと、そこから作る Asset の classification。ワーカーのキーはこれ以上を持つ必要がある */
 const JOB_CLASSIFICATION = "internal" as const;
+
+/** 1 回の通知で添付する上限 (件数)。動画は 1 本ずつ変換するので、実行時間の歯止めも兼ねる */
+const MAX_NOTIFY_ATTACHMENTS = 30;
+/** webhook は 2 秒に 5 件。続けて送るときの間隔 */
+const DISCORD_GAP_MS = 500;
 
 /** story の出どころ。discord-bot の人手リレー経路 (`src/insta_story/`) と同じ名前にそろえる */
 const SOURCE_ENTITY_NAME = "日向坂46 Instagram";
@@ -604,6 +608,24 @@ export async function noteStoryJobError(id: string, message: string): Promise<vo
   await prismaInternal.instaStoryJob.updateMany({ where: { id }, data: { error: message.slice(0, 500) } });
 }
 
+/**
+ * 1 メッセージ送る。413 (合計が大きすぎる) なら大きいものを 1 つ外して送り直し、
+ * 実際に送れた添付の数を返す (小分けしても端末や設定で上限が違うことがあるための保険)
+ */
+async function sendChunk(url: string, content: string, files: DiscordAttachment[]): Promise<number> {
+  let rest = [...files];
+  for (;;) {
+    try {
+      await postDiscordWebhookWithFiles(url, content, rest);
+      return rest.length;
+    } catch (e) {
+      if (!(e instanceof DiscordWebhookError) || e.status !== 413 || rest.length === 0) throw e;
+      const largest = rest.reduce((a, b) => (b.data.length > a.data.length ? b : a));
+      rest = rest.filter((a) => a !== largest);
+    }
+  }
+}
+
 /** 署名付きの CDN URL を cookie 無しで取る。リダイレクトは追わない (別ホストに飛ばされない) */
 async function fetchStoryMedia(url: string): Promise<{ buffer: Buffer; contentType: string | null }> {
   let res: Response;
@@ -805,14 +827,15 @@ export async function notifyStoryJobCompleted(job: InstaStoryJobView): Promise<N
     handle: job.handle,
     url: job.url,
     files: job.result.files,
-    assetLinks: fresh.slice(0, MAX_ASSET_LINKS).map((f) => appUrl(`/assets/${f.assetId}`)),
+    // **全件渡す。** 収まらないぶんは formatCompletionMessage が「…他 N 件」にする
+    assetLinks: fresh.map((f) => appUrl(`/assets/${f.assetId}`)),
   });
 
   try {
     const maxBytes = discordMaxFileBytes();
-    let attachments: DiscordAttachment[] = [];
+    const attachments: DiscordAttachment[] = [];
     for (const f of fresh) {
-      if (attachments.length >= DISCORD_MAX_FILES) break;
+      if (attachments.length >= MAX_NOTIFY_ATTACHMENTS) break;
       if (!f.driveFileId) continue;
       const data = await downloadFromDrive(f.driveFileId).catch(() => null);
       if (!data) continue;
@@ -830,18 +853,21 @@ export async function notifyStoryJobCompleted(job: InstaStoryJobView): Promise<N
       attachments.push(att);
     }
 
-    // 413 (添付が大きすぎる) は大きい順に外して送り直す
-    for (;;) {
-      try {
-        await postDiscordWebhookWithFiles(url, content, attachments);
-        break;
-      } catch (e) {
-        if (!(e instanceof DiscordWebhookError) || e.status !== 413 || attachments.length === 0) throw e;
-        const largest = attachments.reduce((a, b) => (b.data.length > a.data.length ? b : a));
-        attachments = attachments.filter((a) => a !== largest);
+    // 合計サイズと件数で小分けにして、複数メッセージで全部送る
+    // (1 リクエストの合計上限を超えると 413 でそのメッセージ全体が落ちるため)
+    const chunks = chunkAttachments(attachments);
+    let sent = 0;
+    if (chunks.length === 0) {
+      await sendChunk(url, content, []);
+    } else {
+      for (const [i, chunk] of chunks.entries()) {
+        const body = i === 0 ? content : `（続き ${i + 1}/${chunks.length}）`;
+        sent += await sendChunk(url, body, chunk);
+        // webhook は 2 秒に 5 件。続けて送ると 429 を踏む
+        if (i < chunks.length - 1) await new Promise((r) => setTimeout(r, DISCORD_GAP_MS));
       }
     }
-    return { notified: true, attached: attachments.length, error: null };
+    return { notified: true, attached: sent, error: null };
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     console.error("insta job: Discord 通知に失敗:", e);

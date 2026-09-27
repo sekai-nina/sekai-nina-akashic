@@ -316,17 +316,56 @@ export function discordMaxFileBytes(): number {
   const mb = Number(process.env.DISCORD_INSTA_MAX_ATTACHMENT_MB);
   return (Number.isFinite(mb) && mb > 0 ? mb : 10) * 1024 * 1024;
 }
-/** Discord の 1 メッセージあたりの添付上限 */
+/** Discord の 1 メッセージあたりの添付上限 (件数) */
 export const DISCORD_MAX_FILES = 10;
-/** Discord 本文と管理画面に並べる Asset リンクの上限 */
+/**
+ * 1 メッセージの**合計**サイズの目安。Discord の上限は 1 リクエスト単位なので、
+ * ファイル 1 件の上限と同じ値に少し余裕を持たせる (超えると 413 で全部落ちる)
+ */
+export function discordMaxTotalBytes(): number {
+  return Math.floor(discordMaxFileBytes() * 0.9);
+}
+/** 管理画面に並べる Asset リンクの上限 (Discord 本文は文字数の枠で決める) */
 export const MAX_ASSET_LINKS = 5;
+/** Discord 本文の上限 (src/lib/status/discord.ts の CONTENT_MAX_CHARS に合わせる) */
+const CONTENT_BUDGET_CHARS = 1900;
+
+/**
+ * 添付を「件数」と「合計サイズ」で小分けにする (#200)。
+ *
+ * Discord は 1 リクエストあたりの合計サイズに上限があり、超えると 413 で**そのメッセージ全体**が
+ * 落ちる。16 コマ (動画 12) の story で実際に起きた: 413 のたびに大きいものを 1 つ外す作りだったため、
+ * 通った数件だけが黙って残っていた。分けて送れば全部届く。
+ */
+export function chunkAttachments<T extends { data: { length: number } }>(
+  files: readonly T[],
+  maxFiles: number = DISCORD_MAX_FILES,
+  maxTotalBytes: number = discordMaxTotalBytes(),
+): T[][] {
+  const chunks: T[][] = [];
+  let current: T[] = [];
+  let size = 0;
+  for (const f of files) {
+    const over = current.length >= maxFiles || (current.length > 0 && size + f.data.length > maxTotalBytes);
+    if (over) {
+      chunks.push(current);
+      current = [];
+      size = 0;
+    }
+    current.push(f);
+    size += f.data.length;
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+}
 /** multipart に 4MB 超を送られたときの文言 (route と domain の両方で使う) */
 export const DIRECT_UPLOAD_TOO_LARGE_MESSAGE =
   "multipart で受けられるのは 4MB までです。upload-url の経路を使ってください";
 
 /**
  * complete 時の Discord 本文。添付できない (大きい / 重複) ものも本文の件数で分かるようにする。
- * `assetLinks` は新規に登録した Asset の URL (最大 MAX_ASSET_LINKS 件)
+ * `assetLinks` は新規に登録した Asset の URL。**全件渡してよい** — 文字数の枠に収まるだけ載せ、
+ * 入らなかったぶんは「…他 N 件」として数で示す
  */
 export function formatCompletionMessage(input: {
   handle: string;
@@ -340,6 +379,18 @@ export function formatCompletionMessage(input: {
     fresh.length === 0
       ? `📸 story **${input.handle}**: 新しいコマはありませんでした (${input.files.length} 件は登録済み)`
       : `📸 story を保存 **${input.handle}** (新規 ${fresh.length} 件${dup ? ` / 登録済み ${dup} 件` : ""})`;
-  const lines = [head, input.url, ...input.assetLinks];
+  // 文字数の枠に収まるだけリンクを載せ、入らなかったぶんは数で示す
+  const lines = [head, input.url];
+  let used = lines.join("\n").length;
+  let shown = 0;
+  for (const link of input.assetLinks) {
+    // 末尾に付けるかもしれない「…他 N 件」の行ぶんを残しておく
+    if (used + link.length + 1 > CONTENT_BUDGET_CHARS - 24) break;
+    lines.push(link);
+    used += link.length + 1;
+    shown += 1;
+  }
+  const rest = input.assetLinks.length - shown;
+  if (rest > 0) lines.push(`…他 ${rest} 件`);
   return lines.join("\n");
 }
