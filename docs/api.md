@@ -89,7 +89,8 @@ APIキーは `pnpm cli:keygen <user-email> <key-name> [permissions]` で発行�
 | POST | `/insta/jobs` | write | story ジョブ作成（空いていれば即 Pushcut で iPad に送る） |
 | GET | `/insta/jobs/:id` | read or insta_worker | story ジョブ詳細 |
 | POST | `/insta/jobs/:id/start` | insta_worker or write | iPad が受け取った報告（→ processing） |
-| POST | `/insta/jobs/:id/media-urls` | insta_worker or write | 媒体 URL を渡してサーバに取得・登録させる（既定の経路） |
+| POST | `/insta/media-urls` | insta_worker or write | 同上。**jobId を知らない呼び出し元**（Instagram Download 内の仕込み）用 |
+| POST | `/insta/jobs/:id/media-urls` | insta_worker or write | 媒体 URL を渡してサーバに取得・登録させる |
 | POST | `/insta/jobs/:id/upload-url` | insta_worker or write | Drive へ直接 PUT する URL を発行（端末から上げる経路） |
 | POST | `/insta/jobs/:id/result` | insta_worker or write | 落としたファイル 1 件を登録（JSON か multipart） |
 | POST | `/insta/jobs/:id/complete` | insta_worker or write | 完了（Discord 通知・次のジョブを送る） |
@@ -1845,6 +1846,25 @@ Shortcut の結果をそのまま入れれば、中の `http(s)` の URL を拾�
 1 件でも登録できれば 201、全部失敗なら 207。URL が 1 件も入っていなければ **400** で、
 受け取った本文の先頭 300 字を `received` に返し、**同じものをジョブの `error` にも残す**
 （端末を覗かずに「何が届いたか」を追えるようにするため）。
+
+### POST /insta/media-urls
+
+`jobId` を **知らない**呼び出し元のための口。`/insta/jobs/:id/media-urls` と同じことをするが、
+宛先は **「いま `processing`（無ければ `dispatched`）のいちばん新しいジョブ」**（iPad は 1 台で同時に 1 件しか走らない）。
+
+なぜ要るか: 「Instagram Download」は URL しか受け取らないので、その中に仕込んだ POST は jobId を持てない。
+また Shortcuts の「ショートカットを実行」は**入れ子・自己再入で出力が呼び出し元に戻らない**ことがあり、
+「URL を返してもらう」作りは実機で成立しなかった（2026-09-27〜28 実測: 出力点を 4 箇所に置き、自己呼び出し
+直後の `exit` も出力に変えたが、常に空だった）。そこで **内側の Shortcut が自分でここに POST する**。
+
+```json
+{ "text": "curl -s -o ig_1.jpg 'https://scontent-....jpg'", "mark": "ashell" }
+```
+
+- `text` / `urls` の扱いは `/insta/jobs/:id/media-urls` と同じ（**curl のコマンド行でもそのまま渡せる**）
+- `mark` は「どの仕込み位置から来たか」の目印。ジョブの `error` に `media-urls mark=ashell に N 件届きました`
+  として残るので、実機でどこが通ったかを端末を覗かずに追える
+- 処理中のジョブが無ければ **409**
 
 ### POST /insta/jobs/:id/upload-url
 
