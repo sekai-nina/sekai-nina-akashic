@@ -7,6 +7,7 @@ import {
   PENDING_TIMEOUT_MS,
   PROCESSING_TIMEOUT_MS,
   buildWorkerInput,
+  chunkAttachments,
   dedupeFilename,
   extractMediaUrls,
   formatCompletionMessage,
@@ -202,6 +203,30 @@ describe("parseJobResult", () => {
   });
 });
 
+describe("chunkAttachments", () => {
+  const f = (bytes: number) => ({ data: { length: bytes } });
+  const MB = 1024 * 1024;
+
+  it("合計サイズで小分けにする (413 でメッセージ全体が落ちるのを防ぐ)", () => {
+    const chunks = chunkAttachments([f(4 * MB), f(4 * MB), f(4 * MB)], 10, 9 * MB);
+    expect(chunks.map((c) => c.length)).toEqual([2, 1]);
+  });
+
+  it("件数でも小分けにする", () => {
+    const chunks = chunkAttachments(Array.from({ length: 25 }, () => f(1)), 10, 9 * MB);
+    expect(chunks.map((c) => c.length)).toEqual([10, 10, 5]);
+  });
+
+  it("1 件だけで上限を超えていても捨てずに単独で送る", () => {
+    const chunks = chunkAttachments([f(50 * MB), f(1)], 10, 9 * MB);
+    expect(chunks.map((c) => c.length)).toEqual([1, 1]);
+  });
+
+  it("空なら空", () => {
+    expect(chunkAttachments([], 10, 9 * MB)).toEqual([]);
+  });
+});
+
 describe("formatCompletionMessage", () => {
   const file = (assetId: string, duplicate: boolean) => ({
     assetId,
@@ -230,6 +255,22 @@ describe("formatCompletionMessage", () => {
     const msg = formatCompletionMessage({ handle: "h", url: "u", files: [file("a", false)], assetLinks: [] });
     expect(msg).toContain("新規 1 件)");
     expect(msg).not.toContain("登録済み");
+  });
+
+  it("リンクは全件渡してよい (収まらないぶんは「…他 N 件」になる)", () => {
+    const files = Array.from({ length: 16 }, (_, i) => file(`a${i}`, false));
+    const links = files.map((f) => `https://akashic.example/assets/${f.assetId}`);
+    const msg = formatCompletionMessage({ handle: "h", url: "u", files, assetLinks: links });
+    expect(msg).toContain("新規 16 件");
+    // 16 件なら全部載る (1 行 40 字程度 × 16 で枠内)
+    expect(msg.split("\n").filter((l) => l.startsWith("https://akashic.example"))).toHaveLength(16);
+    expect(msg).not.toContain("…他");
+
+    // 長いリンクを大量に渡すと打ち切って数で示す
+    const many = Array.from({ length: 200 }, (_, i) => `https://akashic.example/assets/${"x".repeat(40)}${i}`);
+    const msg2 = formatCompletionMessage({ handle: "h", url: "u", files, assetLinks: many });
+    expect(msg2.length).toBeLessThanOrEqual(1900);
+    expect(msg2).toMatch(/…他 \d+ 件/);
   });
 
   it("全部登録済みならその旨だけ", () => {
