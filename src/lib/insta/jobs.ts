@@ -114,6 +114,10 @@ export const ALLOWED_MIME_TYPES: readonly string[] = [
   "image/heif",
   "video/mp4",
   "video/quicktime",
+  // Instagram は動画を DASH で配るので「音声だけの mp4」が来ることがある (#201)。
+  // 相方の映像が見つからなければ音声として残す
+  "audio/mp4",
+  "audio/mpeg",
 ];
 
 /** 拡張子から MIME を補う。Shortcuts は `application/octet-stream` で送ってくることがある */

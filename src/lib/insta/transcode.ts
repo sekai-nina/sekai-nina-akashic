@@ -31,6 +31,85 @@ export interface TranscodeResult {
   contentType: "video/mp4";
 }
 
+export interface MediaStreams {
+  hasVideo: boolean;
+  hasAudio: boolean;
+}
+
+/**
+ * ストリームの構成だけ見る (#201)。`ffprobe` は ffmpeg-static に入っていないので、
+ * `ffmpeg -i` の標準エラーを読む (入力だけ指定すると情報を出して終了コード 1 で終わる)。
+ *
+ * Instagram は動画を **DASH で配る**ので、落ちてくるのは「映像だけの mp4」と「音声だけの mp4」に
+ * 割れている。どちらなのかを知るために使う。
+ */
+export async function probeMedia(input: Buffer, filename: string): Promise<MediaStreams> {
+  if (!isTranscodeAvailable()) throw new Error("ffmpeg が無い");
+  const dir = await mkdtemp(path.join(tmpdir(), "insta-probe-"));
+  const file = path.join(dir, "in" + (path.extname(filename) || ".mp4"));
+  try {
+    await writeFile(file, input);
+    const out = await runFfmpegForOutput(["-hide_banner", "-i", file]);
+    const streams = out.matchAll(/Stream #\d+:\d+[^\n]*?: (Video|Audio):/g);
+    let hasVideo = false;
+    let hasAudio = false;
+    for (const m of streams) {
+      if (m[1] === "Video") hasVideo = true;
+      if (m[1] === "Audio") hasAudio = true;
+    }
+    return { hasVideo, hasAudio };
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * 映像だけの mp4 と音声だけの mp4 を 1 本にまとめる (#201)。再エンコードはしない
+ * (原本の画質を落とさない。Discord 用の H.264 変換は `transcodeForDiscord` が別途やる)。
+ */
+export async function muxVideoAudio(video: Buffer, audio: Buffer, filename: string): Promise<Buffer> {
+  if (!isTranscodeAvailable()) throw new Error("ffmpeg が無い");
+  const dir = await mkdtemp(path.join(tmpdir(), "insta-mux-"));
+  const vPath = path.join(dir, "v.mp4");
+  const aPath = path.join(dir, "a.mp4");
+  const outPath = path.join(dir, "out.mp4");
+  try {
+    await writeFile(vPath, video);
+    await writeFile(aPath, audio);
+    const args = (audioCodec: string) => [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-i",
+      vPath,
+      "-i",
+      aPath,
+      "-map",
+      "0:v:0",
+      "-map",
+      "1:a:0",
+      "-c:v",
+      "copy",
+      "-c:a",
+      audioCodec,
+      "-shortest",
+      "-movflags",
+      "+faststart",
+      outPath,
+    ];
+    try {
+      await runFfmpeg(args("copy"));
+    } catch {
+      // HE-AAC をそのまま入れられない容れ物のときは音声だけ詰め直す
+      await runFfmpeg(args("aac"));
+    }
+    return await readFile(outPath);
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 export function isTranscodeAvailable(): boolean {
   return typeof ffmpegPath === "string" && ffmpegPath.length > 0;
 }
@@ -55,6 +134,13 @@ export async function transcodeForDiscord(input: Buffer, filename: string): Prom
       // 幅 720 に (縦横比維持。偶数に丸めないと libx264 が拒む)
       "-vf",
       `scale='min(${MAX_WIDTH},iw)':-2`,
+      // iOS のプレイヤー (AVPlayer) は可変フレームレートや極端に低い fps を嫌う。
+      // story は「静止画 + 音楽」で 1 fps のことがあるので固定 30 fps にそろえる
+      // (同じ絵の繰り返しは x264 がほぼ無コストで潰すのでサイズは増えない)
+      "-fps_mode",
+      "cfr",
+      "-r",
+      "30",
       "-c:v",
       "libx264",
       "-preset",
@@ -82,6 +168,28 @@ export async function transcodeForDiscord(input: Buffer, filename: string): Prom
 }
 
 let runnablePath: string | null = null;
+
+/** 情報取得用。終了コードは見ず、標準エラーの内容を返す */
+async function runFfmpegForOutput(args: string[]): Promise<string> {
+  const bin = runnablePath ?? (ffmpegPath as string);
+  try {
+    const { stderr } = await execFileAsync(bin, args, { timeout: TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 });
+    runnablePath = bin;
+    return stderr;
+  } catch (e) {
+    const err = e as NodeJS.ErrnoException & { stderr?: string };
+    if (err.code === "EACCES" && !runnablePath) {
+      const copy = path.join(tmpdir(), "ffmpeg-insta");
+      await copyFile(bin, copy);
+      await chmod(copy, 0o755);
+      runnablePath = copy;
+      return runFfmpegForOutput(args);
+    }
+    // `-i` だけの実行は終了コード 1 になるが、標準エラーに情報が出ている
+    if (err.stderr) return err.stderr;
+    throw new Error(`ffmpeg に失敗: ${err.message}`);
+  }
+}
 
 async function runFfmpeg(args: string[]): Promise<void> {
   const bin = runnablePath ?? (ffmpegPath as string);

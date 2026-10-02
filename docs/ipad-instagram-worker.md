@@ -55,6 +55,9 @@ insta-watch (sekai)                         Akashic (Vercel)                    
   署名付きの CDN URL は cookie 無しで取れる
 - 端末から実体を上げる経路も残してある (`upload-url` → Drive へ PUT → `result`、または 4MB 以下なら
   `result` に multipart)。Instagram Download に落とさせたファイルを送りたいときはこちら
+- **動画は DASH なので、サーバが映像と音声を結合してから登録する** (#201)。横取りした URL からは
+  「映像だけ (VP9)」と「音声だけ (HE-AAC)」が別々に落ちてくる。結合しないと 1 コマが 2 つの壊れた
+  アセットになり、**iPhone では再生できない** (Android は音声だけの mp4 でも鳴るので気づきにくい)
 - 登録される Asset: kind は MIME から、`status=inbox`、`sourceType=web`、`canonicalDate` はジョブを作った日 (JST)、
   タグ「日向坂46」+ source「日向坂46 Instagram」+ story URL の SourceRecord。**人物は付けない**
   (公式垢の story が全部落ちてくるので、誰が写っているかは /inbox で人が付ける)
