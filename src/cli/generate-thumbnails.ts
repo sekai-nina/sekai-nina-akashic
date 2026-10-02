@@ -21,6 +21,7 @@ import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { readFileSync, readdirSync, existsSync } from "fs";
 import { join } from "path";
 import "dotenv/config";
+import { extractPoster, probeMedia } from "@/lib/insta/transcode";
 import { thumbnailPendingWhere } from "@/lib/thumbnails";
 
 // 既定の DATABASE_URL は app_runtime ロールで RLS が効くため、CLI から素で繋ぐと
@@ -104,11 +105,25 @@ async function fetchDriveThumbnail(fileId: string, size = GALLERY_WIDTH): Promis
 
 /**
  * アセット 1 件のサムネイル元画像を取得する。
- * 画像は原本そのもの、動画は Drive 生成のサムネイルを使う。
+ * 画像は原本そのもの、動画は Drive 生成のサムネイルを使い、**無ければ実体からコマを抜く** (#205)。
+ *
+ * Drive は VP9 などサムネイルを作れない動画があり (実測 52 件)、待っても出てこない。
+ * 実体を落として ffmpeg で 1 枚抜けば必ず作れるので、最後はそれに落とす。
  */
 async function fetchSourceImage(kind: AssetKind, fileId: string): Promise<Buffer | null> {
-  if (kind === "video") return fetchDriveThumbnail(fileId);
-  return downloadFromDrive(fileId);
+  if (kind !== "video") return downloadFromDrive(fileId);
+  const fromDrive = await fetchDriveThumbnail(fileId);
+  if (fromDrive) return fromDrive;
+  const buf = await downloadFromDrive(fileId);
+  if (!buf) return null;
+  // 「トーク」の音声メッセージなど、kind=video でも映像が無いものがある (実測 7 件)。
+  // コマは抜けないので、失敗ではなく飛ばす
+  const { hasVideo } = await probeMedia(buf, "video.mp4");
+  if (!hasVideo) {
+    console.log("  映像ストリームが無い (音声だけ) → 飛ばす");
+    return null;
+  }
+  return extractPoster(buf, "video.mp4");
 }
 
 async function generateAndUpload(assetId: string, buffer: Buffer): Promise<string> {
@@ -290,7 +305,7 @@ async function main() {
           const buffer = await fetchSourceImage(asset.kind, asset.storageKey!);
           if (!buffer) {
             // Drive 側がまだサムネイルを生成していない。後日再実行すれば埋まる
-            console.log(`  No Drive thumbnail yet`);
+            console.log(`  サムネイルを作れなかった`);
             return "no-thumb";
           }
           const url = await generateAndUpload(asset.id, buffer);
@@ -318,7 +333,7 @@ async function main() {
     }
   }
 
-  console.log(`\nDone: ${success} success, ${noThumb} no Drive thumbnail, ${failed} failed`);
+  console.log(`\nDone: ${success} success, ${noThumb} サムネイルを作れず, ${failed} failed`);
   await prisma.$disconnect();
 }
 
