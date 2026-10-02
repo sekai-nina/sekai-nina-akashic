@@ -41,7 +41,7 @@ import {
   type InstaStoryJobFile,
   type InstaStoryJobResult,
 } from "@/lib/insta/jobs";
-import { transcodeForDiscord } from "@/lib/insta/transcode";
+import { isTranscodeAvailable, muxVideoAudio, probeMedia, transcodeForDiscord } from "@/lib/insta/transcode";
 import { DiscordWebhookError, postDiscordWebhookWithFiles, type DiscordAttachment } from "@/lib/status/discord";
 import { guessMimeKind } from "@/lib/mime";
 import { generateAndUploadThumbnails } from "@/lib/thumbnails";
@@ -517,6 +517,9 @@ export async function registerStoryFile(
   return { job: toView(updated), file };
 }
 
+/** 1 回の報告で受け取る合計の上限。story 1 本ぶん (DASH の映像と音声で倍になる) を見込む */
+const MAX_BATCH_BYTES = 400 * 1024 * 1024;
+
 /** CDN から実体を取るときの待ち時間。動画 1 本でも 1 分あれば足りる */
 const MEDIA_FETCH_TIMEOUT_MS = 60_000;
 /** 実体を取りに行くときに名乗る UA。CDN は UA 無しを嫌うことがある */
@@ -558,25 +561,120 @@ export async function registerStoryMediaUrls(
   let job = await getStoryJob(id, actor.clearance);
   if (!job) throw new InstaJobError("ジョブが見つかりません", 404);
 
-  // 同じ URL が 2 度来ても 1 回しか取りに行かない (Shortcut の作りで重複しやすい)
+  // 1) まず全部取る (同じ URL が 2 度来ても 1 回しか取りに行かない)
+  const fetched: FetchedMedia[] = [];
+  let total = 0;
   for (const raw of [...new Set(urls)]) {
     try {
       const { url, filename } = parseMediaUrl(raw);
       const { buffer, contentType } = await fetchStoryMedia(url);
-      const res = await registerStoryFile(
-        id,
-        { kind: "remote", buffer, filename, mimeType: contentType, sourceUrl: url },
-        actor,
-      );
-      job = res.job;
-      files.push(res.file);
+      total += buffer.length;
+      if (total > MAX_BATCH_BYTES) throw new InstaJobError("1 回で受け取れる合計を超えました", 413);
+      fetched.push({ url, filename, buffer, contentType });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       console.warn("insta job: 媒体の取得に失敗:", raw.slice(0, 120), message);
       failed.push({ url: raw.slice(0, 300), error: message.slice(0, 300) });
     }
   }
+
+  // 2) DASH で割れている映像と音声を対にして結合する
+  const items = await buildStoryItems(fetched, failed);
+
+  // 3) 登録
+  for (const item of items) {
+    try {
+      const res = await registerStoryFile(
+        id,
+        { kind: "remote", buffer: item.buffer, filename: item.filename, mimeType: item.mimeType, sourceUrl: item.url },
+        actor,
+      );
+      job = res.job;
+      files.push(res.file);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.warn("insta job: 登録に失敗:", item.filename, message);
+      failed.push({ url: item.url.slice(0, 300), error: message.slice(0, 300) });
+    }
+  }
   return { job, files, failed };
+}
+
+interface FetchedMedia {
+  url: string;
+  filename: string;
+  buffer: Buffer;
+  contentType: string | null;
+}
+
+interface StoryItem {
+  url: string;
+  filename: string;
+  mimeType: string | null;
+  buffer: Buffer;
+}
+
+/**
+ * 落ちてきたファイルを「登録するもの」に組み替える (#201)。
+ *
+ * Instagram は動画を **DASH** で配るので、横取りした URL からは **映像だけの mp4** と
+ * **音声だけの mp4** が別々に落ちてくる (実測: 到着順に映像→音声の繰り返し)。
+ * そのまま登録すると 1 コマが 2 つの壊れたアセットになり、iPhone では再生もできない
+ * (Android は音声だけの mp4 でも鳴るので気づきにくい)。
+ *
+ * 画像はそのまま。映像だけ・音声だけのものは**到着順に対にして結合**し、相方がいなければ
+ * 単独で残す (音声だけのものは MIME を audio/mp4 にして「動画」として登録しない)。
+ * ffmpeg が使えない環境では何もせずそのまま通す。
+ */
+async function buildStoryItems(fetched: FetchedMedia[], failed: MediaUrlFailure[]): Promise<StoryItem[]> {
+  const asItem = (m: FetchedMedia, mimeType?: string | null): StoryItem => ({
+    url: m.url,
+    filename: m.filename,
+    mimeType: mimeType ?? m.contentType,
+    buffer: m.buffer,
+  });
+  if (!isTranscodeAvailable()) return fetched.map((m) => asItem(m));
+
+  const out: StoryItem[] = [];
+  const videos: FetchedMedia[] = [];
+  const audios: FetchedMedia[] = [];
+  for (const m of fetched) {
+    const isVideoish = (m.contentType ?? "").startsWith("video/") || /\.(mp4|m4v|mov)$/i.test(m.filename);
+    if (!isVideoish) {
+      out.push(asItem(m));
+      continue;
+    }
+    try {
+      const { hasVideo, hasAudio } = await probeMedia(m.buffer, m.filename);
+      if (hasVideo && hasAudio) out.push(asItem(m));
+      else if (hasVideo) videos.push(m);
+      else if (hasAudio) audios.push(m);
+      else out.push(asItem(m)); // 判別できないものはそのまま
+    } catch (e) {
+      console.warn("insta job: 構成を読めませんでした (そのまま登録):", m.filename, e);
+      out.push(asItem(m));
+    }
+  }
+
+  const pairs = Math.min(videos.length, audios.length);
+  for (let i = 0; i < pairs; i += 1) {
+    const v = videos[i];
+    const a = audios[i];
+    try {
+      const buffer = await muxVideoAudio(v.buffer, a.buffer, v.filename);
+      out.push({ url: v.url, filename: v.filename, mimeType: "video/mp4", buffer });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.warn("insta job: 映像と音声の結合に失敗 (別々に登録):", v.filename, message);
+      failed.push({ url: v.url.slice(0, 300), error: `結合に失敗: ${message.slice(0, 200)}` });
+      out.push(asItem(v));
+      out.push(asItem(a, "audio/mp4"));
+    }
+  }
+  // 相方がいなかったぶん
+  for (const v of videos.slice(pairs)) out.push(asItem(v));
+  for (const a of audios.slice(pairs)) out.push(asItem(a, "audio/mp4"));
+  return out;
 }
 
 /**
