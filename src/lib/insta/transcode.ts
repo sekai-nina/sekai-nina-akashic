@@ -209,3 +209,48 @@ async function runFfmpeg(args: string[]): Promise<void> {
     await execFileAsync(copy, args, { timeout: TIMEOUT_MS, maxBuffer: 1024 * 1024 });
   }
 }
+
+/**
+ * 動画からサムネイル用のコマを 1 枚抜く (#205)。
+ *
+ * 動画のサムネイルは Drive が作ったものを使っているが、**上げた直後はまだ無い**ので
+ * 登録時には取れず、ずっと空のままになっていた (実測 185 件)。実体が手元にある経路では
+ * これで作る。
+ */
+export async function extractPoster(input: Buffer, filename: string): Promise<Buffer> {
+  if (!isTranscodeAvailable()) throw new Error("ffmpeg が無い");
+  const dir = await mkdtemp(path.join(tmpdir(), "insta-poster-"));
+  const inPath = path.join(dir, "in" + (path.extname(filename) || ".mp4"));
+  const outPath = path.join(dir, "out.jpg");
+  try {
+    await writeFile(inPath, input);
+    const args = (seek: string | null) => [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      ...(seek ? ["-ss", seek] : []),
+      "-i",
+      inPath,
+      "-frames:v",
+      "1",
+      "-vf",
+      `scale='min(${MAX_WIDTH},iw)':-2`,
+      "-q:v",
+      "3",
+      outPath,
+    ];
+    try {
+      // 冒頭は暗転していることがあるので少し進めてから
+      await runFfmpeg(args("1"));
+      const data = await readFile(outPath);
+      if (data.length > 0) return data;
+    } catch {
+      // 1 秒より短い動画 → 先頭から
+    }
+    await runFfmpeg(args(null));
+    return await readFile(outPath);
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}

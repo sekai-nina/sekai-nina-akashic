@@ -41,7 +41,13 @@ import {
   type InstaStoryJobFile,
   type InstaStoryJobResult,
 } from "@/lib/insta/jobs";
-import { isTranscodeAvailable, muxVideoAudio, probeMedia, transcodeForDiscord } from "@/lib/insta/transcode";
+import {
+  extractPoster,
+  isTranscodeAvailable,
+  muxVideoAudio,
+  probeMedia,
+  transcodeForDiscord,
+} from "@/lib/insta/transcode";
 import { DiscordWebhookError, postDiscordWebhookWithFiles, type DiscordAttachment } from "@/lib/status/discord";
 import { guessMimeKind } from "@/lib/mime";
 import { generateAndUploadThumbnails } from "@/lib/thumbnails";
@@ -471,10 +477,19 @@ export async function registerStoryFile(
       actor.clearance,
     ));
 
-    // サムネイル。画像は原本から、動画は Drive の生成物から (直後は無いことが多い。
-    // 取れなければ `pnpm cli:thumbnails --kind=video` で後から埋める)
+    // サムネイル。画像は原本から、動画は実体からコマを 1 枚抜いて作る (#205)。
+    // Drive の生成物は上げた直後にはまだ無いので、それだけに頼ると永久に空のままになる
+    // (実測 185 件)。実体を落とさない drive 経路だけ Drive の生成物に頼る
     try {
-      const src = kind === "image" ? await getBuffer() : await fetchDriveThumbnail(storageKey);
+      const src =
+        kind === "image"
+          ? await getBuffer()
+          : source.kind === "drive"
+            ? await fetchDriveThumbnail(storageKey)
+            : await extractPoster(await getBuffer(), filename).catch(async (e) => {
+                console.error("insta job: コマの抜き出しに失敗 (Drive の生成物を待つ):", e);
+                return fetchDriveThumbnail(storageKey);
+              });
       const r2Url = src ? await generateAndUploadThumbnails(asset.id, src) : null;
       if (r2Url) {
         await withClearance(actor.clearance, (tx) =>
