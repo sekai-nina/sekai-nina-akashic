@@ -44,6 +44,8 @@ pnpm test             # vitest。変更後は typecheck とあわせて実行
 
 `pnpm cli:*` は運用スクリプト群（`import` / `backup` / `restore` / `thumbnails` / `keygen` 等）。`src/cli/` 参照。
 
+一度きりの後片付けスクリプトは既定が下見で、`--apply` を付けたときだけ書く（`cli:import-articles` / `cli:fix-insta-dash` 等）。
+
 **lint スクリプトは存在しない。** 検証は `pnpm typecheck` + `pnpm test` + 実 DB への手動確認（`npx tsx -e '...'` で実データを叩く）。
 
 テストは **vitest**（`vitest.config.mts`）。現状の対象は記事の frontmatter 往復のみ:
