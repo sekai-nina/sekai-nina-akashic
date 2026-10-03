@@ -111,8 +111,12 @@ export async function muxVideoAudio(video: Buffer, audio: Buffer, filename: stri
   }
 }
 
+/**
+ * ffmpeg が使えるか。**実体の有無まで見る。** パス文字列だけ見ていたせいで、
+ * 関数にバイナリが入っていないのに true を返し、結合や変換が静かに飛ばされていた (#206)。
+ */
 export function isTranscodeAvailable(): boolean {
-  return typeof ffmpegPath === "string" && ffmpegPath.length > 0;
+  return resolveFfmpeg() !== null;
 }
 
 /**
@@ -172,7 +176,7 @@ let runnablePath: string | null = null;
 
 /** 情報取得用。終了コードは見ず、標準エラーの内容を返す */
 async function runFfmpegForOutput(args: string[]): Promise<string> {
-  const bin = runnablePath ?? (ffmpegPath as string);
+  const bin = runnablePath ?? (resolveFfmpeg() as string);
   try {
     const { stderr } = await execFileAsync(bin, args, { timeout: TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 });
     runnablePath = bin;
@@ -193,7 +197,7 @@ async function runFfmpegForOutput(args: string[]): Promise<string> {
 }
 
 async function runFfmpeg(args: string[]): Promise<void> {
-  const bin = runnablePath ?? (ffmpegPath as string);
+  const bin = runnablePath ?? (resolveFfmpeg() as string);
   try {
     await execFileAsync(bin, args, { timeout: TIMEOUT_MS, maxBuffer: 1024 * 1024 });
     runnablePath = bin;
@@ -256,22 +260,46 @@ export async function extractPoster(input: Buffer, filename: string): Promise<Bu
   }
 }
 
-/** 関数の中で実体を探すときの候補。Vercel は配置が変わることがある (#206) */
+/**
+ * 実体の置き場の候補 (#206)。
+ *
+ * `require("ffmpeg-static")` が返すのは **ビルド時に焼き込まれたパス**で、Vercel の
+ * 関数の中では存在しない (実測 `/ROOT/node_modules/.pnpm/…` / 実際は `/var/task/…`)。
+ * バイナリは `outputFileTracingIncludes` で関数に入っているので、cwd から探し直す。
+ */
 function candidatePaths(): string[] {
-  const rel = [
-    "node_modules/ffmpeg-static/ffmpeg",
-    "node_modules/.pnpm/ffmpeg-static@5.3.0/node_modules/ffmpeg-static/ffmpeg",
-  ];
-  const roots = [process.cwd(), "/var/task", "/ROOT"];
   const out: string[] = [];
-  for (const r of roots) for (const f of rel) out.push(path.join(r, f));
+  for (const root of [process.cwd(), "/var/task"]) {
+    out.push(path.join(root, "node_modules/ffmpeg-static/ffmpeg"));
+    // pnpm の実体は版がパスに入るので走査する
+    const store = path.join(root, "node_modules/.pnpm");
+    try {
+      for (const d of readdirSync(store)) {
+        if (d.startsWith("ffmpeg-static@")) {
+          out.push(path.join(store, d, "node_modules/ffmpeg-static/ffmpeg"));
+        }
+      }
+    } catch {
+      // .pnpm が無い配置もある
+    }
+  }
   return out;
 }
 
+/** 実際に実行できるパス。一度解決したら覚える */
+let resolvedBin: string | null | undefined;
+
+function resolveFfmpeg(): string | null {
+  if (resolvedBin !== undefined) return resolvedBin;
+  const cands = [typeof ffmpegPath === "string" ? ffmpegPath : null, ...candidatePaths()];
+  resolvedBin = cands.find((c): c is string => !!c && existsSync(c)) ?? null;
+  return resolvedBin;
+}
+
 export interface FfmpegDiagnostics {
-  /** `require("ffmpeg-static")` が返したパス */
+  /** 実際に使うパス (解決できなければ ffmpeg-static が返した焼き込みパス) */
   path: string | null;
-  /** そのパスに実体があるか */
+  /** 実体が見つかったか */
   exists: boolean;
   /** 実際に動かして取れた版（動かなければ null） */
   version: string | null;
@@ -286,32 +314,24 @@ export interface FfmpegDiagnostics {
  * 飛ばされていた。
  */
 export async function ffmpegDiagnostics(): Promise<FfmpegDiagnostics> {
-  const p = typeof ffmpegPath === "string" && ffmpegPath.length > 0 ? ffmpegPath : null;
-  if (!p) return { path: null, exists: false, version: null, error: "ffmpeg-static がパスを返さない" };
-  const exists = existsSync(p);
-  if (!exists) {
-    // どこにあるのか分からないと直せない。候補と、実際に見える中身を返す
-    const found = candidatePaths().filter((c) => existsSync(c));
-    const peek: Record<string, string[]> = {};
-    for (const d of [process.cwd(), path.join(process.cwd(), "node_modules"), "/var/task"]) {
-      try {
-        peek[d] = readdirSync(d).slice(0, 25);
-      } catch (e) {
-        peek[d] = [`(読めない: ${(e as Error).message})`];
-      }
-    }
+  const baked = typeof ffmpegPath === "string" && ffmpegPath.length > 0 ? ffmpegPath : null;
+  const resolved = resolveFfmpeg();
+  if (!resolved) {
     return {
-      path: p,
-      exists,
+      path: baked,
+      exists: false,
       version: null,
-      error: `実体が無い。見つかった候補=${found.join(",") || "なし"} / cwd=${process.cwd()} / ${JSON.stringify(peek).slice(0, 700)}`,
+      error: `実体が見つからない。候補=${candidatePaths().join(",")} / cwd=${process.cwd()}`,
     };
   }
   try {
-    const out = await runFfmpegForOutput(["-hide_banner", "-version"]);
-    const version = out.split("\n")[0]?.trim() || null;
-    return { path: p, exists, version, error: null };
+    // `-version` は標準出力に出る (runFfmpegForOutput は標準エラーを返すので直に叩く)
+    const { stdout } = await execFileAsync(resolved, ["-hide_banner", "-version"], {
+      timeout: 15_000,
+      maxBuffer: 1024 * 1024,
+    });
+    return { path: resolved, exists: true, version: stdout.split("\n")[0]?.trim() || null, error: null };
   } catch (e) {
-    return { path: p, exists, version: null, error: e instanceof Error ? e.message : String(e) };
+    return { path: resolved, exists: true, version: null, error: e instanceof Error ? e.message : String(e) };
   }
 }
