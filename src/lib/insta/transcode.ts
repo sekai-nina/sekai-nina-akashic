@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { chmod, copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -252,5 +253,35 @@ export async function extractPoster(input: Buffer, filename: string): Promise<Bu
     return await readFile(outPath);
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+export interface FfmpegDiagnostics {
+  /** `require("ffmpeg-static")` が返したパス */
+  path: string | null;
+  /** そのパスに実体があるか */
+  exists: boolean;
+  /** 実際に動かして取れた版（動かなければ null） */
+  version: string | null;
+  error: string | null;
+}
+
+/**
+ * ffmpeg が**実際に動くか**まで確かめる (#206)。
+ *
+ * `isTranscodeAvailable()` はパス文字列が空でないかしか見ないので、バイナリが
+ * バンドルに入っていなくても true を返す。本番でそれに気づけず、変換が静かに
+ * 飛ばされていた。
+ */
+export async function ffmpegDiagnostics(): Promise<FfmpegDiagnostics> {
+  const p = typeof ffmpegPath === "string" && ffmpegPath.length > 0 ? ffmpegPath : null;
+  if (!p) return { path: null, exists: false, version: null, error: "ffmpeg-static がパスを返さない" };
+  const exists = existsSync(p);
+  try {
+    const out = await runFfmpegForOutput(["-hide_banner", "-version"]);
+    const version = out.split("\n")[0]?.trim() || null;
+    return { path: p, exists, version, error: null };
+  } catch (e) {
+    return { path: p, exists, version: null, error: e instanceof Error ? e.message : String(e) };
   }
 }

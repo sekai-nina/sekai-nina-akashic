@@ -79,6 +79,14 @@ Instagram Download は a-Shell の ffmpeg で結合しているが、こちら�
 (Android のプレイヤーは音声だけの mp4 でも鳴るので気づきにくい)。サーバは構成を見て到着順に対にし、
 再エンコードせずに 1 本にする。相方がいなければ単独で登録し、音声だけのものは `audio/mp4` にする。
 
+**ffmpeg のバイナリは経路ごとに `next.config.ts` の `outputFileTracingIncludes` へ明示的に足す** (#206)。
+`require("ffmpeg-static")` が返すのは実行時に組み立てるパスなので自動追跡に乗らず、入れ忘れた経路では
+**実行時に初めて ENOENT で落ちる**。`isTranscodeAvailable()` はパス文字列しか見ないので true のままで、
+結合も変換も静かに飛ばされる。2026-10-02〜03 はこれで DASH の片割れがそのまま登録されていた
+(complete にだけ入っていて、実際に登録するのは media-urls だった)。
+
+動くかどうかは **`GET /api/v1/insta/diagnostics`** で確かめられる (story を待たなくてよい)。
+
 Discord に貼るぶんだけ **H.264 / 720p / 固定 30fps** に変換する (VP9 は iOS で再生できない。
 story は「静止画 + 音楽」で 1 fps のことがあり、iOS のプレイヤーは可変・極低 fps を嫌う)。
 
