@@ -33,7 +33,8 @@
     "cli:verify-article-push": "tsx src/cli/verify-article-push.ts",
     "cli:backfill-article-dossiers": "tsx src/cli/backfill-article-dossiers.ts",
     "cli:import-songs": "tsx src/cli/import-songs.ts",
-    "cli:fix-insta-dash": "tsx src/cli/fix-insta-story-dash.ts"
+    "cli:fix-insta-dash": "tsx src/cli/fix-insta-story-dash.ts",
+    "cli:import-meetgreet-upcoming": "tsx src/cli/import-meetgreet-upcoming.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

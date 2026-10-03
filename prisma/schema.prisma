@@ -1010,6 +1010,13 @@ model MeetGreet {
   /// label が短い通称 (幕張) なのに対し、こちらは表に出す名前。オンラインでは使わない
   venue  String?
 
+  /// 本人が事前に公言した予告コーデ (#203)。空でなく開催日が今日 (JST) 以降なら
+  /// 公開サイトの「次回以降のミーグリ」に出る。開催後も消さない (予告と実際を比べる記録)
+  previewOutfit         String   @default("")
+  /// 予告の出典アセット (ブログ / トーク) の ID。記念日と同じく Asset のタイトルと
+  /// SourceRecord からラベル・URL を作る。FK は張らない (消えた ID は読むときに落とす)
+  previewSourceAssetIds String[] @default([])
+
   classification ClearanceLevel @default(internal)
 
   /// 素材置き場。作成時に自動で作る (1:1)。

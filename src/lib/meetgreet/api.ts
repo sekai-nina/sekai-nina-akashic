@@ -20,7 +20,9 @@ import {
   maxReferencePhotos,
 } from "./config";
 import type { MeetGreetSummary, MeetGreetDetail } from "@/lib/domain/meetgreets";
+import type { UpcomingPreview } from "@/lib/domain/meetgreet-preview";
 import type { CandidateGroup } from "./candidates";
+import { previewSourceLabel } from "./preview";
 import { MIN_FRACTION } from "./crop";
 import { getR2PublicUrl } from "@/lib/r2";
 
@@ -228,4 +230,24 @@ export function projectCandidates(groups: CandidateGroup[]) {
     matched: g.matched,
     assets: g.assets,
   }));
+}
+
+/** `GET /meetgreets/upcoming` の 1 件。公開サイトの「次回以降のミーグリ」が読む (#203) */
+export function projectUpcomingPreview(p: UpcomingPreview) {
+  return {
+    id: p.id,
+    date: p.date,
+    format: p.format,
+    single: p.single,
+    label: p.label,
+    venue: p.venue,
+    outfit: p.outfit,
+    sources: p.sources.map((s) => ({
+      assetId: s.assetId,
+      label: previewSourceLabel(s.title),
+      title: s.title,
+      date: s.date,
+      url: s.url,
+    })),
+  };
 }

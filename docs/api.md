@@ -1154,6 +1154,34 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 - **`dossier` は `null` になりうる。** ドシエは別テーブルで所有者・`viewMode` による RLS が別に効くので、所有者があとから `private` に戻したり機密を上げると、他の人には見えなくなる。ID は常に `dossierId` で返すので、`dossier` が `null` なら「ドシエが見えない」を表示する
 - `repoCollection` も `null` になりうる（収集を消した場合。`classification` は MeetGreet と同じ値で作られるので、通常は同じ人に見える）
 
+### GET /meetgreets/upcoming
+
+予告コーデ（本人がブログ / トークで事前に公言した、次回以降のミーグリのコーデ）のある回のうち、開催日が今日（JST）以降のものを開催日の昇順で返す（#203）。公開サイト（世界新奈）の `/meetgreet`「次回以降のミーグリ」がビルド時に読む。
+
+```json
+{
+  "items": [
+    {
+      "id": "…",
+      "date": "2026-10-18",
+      "format": "online",
+      "single": "18thシングル「イチャイチャ虫」",
+      "label": "通常",
+      "venue": null,
+      "outfit": "秋らしい、茶色を基調にしたコーデ",
+      "sources": [
+        { "assetId": "…", "label": "坂井新奈ブログ「…」", "title": "坂井新奈ブログ「…」", "date": "2026-10-01", "url": "https://www.hinatazaka46.com/s/official/diary/detail/…" },
+        { "assetId": "…", "label": "坂井新奈トーク", "title": "坂井新奈トーク 2026.10.2 18:00", "date": "2026-10-02", "url": null }
+      ]
+    }
+  ]
+}
+```
+
+- 予告は `/meetgreets/:id` の画面か、ブログ / トークのアセットページの「ミーグリの予告」から書く。下書きの段階は無く、書けば出る
+- `sources` は出典アセット。`label` はトークの末尾の投稿日時を落としたもの、`url` は `SourceRecord` の URL（トークは `null`）。見えない（clearance 外）・消えたアセットは落ちる
+- 「今日」はリクエスト時点の JST。サイト側もビルドが古くなったときのために開催日で絞り直す
+
 ### POST /meetgreets
 
 起点。1 回の呼び出しで次を行う:

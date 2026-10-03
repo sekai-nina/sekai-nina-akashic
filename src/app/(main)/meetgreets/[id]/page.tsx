@@ -11,8 +11,10 @@ import { cropsFromJson } from "@/lib/meetgreet/crop";
 import { refsFromJson } from "@/lib/meetgreet/sketch-refs";
 import { getR2PublicUrl } from "@/lib/r2";
 import { MATERIAL_WINDOW_DAYS, REPORT_WINDOW_DAYS, TALK_SUGGEST_DAYS } from "@/lib/meetgreet/config";
-import { formatDate } from "@/lib/utils";
+import { formatDate, todayJst } from "@/lib/utils";
 import { MetaForm } from "./meta-form";
+import { PreviewForm } from "./preview-form";
+import { getPreviewSources } from "@/lib/domain/meetgreet-preview";
 import { MaterialsStep } from "@/components/materials-step";
 import {
   applyExcerptsAction,
@@ -54,11 +56,12 @@ export default async function MeetGreetDetailPage({ params, searchParams }: Prop
   const mg = await getMeetGreet(session.user, id);
   if (!mg) notFound();
 
-  const [candidates, sketchSources, keeps, sketchSetting] = await Promise.all([
+  const [candidates, sketchSources, keeps, sketchSetting, previewSources] = await Promise.all([
     listMaterialCandidates(session.user, mg),
     listSketchSources(session.user, mg),
     listMeetGreetKeeps(session.user, mg, mg.reports?.keep ?? 0),
     getSketchSetting(),
+    getPreviewSources(session.user.clearance, mg.previewSourceAssetIds),
   ]);
   // 新しい候補を先に出す (作り直すほど古いものが上に溜まらないように)
   const sketchCandidates = jsonStringArray(mg.sketchCandidates)
@@ -93,6 +96,12 @@ export default async function MeetGreetDetailPage({ params, searchParams }: Prop
           label={mg.label}
           venue={mg.venue}
           isReal={mg.format === "real"}
+        />
+        <PreviewForm
+          id={mg.id}
+          outfit={mg.previewOutfit}
+          sources={previewSources}
+          upcoming={mg.date >= todayJst()}
         />
       </div>
 

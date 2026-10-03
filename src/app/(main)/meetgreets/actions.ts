@@ -13,6 +13,8 @@ import {
   updateMeetGreet,
 } from "@/lib/domain/meetgreets";
 import { applyExcerpts, proposeExcerptsForDossier } from "@/lib/domain/excerpts";
+import { setMeetGreetPreview, setPreviewsFromAsset } from "@/lib/domain/meetgreet-preview";
+import { parseAssetRefs, PreviewEntriesSchema, SetPreviewSchema } from "@/lib/meetgreet/preview";
 import { meetGreetExcerptTarget } from "@/lib/domain/meetgreets";
 import { importMeetGreets, linkArticles } from "@/lib/domain/meetgreet-import";
 import {
@@ -306,6 +308,40 @@ export async function linkArticlesAction(meetGreetIds: string[]) {
     revalidatePath("/meetgreets");
     revalidatePath("/meetgreets/import");
     return { ok: true as const, ...result };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+/** 予告コーデと出典を書き換える (#203)。出典はアセットの ID か URL を改行区切りで */
+export async function setMeetGreetPreviewAction(id: string, input: { outfit: string; sources: string }) {
+  const user = await requireMember();
+  const parsed = SetPreviewSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: formatZodError(parsed.error) };
+  try {
+    await setMeetGreetPreview(user, id, { outfit: input.outfit, sourceAssetIds: parseAssetRefs(input.sources) });
+    revalidatePath(`/meetgreets/${id}`);
+    revalidatePath("/meetgreets");
+    return { ok: true as const };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+/** アセットページから、開催予定の回にまとめて予告を書く (#203) */
+export async function setPreviewsFromAssetAction(
+  assetId: string,
+  entries: { meetGreetId: string; outfit: string }[]
+) {
+  const user = await requireMember();
+  const parsed = PreviewEntriesSchema.safeParse(entries);
+  if (!parsed.success) return { ok: false as const, error: formatZodError(parsed.error) };
+  try {
+    const res = await setPreviewsFromAsset(user, assetId, parsed.data);
+    revalidatePath(`/assets/${assetId}`);
+    revalidatePath("/meetgreets");
+    for (const e of entries) revalidatePath(`/meetgreets/${e.meetGreetId}`);
+    return { ok: true as const, ...res };
   } catch (e) {
     return { ok: false as const, error: errorMessage(e) };
   }
