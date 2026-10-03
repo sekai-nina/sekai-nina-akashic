@@ -22,6 +22,8 @@ import { MeetGreetInputError, type ActingUser } from "./meetgreets";
 export const PREVIEW_OUTFIT_MAX = 500;
 /** 1 回に付けられる出典の数。実データはブログ 1 + トーク 1 */
 export const PREVIEW_SOURCES_MAX = 10;
+/** アセットページから一度に書ける回の数。開催予定の回は多くても 1 シングル分 (十数回) */
+export const PREVIEW_ENTRIES_MAX = 50;
 
 export interface PreviewSource {
   assetId: string;
@@ -67,11 +69,15 @@ function normalizeOutfit(outfit: string): string {
   return v;
 }
 
-function normalizeSourceIds(ids: string[]): string[] {
-  const v = [...new Set(ids.map((s) => s.trim()).filter(Boolean))];
-  if (v.length > PREVIEW_SOURCES_MAX) {
+function assertSourceCount(ids: string[]) {
+  if (ids.length > PREVIEW_SOURCES_MAX) {
     throw new MeetGreetInputError(`出典は ${PREVIEW_SOURCES_MAX} 件までです`);
   }
+}
+
+function normalizeSourceIds(ids: string[]): string[] {
+  const v = [...new Set(ids.map((s) => s.trim()).filter(Boolean))];
+  assertSourceCount(v);
   return v;
 }
 
@@ -129,7 +135,9 @@ export async function getPreviewSources(clearance: string, ids: string[]): Promi
 
 /**
  * 1 回分の予告と出典を書き換える (`/meetgreets/[id]`)。
- * 出典は**全置換**。見えないアセット (クリアランス外 / 存在しない) を指していたら断る。
+ * 出典は全置換だが、**今の出典のうち自分に見えないもの (上位機密のトーク等) は残す**。
+ * 画面には見える出典しか出ないので、そのまま全置換すると文面を直しただけで無言で消える。
+ * 新しく指定した ID が見えない / 存在しないなら断る。
  */
 export async function setMeetGreetPreview(
   user: ActingUser,
@@ -140,14 +148,18 @@ export async function setMeetGreetPreview(
   const sourceIds = normalizeSourceIds(input.sourceAssetIds);
 
   await withClearance(user.clearance, async (tx) => {
-    const found = await loadSources(tx, sourceIds);
+    const row = await tx.meetGreet.findUnique({ where: { id }, select: { previewSourceAssetIds: true } });
+    if (!row) throw new MeetGreetInputError("見つかりません");
+    const found = await loadSources(tx, [...sourceIds, ...row.previewSourceAssetIds]);
     const missing = sourceIds.filter((s) => !found.has(s));
     if (missing.length) throw new MeetGreetInputError(`出典のアセットが見つかりません: ${missing.join(", ")}`);
-    const res = await tx.meetGreet.updateMany({
+    const hidden = row.previewSourceAssetIds.filter((s) => !found.has(s) && !sourceIds.includes(s));
+    const next = [...sourceIds, ...hidden];
+    assertSourceCount(next);
+    await tx.meetGreet.update({
       where: { id },
-      data: { previewOutfit: outfit, previewSourceAssetIds: sourceIds },
+      data: { previewOutfit: outfit, previewSourceAssetIds: next },
     });
-    if (res.count === 0) throw new MeetGreetInputError("見つかりません");
   });
 
   await logAudit({
@@ -192,7 +204,8 @@ export async function listPreviewTargets(user: ActingUser, assetId: string, toda
  * アセットページから、開催予定の回にまとめて予告を書く。
  *
  * - 予告を書いた回: 予告を上書きし、このアセットを出典に足す (既にあれば足さない)
- * - 予告を空にした回: 予告を消し、このアセットを出典から外す
+ * - 予告を空にした回: このアセットを出典から外す。**他の出典が残るなら予告の文面は残す**
+ *   (ブログ + トークで予告された回をトーク側から外しても、ブログの予告まで消さない)
  * - 渡されなかった回: 触らない
  *
  * 1 本のブログで数回分を予告するのが普通なので、1 トランザクションでまとめて書く。
@@ -203,6 +216,12 @@ export async function setPreviewsFromAsset(
   entries: { meetGreetId: string; outfit: string }[]
 ): Promise<{ updated: number }> {
   if (entries.length === 0) throw new MeetGreetInputError("更新する回がありません");
+  if (entries.length > PREVIEW_ENTRIES_MAX) {
+    throw new MeetGreetInputError(`一度に書けるのは ${PREVIEW_ENTRIES_MAX} 回分までです`);
+  }
+  if (new Set(entries.map((e) => e.meetGreetId)).size !== entries.length) {
+    throw new MeetGreetInputError("同じ回が重複しています");
+  }
   const normalized = entries.map((e) => ({ id: e.meetGreetId, outfit: normalizeOutfit(e.outfit) }));
 
   const updated = await withClearance(user.clearance, async (tx) => {
@@ -221,13 +240,13 @@ export async function setPreviewsFromAsset(
       const sources = e.outfit ? [...others, assetId] : others;
       // 並び順を保つ: 既に入っていた位置はそのまま
       const nextSources = e.outfit && row.previewSourceAssetIds.includes(assetId) ? row.previewSourceAssetIds : sources;
-      if (row.previewOutfit === e.outfit && sameList(row.previewSourceAssetIds, nextSources)) continue;
-      if (nextSources.length > PREVIEW_SOURCES_MAX) {
-        throw new MeetGreetInputError(`出典は ${PREVIEW_SOURCES_MAX} 件までです`);
-      }
+      // 空にした = このアセットを外す。他の出典が残るなら文面はそちらの予告として残す
+      const nextOutfit = e.outfit || (others.length > 0 ? row.previewOutfit : "");
+      if (row.previewOutfit === nextOutfit && sameList(row.previewSourceAssetIds, nextSources)) continue;
+      assertSourceCount(nextSources);
       await tx.meetGreet.update({
         where: { id: e.id },
-        data: { previewOutfit: e.outfit, previewSourceAssetIds: nextSources },
+        data: { previewOutfit: nextOutfit, previewSourceAssetIds: nextSources },
       });
       count++;
     }

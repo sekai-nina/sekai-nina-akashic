@@ -117,7 +117,13 @@ export function PreviewForm({
             </button>
             <button
               type="button"
-              onClick={() => setEditing(false)}
+              onClick={() => {
+                // 取り消した入力を次に開いたときに残さない
+                setO(outfit);
+                setS(sources.map((x) => x.assetId).join("\n"));
+                setMsg(null);
+                setEditing(false);
+              }}
               className="h-8 px-3 rounded-md border border-slate-200 text-xs text-slate-600 hover:bg-slate-50"
             >
               取消
@@ -126,6 +132,7 @@ export function PreviewForm({
           <p className="text-xs text-slate-400">
             開催日が今日以降で予告が空でなければ、次の公開サイトのビルドで「次回以降のミーグリ」に出ます。
             ブログ / トークのアセットページからも、開催予定の回にまとめて書けます。
+            出典欄には自分に見えるものだけが出ます。見えない出典は保存しても残ります。
           </p>
           {msg && <p className="text-xs text-red-600">{msg}</p>}
         </div>

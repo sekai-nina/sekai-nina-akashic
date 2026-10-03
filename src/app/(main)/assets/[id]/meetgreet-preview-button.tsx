@@ -56,7 +56,7 @@ export function MeetGreetPreviewButton({ assetId, targets }: { assetId: string; 
       {open && (
         <div className="absolute right-0 z-20 mt-1 w-[26rem] max-w-[90vw] rounded-lg border border-slate-200 bg-white p-3 shadow-lg">
           <p className="text-xs text-slate-500">
-            このアセットで予告されたコーデを、回ごとに書いてください。書いた回の出典にこのアセットが入ります。空にすると外します。
+            このアセットで予告されたコーデを、回ごとに書いてください。書いた回の出典にこのアセットが入ります。空にするとこのアセットを出典から外します (他の出典が無ければ予告も消えます)。
           </p>
           {targets.length === 0 ? (
             <p className="mt-2 text-xs text-amber-700">
@@ -68,7 +68,7 @@ export function MeetGreetPreviewButton({ assetId, targets }: { assetId: string; 
                 <li key={t.id}>
                   <label className="block text-xs text-slate-600">
                     {formatJpDate(t.date)} {t.label}
-                    {MEETGREET_FORMAT_LABELS[t.format]}
+                    {MEETGREET_FORMAT_LABELS[t.format]}ミーグリ
                     {!t.linked && t.outfit && <span className="text-slate-400">（別の出典で入力済み: {t.outfit}）</span>}
                   </label>
                   <textarea

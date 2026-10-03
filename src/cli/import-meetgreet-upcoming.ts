@@ -16,6 +16,7 @@
  */
 import { readFileSync } from "node:fs";
 import { prismaInternal } from "@/lib/db";
+import { MEETGREET_FORMAT_LABELS } from "@/lib/utils";
 
 const args = process.argv.slice(2);
 const APPLY = args.includes("--apply");
@@ -68,7 +69,7 @@ async function main() {
       console.log(`  飛ばす ${it.date}: 別の予告が入っています (「${row.previewOutfit}」)`);
       continue;
     }
-    console.log(`  ${APPLY ? "書く" : "書く予定"} ${it.date} ${row.label}${row.format}: ${it.outfit}`);
+    console.log(`  ${APPLY ? "書く" : "書く予定"} ${it.date} ${row.label}${MEETGREET_FORMAT_LABELS[row.format]}: ${it.outfit}`);
     if (APPLY) {
       await prismaInternal.meetGreet.update({
         where: { id: row.id },
