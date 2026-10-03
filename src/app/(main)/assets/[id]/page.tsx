@@ -33,6 +33,8 @@ import { NinaHighlightBanner } from "./nina-highlight-banner";
 import { CopySourceRef } from "./copy-source-ref";
 import { AnniversaryLink } from "./anniversary-link";
 import { listAnniversariesForAsset } from "@/lib/domain/anniversaries";
+import { MeetGreetPreviewButton } from "./meetgreet-preview-button";
+import { listPreviewTargets } from "@/lib/domain/meetgreet-preview";
 import { ParentAssets, ChildAssets } from "./related-assets";
 import { SubGraph } from "./sub-graph";
 import { TextsSection, type TextRange } from "./texts-section";
@@ -236,6 +238,8 @@ export default async function AssetDetailPage({
   const editableDossiers = await listEditableDossiers(session.user);
   // このアセットから作った記念日 (あれば「登録済み」として出す)
   const assetAnniversaries = await listAnniversariesForAsset(id, session.user.clearance);
+  // ブログ / トーク (text) なら、開催予定のミーグリへの予告コーデ入力を出す (#203)
+  const previewTargets = asset.kind === "text" ? await listPreviewTargets(session.user, id) : null;
   const dossiersContainingAsset = editableDossiers.length
     ? await withSession(session.user, (tx) =>
         tx.dossierItem.findMany({
@@ -367,6 +371,7 @@ export default async function AssetDetailPage({
             canonicalDate={asset.canonicalDate?.toISOString() ?? null}
           />
           <AnniversaryLink assetId={asset.id} existing={assetAnniversaries} />
+          {previewTargets && <MeetGreetPreviewButton assetId={asset.id} targets={previewTargets} />}
           <Link
             href={`/assets/${id}/edit`}
             className="border border-slate-300 text-slate-700 px-3 py-1.5 rounded text-sm hover:bg-slate-50 transition-colors"
