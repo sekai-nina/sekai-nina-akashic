@@ -20,6 +20,12 @@ const SECURITY_HEADERS = [
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
 ];
 
+/** ffmpeg-static のバイナリ。pnpm の実体 (.pnpm 配下) と普通の配置の両方を書く */
+const FFMPEG_FILES = [
+  "./node_modules/.pnpm/ffmpeg-static*/node_modules/ffmpeg-static/ffmpeg",
+  "./node_modules/ffmpeg-static/ffmpeg",
+];
+
 const nextConfig: NextConfig = {
   async headers() {
     return [{ source: "/:path*", headers: SECURITY_HEADERS }];
@@ -30,8 +36,27 @@ const nextConfig: NextConfig = {
   },
   outputFileTracingIncludes: {
     "/api/v1/stats/words": ["./data/kuromoji-dict/**/*"],
-    // Discord 用の動画変換 (ffmpeg-static のバイナリ。動的なパス組み立てなので自動追跡に乗らない)
-    "/api/v1/insta/jobs/[id]/complete": ["./node_modules/.pnpm/ffmpeg-static*/node_modules/ffmpeg-static/ffmpeg"],
+    /**
+     * ffmpeg-static のバイナリ。`require("ffmpeg-static")` が返すのは実行時に組み立てる
+     * パスなので、**自動追跡には乗らない**。入れ忘れた経路では実行時に ENOENT で落ちる。
+     *
+     * story の動画は「DASH の結合」「サムネイルのコマ抜き」「Discord 用の H.264 変換」で
+     * ffmpeg を使い、**どれも登録の経路 (media-urls / result) で走る** (#206)。
+     * complete にだけ入れていたせいで、本番では一度も変換できていなかった。
+     * 経路を増やしたらここにも足す。
+     */
+    ...Object.fromEntries(
+      [
+        "/api/v1/insta/media-urls",
+        "/api/v1/insta/jobs/[id]/media-urls",
+        "/api/v1/insta/jobs/[id]/result",
+        "/api/v1/insta/jobs/[id]/complete",
+        "/api/v1/insta/diagnostics",
+        "/api/cron/insta-jobs",
+        // 「キューを進める」の Server Action はページ側のバンドルに入る
+        "/admin/insta",
+      ].map((route) => [route, FFMPEG_FILES]),
+    ),
   },
   experimental: {
     staleTimes: {

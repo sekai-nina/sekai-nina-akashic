@@ -1897,6 +1897,17 @@ Google Drive に **直接 PUT する URL** を発行する。Vercel の本文上
 
 - `multipart/form-data` — `file` フィールド。**4MB まで**（超えると 413。動画は上の経路へ）
 
+#### `GET /api/v1/insta/diagnostics`
+
+permission: `read` または `insta_worker`。story の変換まわりが**実際に動くか**を返す。
+
+```json
+{ "ffmpeg": { "path": "/var/task/node_modules/.../ffmpeg", "exists": true,
+              "version": "ffmpeg version 6.0 …", "error": null } }
+```
+
+ffmpeg はバンドルに含め忘れると実行時に初めて落ちるので、story を待たずに確かめる口を用意している (#206)。
+
 **Instagram は動画を DASH で配る**ので、横取りした URL からは「映像だけの mp4」と「音声だけの mp4」が
 別々に落ちてくる（実測: 到着順に映像→音声の繰り返し）。サーバ側で構成を見て**到着順に対にして結合**し、
 1 コマ 1 アセットにする（相方がいなければ単独で登録。音声だけのものは `audio/mp4` として登録し「動画」にはしない）。

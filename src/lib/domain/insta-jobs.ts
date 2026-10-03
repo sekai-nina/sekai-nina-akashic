@@ -666,7 +666,11 @@ async function buildStoryItems(fetched: FetchedMedia[], failed: MediaUrlFailure[
       else if (hasAudio) audios.push(m);
       else out.push(asItem(m)); // 判別できないものはそのまま
     } catch (e) {
-      console.warn("insta job: 構成を読めませんでした (そのまま登録):", m.filename, e);
+      // ffmpeg が無い/動かないとここに来る。黙って素通しすると DASH の片割れが
+      // そのまま登録されて iPhone で再生できなくなるので、ジョブに残す (#206)
+      const message = e instanceof Error ? e.message : String(e);
+      console.warn("insta job: 構成を読めませんでした (そのまま登録):", m.filename, message);
+      failed.push({ url: m.url.slice(0, 300), error: `構成を読めない: ${message.slice(0, 200)}` });
       out.push(asItem(m));
     }
   }
@@ -944,6 +948,8 @@ export async function notifyStoryJobCompleted(job: InstaStoryJobView): Promise<N
     assetLinks: fresh.map((f) => appUrl(`/assets/${f.assetId}`)),
   });
 
+  // 添付できなかった理由。黙って落とすと「動画が来ない」だけが見えて原因に辿れない (#206)
+  const notes: string[] = [];
   try {
     const maxBytes = discordMaxFileBytes();
     const attachments: DiscordAttachment[] = [];
@@ -958,7 +964,11 @@ export async function notifyStoryJobCompleted(job: InstaStoryJobView): Promise<N
           const t = await transcodeForDiscord(data, f.filename);
           att = { filename: t.filename, data: t.data, contentType: t.contentType };
         } catch (e) {
-          console.warn("insta job: Discord 用の変換に失敗 (添付しない):", e);
+          // 変換できないと添付を落とすしかない。なぜ落ちたかが分からないと
+          // 「動画が来ない」だけが見えて原因に辿れないので、ジョブに残す (#206)
+          const message = e instanceof Error ? e.message : String(e);
+          console.warn("insta job: Discord 用の変換に失敗 (添付しない):", message);
+          notes.push(`${f.filename} の変換に失敗: ${message.slice(0, 160)}`);
           continue;
         }
       }
@@ -979,6 +989,11 @@ export async function notifyStoryJobCompleted(job: InstaStoryJobView): Promise<N
         // webhook は 2 秒に 5 件。続けて送ると 429 を踏む
         if (i < chunks.length - 1) await new Promise((r) => setTimeout(r, DISCORD_GAP_MS));
       }
+    }
+    if (notes.length > 0) {
+      await prismaInternal.instaStoryJob
+        .update({ where: { id: job.id }, data: { error: notes.join(" / ").slice(0, 500) } })
+        .catch(() => {});
     }
     return { notified: true, attached: sent, error: null };
   } catch (e) {
