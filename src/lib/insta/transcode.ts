@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { chmod, copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -256,6 +256,18 @@ export async function extractPoster(input: Buffer, filename: string): Promise<Bu
   }
 }
 
+/** 関数の中で実体を探すときの候補。Vercel は配置が変わることがある (#206) */
+function candidatePaths(): string[] {
+  const rel = [
+    "node_modules/ffmpeg-static/ffmpeg",
+    "node_modules/.pnpm/ffmpeg-static@5.3.0/node_modules/ffmpeg-static/ffmpeg",
+  ];
+  const roots = [process.cwd(), "/var/task", "/ROOT"];
+  const out: string[] = [];
+  for (const r of roots) for (const f of rel) out.push(path.join(r, f));
+  return out;
+}
+
 export interface FfmpegDiagnostics {
   /** `require("ffmpeg-static")` が返したパス */
   path: string | null;
@@ -277,6 +289,24 @@ export async function ffmpegDiagnostics(): Promise<FfmpegDiagnostics> {
   const p = typeof ffmpegPath === "string" && ffmpegPath.length > 0 ? ffmpegPath : null;
   if (!p) return { path: null, exists: false, version: null, error: "ffmpeg-static がパスを返さない" };
   const exists = existsSync(p);
+  if (!exists) {
+    // どこにあるのか分からないと直せない。候補と、実際に見える中身を返す
+    const found = candidatePaths().filter((c) => existsSync(c));
+    const peek: Record<string, string[]> = {};
+    for (const d of [process.cwd(), path.join(process.cwd(), "node_modules"), "/var/task"]) {
+      try {
+        peek[d] = readdirSync(d).slice(0, 25);
+      } catch (e) {
+        peek[d] = [`(読めない: ${(e as Error).message})`];
+      }
+    }
+    return {
+      path: p,
+      exists,
+      version: null,
+      error: `実体が無い。見つかった候補=${found.join(",") || "なし"} / cwd=${process.cwd()} / ${JSON.stringify(peek).slice(0, 700)}`,
+    };
+  }
   try {
     const out = await runFfmpegForOutput(["-hide_banner", "-version"]);
     const version = out.split("\n")[0]?.trim() || null;
