@@ -113,7 +113,7 @@ export default async function AssetDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ hl?: string }>;
+  searchParams: Promise<{ hl?: string; dossier?: string }>;
 }) {
   const { id } = await params;
   const sp = await searchParams;
@@ -249,6 +249,13 @@ export default async function AssetDetailPage({
       )
     : [];
   const dossierIdsContaining = dossiersContainingAsset.map((r) => r.dossierId);
+  // `?dossier=` は抜粋の追加先 (/quotes の「記事を作る」から来たとき, #206)。編集できるドシエだけ
+  const targetDossier = sp.dossier ? (editableDossiers.find((d) => d.id === sp.dossier) ?? null) : null;
+  const targetExcerptCount = targetDossier
+    ? await withSession(session.user, (tx) =>
+        tx.dossierItem.count({ where: { dossierId: targetDossier.id, excerpt: { not: "" } } })
+      )
+    : 0;
 
   // 記事の紐づけ先候補。Article は非保護なので withClearance を通さない。
   // クリップ (#41) と「記事での参照」もここで引く
@@ -290,6 +297,25 @@ export default async function AssetDetailPage({
 
   return (
     <div className="max-w-6xl mx-auto">
+      {targetDossier && (
+        <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-900">
+          <span>
+            本文を範囲選択して「<span className="font-semibold">{targetDossier.title}</span>」に抜粋を追加
+          </span>
+          <span className="tabular-nums text-indigo-700">抜粋 {targetExcerptCount}</span>
+          <span className="ml-auto flex items-center gap-2">
+            <Link href={`/dossiers/${targetDossier.id}`} className="underline underline-offset-2 hover:text-indigo-700">
+              ドシエ
+            </Link>
+            <Link
+              href={`/dossiers/${targetDossier.id}/article`}
+              className="inline-flex items-center h-7 px-2.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700"
+            >
+              記事にする →
+            </Link>
+          </span>
+        </div>
+      )}
       {(prevAsset || nextAsset) && (
         <nav className="mb-3 flex items-stretch gap-2 text-xs">
           {prevAsset ? (
@@ -437,6 +463,7 @@ export default async function AssetDetailPage({
                 canClip={canClip}
                 clipRanges={clipRanges}
                 highlightTerms={hlNina ? ninaTerms : []}
+                targetDossier={targetDossier}
               />
               <div className="bg-white border border-slate-200 rounded-lg p-5 mt-4">
                 <details className="border border-slate-200 rounded p-3">

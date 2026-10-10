@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
-import { Quote, Check, ExternalLink, Scissors } from "lucide-react";
+import { useRouter } from "next/navigation";
+import type { TextType } from "@prisma/client";
+import { Quote, Check, ExternalLink, Scissors, Loader2, Plus } from "lucide-react";
+import { addAssetToDossierAction } from "@/app/(main)/dossiers/actions";
 import { AddToDossier } from "@/components/add-to-dossier";
 import { AddToArticle, type PickerArticle } from "@/components/add-to-article";
 import { ClipDialog, type ClipDraft } from "@/components/clip-dialog";
@@ -57,6 +60,8 @@ interface TextsSectionProps {
   clipRanges?: Record<string, TextRange[]>;
   /** 言及ハイライト語彙（?hl=nina 時のみ非空。長い語が先＝交替の優先順） */
   highlightTerms?: string[];
+  /** 抜粋の追加先 (`?dossier=`, #206)。あればフローターから 1 クリックで足せる */
+  targetDossier?: EditableDossier | null;
 }
 
 type Selection = {
@@ -78,6 +83,7 @@ export function TextsSection({
   canClip = false,
   clipRanges = {},
   highlightTerms = [],
+  targetDossier = null,
 }: TextsSectionProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [activeSelection, setActiveSelection] = useState<Selection>(null);
@@ -207,6 +213,7 @@ export function TextsSection({
           assetId={assetId}
           assetTitle={assetTitle}
           editableDossiers={editableDossiers}
+          targetDossier={targetDossier}
           articles={articles}
           canClip={canClip}
           onClip={() => {
@@ -448,6 +455,7 @@ function ExcerptFloater({
   assetId,
   assetTitle,
   editableDossiers,
+  targetDossier,
   articles,
   canClip,
   onClip,
@@ -457,6 +465,7 @@ function ExcerptFloater({
   assetId: string;
   assetTitle: string;
   editableDossiers: EditableDossier[];
+  targetDossier: EditableDossier | null;
   articles: PickerArticle[];
   canClip: boolean;
   onClip: () => void;
@@ -464,6 +473,30 @@ function ExcerptFloater({
 }) {
   const [confirmation, setConfirmation] = useState<{ id: string; title: string } | null>(null);
   const [articleConfirmation, setArticleConfirmation] = useState<string | null>(null);
+  const [addingToTarget, startAddToTarget] = useTransition();
+  const [targetError, setTargetError] = useState<string | null>(null);
+  const router = useRouter();
+
+  function addToTarget() {
+    if (!targetDossier) return;
+    setTargetError(null);
+    startAddToTarget(async () => {
+      try {
+        await addAssetToDossierAction(targetDossier.id, assetId, {
+          caption: assetTitle,
+          excerpt: selection.text,
+          excerptType: selection.textType as TextType,
+          excerptStart: selection.start,
+          excerptEnd: selection.end,
+        });
+        setConfirmation(targetDossier);
+        // 上の帯の抜粋数を更新する
+        router.refresh();
+      } catch {
+        setTargetError("追加できませんでした");
+      }
+    });
+  }
 
   // 選択範囲の上・中央に出す。ボタンの数で幅が変わるので実寸を測って中央に寄せ、画面端で切れないよう clamp する
   const floaterRef = useRef<HTMLDivElement>(null);
@@ -532,6 +565,19 @@ function ExcerptFloater({
     >
       <Quote className="h-3 w-3" />
       <span className="text-[11px]">この箇所を引用</span>
+      {targetDossier && (
+        <button
+          type="button"
+          onClick={addToTarget}
+          disabled={addingToTarget}
+          title={`「${targetDossier.title}」に抜粋を追加`}
+          className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-indigo-500 hover:bg-indigo-400 disabled:opacity-60"
+        >
+          {addingToTarget ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+          <span>言葉記事に追加</span>
+        </button>
+      )}
+      {targetError && <span className="text-[11px] text-red-300">{targetError}</span>}
       {canClip && (
         <button
           type="button"
