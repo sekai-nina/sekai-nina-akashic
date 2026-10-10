@@ -375,6 +375,110 @@ class AkashicClient:
         )
 
     # ------------------------------------------------------------------
+    # Articles
+    # ------------------------------------------------------------------
+
+    def list_articles(
+        self,
+        *,
+        q: str | None = None,
+        type: str | None = None,
+        dirty: bool | None = None,
+        include_draft: bool | None = None,
+        page: int | None = None,
+        per_page: int | None = None,
+    ) -> dict[str, Any]:
+        """記事の一覧（本文は含まない）。``q`` はタイトル・本文の部分一致。"""
+        params: dict[str, Any] = {
+            "q": q,
+            "type": type,
+            "page": page,
+            "perPage": per_page,
+        }
+        if dirty is not None:
+            params["dirty"] = "true" if dirty else "false"
+        if include_draft is not None:
+            params["includeDraft"] = "true" if include_draft else "false"
+        return self._request("GET", "/articles", params=params)
+
+    def get_article(self, short_id: str) -> dict[str, Any]:
+        """記事を 1 本取得する（本文・出典・楽観ロック用の ``updatedAt`` を含む）。"""
+        return self._request("GET", f"/articles/{short_id}")
+
+    def append_article(
+        self,
+        short_id: str,
+        *,
+        updated_at: str,
+        body: str,
+        article_updated_at: str | None = None,
+        sources: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """本文を置き換えて出典を足す（1 トランザクション）。記事は push 待ちになる。
+
+        一覧記事に 1 行足すための口。行の挿入位置は呼び出し側が決めて、追記後の本文全体を渡す。
+        同じアセット（無ければ同じ URL）の出典が既にあれば足さないので、再送しても重複しない。
+
+        Args:
+            short_id: 記事の short_id
+            updated_at: ``get_article`` で読んだ ``updatedAt``（楽観ロック）
+            body: 追記後の本文（frontmatter を除く）
+            article_updated_at: frontmatter の ``updated_at``（``YYYY-MM-DD``）。省略で変えない
+            sources: ``[{"assetId": …, "url": …, "label": …, "date": "YYYY-MM-DD"}]``。
+                ``assetId`` か ``url`` のどちらかが必要。``label`` 省略でアセットのタイトル。
+                ``assetId`` は ``internal`` 以下のアセットだけ（より上は 403）
+
+        Returns:
+            ``{"shortId", "changed", "addedSources", "hadPendingEdits", "updatedAt"}``。
+            ``hadPendingEdits`` が真なら、書く前から人の未 push の編集があった（自動で push しない）
+
+        Raises:
+            AkashicError: 409 は読んでから書くまでに記事が変わった（読み直して再送する）
+        """
+        payload: dict[str, Any] = {"updatedAt": updated_at, "body": body}
+        if article_updated_at is not None:
+            payload["articleUpdatedAt"] = article_updated_at
+        if sources:
+            payload["sources"] = sources
+        return self._request("POST", f"/articles/{short_id}/append", json=payload)
+
+    def push_article(
+        self,
+        short_id: str,
+        *,
+        subject: str | None = None,
+        expected_updated_at: str | None = None,
+        timeout: int = 60,
+    ) -> dict[str, Any]:
+        """この記事 1 本だけを公開リポジトリに push する（``article_push`` を持つキーだけ）。
+
+        **その記事の未 push の変更をすべて出す。** ``append_article`` の応答の
+        ``hadPendingEdits`` が真なら呼ばずに人に任せること。
+
+        Args:
+            short_id: 記事の short_id
+            subject: コミットメッセージの件名
+            expected_updated_at: ``append_article`` の応答の ``updatedAt``。それ以降に記事が
+                編集されていたら push せず 409 になる
+
+        Returns:
+            ``{"pushed", "unchanged", "blocked", "conflicts", "commitUrl", "dbError"}``。
+            ``conflicts`` が 1 なら GitHub 側が先に変わっている（Akashic で取り込み直す）
+
+        Raises:
+            AkashicError: 409 は ``expected_updated_at`` 以降の編集（``reason: "conflict"``）か、
+                push 中にブランチが進んだ（``reason: "branch_moved"``。少し待って再送）
+        """
+        payload: dict[str, Any] = {}
+        if subject is not None:
+            payload["subject"] = subject
+        if expected_updated_at is not None:
+            payload["expectedUpdatedAt"] = expected_updated_at
+        return self._request(
+            "POST", f"/articles/{short_id}/push", json=payload, timeout=timeout
+        )
+
+    # ------------------------------------------------------------------
     # Entities
     # ------------------------------------------------------------------
 

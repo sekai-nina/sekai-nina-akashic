@@ -14,11 +14,15 @@
 import { PrismaClient } from "@prisma/client";
 import { createHash, randomBytes } from "crypto";
 import { WORKER_PERMISSION } from "@/lib/insta/jobs";
+import { ARTICLE_PUSH_PERMISSION } from "@/lib/articles/append";
 
 const prisma = new PrismaClient();
 
-/** アプリが見る permission。`insta_worker` は /api/v1/insta/jobs の iPad 側だけを通す */
-const KNOWN_PERMISSIONS = ["read", "write", WORKER_PERMISSION];
+/**
+ * アプリが見る permission。`insta_worker` は /api/v1/insta/jobs の iPad 側だけを通す。
+ * `article_push` は記事を公開リポジトリに push する (Discord bot 用。#209)
+ */
+const KNOWN_PERMISSIONS = ["read", "write", WORKER_PERMISSION, ARTICLE_PUSH_PERMISSION];
 
 async function main() {
   const [, , email, name, permissionsArg] = process.argv;

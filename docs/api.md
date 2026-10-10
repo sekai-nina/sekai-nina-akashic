@@ -27,6 +27,7 @@ APIキーは `pnpm cli:keygen <user-email> <key-name> [permissions]` で発行�
 - `read`: GET系のエンドポイント
 - `write`: POST / PATCH / ファイルアップロード
 - `insta_worker`: iPad の story ワーカー専用（`/insta/jobs/:id/start` 等の報告と、自分のジョブの参照だけ）。`pnpm cli:keygen <email> "ipad-insta-worker" insta_worker` で **read / write を持たないキー**を作って iPad に置く。permission はルートを絞るだけで RLS の範囲は持ち主のクリアランスのままなので、**clearance が internal の専用ユーザー**に発行する。なお `GET /insta/targets` `/insta/account` `/ai-status` は「キーが有効なら誰でも読める」設計なので、このキーからも読める
+- `article_push`: 記事 1 本を公開リポジトリに push する（`POST /articles/:shortId/push`）。`write` とは別に持たせる。Discord bot のキーにだけ付ける（#209）
 
 ### エラーレスポンス
 
@@ -82,6 +83,8 @@ APIキーは `pnpm cli:keygen <user-email> <key-name> [permissions]` で発行�
 | GET | `/articles/:shortId` | read | 記事詳細（本文・frontmatter・出典） |
 | PATCH | `/articles/:shortId` | write | 記事の部分更新（`updatedAt` 必須の楽観ロック） |
 | POST | `/articles/:shortId/sources/:sourceId/apply` | write | 紐づけを反映済みにする（公開判断。internal 以下のみ） |
+| POST | `/articles/:shortId/append` | write | 本文の置き換えと出典の追加を 1 トランザクションで（bot の一覧追記） |
+| POST | `/articles/:shortId/push` | article_push | この記事 1 本だけを公開リポジトリに push |
 | POST | `/jobs/:key/runs` | write | ハートビート（bot / ワーカーのジョブが実行結果を報告する） |
 | GET | `/insta/targets` | 有効なキー | insta-watch が見張るハンドルの一覧 |
 | GET / POST | `/insta/account` | 有効なキー / write | story 取得に使うアカウントの状態 |
@@ -1018,6 +1021,66 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 | 400 | JSON / 型の誤り、`updatedAt` 欠落、更新項目なし、`dateMode` 不正、暦に無い日付・本文の長さ超過（`fieldErrors` 付き） |
 | 404 | 記事が無い |
 | 409 | `updatedAt` が現在と違う。`{"error": …, "reason": "conflict", "updatedAt": "<現在>"}` |
+
+### POST /articles/:shortId/append
+
+本文を置き換えて出典を足す（#209）。**本文の置き換えと出典の追加を 1 トランザクションで**行う。Discord bot が一覧記事（出演一覧・雑誌掲載一覧 等）に 1 行足すのに使う。行の挿入位置や連番の振り直しは呼び出し側が決め、追記後の本文全体を渡す。
+
+```json
+{
+  "updatedAt": "2026-10-03T06:42:42.577Z",
+  "body": "…| 384 | 2026/10/12 | [企画名](https://lemino…) | ○ | … |\n",
+  "articleUpdatedAt": "2026-10-12",
+  "sources": [
+    { "assetId": "cmn…", "url": "https://lemino.docomo.ne.jp/…", "label": "日向坂で会いましょう【企画名】#384", "date": "2026-10-12" }
+  ]
+}
+```
+
+| フィールド | 型 | 備考 |
+|---|---|---|
+| `updatedAt` | string | 必須。`GET /articles/:shortId` で読んだ値（楽観ロック） |
+| `body` | string | 必須。追記後の本文全体（frontmatter を除く）。PATCH と同じ正規化・上限 |
+| `articleUpdatedAt` | `YYYY-MM-DD` / null | frontmatter の `updated_at`。省略で変えない |
+| `sources` | array | 最大 20。各要素は `assetId` か `url` のどちらかが必須。`label`（省略でアセットのタイトル）/ `date`（`YYYY-MM-DD`）は任意 |
+
+- 出典は `applied` / `public` で作る（push で frontmatter の `source[]` に載り、`ref` は `assetId`）。脚注番号（`id`）は振らない（一覧記事の表は `^[n]` を使わない）。並びは既存の出典の後ろ
+- **同じアセット（`assetId` が無ければ同じ URL）の出典が既にあれば足さない。** 再送しても重複しない
+- `assetId` はキーの持ち主のクリアランスで見えるもの、かつ **`internal` 以下**だけ（apply と同じ上限。見えなければ 400、`internal` より上なら 403）。出典は public で作られ ref と label が公開リポジトリに載るため
+- 本文も出典も変わらなければ何も書かない（`changed: []` / `addedSources: 0`）
+- 書いたら `dirty = true`。公開は `POST /articles/:shortId/push`
+
+**レスポンス:** `{"shortId", "changed": ["body", "articleUpdatedAt"], "addedSources": 1, "hadPendingEdits": false, "updatedAt": "…"}`
+
+`hadPendingEdits` は **書く前から push 待ちだった**（= 人の未 push の編集が残っている）。このとき呼び出し側は自動で push せず、人に任せる。
+
+| ステータス | 意味 |
+|---|---|
+| 400 | JSON / 型の誤り、`updatedAt` 欠落、本文の検証エラー（`fieldErrors`）、見えない `assetId` |
+| 403 | `assetId` が `internal` より上 |
+| 404 | 記事が無い |
+| 409 | `updatedAt` が現在と違う。`{"reason": "conflict", "updatedAt": "<現在>"}` |
+
+### POST /articles/:shortId/push
+
+**この記事 1 本だけ**を公開リポジトリに push する（#209）。permission `article_push` を持つキーだけ（`write` だけでは押せない。MCP や AI エージェント用のキーに公開までさせないため）。`pnpm cli:keygen <email> <name> read,write,article_push` で発行する。
+
+```json
+{ "subject": "日向坂で会いましょう#384 を出演一覧に追記", "expectedUpdatedAt": "2026-10-12T00:01:02.345Z" }
+```
+
+body は省略可（`subject` を省くと既定のコミットメッセージ）。`expectedUpdatedAt` に append の応答の `updatedAt` を渡すと、それ以降に記事が編集されていたら push せず 409 を返す（bot が書いた直後に人が足した編集を、bot の push でまとめて出さない）。
+
+**push はその記事の未 push の変更をすべて出す。** append の応答の `hadPendingEdits` が真（書く前から人の未 push の編集があった）なら、呼び出し側は push せず人に任せること。サーバはこれを強制しない。
+
+**レスポンス:** `{"shortId", "pushed": 1, "unchanged": 0, "blocked": 0, "conflicts": 0, "commitUrl": "https://github.com/…", "dbError": null}`
+
+- push 待ちでなければ何もしない（`pushed: 0`）
+- `conflicts: 1` は GitHub 側が先に変わっている（Akashic で `pnpm cli:import-articles` してから押し直す）
+- 記事が無ければ 404。`expectedUpdatedAt` と食い違えば 409（`reason: "conflict"`）
+- GitHub の 422（読んでから commit するまでにブランチが進んだ）は 409（`reason: "branch_moved"`）。少し待って再送する。それ以外の GitHub の失敗は 502
+- `ARTICLES_GITHUB_TOKEN` が未設定なら 503
+- push したら監査ログに `article.push` を残す（画面の一括 push と同じ）
 
 ### POST /articles/:shortId/sources/:sourceId/apply
 

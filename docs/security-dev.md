@@ -249,7 +249,9 @@ akashic が記事の真実になると、古い checkout から取り込むと D
 - **ファイルの blob SHA == DB の `githubSha` かつ path も同じ かつ `editedAt` が非 null の記事はスキップ**（上流が変わっていない = DB の編集の方が新しい）。SHA が違えば上流が新しいのでファイルで上書きし、akashic の編集を捨てた記事（`editedAt` が非 null だったもの）は最後に一覧で知らせる。`dirty` ではなく `editedAt` で見るのは、正規化だけの dirty まで守ると `--create-missing` や照合のやり直しが push まで効かなくなるため。path も見るのは、内容そのままのリネームをスキップすると DB が旧 path のまま残って push が `deleted_upstream` で衝突し続けるため。スキップしなかった記事は `editedAt` を null に戻す（値がファイルと同じで書き込みを省いた経路も同様）
 - **`--apply` は checkout の HEAD が origin/main と一致しない・`--dir` がリポジトリのトップレベルでないと止まる**（`compareCheckoutWithRemote`）。承知の上なら `--allow-stale`。dry-run でも同じ検査を警告として出す。未コミットの変更があるファイルは警告だけ（取り込むと push で衝突扱いになる）
 
-**push の出力に影響する書き込みは必ず `Article.dirty = true` と `editedAt = now` を立てること**（本文・frontmatter カラム・`ArticleSource` の `applied` / `public` への遷移）。`dirty` を立て忘れると push 画面に出ず、GitHub と DB が食い違ったまま気づけません。`editedAt` を立て忘れると、次の取り込みがその編集をファイルで黙って上書きします。現状この書き込みをするのは `updateArticle` / `patchArticle`（編集 UI と API の保存）、`createArticle`（API の新規作成）、`applyArticleSource` の 4 つで、いずれも `src/lib/domain/articles.ts`。
+**push の出力に影響する書き込みは必ず `Article.dirty = true` と `editedAt = now` を立てること**（本文・frontmatter カラム・`ArticleSource` の `applied` / `public` への遷移）。`dirty` を立て忘れると push 画面に出ず、GitHub と DB が食い違ったまま気づけません。`editedAt` を立て忘れると、次の取り込みがその編集をファイルで黙って上書きします。現状この書き込みをするのは `updateArticle` / `patchArticle`（編集 UI と API の保存）、`createArticle`（API の新規作成）、`applyArticleSource`、`appendToArticle`（bot の一覧追記。#209）の 5 つで、いずれも `src/lib/domain/articles.ts`。
+
+**`appendToArticle`（`POST /api/v1/articles/:shortId/append`）は `applyArticleSource` と並ぶ公開化の経路**で、出典を `applied` / `public` で直接作る。そのためアセットは `assertClearance` に加えて `API_APPLY_MAX_CLASSIFICATION`（internal）以下に限る（apply の API 経路と同じ上限）。記事 1 本の push（`POST /api/v1/articles/:shortId/push`）は `write` ではなく専用の permission `article_push` を要る（MCP / AI エージェント用の write キーに公開までさせない）。
 
 ### 記事の編集 UI（`/articles/[shortId]/edit`）と API（`/api/v1/articles`）
 
