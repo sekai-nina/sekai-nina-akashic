@@ -111,13 +111,24 @@ export default async function DossierArticlePage({ params, searchParams }: Props
             <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
               <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">2. 記事</h2>
               {target && (
-                <Link
-                  href={`/articles/${target.shortId}`}
-                  className="inline-flex items-center gap-1 text-xs text-slate-600 hover:text-slate-900 underline underline-offset-2"
-                >
-                  {target.title || target.shortId}
-                  {target.draft ? "（下書き）" : ""} を開く <ExternalLink size={12} />
-                </Link>
+                <span className="flex flex-wrap items-center gap-3">
+                  {current === "quote_blog" && (
+                    // 言葉記事テンプレートは {q} を付けない。名言集に載せる一節は人が選ぶ (#206)
+                    <Link
+                      href={`/quotes/${target.shortId}`}
+                      className="inline-flex items-center h-7 px-2.5 rounded-md bg-emerald-600 text-white text-xs hover:bg-emerald-700"
+                    >
+                      名言集に載せる一節を選ぶ →
+                    </Link>
+                  )}
+                  <Link
+                    href={`/articles/${target.shortId}`}
+                    className="inline-flex items-center gap-1 text-xs text-slate-600 hover:text-slate-900 underline underline-offset-2"
+                  >
+                    {target.title || target.shortId}
+                    {target.draft ? "（下書き）" : ""} を開く <ExternalLink size={12} />
+                  </Link>
+                </span>
               )}
             </div>
 

@@ -233,6 +233,14 @@ export const ARTICLE_TEMPLATE_LABELS: Record<ArticleTemplate, string> = {
   attribute: "スナップ",
 };
 
+/** 本人ブログ → 言葉記事の進捗 (`/quotes`, #206)。キーは `BlogQuoteStatus` */
+export const BLOG_QUOTE_STATUS_LABELS: Record<"todo" | "in_progress" | "done" | "excluded", string> = {
+  todo: "未着手",
+  in_progress: "作業中",
+  done: "記事化済み",
+  excluded: "対象外",
+};
+
 /** お知らせの種類。公開サイトの一覧で見出しの前に出る小さな文字 */
 export const ANNOUNCEMENT_KIND_LABELS: Record<AnnouncementKind, string> = {
   feature: "機能",
