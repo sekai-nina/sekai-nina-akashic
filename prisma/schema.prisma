@@ -995,6 +995,42 @@ enum MeetGreetFormat {
   real
 }
 
+/// 記事化の進捗で、素材の種類 (#207)。値を足すのは安全 (消すのはコードを先に)
+enum ProgressMaterialKind {
+  blog
+}
+
+/// 素材の反映先。1 つの素材が複数の反映先を持てる (ひなあい 1 回 → 出演一覧の行・スナップ・属性記事)
+enum ProgressTarget {
+  quote_article
+}
+
+enum ProgressStatus {
+  /// 反映しない (名言の無いブログなど)
+  excluded
+  /// 手で「済」にした。記事から導出できる反映先 (ブログ → 言葉記事) では使わない
+  done
+}
+
+/// 記事化の進捗 (#206 / #207)。素材 × 反映先ごとに、人が決めた状態だけを持つ。
+/// 「記事化済み」が記事から導出できる反映先では行を作らない (未着手は行が無い状態)。
+/// 素材キーは種類ごとに決める: blog = ブログの URL。
+/// 保護テーブル。classification の direct-classification RLS
+model ArticleProgress {
+  id             String               @id @default(cuid())
+  materialKind   ProgressMaterialKind
+  materialKey    String
+  target         ProgressTarget
+  status         ProgressStatus
+  note           String               @default("")
+  classification ClearanceLevel       @default(internal)
+  updatedById    String?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  @@unique([materialKind, materialKey, target])
+}
+
 /// 保護テーブル。classification の direct-classification RLS (Place / RepoCollection と同形)。
 /// ドシエは所有者判定があるので、ドシエを include する読みは withSession で行う。
 model MeetGreet {
