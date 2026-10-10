@@ -14,6 +14,8 @@ import { MATERIAL_WINDOW_DAYS, REPORT_WINDOW_DAYS, TALK_SUGGEST_DAYS } from "@/l
 import { formatDate, todayJst } from "@/lib/utils";
 import { MetaForm } from "./meta-form";
 import { PreviewForm } from "./preview-form";
+import { FeaturedReports } from "./featured-reports";
+import { listArticleReports } from "@/lib/domain/meetgreet-featured";
 import { getPreviewSources } from "@/lib/domain/meetgreet-preview";
 import { MaterialsStep } from "@/components/materials-step";
 import {
@@ -56,12 +58,13 @@ export default async function MeetGreetDetailPage({ params, searchParams }: Prop
   const mg = await getMeetGreet(session.user, id);
   if (!mg) notFound();
 
-  const [candidates, sketchSources, keeps, sketchSetting, previewSources] = await Promise.all([
+  const [candidates, sketchSources, keeps, sketchSetting, previewSources, articleReports] = await Promise.all([
     listMaterialCandidates(session.user, mg),
     listSketchSources(session.user, mg),
     listMeetGreetKeeps(session.user, mg, mg.reports?.keep ?? 0),
     getSketchSetting(),
     getPreviewSources(session.user.clearance, mg.previewSourceAssetIds),
+    listArticleReports(session.user, mg.articleId),
   ]);
   // 新しい候補を先に出す (作り直すほど古いものが上に溜まらないように)
   const sketchCandidates = jsonStringArray(mg.sketchCandidates)
@@ -177,6 +180,7 @@ export default async function MeetGreetDetailPage({ params, searchParams }: Prop
           fetched={!!mg.repoCollection?.lastFetchedAt}
           keeps={keeps}
         />
+        {articleReports && <FeaturedReports id={mg.id} data={articleReports} />}
       </StepCard>
 
       {/* 3. スケッチ */}
