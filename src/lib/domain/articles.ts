@@ -18,7 +18,7 @@ import {
   type ArticleEditValues,
 } from "@/lib/articles/edit";
 import { mergeArticleEditPatch, type ArticleEditPatch } from "@/lib/articles/patch";
-import { renderArticleMarkdown } from "@/lib/articles/frontmatter";
+import { parseFrontmatterDate, renderArticleMarkdown } from "@/lib/articles/frontmatter";
 import { buildCommitMessage, planPush, type PushPlan, type RenderedArticle } from "@/lib/articles/push";
 import { gitBlobSha } from "@/lib/github/blob";
 import { todayJst } from "@/lib/utils";
@@ -759,6 +759,179 @@ export async function patchArticle(
   return updateArticleFrom(shortId, current, expectedUpdatedAt, parsed.values, actor);
 }
 
+export interface AppendSourceInput {
+  /** 出典のアセット。frontmatter の ref になる。キーのクリアランスで見えないものは断る */
+  assetId?: string | null;
+  url?: string | null;
+  /** 省略 / 空ならアセットのタイトル */
+  label?: string | null;
+  /** "YYYY-MM-DD" */
+  date?: string | null;
+}
+
+export interface AppendToArticleInput {
+  shortId: string;
+  expectedUpdatedAt: Date;
+  /** 追記後の本文全体 (行の挿入位置は呼び出し側が決める) */
+  body: string;
+  /** frontmatter の updated_at。省略で変えない */
+  articleUpdatedAt?: string | null;
+  sources?: AppendSourceInput[];
+  actor: ArticleActor;
+  /**
+   * 出典にできるアセットの機密レベルの上限。API キー経路は `API_APPLY_MAX_CLASSIFICATION`
+   * (apply と同じ)。出典は public で作られ ref と label が公開リポジトリに載るため
+   */
+  maxClassification: ClearanceLevel;
+}
+
+export type AppendToArticleResult =
+  | {
+      ok: true;
+      changed: ArticleEditField[];
+      /** 足した出典の数 (同じアセット / URL が既にあるものは足さない) */
+      addedSources: number;
+      updatedAt: Date;
+      /**
+       * 書く前から push 待ちだった (= 人の未 push の編集が残っている)。
+       * 呼び出し側はこのとき自動で push せず、人に任せる
+       */
+      hadPendingEdits: boolean;
+    }
+  | { ok: false; reason: "not_found" }
+  | { ok: false; reason: "conflict"; currentUpdatedAt: Date }
+  | { ok: false; reason: "invalid"; errors: Partial<Record<ArticleEditField, string>> }
+  | { ok: false; reason: "asset_not_found"; assetId: string }
+  | { ok: false; reason: "above_limit"; assetId: string };
+
+class AppendAbort extends Error {
+  constructor(readonly failure: Exclude<AppendToArticleResult, { ok: true }>) {
+    super(failure.reason);
+  }
+}
+
+/**
+ * 外部 (bot) からの「本文を置き換えて出典を足す」(#209)。
+ *
+ * Discord bot が一覧記事 (出演一覧・雑誌掲載一覧 等) に 1 行足すのに使う。行の挿入位置や連番の
+ * 振り直しは bot 側が持ち、ここは **本文の置き換えと出典の追加を 1 トランザクションで**行う
+ * (片方だけ入って本文と frontmatter が食い違うのを防ぐ)。
+ *
+ * - 本文と `articleUpdatedAt` は PATCH と同じ検証・正規化 (`parseArticleEditForm`) を通す
+ * - 出典は `applied` / `public` で作る (frontmatter に載る)。**`applyArticleSource` と並ぶ公開化の経路**なので、
+ *   アセットはキーのクリアランス内 (`assertClearance`) かつ `maxClassification` 以下に限る。脚注番号は振らない
+ *   (一覧記事の表は `^[n]` を使わない。取り込み由来の行も sourceNo は null)
+ * - 同じアセット (無ければ同じ URL) の出典が既にあれば足さない (bot の再送で重複しない)
+ * - 書いたら dirty。push はしない (`pushDirtyArticles(…, { shortId })` を別に呼ぶ)
+ *
+ * `ArticleSource` は保護テーブルなので withClearance の中で書く。`Article` も同じトランザクションで書く。
+ */
+export async function appendToArticle(
+  input: AppendToArticleInput,
+  clearance: string,
+): Promise<AppendToArticleResult> {
+  let result: AppendToArticleResult;
+  try {
+    result = await withClearance(clearance, async (tx): Promise<AppendToArticleResult> => {
+      const current = await tx.article.findUnique({
+        where: { shortId: input.shortId },
+        select: {
+          ...ARTICLE_EDIT_SELECT,
+          id: true,
+          dirty: true,
+          sources: {
+            where: { status: { not: ArticleSourceStatus.pending } },
+            select: { assetId: true, originalRef: true, url: true, sortOrder: true },
+          },
+        },
+      });
+      if (!current) throw new AppendAbort({ ok: false, reason: "not_found" });
+      if (current.updatedAt.getTime() !== input.expectedUpdatedAt.getTime()) {
+        throw new AppendAbort({ ok: false, reason: "conflict", currentUpdatedAt: current.updatedAt });
+      }
+
+      const patch: ArticleEditPatch = { body: input.body };
+      if (input.articleUpdatedAt !== undefined) patch.articleUpdatedAt = input.articleUpdatedAt;
+      const parsed = parseArticleEditForm(mergeArticleEditPatch(toArticleEditValues(current), patch));
+      if (!parsed.ok) throw new AppendAbort({ ok: false, reason: "invalid", errors: parsed.errors });
+      const changed = diffArticleEdit(toArticleEditValues(current), parsed.values);
+
+      // 既にある出典 (同じアセット / 同じ URL) は足さない
+      const haveAssets = new Set(current.sources.flatMap((s) => [s.assetId, s.originalRef]).filter(Boolean));
+      const haveUrls = new Set(current.sources.map((s) => s.url).filter(Boolean));
+      let sortOrder = nextSortOrder(current.sources.map((s) => s.sortOrder));
+      let added = 0;
+      for (const src of input.sources ?? []) {
+        const assetId = src.assetId?.trim() || null;
+        const url = src.url?.trim() || null;
+        if (assetId ? haveAssets.has(assetId) : url ? haveUrls.has(url) : false) continue;
+        let label = src.label?.trim() ?? "";
+        if (assetId) {
+          // RLS 下で引くので、見えないアセットは null (= 存在確認を兼ねる)
+          const asset = await tx.asset.findUnique({
+            where: { id: assetId },
+            select: { title: true, classification: true },
+          });
+          if (!asset) throw new AppendAbort({ ok: false, reason: "asset_not_found", assetId });
+          assertClearance(clearance, asset.classification);
+          if (isAboveClearance(asset.classification, input.maxClassification)) {
+            throw new AppendAbort({ ok: false, reason: "above_limit", assetId });
+          }
+          // apply と同じく、label が無ければアセットのタイトルで埋める
+          label ||= asset.title;
+        }
+        // frontmatter の日付と同じく UTC 深夜で持つ (`formatFrontmatterDate` が YYYY-MM-DD に戻せる形)
+        const date = src.date ? parseFrontmatterDate(src.date) : null;
+        if (src.date && !date) {
+          throw new AppendAbort({ ok: false, reason: "invalid", errors: { body: `出典の日付が不正です: ${src.date}` } });
+        }
+        await tx.articleSource.create({
+          data: {
+            articleId: current.id,
+            assetId,
+            status: ArticleSourceStatus.applied,
+            classification: ClearanceLevel.public,
+            label,
+            url,
+            date,
+            sortOrder: sortOrder++,
+          },
+        });
+        if (assetId) haveAssets.add(assetId);
+        if (url) haveUrls.add(url);
+        added++;
+      }
+
+      if (!changed.length && added === 0) {
+        return { ok: true, changed, addedSources: 0, updatedAt: current.updatedAt, hadPendingEdits: current.dirty };
+      }
+      const [after] = await tx.article.updateManyAndReturn({
+        where: { id: current.id, updatedAt: input.expectedUpdatedAt },
+        data: { ...parsed.values, dirty: true, editedAt: new Date() },
+        select: { updatedAt: true },
+      });
+      if (!after) {
+        const now = await tx.article.findUniqueOrThrow({ where: { id: current.id }, select: { updatedAt: true } });
+        throw new AppendAbort({ ok: false, reason: "conflict", currentUpdatedAt: now.updatedAt });
+      }
+      return { ok: true, changed, addedSources: added, updatedAt: after.updatedAt, hadPendingEdits: current.dirty };
+    });
+  } catch (e) {
+    if (e instanceof AppendAbort) return e.failure;
+    throw e;
+  }
+
+  if (result.ok && (result.changed.length || result.addedSources)) {
+    await auditArticle(input.actor, {
+      action: "article.append",
+      targetType: "Article",
+      targetId: input.shortId,
+      metadata: { changed: result.changed, addedSources: result.addedSources },
+    });
+  }
+  return result;
+}
+
 export type CreateArticleResult =
   | { ok: true; article: ArticleDetailRow }
   /** `parseArticleEditForm` の検証 (暦に無い日付 / 本文の長さ / dateMode) */
@@ -1163,10 +1336,15 @@ async function markPushed(pushed: PushedItem[], unchanged: PushedItem[]): Promis
  * 呼び出し側がコミット URL と一緒に見せる。次回の push は `githubSha` (古い) ≠ tree の SHA
  * (新しい) で衝突扱いになり、再取り込みで解消する (二重に書くことはない)。
  */
-export async function pushDirtyArticles(subject?: string | null): Promise<PushArticlesResult> {
+export async function pushDirtyArticles(
+  subject?: string | null,
+  /** 1 本だけ push する (bot が自分の書いた記事だけを出す。#209)。省略で dirty 全部 */
+  only?: { shortId: string },
+): Promise<PushArticlesResult> {
   if (!isGithubConfigured()) throw new Error("ARTICLES_GITHUB_TOKEN が設定されていません");
 
-  const [rendered, { head, tree }] = await Promise.all([renderArticlesForPush({ dirty: true }), readUpstream()]);
+  const where: Prisma.ArticleWhereInput = only ? { dirty: true, shortId: only.shortId } : { dirty: true };
+  const [rendered, { head, tree }] = await Promise.all([renderArticlesForPush(where), readUpstream()]);
   const plan = planPush(rendered, tree);
   const result: PushArticlesResult = {
     pushed: 0,
