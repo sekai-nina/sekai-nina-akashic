@@ -14,6 +14,7 @@ import {
 } from "@/lib/domain/meetgreets";
 import { applyExcerpts, proposeExcerptsForDossier } from "@/lib/domain/excerpts";
 import { setMeetGreetPreview, setPreviewsFromAsset } from "@/lib/domain/meetgreet-preview";
+import { setMeetGreetReportFeatured } from "@/lib/domain/meetgreet-featured";
 import { parseAssetRefs, PreviewEntriesSchema, SetPreviewSchema } from "@/lib/meetgreet/preview";
 import { meetGreetExcerptTarget } from "@/lib/domain/meetgreets";
 import { importMeetGreets, linkArticles } from "@/lib/domain/meetgreet-import";
@@ -342,6 +343,21 @@ export async function setPreviewsFromAssetAction(
     revalidatePath("/meetgreets");
     for (const e of entries) revalidatePath(`/meetgreets/${e.meetGreetId}`);
     return { ok: true as const, ...res };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+/** レポの「ミーグリページに出す」(記事本文の `![rep]`) を付け外しする (#210) */
+export async function setReportFeaturedAction(id: string, tweetId: string, on: boolean) {
+  const user = await requireMember();
+  if (!/^\d{1,25}$/.test(tweetId)) return { ok: false as const, error: "ツイート ID が不正です" };
+  try {
+    await setMeetGreetReportFeatured(user, id, tweetId, on === true);
+    revalidatePath(`/meetgreets/${id}`);
+    revalidatePath("/meetgreets");
+    revalidatePath("/articles", "layout");
+    return { ok: true as const };
   } catch (e) {
     return { ok: false as const, error: errorMessage(e) };
   }

@@ -4,6 +4,8 @@ import { Download, Plus } from "lucide-react";
 import { auth } from "@/lib/auth";
 import { listMeetGreets, meetGreetTitle } from "@/lib/domain/meetgreets";
 import { formatDate } from "@/lib/utils";
+import { listSiteFeaturedReports } from "@/lib/domain/meetgreet-featured";
+import { SiteReports } from "./site-reports";
 
 /**
  * ミーグリ記事の作成ワークフロー (#106)。
@@ -13,7 +15,10 @@ export default async function MeetGreetsPage() {
   const session = await auth();
   if (!session?.user) notFound();
 
-  const rows = await listMeetGreets(session.user);
+  const [rows, siteReports] = await Promise.all([
+    listMeetGreets(session.user),
+    listSiteFeaturedReports(session.user),
+  ]);
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -39,6 +44,8 @@ export default async function MeetGreetsPage() {
           </Link>
         </div>
       </div>
+
+      <SiteReports reports={siteReports} />
 
       {rows.length === 0 ? (
         <div className="bg-white border border-dashed border-slate-300 rounded-lg p-10 text-center text-sm text-slate-500">
