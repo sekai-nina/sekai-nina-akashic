@@ -249,7 +249,7 @@ export default async function AssetDetailPage({
       )
     : [];
   const dossierIdsContaining = dossiersContainingAsset.map((r) => r.dossierId);
-  // `?dossier=` は抜粋の追加先 (/quotes の「記事を作る」から来たとき, #206)。編集できるドシエだけ
+  // `?dossier=` は抜粋の追加先 (/progress/blog の「記事を作る」から来たとき, #206)。編集できるドシエだけ
   const targetDossier = sp.dossier ? (editableDossiers.find((d) => d.id === sp.dossier) ?? null) : null;
   const targetExcerptCount = targetDossier
     ? await withSession(session.user, (tx) =>
