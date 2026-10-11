@@ -67,7 +67,8 @@ async function loadEpisodes(user: ActingUser, only?: number): Promise<Map<number
     tx.asset.findMany({
       where: {
         kind: "video",
-        title: only === undefined ? { contains: "日向坂で会いましょう" } : { endsWith: `#${only}` },
+        // 題の末尾に改行が付いたものがあるので endsWith ではなく contains (回番号は下で照合)
+        title: { contains: only === undefined ? "日向坂で会いましょう" : `#${only}` },
       },
       select: {
         id: true,
