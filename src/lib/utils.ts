@@ -233,12 +233,20 @@ export const ARTICLE_TEMPLATE_LABELS: Record<ArticleTemplate, string> = {
   attribute: "スナップ",
 };
 
-/** 本人ブログ → 言葉記事の進捗 (`/quotes`, #206)。キーは `BlogQuoteStatus` */
+/** 本人ブログ → 言葉記事の進捗 (`/progress/blog`, #206)。キーは `BlogQuoteStatus` */
 export const BLOG_QUOTE_STATUS_LABELS: Record<"todo" | "in_progress" | "done" | "excluded", string> = {
   todo: "未着手",
   in_progress: "作業中",
   done: "記事化済み",
   excluded: "対象外",
+};
+
+/** ひなあいの回の進捗 (`/progress/hinaai`, #208)。キーは `EpisodeStatus` */
+export const HINAAI_EPISODE_STATUS_LABELS: Record<"todo" | "partial" | "done" | "excluded", string> = {
+  todo: "未着手",
+  partial: "途中",
+  done: "済",
+  excluded: "出演なし",
 };
 
 /** お知らせの種類。公開サイトの一覧で見出しの前に出る小さな文字 */
