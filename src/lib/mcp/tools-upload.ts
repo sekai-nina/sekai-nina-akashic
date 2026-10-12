@@ -29,14 +29,30 @@ import type { ToolContext } from "./tools";
  *   2. エージェントが curl -X PUT --upload-file で URL に送り、返った JSON の id を得る
  *   3. akashic_complete_upload にその id を渡して inbox に登録する
  *
- * 保存先は GOOGLE_DRIVE_FOLDER_ID に固定する (REST の driveFolderId は受けない)。complete は
- * 渡された driveFileId がそのフォルダに最近できた、まだどのアセットも指していないファイルかを確かめる。
+ * 保存先は GOOGLE_DRIVE_FOLDER_ID に固定する (REST の driveFolderId は受けない)。begin はファイルに
+ * appProperties で「発行したキー」と「申告された sha256」を刻み、complete はそれが呼び出し元のキー・
+ * 引数の sha256 と一致し、Drive が計算した SHA-256 とも一致するファイルしか受けない。
  * finalizeDriveUpload はファイルを「リンクを知っていれば誰でも閲覧可」にするので、検証しないと
- * 任意の driveFileId を渡して別のファイルを公開する口になる。
+ * 任意の driveFileId (REST や iPad ワーカーが上げ途中のファイルを含む) を公開する口になる。
  */
 
-/** Drive の resumable session は 1 週間有効。それより古いファイルは begin で発行した先ではない */
+/**
+ * resumable session は 1 週間有効。createdTime は PUT が終わった時刻なので、これより古いファイルは
+ * まず無い。appProperties の照合が本命で、こちらは保険
+ */
 const UPLOAD_MAX_AGE_MS = 8 * 24 * 60 * 60 * 1000;
+
+/** begin がファイルに刻む appProperties のキー */
+const UPLOADER_PROP = "akashicMcpUploader";
+const SHA256_PROP = "akashicMcpSha256";
+
+/** サムネイルを作るために本体を落とす上限。これを超える画像はサムネイル無しで登録する */
+const THUMBNAIL_MAX_BYTES = 50 * 1024 * 1024;
+
+// command に埋め込むので、シェルのメタ文字を通さない形に絞る
+const MIME_TYPE = z
+  .string()
+  .regex(/^[\w.+-]+\/[\w.+-]+$/, "MIME タイプの形式 (例: video/mp4) で指定してください");
 
 const SHA256 = z
   .string()
@@ -50,7 +66,7 @@ const SHA256 = z
 async function findDuplicate(where: { sha256: string } | { storageKey: string }) {
   return prismaInternal.asset.findFirst({
     where,
-    select: { id: true, title: true, classification: true },
+    select: { id: true, title: true, classification: true, storageKey: true },
   });
 }
 
@@ -78,13 +94,13 @@ export function registerUploadTools(server: McpServer, { user, baseUrl }: ToolCo
       title: "ファイルアップロードの開始",
       description:
         "画像・動画などのファイルを Drive に上げてアセットにする 3 手順の 1 つ目。" +
-        "Drive の upload URL を返すので、手元で curl -X PUT --upload-file <path> <uploadUrl> を実行し、" +
+        "Drive の upload URL と curl コマンドを返すので、手元で <path> をファイルパスに置き換えて実行し、" +
         "返った JSON の id を akashic_complete_upload の driveFileId に渡す。" +
         "sha256 が既存アセットと一致したら URL は出さず existingId を返す (アップロード不要)。" +
         "sha256 は shasum -a 256 <path> で求める。",
       inputSchema: z.object({
         filename: z.string().min(1).describe("Drive 上のファイル名 (例: 20250430_wakemon.mp4)"),
-        mimeType: z.string().min(1).describe("MIME タイプ (例: video/mp4, image/jpeg)"),
+        mimeType: MIME_TYPE.describe("MIME タイプ (例: video/mp4, image/jpeg)"),
         sha256: SHA256.describe("ファイルの SHA-256 (16 進)。重複判定に使う"),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
@@ -97,14 +113,18 @@ export function registerUploadTools(server: McpServer, { user, baseUrl }: ToolCo
         if (!isDriveEnabled()) {
           return fail("Google Drive が未設定のため、ファイルをアップロードできません。");
         }
-        const uploadUrl = await createResumableUploadSession(args.filename, args.mimeType);
+        const uploadUrl = await createResumableUploadSession(args.filename, args.mimeType, undefined, {
+          [UPLOADER_PROP]: user.apiKeyId,
+          [SHA256_PROP]: args.sha256,
+        });
         if (!uploadUrl) return fail("Drive の upload URL を発行できませんでした。");
 
         return ok({
           duplicate: false,
           uploadUrl,
-          // URL にはクエリ文字が入るのでシングルクォートで包む
-          command: `curl -sS -X PUT -H 'Content-Type: ${args.mimeType}' --upload-file <path> '${uploadUrl}'`,
+          // URL にはクエリ文字が、パスには空白が入りうるのでシングルクォートで包む。
+          // --fail-with-body がないと 4xx/5xx でも終了コード 0 になり、エラー本文から id を探しにいく
+          command: `curl -sS --fail-with-body -X PUT -H 'Content-Type: ${args.mimeType}' --upload-file '<path>' '${uploadUrl}'`,
           next:
             "command の <path> をファイルパスに置き換えて実行し、返った JSON の id を driveFileId、" +
             "同じ sha256 を添えて akashic_complete_upload を呼んでください。URL の有効期限は 1 週間です。",
@@ -148,10 +168,12 @@ export function registerUploadTools(server: McpServer, { user, baseUrl }: ToolCo
           meta.trashed ||
           !folderId ||
           !meta.parents.includes(folderId) ||
+          meta.appProperties[UPLOADER_PROP] !== user.apiKeyId ||
+          meta.appProperties[SHA256_PROP] !== args.sha256 ||
           !meta.createdTime ||
           Date.now() - meta.createdTime.getTime() > UPLOAD_MAX_AGE_MS
         ) {
-          return fail("そのファイルは akashic_begin_upload で発行した先のものではありません。", {
+          return fail("そのファイルは、このキーがこの sha256 で akashic_begin_upload した先のものではありません。", {
             driveFileId: args.driveFileId,
           });
         }
@@ -160,21 +182,29 @@ export function registerUploadTools(server: McpServer, { user, baseUrl }: ToolCo
         const owner = await findDuplicate({ storageKey: args.driveFileId });
         if (owner) return duplicatePayload(owner, user, baseUrl);
 
-        // Drive が計算した値があればそれを正とする (申告値だけを信じない)
-        if (meta.sha256 && meta.sha256.toLowerCase() !== args.sha256) {
-          return fail("sha256 が Drive 上のファイルと一致しません。送ったファイルと sha256 を確認してください。", {
-            declared: args.sha256,
-            drive: meta.sha256.toLowerCase(),
-          });
+        // 申告値だけを信じない。Drive が計算した値と突き合わせる (重複判定と Asset.sha256 に使うため)
+        if (!meta.sha256) {
+          return fail("Drive がまだファイルの SHA-256 を出していません。少し待ってから再実行してください。");
+        }
+        if (meta.sha256.toLowerCase() !== args.sha256) {
+          return fail("送ったファイルの中身が sha256 と一致しません。ファイルと sha256 を確認して begin からやり直してください。");
         }
         const sha256 = args.sha256;
 
         const dup = await findDuplicate({ sha256 });
         if (dup) {
-          // 送ってもらった実体は要らないのでゴミ箱へ (孤児を残さない。30 日は戻せる)
-          await trashDriveFile(args.driveFileId).catch((e) =>
-            console.warn("[mcp] 重複ファイルの片付けに失敗:", e)
-          );
+          // 送ってもらった実体は要らないのでゴミ箱へ (孤児を残さない。30 日は戻せる)。
+          // **ただし、どれかの Asset がその ID を実体として指しているなら触らない。** 同じ driveFileId の
+          // complete が並行して走ると (タイムアウト後のリトライ)、上の storageKey 確認をすり抜けた後に
+          // 相手が作った Asset が重複として見つかり、その原本を消してしまうため
+          const referenced =
+            dup.storageKey === args.driveFileId ||
+            (await prismaInternal.asset.count({ where: { storageKey: args.driveFileId } })) > 0;
+          if (!referenced) {
+            await trashDriveFile(args.driveFileId).catch((e) =>
+              console.warn("[mcp] 重複ファイルの片付けに失敗:", e)
+            );
+          }
           return duplicatePayload(dup, user, baseUrl);
         }
 
@@ -203,8 +233,23 @@ export function registerUploadTools(server: McpServer, { user, baseUrl }: ToolCo
           user.clearance
         );
 
-        // 画像は R2 のサムネイルを作る (REST の /upload/complete と同じ)。失敗してもアセットは残す
-        if (kind === "image") {
+        // 監査ログはサムネイルより先に書く (サムネイルで落ちても作成の記録は残す)
+        await logMcpToolCall({
+          user,
+          tool: "complete_upload",
+          targetType: "Asset",
+          targetId: asset.id,
+          args: { kind, title: args.title, driveFileId: args.driveFileId, sha256, sourceType: data.sourceType },
+        });
+
+        // 画像は R2 のサムネイルを作る (REST の /upload/complete と同じ)。失敗してもアセットは残す。
+        // kind は上書きできるので MIME とサイズで判定する (大きな動画を image 扱いで丸ごと読まない)
+        if (
+          kind === "image" &&
+          mimeType.startsWith("image/") &&
+          meta.size != null &&
+          meta.size <= THUMBNAIL_MAX_BYTES
+        ) {
           try {
             const buffer = await downloadFromDrive(finalized.fileId);
             const r2Url = buffer ? await generateAndUploadThumbnails(asset.id, buffer) : null;
@@ -217,14 +262,6 @@ export function registerUploadTools(server: McpServer, { user, baseUrl }: ToolCo
             console.error("[mcp] R2 サムネイル生成に失敗:", err);
           }
         }
-
-        await logMcpToolCall({
-          user,
-          tool: "complete_upload",
-          targetType: "Asset",
-          targetId: asset.id,
-          args: { kind, title: args.title, driveFileId: args.driveFileId, sha256, sourceType: data.sourceType },
-        });
 
         return ok({ duplicate: false, ...createdAssetPayload(asset, resolution, baseUrl) });
       } catch (err) {
