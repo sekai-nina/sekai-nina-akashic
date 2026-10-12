@@ -85,22 +85,24 @@ const adminItems = [
 ];
 
 /**
- * サイドバーのリンク。表示中は Link 既定のプリフェッチ（loading.tsx まで）だけにして、
- * ホバーしたリンクだけページ全体をプリフェッチする（Next.js ドキュメントの hover prefetch）。
- *
- * 以前は全リンクを prefetch={true} にした上で遷移ごとに全ページを router.prefetch していたため、
- * 1 回の遷移で ~30 ページ分のレンダリング（= DB クエリ）が同時に走って接続プールがあふれ、
- * 開いているページが P2028 で落ちていた（2026-10-11 の /assets・/graph）。
+ * サイドバーのリンク。表示中は Link 既定のプリフェッチ（loading.tsx まで。DB クエリは走らない）で、
+ * マウスが乗っている間だけページ全体をプリフェッチする。全リンクを常時フルにすると、
+ * 遷移や保存のたびに ~30 ページが同時に描画されて接続プールがあふれる（P2028）。
  */
-function NavLink(props: ComponentProps<typeof Link>) {
+function NavLink(props: Omit<ComponentProps<typeof Link>, "prefetch">) {
   const [hovered, setHovered] = useState(false);
   return (
     <Link
       {...props}
       prefetch={hovered ? true : null}
-      onMouseEnter={(e) => {
-        setHovered(true);
-        props.onMouseEnter?.(e);
+      onPointerEnter={(e) => {
+        // タップでもフルにすると遷移と競合して同じページを二重に描画する
+        if (e.pointerType === "mouse") setHovered(true);
+        props.onPointerEnter?.(e);
+      }}
+      onPointerLeave={(e) => {
+        setHovered(false);
+        props.onPointerLeave?.(e);
       }}
     />
   );
