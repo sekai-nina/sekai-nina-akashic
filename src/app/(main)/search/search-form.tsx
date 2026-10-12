@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2, RotateCcw } from "lucide-react";
-import { ASSET_KIND_LABELS, ENTITY_TYPE_LABELS } from "@/lib/utils";
+import { ASSET_KIND_LABELS, ENTITY_TYPE_LABELS, TAG_GROUP_LABELS } from "@/lib/utils";
 import { EntityFilter } from "./entity-filter";
 import { AuthorFilter } from "./author-filter";
 import { CARRIED_PARAM_KEYS } from "./params";
@@ -32,6 +32,7 @@ interface SearchFormProps {
     type: string;
     generation?: number | null;
     reading?: string | null;
+    tagGroup?: string | null;
   }[];
 }
 
@@ -111,10 +112,23 @@ export function SearchForm({
   }, [router]);
 
   const HIDDEN_ENTITY_TYPES = new Set(["source"]);
-  const entityTypes = [...new Set(entities.map((e) => e.type))].filter((t) => !HIDDEN_ENTITY_TYPES.has(t));
+  // ゲームのカード名タグは区分ごとに別のプルダウンへ分ける (一般タグが埋もれないように)
+  const filterKey = (e: (typeof entities)[number]) =>
+    e.type === "tag" && e.tagGroup ? `tag:${e.tagGroup}` : e.type;
+  // 区分付きタグは名前順の並びだと一般タグより前に出ることがあるので、
+  // TAG_GROUP_LABELS の順で末尾に回す
+  const groupOrder = (t: string) =>
+    t.startsWith("tag:") ? 1 + Object.keys(TAG_GROUP_LABELS).indexOf(t.slice(4)) : 0;
+  const entityTypes = [...new Set(entities.map(filterKey))]
+    .filter((t) => !HIDDEN_ENTITY_TYPES.has(t))
+    .sort((a, b) => groupOrder(a) - groupOrder(b));
   const entitiesByType = Object.fromEntries(
-    entityTypes.map((t) => [t, entities.filter((e) => e.type === t)])
+    entityTypes.map((t) => [t, entities.filter((e) => filterKey(e) === t)])
   );
+  const filterLabels: Record<string, string> = {
+    ...ENTITY_TYPE_LABELS,
+    ...Object.fromEntries(Object.entries(TAG_GROUP_LABELS).map(([g, label]) => [`tag:${g}`, label])),
+  };
 
   // テキスト種別のサブフィルタ用エンティティ
   const textSubEntities = TEXT_SUB_TAGS
@@ -403,7 +417,7 @@ export function SearchForm({
             onMatchChange={setEntityMatch}
             entityTypes={entityTypes}
             entitiesByType={entitiesByType}
-            typeLabels={ENTITY_TYPE_LABELS}
+            typeLabels={filterLabels}
             selected={filterEntityIds}
             onToggle={toggleFilterEntity}
           />

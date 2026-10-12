@@ -60,6 +60,12 @@ enum EntityType {
   tag
 }
 
+/// タグの区分。一般タグは null
+enum TagGroup {
+  hinakoi
+  unis_on_air
+}
+
 enum TextType {
   title
   body
@@ -299,6 +305,8 @@ model Entity {
   generation     Int?
   /// 五十音順の並び替え用の読み仮名 (ひらがな)
   reading        String?
+  /// タグの区分 (tag のみ)。null は一般タグ。ゲームのカード名タグを検索の選択肢から分けるのに使う
+  tagGroup       TagGroup?
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
