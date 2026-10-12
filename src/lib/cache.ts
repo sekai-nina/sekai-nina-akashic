@@ -1,4 +1,4 @@
-import { unstable_cache, revalidateTag } from "next/cache";
+import { unstable_cache, revalidateTag, updateTag } from "next/cache";
 import { prismaInternal, withClearance } from "@/lib/db";
 import { getDashboardStats } from "@/lib/domain/stats";
 import { entityClearanceWhere } from "@/lib/domain/entities";
@@ -37,6 +37,14 @@ export function invalidateAssetList() {
 
 export function invalidateEntities() {
   revalidateTag(CACHE_TAGS.entities, "max");
+}
+
+/**
+ * Server Action 内で使う即時版。"max" の stale-while-revalidate だと保存直後の再描画に
+ * 古い値が出て、保存に失敗したように見える箇所に使う。
+ */
+export function expireEntities() {
+  updateTag(CACHE_TAGS.entities);
 }
 
 export function invalidatePlaces() {
@@ -177,7 +185,8 @@ export const getCachedEntityById = (id: string, clearance: ClearanceLevel) =>
           include: { _count: { select: { assets: true } } },
         })
       ),
-    [`entity-detail-${clearance}-${id}`],
+    // tagGroup を足したので鍵を変える (古い行のままだと詳細の区分が「一般」に見え、保存で消える)
+    [`entity-detail-v2-${clearance}-${id}`],
     { tags: [CACHE_TAGS.entities], revalidate: 60 }
   )();
 

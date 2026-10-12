@@ -115,10 +115,13 @@ export function SearchForm({
   // ゲームのカード名タグは区分ごとに別のプルダウンへ分ける (一般タグが埋もれないように)
   const filterKey = (e: (typeof entities)[number]) =>
     e.type === "tag" && e.tagGroup ? `tag:${e.tagGroup}` : e.type;
-  // 区分付きタグは名前順の並びだと一般タグより前に出ることがあるので、末尾に回す
+  // 区分付きタグは名前順の並びだと一般タグより前に出ることがあるので、
+  // TAG_GROUP_LABELS の順で末尾に回す
+  const groupOrder = (t: string) =>
+    t.startsWith("tag:") ? 1 + Object.keys(TAG_GROUP_LABELS).indexOf(t.slice(4)) : 0;
   const entityTypes = [...new Set(entities.map(filterKey))]
     .filter((t) => !HIDDEN_ENTITY_TYPES.has(t))
-    .sort((a, b) => Number(a.startsWith("tag:")) - Number(b.startsWith("tag:")));
+    .sort((a, b) => groupOrder(a) - groupOrder(b));
   const entitiesByType = Object.fromEntries(
     entityTypes.map((t) => [t, entities.filter((e) => filterKey(e) === t)])
   );
