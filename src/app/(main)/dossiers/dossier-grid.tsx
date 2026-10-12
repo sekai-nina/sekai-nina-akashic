@@ -111,7 +111,6 @@ export function DossierGrid({ dossiers, currentUserId }: { dossiers: DossierCard
             <Link
               key={d.id}
               href={`/dossiers/${d.id}`}
-              prefetch
               className="block bg-white border border-slate-200 hover:border-indigo-300 rounded-lg p-4 transition-colors"
             >
               <div className="flex items-start justify-between gap-2 mb-2">

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ComponentProps } from "react";
 import {
   Search,
   ListChecks,
@@ -84,6 +84,30 @@ const adminItems = [
   { href: "/admin/invitations", label: "招待管理", icon: UserPlus },
 ];
 
+/**
+ * サイドバーのリンク。表示中は Link 既定のプリフェッチ（loading.tsx まで。DB クエリは走らない）で、
+ * マウスが乗っている間だけページ全体をプリフェッチする。全リンクを常時フルにすると、
+ * 遷移や保存のたびに ~30 ページが同時に描画されて接続プールがあふれる（P2028）。
+ */
+function NavLink(props: Omit<ComponentProps<typeof Link>, "prefetch">) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <Link
+      {...props}
+      prefetch={hovered ? true : null}
+      onPointerEnter={(e) => {
+        // タップでもフルにすると遷移と競合して同じページを二重に描画する
+        if (e.pointerType === "mouse") setHovered(true);
+        props.onPointerEnter?.(e);
+      }}
+      onPointerLeave={(e) => {
+        setHovered(false);
+        props.onPointerLeave?.(e);
+      }}
+    />
+  );
+}
+
 export function Sidebar({ user, clipCount = 0 }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -93,28 +117,6 @@ export function Sidebar({ user, clipCount = 0 }: SidebarProps) {
   useEffect(() => {
     setOpen(false);
   }, [pathname]);
-
-  // 主要ページを背景でプリフェッチ — クリック時に即座に表示できるようにする
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    // requestIdleCallback で他の処理を邪魔しないようにする
-    const cb = () => {
-      for (const item of navItems) {
-        if (item.href !== pathname) router.prefetch(item.href);
-      }
-      if (user.role === "admin") {
-        for (const item of adminItems) {
-          if (item.href !== pathname) router.prefetch(item.href);
-        }
-      }
-    };
-    if ("requestIdleCallback" in window) {
-      const id = (window as Window & typeof globalThis).requestIdleCallback(cb, { timeout: 2000 });
-      return () => (window as Window & typeof globalThis).cancelIdleCallback(id);
-    }
-    const timer = setTimeout(cb, 500);
-    return () => clearTimeout(timer);
-  }, [pathname, router, user.role]);
 
   async function handleSignOut() {
     const supabase = createClient();
@@ -171,11 +173,9 @@ export function Sidebar({ user, clipCount = 0 }: SidebarProps) {
               ? pathname === item.href
               : pathname.startsWith(item.href);
             return (
-              <Link
+              <NavLink
                 key={item.href}
                 href={item.href}
-                prefetch
-                onMouseEnter={() => router.prefetch(item.href)}
                 className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm ${
                   active
                     ? "bg-slate-100 font-medium text-slate-900"
@@ -189,7 +189,7 @@ export function Sidebar({ user, clipCount = 0 }: SidebarProps) {
                     {clipCount}
                   </span>
                 )}
-              </Link>
+              </NavLink>
             );
           })}
           {user.role === "admin" && (
@@ -198,11 +198,9 @@ export function Sidebar({ user, clipCount = 0 }: SidebarProps) {
               {adminItems.map((item) => {
                 const active = pathname.startsWith(item.href);
                 return (
-                  <Link
+                  <NavLink
                     key={item.href}
                     href={item.href}
-                    prefetch
-                    onMouseEnter={() => router.prefetch(item.href)}
                     className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm ${
                       active
                         ? "bg-slate-100 font-medium text-slate-900"
@@ -211,7 +209,7 @@ export function Sidebar({ user, clipCount = 0 }: SidebarProps) {
                   >
                     <item.icon size={16} />
                     {item.label}
-                  </Link>
+                  </NavLink>
                 );
               })}
             </>
