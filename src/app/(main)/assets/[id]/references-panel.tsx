@@ -3,16 +3,18 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FileText, Loader2, Scissors, Trash2 } from "lucide-react";
+import { FileText, FolderSearch, Loader2, Scissors, Trash2, X } from "lucide-react";
 import { deleteClipsAction } from "@/app/(main)/clips/actions";
+import { removeAssetFromDossierAction } from "@/app/(main)/dossiers/actions";
 import type { ArticleReferenceForAsset } from "@/lib/domain/articles";
 import { ARTICLE_SOURCE_STATUS_LABELS, formatDate } from "@/lib/utils";
 
 /**
- * アセット詳細の「記事での参照」と「クリップ」(#41)。
+ * アセット詳細の「記事での参照」「含まれているドシエ」「クリップ」(#41)。
  *
  * - 記事での参照: このアセットを出典にしている記事と、その記述 (本文で ^[n] を含む段落)。
  *   「ここはもう記事 X に書いた」を、記事を開かずに分からせる
+ * - 含まれているドシエ: このアセットが入っているドシエ (見えるもの全部)。編集できるものは外せる
  * - クリップ: プールに入っているこのアセットの抜粋。本文上のハイライトと対になる
  */
 
@@ -26,13 +28,23 @@ interface ClipView {
   createdBy: string | null;
 }
 
+interface DossierView {
+  id: string;
+  title: string;
+  /** 抜粋ごとに複数回入っていることがある */
+  itemCount: number;
+  canRemove: boolean;
+}
+
 interface AssetReferencesPanelProps {
+  assetId: string;
   references: ArticleReferenceForAsset[];
+  dossiers: DossierView[];
   clips: ClipView[];
   canEdit: boolean;
 }
 
-export function AssetReferencesPanel({ references, clips, canEdit }: AssetReferencesPanelProps) {
+export function AssetReferencesPanel({ assetId, references, dossiers, clips, canEdit }: AssetReferencesPanelProps) {
   return (
     <div className="bg-white border border-slate-200 rounded-lg p-4 space-y-4">
       {references.length > 0 && (
@@ -83,6 +95,20 @@ export function AssetReferencesPanel({ references, clips, canEdit }: AssetRefere
         </section>
       )}
 
+      {dossiers.length > 0 && (
+        <section>
+          <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            <FolderSearch className="h-3.5 w-3.5" />
+            含まれているドシエ ({dossiers.length})
+          </h2>
+          <ul className="space-y-1">
+            {dossiers.map((d) => (
+              <DossierRow key={d.id} dossier={d} assetId={assetId} />
+            ))}
+          </ul>
+        </section>
+      )}
+
       {clips.length > 0 && (
         <section>
           <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 flex items-center justify-between">
@@ -102,6 +128,53 @@ export function AssetReferencesPanel({ references, clips, canEdit }: AssetRefere
         </section>
       )}
     </div>
+  );
+}
+
+function DossierRow({ dossier, assetId }: { dossier: DossierView; assetId: string }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  const remove = () => {
+    const note = dossier.itemCount > 1 ? `\n(抜粋として ${dossier.itemCount} 件入っています。すべて外れます)` : "";
+    if (!confirm(`「${dossier.title || "(無題)"}」からこのアセットを外しますか？${note}`)) return;
+    setError(null);
+    startTransition(async () => {
+      try {
+        await removeAssetFromDossierAction(dossier.id, assetId);
+        router.refresh();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "外せませんでした");
+      }
+    });
+  };
+
+  return (
+    <li className="text-sm">
+      <div className="flex items-center justify-between gap-2">
+        <Link href={`/dossiers/${dossier.id}`} className="text-indigo-700 hover:underline truncate">
+          {dossier.title || "(無題)"}
+        </Link>
+        <span className="flex items-center gap-1.5 shrink-0">
+          {dossier.itemCount > 1 && (
+            <span className="text-[10px] text-slate-400">({dossier.itemCount} 件)</span>
+          )}
+          {dossier.canRemove && (
+            <button
+              type="button"
+              onClick={remove}
+              disabled={isPending}
+              title="このドシエから外す"
+              className="inline-flex items-center text-slate-400 hover:text-red-600 disabled:opacity-50"
+            >
+              {isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
+            </button>
+          )}
+        </span>
+      </div>
+      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+    </li>
   );
 }
 
