@@ -1,0 +1,19 @@
+export default function Loading() {
+  return (
+    <div className="animate-pulse">
+      <div className="mb-4 h-4 w-80 bg-slate-100 rounded" />
+      <div className="h-8 w-96 bg-slate-100 rounded mb-3" />
+      <div className="bg-white border border-slate-200 rounded-lg divide-y divide-slate-100">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-3 px-4 py-3">
+            <div className="flex-1 space-y-2">
+              <div className="h-4 w-1/2 bg-slate-100 rounded" />
+              <div className="h-3 w-1/4 bg-slate-50 rounded" />
+            </div>
+            <div className="h-7 w-28 bg-slate-100 rounded" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
