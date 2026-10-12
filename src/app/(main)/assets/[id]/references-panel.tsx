@@ -158,7 +158,7 @@ function DossierRow({ dossier, assetId }: { dossier: DossierView; assetId: strin
         </Link>
         <span className="flex items-center gap-1.5 shrink-0">
           {dossier.itemCount > 1 && (
-            <span className="text-[10px] text-slate-400">×{dossier.itemCount}</span>
+            <span className="text-[10px] text-slate-400">({dossier.itemCount} 件)</span>
           )}
           {dossier.canRemove && (
             <button

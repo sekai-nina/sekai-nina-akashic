@@ -234,14 +234,16 @@ export default async function AssetDetailPage({
       )
     : 0;
 
-  // Editable dossiers + which of them already contain this asset
-  const editableDossiers = await listEditableDossiers(session.user);
+  // 編集できるドシエ (ピッカー) と、このアセットを含むドシエ (見えるもの全部)。
+  // ピッカーの「追加済み」は後者のうち編集できるもの
+  const [editableDossiers, containingDossiers] = await Promise.all([
+    listEditableDossiers(session.user),
+    listDossiersContainingAsset(session.user, id),
+  ]);
   // このアセットから作った記念日 (あれば「登録済み」として出す)
   const assetAnniversaries = await listAnniversariesForAsset(id, session.user.clearance);
   // ブログ / トーク (text) なら、開催予定のミーグリへの予告コーデ入力を出す (#203)
   const previewTargets = asset.kind === "text" ? await listPreviewTargets(session.user, id) : null;
-  // このアセットを含むドシエ (見えるもの全部)。ピッカーの「追加済み」はこのうち編集できるもの
-  const containingDossiers = await listDossiersContainingAsset(session.user, id);
   const containingIds = new Set(containingDossiers.map((d) => d.id));
   const dossierIdsContaining = editableDossiers.filter((d) => containingIds.has(d.id)).map((d) => d.id);
   // `?dossier=` は抜粋の追加先 (/progress/blog の「記事を作る」から来たとき, #206)。編集できるドシエだけ
@@ -377,6 +379,8 @@ export default async function AssetDetailPage({
             dossiers={editableDossiers}
             defaultCaption={asset.title || ""}
             alreadyAdded={dossierIdsContaining}
+            // 追加済みは初回だけ state に取り込むので、パネルや抜粋から増減したら作り直す
+            key={dossierIdsContaining.join(",")}
             allowRemove
             variant="button"
           />

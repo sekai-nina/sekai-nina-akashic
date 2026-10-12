@@ -588,13 +588,15 @@ export async function removeAssetFromDossier(user: ActingUser, dossierId: string
   const { count } = await withSession(user, (tx) =>
     tx.dossierItem.deleteMany({ where: { dossierId, assetId } })
   );
-  await logAudit({
-    actorId: user.id,
-    action: "dossier.item.remove",
-    targetType: "Dossier",
-    targetId: dossierId,
-    metadata: { assetId, count },
-  });
+  if (count > 0) {
+    await logAudit({
+      actorId: user.id,
+      action: "dossier.asset.remove",
+      targetType: "Dossier",
+      targetId: dossierId,
+      metadata: { assetId, count },
+    });
+  }
   return count;
 }
 

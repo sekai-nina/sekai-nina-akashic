@@ -61,6 +61,7 @@ export function AddToDossier({
   const [query, setQuery] = useState("");
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set(alreadyAdded));
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [isPending, startTransition] = useTransition();
@@ -121,6 +122,7 @@ export function AddToDossier({
     if (addedIds.has(dossierId)) return;
     const target = dossiers.find((d) => d.id === dossierId);
     setPendingId(dossierId);
+    setError(null);
     startTransition(async () => {
       try {
         await addAssetToDossierAction(dossierId, assetId, {
@@ -135,6 +137,9 @@ export function AddToDossier({
           onAdded(dossierId, target?.title || "(無題)");
           setOpen(false);
         }
+      } catch (e) {
+        // 投げたままにするとエラー境界まで上がってページごと落ちる
+        setError(e instanceof Error ? e.message : "追加できませんでした");
       } finally {
         setPendingId(null);
       }
@@ -145,6 +150,7 @@ export function AddToDossier({
     const target = dossiers.find((d) => d.id === dossierId);
     if (!confirm(`「${target?.title || "(無題)"}」からこのアセットを外しますか？\n(抜粋として複数回入っている場合はすべて外れます)`)) return;
     setPendingId(dossierId);
+    setError(null);
     startTransition(async () => {
       try {
         await removeAssetFromDossierAction(dossierId, assetId);
@@ -153,6 +159,8 @@ export function AddToDossier({
           next.delete(dossierId);
           return next;
         });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "外せませんでした");
       } finally {
         setPendingId(null);
       }
@@ -294,6 +302,7 @@ export function AddToDossier({
               );
             })}
           </ul>
+          {error && <p className="mt-1 shrink-0 text-[11px] text-red-600 px-2">{error}</p>}
           <div className="mt-2 shrink-0 border-t border-slate-100 pt-2">
             {canQuickCreate ? (
               <button
