@@ -132,7 +132,7 @@ MCP サーバーは Vercel 上のリモート HTTP なので、**エージェン
 
 ```
 1. akashic_begin_upload { filename, mimeType, sha256 }
-   → { uploadUrl, command: "curl -sS -X PUT -H 'Content-Type: video/mp4' --upload-file <path> '<uploadUrl>'" }
+   → { uploadUrl, command: "curl -sS --fail-with-body -X PUT -H 'Content-Type: video/mp4' --upload-file '<path>' '<uploadUrl>'" }
 2. エージェントが command を実行 → Drive が {"id": "1AbC…", …} を返す
 3. akashic_complete_upload { driveFileId: "1AbC…", sha256, title, canonicalDate, entityNames, … }
    → akashic_create_asset と同じ返却形 (+ duplicate: false)
@@ -141,10 +141,13 @@ MCP サーバーは Vercel 上のリモート HTTP なので、**エージェン
 - `sha256` はエージェントが `shasum -a 256 <path>` で求める。begin の時点で既存アセットと一致したら URL を出さず `existingId` を返す（アップロード不要）
 - **重複時は既存アセットを書き換えない。** REST の `/api/v1/upload/*` は一致したアセットにメタデータを無言でマージするが、MCP では `existingId` を返すだけにして、追記は `akashic_update_asset` に寄せる。AI が仕分け済みのアセットを上書きしないため
 - complete の引数は `akashic_create_asset` と同じ（`src/lib/mcp/asset-input.ts` で共有）。`kind` は省略すると Drive 上の MIME から決まる。サイズ・MIME・ファイル名は Drive のメタデータを正とする
-- **保存先は `GOOGLE_DRIVE_FOLDER_ID` 固定。** `driveFolderId` は受けない。complete は渡された `driveFileId` が「そのフォルダにあり、ゴミ箱になく、作成から 8 日以内（resumable URL の有効期限 1 週間 + 余裕）で、どのアセットの実体にもなっていない」ことを確かめる。`finalizeDriveUpload` はファイルを「リンクを知っていれば誰でも閲覧可」にするので、検証しないと任意の `driveFileId` を渡して別のファイルを公開する口になる
-- Drive が計算した `sha256Checksum` があればそれと申告値を突き合わせ、食い違えばエラー。complete の時点で既存と重複していたら、送られた実体はゴミ箱に入れて（30 日は戻せる）`existingId` を返す
+- **保存先は `GOOGLE_DRIVE_FOLDER_ID` 固定。** `driveFolderId` は受けない
+- **begin はファイルに `appProperties`（発行したキーの ID と申告された sha256）を刻み、complete はそれが呼び出し元のキー・引数の sha256 と一致するファイルしか受けない。** 加えて「そのフォルダにあり、ゴミ箱になく、作成から 8 日以内で、どのアセットの実体にもなっていない」ことも確かめる。`finalizeDriveUpload` はファイルを「リンクを知っていれば誰でも閲覧可」にするので、検証しないと任意の `driveFileId`（REST や iPad ワーカーが上げ途中のファイルを含む）を公開する口になる
+- **sha256 は Drive が計算した `sha256Checksum` と突き合わせる。** Drive がまだ値を出していなければエラー（再実行を促す）。申告値だけを信じると、重複判定をすり抜けて上位機密と同じ中身を下位で登録できてしまう
+- complete の時点で既存と重複していたら、送られた実体はゴミ箱に入れて（30 日は戻せる）`existingId` を返す。**ただし、どれかのアセットがその `driveFileId` を実体として指しているなら触らない**（同じ complete の並行リトライで、相手が作ったアセットの原本を消さないため）
 - 既存がキーのクリアランスを超える場合は ID を返さない（「既に登録されている」とだけ伝える）
-- 画像は REST と同じく R2 のサムネイルを作る。失敗してもアセットは残る
+- 画像は REST と同じく R2 のサムネイルを作る。ただし MIME が `image/*` かつ 50MB 以下のときだけ（`kind` は上書きできるので、大きな動画を画像扱いで丸ごと読まない）。失敗してもアセットは残る
+- `mimeType` は `type/subtype` の形に絞る。返す `command` に埋め込むので、シェルのメタ文字を通さない
 
 ### `sourceType` の決まり方
 
