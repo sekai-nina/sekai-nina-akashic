@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { SHOWS } from "@/lib/progress/shows";
 import { cn } from "@/lib/utils";
 
 const TABS = [
   { href: "/progress/blog", label: "ブログ → 言葉記事" },
-  { href: "/progress/hinaai", label: "ひなあい" },
+  ...Object.values(SHOWS).map((s) => ({ href: `/progress/${s.key}`, label: s.label })),
 ];
 
 export function ProgressTabs() {

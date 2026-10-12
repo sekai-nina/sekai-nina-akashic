@@ -134,7 +134,7 @@ src/
 └── middleware.ts
 ```
 
-主要ページ: `/search`（既定）, `/gallery`, `/assets`, `/inbox`, `/entities`, `/places`（聖地マップ）, `/anniversaries`（記念日）, `/announcements`（お知らせ。公開サイトのトップ / `/news` の正）, `/dossiers`（特定支援）, `/testimonials`, `/repo`, `/mentions`（X 言及監視）, `/meetgreets`（ミーグリ記事ワークフロー）, `/lives`（ライブ記事ワークフロー）, `/progress`（記事化の進捗。ブログ → 言葉記事・ひなあい）, `/songs`（曲マスタ）, `/coverage`, `/graph`, `/analysis`, `/dashboard`, `/status`（パイプライン監視）, `/costs`（LLM コスト・admin のみ）, `/admin/*`
+主要ページ: `/search`（既定）, `/gallery`, `/assets`, `/inbox`, `/entities`, `/places`（聖地マップ）, `/anniversaries`（記念日）, `/announcements`（お知らせ。公開サイトのトップ / `/news` の正）, `/dossiers`（特定支援）, `/testimonials`, `/repo`, `/mentions`（X 言及監視）, `/meetgreets`（ミーグリ記事ワークフロー）, `/lives`（ライブ記事ワークフロー）, `/progress`（記事化の進捗。ブログ → 言葉記事・ひなあい・ひななり）, `/songs`（曲マスタ）, `/coverage`, `/graph`, `/analysis`, `/dashboard`, `/status`（パイプライン監視）, `/costs`（LLM コスト・admin のみ）, `/admin/*`
 
 ## コード規約
 
