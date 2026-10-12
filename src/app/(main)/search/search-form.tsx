@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2, RotateCcw } from "lucide-react";
-import { ASSET_KIND_LABELS, ENTITY_TYPE_LABELS, TAG_GROUP_LABELS } from "@/lib/utils";
+import { ASSET_KIND_LABELS, groupEntitiesByKey } from "@/lib/utils";
 import { EntityFilter } from "./entity-filter";
 import { AuthorFilter } from "./author-filter";
 import { CARRIED_PARAM_KEYS } from "./params";
@@ -113,22 +113,10 @@ export function SearchForm({
 
   const HIDDEN_ENTITY_TYPES = new Set(["source"]);
   // ゲームのカード名タグは区分ごとに別のプルダウンへ分ける (一般タグが埋もれないように)
-  const filterKey = (e: (typeof entities)[number]) =>
-    e.type === "tag" && e.tagGroup ? `tag:${e.tagGroup}` : e.type;
-  // 区分付きタグは名前順の並びだと一般タグより前に出ることがあるので、
-  // TAG_GROUP_LABELS の順で末尾に回す
-  const groupOrder = (t: string) =>
-    t.startsWith("tag:") ? 1 + Object.keys(TAG_GROUP_LABELS).indexOf(t.slice(4)) : 0;
-  const entityTypes = [...new Set(entities.map(filterKey))]
-    .filter((t) => !HIDDEN_ENTITY_TYPES.has(t))
-    .sort((a, b) => groupOrder(a) - groupOrder(b));
-  const entitiesByType = Object.fromEntries(
-    entityTypes.map((t) => [t, entities.filter((e) => filterKey(e) === t)])
-  );
-  const filterLabels: Record<string, string> = {
-    ...ENTITY_TYPE_LABELS,
-    ...Object.fromEntries(Object.entries(TAG_GROUP_LABELS).map(([g, label]) => [`tag:${g}`, label])),
-  };
+  const entityGroups = groupEntitiesByKey(entities).filter((g) => !HIDDEN_ENTITY_TYPES.has(g.key));
+  const entityTypes = entityGroups.map((g) => g.key);
+  const entitiesByType = Object.fromEntries(entityGroups.map((g) => [g.key, g.items]));
+  const filterLabels = Object.fromEntries(entityGroups.map((g) => [g.key, g.label]));
 
   // テキスト種別のサブフィルタ用エンティティ
   const textSubEntities = TEXT_SUB_TAGS
