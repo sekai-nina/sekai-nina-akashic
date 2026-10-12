@@ -228,7 +228,7 @@ async function main() {
 
   const tools = (list.result as { tools: Array<{ name: string }> }).tools;
   const names = tools.map((t) => t.name);
-  const writeTools = names.filter((n) => /_(create|update)_/.test(n));
+  const writeTools = names.filter((n) => /_(create|update|begin|complete)_/.test(n));
   ok(
     "tools/list",
     `${names.length} tools (read ${names.length - writeTools.length} / write ${writeTools.length}) — ${names.join(", ")} (${list.ms}ms)`

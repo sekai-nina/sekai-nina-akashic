@@ -25,6 +25,7 @@ import { entityResolutionHint, resolveEntityNames } from "./entity-resolution";
 import { toAssetDetail, toEntitySummary, toPlaceSummary, toSearchItem } from "./format";
 import { fail, ok, toToolError } from "./result";
 import { registerArticleReadTools, registerArticleWriteTools } from "./tools-articles";
+import { registerUploadTools } from "./tools-upload";
 
 // ============================================================
 // 共通ヘルパー
@@ -103,6 +104,7 @@ export function registerAkashicTools(server: McpServer, ctx: ToolContext) {
   if (hasWrite(ctx.user)) {
     registerWriteTools(server, ctx);
     registerArticleWriteTools(server, ctx);
+    registerUploadTools(server, ctx);
   }
 }
 
@@ -332,7 +334,8 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
       description:
         "アセットを新規登録する。status は必ず inbox になり、人間が /inbox で仕分けする前提の下書きとして入る。" +
         "エンティティは名前で指定でき、既存に一致したものだけが紐づく " +
-        "(一致しない名前は unresolvedEntities として返る)。",
+        "(一致しない名前は unresolvedEntities として返る)。" +
+        "画像・動画などファイル本体を Drive に上げて登録するときは akashic_begin_upload を使う。",
       inputSchema: z.object({
         kind: z.enum($Enums.AssetKind).describe("アセット種別。Discord のテキスト投稿なら text"),
         ...ASSET_DRAFT_FIELDS,
