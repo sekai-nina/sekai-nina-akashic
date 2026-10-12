@@ -998,11 +998,17 @@ enum MeetGreetFormat {
 /// 記事化の進捗で、素材の種類 (#207)。値を足すのは安全 (消すのはコードを先に)
 enum ProgressMaterialKind {
   blog
+  /// ひなあい (日向坂で会いましょう) の回。素材キーは回番号 ("383")
+  hinaai
 }
 
 /// 素材の反映先。1 つの素材が複数の反映先を持てる (ひなあい 1 回 → 出演一覧の行・スナップ・属性記事)
 enum ProgressTarget {
   quote_article
+  /// 出演一覧の行 (ひなあいなど)。行があるかは記事本文から導出する。対象外 = 出ていない回
+  list_row
+  /// その素材を出典にした記事全般 (出来事・属性・言葉…)。記事からは「もう書くことが無い」が分からないので済は人が付ける
+  articles
 }
 
 enum ProgressStatus {

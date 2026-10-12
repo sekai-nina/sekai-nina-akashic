@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useState, useEffect } from "react";
 import {
   Search,
-  Quote,
+  ListChecks,
   Inbox,
   Archive,
   FolderSearch,
@@ -64,7 +64,7 @@ const navItems = [
   { href: "/mentions", label: "X 言及監視", icon: Radar },
   { href: "/meetgreets", label: "ミーグリ", icon: Sparkles },
   { href: "/lives", label: "ライブ", icon: Music },
-  { href: "/quotes", label: "言葉記事", icon: Quote },
+  { href: "/progress", label: "記事化の進捗", icon: ListChecks },
   { href: "/songs", label: "曲", icon: ListMusic },
   { href: "/coverage", label: "収集カバレッジ", icon: Grid3x3 },
   { href: "/ai-questions", label: "案内AIへの質問", icon: MessageCircleQuestion },

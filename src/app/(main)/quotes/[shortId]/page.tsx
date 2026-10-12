@@ -23,8 +23,8 @@ export default async function QuotePassagesPage({ params }: Props) {
 
   return (
     <div className="max-w-3xl mx-auto">
-      <Link href="/quotes" className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600">
-        <ArrowLeft size={14} /> 言葉記事
+      <Link href="/progress/blog" className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600">
+        <ArrowLeft size={14} /> ブログ → 言葉記事
       </Link>
       <h1 className="mt-2 text-lg font-semibold text-slate-900">{article.title}</h1>
       <div className="mt-1 flex flex-wrap items-center gap-x-3 text-xs text-slate-500">
