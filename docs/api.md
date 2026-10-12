@@ -439,12 +439,15 @@ API キーからは **引き上げしかできない。** `PATCH /assets/:id` / 
       "canonicalName": "坂井新奈",
       "normalizedName": "坂井新奈",
       "aliases": [],
-      "description": ""
+      "description": "",
+      "tagGroup": null
     }
   ],
   "total": 10
 }
 ```
+
+`tagGroup` はタグの区分（`hinakoi` / `unis_on_air`。一般タグと tag 以外は `null`）。ゲームのカード名タグを検索画面で一般タグと分けるのに使う。POST では指定できず、新しいタグは一般として作られる（区分はエンティティ詳細画面で変える）。
 
 **レスポンス例 (検索モード: `?q=坂井`):**
 
