@@ -138,26 +138,29 @@ export interface SiteReport {
  * **DB の本文で数える**ので、push 待ちの記事は「push 後に出るもの」になる (`articleDirty` で分かる)。
  */
 export async function listSiteFeaturedReports(user: ActingUser): Promise<SiteReport[]> {
-  const rows = await prisma.article.findMany({
-    where: { tags: { array_contains: [MEETGREET_TAG] }, draft: false, unlisted: false },
-    select: {
-      id: true,
-      shortId: true,
-      path: true,
-      title: true,
-      body: true,
-      date: true,
-      dirty: true,
-      // date が無い記事は、サイトが frontmatter の出典の最も古い日付を使う (`getArticleDate`)。
-      // frontmatter に載るのは pending 以外かつ public の出典だけ
-      sources: {
-        where: { status: { not: "pending" }, classification: "public", date: { not: null } },
-        select: { date: true },
-        orderBy: { date: "asc" },
-        take: 1,
+  // 出典 (`ArticleSource`) は保護テーブル。素の `prisma` だと include が無言で空になるので withClearance で引く
+  const rows = await withClearance(user.clearance, (tx) =>
+    tx.article.findMany({
+      where: { tags: { array_contains: [MEETGREET_TAG] }, draft: false, unlisted: false },
+      select: {
+        id: true,
+        shortId: true,
+        path: true,
+        title: true,
+        body: true,
+        date: true,
+        dirty: true,
+        // date が無い記事は、サイトが frontmatter の出典の最も古い日付を使う (`getArticleDate`)。
+        // frontmatter に載るのは pending 以外かつ public の出典だけ
+        sources: {
+          where: { status: { not: "pending" }, classification: "public", date: { not: null } },
+          select: { date: true },
+          orderBy: { date: "asc" },
+          take: 1,
+        },
       },
-    },
-  });
+    })
+  );
   const articles = rows.map((a) => ({ ...a, sortDate: toJstDateOnly(a.date ?? a.sources[0]?.date ?? null) ?? "" }));
   // サイトは日付の新しい順の安定ソート。同じ日はコレクションの並び (path 順) のまま残る
   articles.sort((a, b) => b.sortDate.localeCompare(a.sortDate) || a.path.localeCompare(b.path));
