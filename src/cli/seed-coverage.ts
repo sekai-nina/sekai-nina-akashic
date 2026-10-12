@@ -88,16 +88,15 @@ const DATA_SOURCES: DataSourceSeed[] = [
     name: "日向坂ちゃんねる",
     kind: "youtube",
     itemRule: "source_url",
-    publisherPattern: "YouTube%",
-    titlePattern: "日向坂ちゃんねる%",
+    // publisher はチャンネル名 (youtube_watch が付ける。#101 より前の行は backfill 済み)
+    publisherPattern: "日向坂ちゃんねる%",
   },
   {
     key: "official_ch",
     name: "日向坂46公式チャンネル",
     kind: "youtube",
     itemRule: "source_url",
-    publisherPattern: "YouTube%",
-    titlePattern: "日向坂46公式チャンネル%",
+    publisherPattern: "日向坂46公式チャンネル%",
   },
   // 雑誌: 誌名=publisher。新誌が来たら設定タブで追記
   {

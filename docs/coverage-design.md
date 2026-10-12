@@ -61,8 +61,8 @@ v1 は「セルに手動の日付カーソル（collectedUntil）を持つ」設
 | hinaai | source_url | `Lemino%` | `【%配信】#%\|%日向坂で会いましょう%\|#3__\|#4__\|#3__⏎\|#4__⏎` | 番号のみ表記(#362等)は**末尾%なしの完全長マッチ**（`#4__%` だとひななり「#4 企画名」を誤マッチ）。⏎=改行付き行対応 |
 | ninarimashou | source_url | `Lemino%` | `#_ %\|#__ %\|%日向坂になりましょう%` | 「#N 企画名」形式と「日向坂になりましょう【…】#N」形式 |
 
-| hinachan | source_url | `YouTube%` | `日向坂ちゃんねる%` | 全タイトルがこの前方一致 |
-| official_ch | source_url | `YouTube%` | `日向坂46公式チャンネル%` | 同上 |
+| hinachan | source_url | `日向坂ちゃんねる%` | — | publisher = チャンネル名 (youtube_watch が付ける。#101) |
+| official_ch | source_url | `日向坂46公式チャンネル%` | — | 同上 |
 | magazine | source_url | `EX大衆%\|BRODY%\|週刊少年チャンピオン%\|グラビアチャンピオン%\|Ray%\|BUBKA%\|B.L.T.%` | — | 誌名=publisher。新誌が来たら設定タブで追記 |
 | instagram / tiktok / x_official / showroom / radio | manual | — | — | **Akashic にアセット未取込**のため導出不能。取込が始まったら設定 |
 
