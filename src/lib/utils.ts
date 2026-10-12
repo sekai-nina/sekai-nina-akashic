@@ -129,6 +129,12 @@ export const ENTITY_TYPE_LABELS: Record<string, string> = {
   tag: "タグ",
 };
 
+/** タグの区分 (Entity.tagGroup)。null は一般タグで、ENTITY_TYPE_LABELS.tag を使う */
+export const TAG_GROUP_LABELS: Record<string, string> = {
+  hinakoi: "ひなこい",
+  unis_on_air: "ユニエア",
+};
+
 /** エンティティ種別のチップ配色 (一覧・詳細・クリップで共通) */
 export const ENTITY_TYPE_BADGE: Record<string, string> = {
   person: "bg-purple-100 text-purple-800 border-purple-200",

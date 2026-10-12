@@ -1,9 +1,9 @@
 import { withClearance } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { getCachedEntityById } from "@/lib/cache";
-import { addEntityAlias, removeEntityAlias } from "@/lib/actions";
+import { addEntityAlias, removeEntityAlias, updateEntityTagGroup } from "@/lib/actions";
 import { searchMentions } from "@/lib/domain/mentions";
-import { ENTITY_TYPE_LABELS, ASSET_KIND_LABELS, formatDate } from "@/lib/utils";
+import { ENTITY_TYPE_LABELS, ASSET_KIND_LABELS, TAG_GROUP_LABELS, formatDate } from "@/lib/utils";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
@@ -97,6 +97,33 @@ export default async function EntityDetailPage({
           紐づきアセット: {entity._count.assets} 件
         </p>
       </div>
+
+      {/* Tag group */}
+      {entity.type === "tag" && (
+        <div className="bg-white border border-slate-200 rounded-lg p-5">
+          <h2 className="text-sm font-semibold text-slate-700 mb-1">タグの区分</h2>
+          <p className="text-xs text-slate-400 mb-3">
+            ゲームのカード名タグは検索画面で一般タグとは別のプルダウンに分かれる
+          </p>
+          <form action={updateEntityTagGroup.bind(null, id)} className="flex gap-2">
+            <select
+              name="tagGroup"
+              defaultValue={entity.tagGroup ?? ""}
+              className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">一般</option>
+              {Object.entries(TAG_GROUP_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <SubmitButton className="bg-slate-700 text-white px-3 py-1.5 rounded text-sm hover:bg-slate-800 transition-colors">
+              保存
+            </SubmitButton>
+          </form>
+        </div>
+      )}
 
       {/* Aliases management */}
       <div className="bg-white border border-slate-200 rounded-lg p-5">

@@ -7,6 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
 import { invalidateAssets, invalidateEntities, invalidatePlaces } from "@/lib/cache";
 import { redirect, RedirectType } from "next/navigation";
+import { TagGroup } from "@prisma/client";
 import type { AssetKind, AssetStatus, TrustLevel, SourceType, StorageProvider, EntityType, TextType, SourceKind, AnnotationKind, RelationType, ClearanceLevel, PlaceKind } from "@prisma/client";
 import { createInvitation, deleteInvitation as deleteInvitationDomain } from "@/lib/domain/invitations";
 import { backupAssetToDrive } from "@/lib/drive";
@@ -525,6 +526,25 @@ export async function removeEntityAlias(entityId: string, alias: string) {
   await prisma.entity.update({
     where: { id: entityId },
     data: { aliases: current.filter((a) => a !== alias) },
+  });
+
+  invalidateEntities();
+  revalidatePath(`/entities/${entityId}`);
+}
+
+/** タグの区分を変える。空文字は一般タグ (null) に戻す */
+export async function updateEntityTagGroup(entityId: string, formData: FormData) {
+  await requireRole(["admin", "member"]);
+  const raw = (formData.get("tagGroup") as string | null) ?? "";
+  if (raw !== "" && !(raw in TagGroup)) throw new Error(`不明なタグ区分: ${raw}`);
+
+  const entity = await prisma.entity.findUnique({ where: { id: entityId }, select: { type: true } });
+  if (!entity) throw new Error("Entity not found");
+  if (entity.type !== "tag") throw new Error("区分を持てるのはタグだけです");
+
+  await prisma.entity.update({
+    where: { id: entityId },
+    data: { tagGroup: raw === "" ? null : (raw as TagGroup) },
   });
 
   invalidateEntities();

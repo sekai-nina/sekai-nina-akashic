@@ -158,11 +158,13 @@ export const getCachedEntityList = (clearance: ClearanceLevel) =>
             normalizedName: true,
             generation: true,
             reading: true,
+            tagGroup: true,
           },
           orderBy: [{ type: "asc" }, { canonicalName: "asc" }],
         })
       ),
-    [`entities-list-light-${clearance}`],
+    // tagGroup を足したので鍵を変える (Vercel のデータキャッシュはデプロイをまたいで残る)
+    [`entities-list-light-v2-${clearance}`],
     { tags: [CACHE_TAGS.entities], revalidate: 300 }
   )();
 
