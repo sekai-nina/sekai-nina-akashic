@@ -135,6 +135,30 @@ export const TAG_GROUP_LABELS: Record<string, string> = {
   unis_on_air: "ユニエア",
 };
 
+/**
+ * エンティティを種別ごとに並べるときの区分キー。区分付きタグ (ゲームのカード名) は
+ * 一般タグに埋もれさせないよう `tag:<区分>` に分ける。
+ */
+export function entityGroupKey(e: { type: string; tagGroup?: string | null }): string {
+  return e.type === "tag" && e.tagGroup ? `tag:${e.tagGroup}` : e.type;
+}
+
+/** entityGroupKey ごとに束ねる。区分付きタグは TAG_GROUP_LABELS の順で末尾に回す (名前順だと一般タグより前に出ることがある) */
+export function groupEntitiesByKey<T extends { type: string; tagGroup?: string | null }>(
+  entities: T[]
+): { key: string; label: string; items: T[] }[] {
+  const order = (key: string) =>
+    key.startsWith("tag:") ? 1 + Object.keys(TAG_GROUP_LABELS).indexOf(key.slice(4)) : 0;
+  const keys = [...new Set(entities.map(entityGroupKey))].sort((a, b) => order(a) - order(b));
+  return keys.map((key) => ({
+    key,
+    label: key.startsWith("tag:")
+      ? (TAG_GROUP_LABELS[key.slice(4)] ?? key)
+      : (ENTITY_TYPE_LABELS[key] ?? key),
+    items: entities.filter((e) => entityGroupKey(e) === key),
+  }));
+}
+
 /** エンティティ種別のチップ配色 (一覧・詳細・クリップで共通) */
 export const ENTITY_TYPE_BADGE: Record<string, string> = {
   person: "bg-purple-100 text-purple-800 border-purple-200",
