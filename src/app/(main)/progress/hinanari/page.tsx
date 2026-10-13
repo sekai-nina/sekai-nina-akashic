@@ -16,9 +16,9 @@ export default async function HinanariProgressPage() {
   return (
     <>
       <p className="text-slate-500 text-sm mb-4">
-        出演一覧の行は記事に足すと自動で済になる（Discord の 📤 はひなあいだけ）。出来事・属性記事を書き終えたら（書くことが無ければ）「見終わった」
+        出演一覧の行は「行を足す」で足すと自動で済になる。出来事・属性記事を書き終えたら（書くことが無ければ）「見終わった」
       </p>
-      <ShowList showKey="hinanari" rows={rows} editable={editable} />
+      <ShowList showKey="hinanari" rows={rows} editable={editable} canPublish={session.user.role === "admin"} />
     </>
   );
 }

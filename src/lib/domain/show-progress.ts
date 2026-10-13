@@ -14,7 +14,11 @@ import type { ClearanceLevel, ProgressStatus, ProgressTarget } from "@prisma/cli
 import { prisma, withClearance } from "@/lib/db";
 import { accessibleClassifications, assertClearance } from "@/lib/classification";
 import { episodeOf, isListTitle, listedEpisodes, SHOWS, subtitleOf, type ShowKey } from "@/lib/progress/shows";
-import { toJstDateOnly } from "@/lib/utils";
+import { insertListRow, nextSuffix, pickYearArticle } from "@/lib/progress/list-row";
+import { isGithubConfigured } from "@/lib/github/client";
+import { todayJst, toJstDateOnly } from "@/lib/utils";
+import { API_APPLY_MAX_CLASSIFICATION } from "@/lib/articles/apply";
+import { appendToArticle, pushDirtyArticles } from "./articles";
 import { WorkflowInputError, type ActingUser } from "./article-workflow";
 import { logAudit } from "./audit";
 
@@ -32,6 +36,8 @@ export interface ShowVideo {
   title: string;
   /** 題の【】の中 (動画ごとに違う。番外編は本編と別の副題になる) */
   subtitle: string;
+  /** 出演一覧の行のタイトルの既定値。Lemino の企画名、無ければ副題 */
+  listTitle: string;
   /** 本編以外 (番外編) */
   extra: boolean;
 }
@@ -64,6 +70,16 @@ interface Episode {
   urls: string[];
 }
 
+/** Lemino の収集が SourceRecord.metadata に入れる企画名 (`kikaku`)。bot の 📤 も出演一覧のタイトルにこれを使う */
+function leminoKikaku(records: { url: string | null; metadata: unknown }[]): string | null {
+  for (const r of records) {
+    if (!r.url?.includes("lemino.docomo.ne.jp")) continue;
+    const k = (r.metadata as { kikaku?: unknown } | null)?.kikaku;
+    if (typeof k === "string" && k.trim()) return k.trim();
+  }
+  return null;
+}
+
 /** `only` を渡すとその回の動画だけを読む (ボタン 1 回ごとに全回を読まない) */
 async function loadEpisodes(user: ActingUser, showKey: ShowKey, only?: number): Promise<Map<number, Episode>> {
   const show = SHOWS[showKey];
@@ -81,7 +97,7 @@ async function loadEpisodes(user: ActingUser, showKey: ShowKey, only?: number): 
         title: true,
         canonicalDate: true,
         classification: true,
-        sourceRecords: { select: { url: true } },
+        sourceRecords: { select: { url: true, metadata: true } },
       },
     })
   );
@@ -99,7 +115,8 @@ async function loadEpisodes(user: ActingUser, showKey: ShowKey, only?: number): 
       urls: [],
     };
     const extra = show.isExtra(a.title);
-    ep.videos.push({ assetId: a.id, title: a.title, subtitle: subtitleOf(a.title), extra });
+    const subtitle = subtitleOf(a.title.trim());
+    ep.videos.push({ assetId: a.id, title: a.title, subtitle, listTitle: leminoKikaku(a.sourceRecords) ?? subtitle, extra });
     ep.assetIds.push(a.id);
     for (const s of a.sourceRecords) if (s.url) ep.urls.push(s.url);
     const date = toJstDateOnly(a.canonicalDate);
@@ -238,4 +255,139 @@ export async function setShowProgress(
     targetId: `${showKey}:${episode}:${target}`,
     metadata: { status, note: note.trim() },
   });
+}
+
+export interface AddListRowResult {
+  article: { shortId: string; title: string };
+  /** 表に足した行の回番号 (`383` / `20a`) */
+  label: string;
+  /** push した / しなかった理由 (人の未 push の編集が残っていた・GitHub 未設定・指定なし・衝突・非公開の出典) */
+  push: "pushed" | "pending_edits" | "not_configured" | "skipped" | "conflict" | "blocked" | "db_error" | "failed";
+}
+
+/**
+ * 回の動画 1 本ぶんの行を年度別の出演一覧に足し、動画を出典にする (Discord の 📤 と同じことを画面から)。
+ *
+ * - 年度の記事は `pickYearArticle`、行の形は表の見出しから (`src/lib/progress/list-row.ts`)
+ * - 題は `cells["タイトル"]` (画面で直したもの) → Lemino の企画名 → アセットの題の【】の中
+ * - 本文の置き換えと出典の追加は `appendToArticle` で 1 トランザクション (bot の append と同じ経路)
+ * - `publish` なら続けてその記事 1 本だけ push する。書く前から push 待ちだった記事 (人の編集が残っている) は
+ *   bot と同じく push せず人に任せる
+ *
+ * `Asset` は保護テーブルなので withClearance。`Article` は非保護なので素の prisma。
+ */
+export async function addShowListRow(
+  user: ActingUser,
+  showKey: ShowKey,
+  assetId: string,
+  cells: Record<string, string>,
+  publish: boolean
+): Promise<AddListRowResult> {
+  const show = SHOWS[showKey];
+  const asset = await withClearance(user.clearance, (tx) =>
+    tx.asset.findUnique({
+      where: { id: assetId },
+      select: {
+        title: true,
+        canonicalDate: true,
+        sourceRecords: { select: { url: true, metadata: true }, orderBy: { createdAt: "asc" } },
+      },
+    })
+  );
+  if (!asset) throw new ProgressInputError("動画が見つかりません");
+  const episode = episodeOf(show, asset.title);
+  if (episode === null) throw new ProgressInputError(`${show.label}の回の動画ではありません`);
+  const date = toJstDateOnly(asset.canonicalDate);
+  if (!date) throw new ProgressInputError("動画に日付がありません");
+  const lemino = asset.sourceRecords.find((r) => r.url?.includes("lemino.docomo.ne.jp"));
+  // 画面で直した題を優先 (Lemino の出典が無く、題が「26/1/19配信」のような仮のままの回がある)
+  const title = cells["タイトル"]?.trim() || leminoKikaku(asset.sourceRecords) || subtitleOf(asset.title.trim());
+
+  const candidates = (
+    await prisma.article.findMany({
+      where: { title: { endsWith: show.listTitleSuffix } },
+      select: { shortId: true, title: true, body: true, updatedAt: true },
+    })
+  ).filter((a) => isListTitle(show, a.title) && /【\d+年目】/.test(a.title));
+  if (candidates.length === 0) throw new ProgressInputError(`年度別の「${show.listTitleSuffix}」の記事がありません`);
+  const target = candidates[pickYearArticle(candidates, episode)];
+
+  // 同じ動画の行を二重に足さない (番外編は枝番が進むので、表の回番号だけでは止まらない)
+  const already = await withClearance(user.clearance, (tx) =>
+    tx.articleSource.findFirst({
+      where: { article: { shortId: target.shortId }, OR: [{ assetId }, { originalRef: assetId }] },
+      select: { id: true },
+    })
+  );
+  if (already || (lemino?.url && target.body.includes(lemino.url))) {
+    throw new ProgressInputError(`「${target.title}」にこの動画の行は既にあります`);
+  }
+  const suffix = nextSuffix(target.body, episode, show.isExtra(asset.title));
+  if (suffix === null) throw new ProgressInputError(`「${target.title}」に #${episode} の行が既にあります`);
+  let body: string;
+  try {
+    body = insertListRow(target.body, { episode, suffix, date, title, url: lemino?.url ?? null, cells });
+  } catch (e) {
+    throw new ProgressInputError(`「${target.title}」に行を足せません: ${(e as Error).message}`);
+  }
+
+  const res = await appendToArticle(
+    {
+      shortId: target.shortId,
+      expectedUpdatedAt: target.updatedAt,
+      body,
+      articleUpdatedAt: todayJst(),
+      sources: [{ assetId, url: lemino?.url ?? null, label: asset.title.trim(), date }],
+      actor: { id: user.id },
+      // 出典は public で公開リポジトリに載る。アセットを人が選ぶ UI の apply と違い、ここは回から暗黙に決まるので
+      // API キー経路と同じ上限にする (confidential 以上の動画を気づかずに公開しない)
+      maxClassification: API_APPLY_MAX_CLASSIFICATION,
+    },
+    user.clearance
+  );
+  if (!res.ok) {
+    const messages: Record<typeof res.reason, string> = {
+      not_found: "記事が見つかりません",
+      conflict: "記事が同時に更新されました。もう一度押してください",
+      invalid: "記事の検証に失敗しました",
+      asset_not_found: "動画が見つかりません",
+      above_limit: `この動画は ${API_APPLY_MAX_CLASSIFICATION} より上の機密なので、ここからは出典にできません（記事の編集画面から）`,
+    };
+    throw new ProgressInputError(messages[res.reason]);
+  }
+
+  const label = `${episode}${suffix}`;
+  let push: AddListRowResult["push"] = "skipped";
+  if (publish) {
+    if (res.hadPendingEdits) push = "pending_edits";
+    else if (!isGithubConfigured()) push = "not_configured";
+    else {
+      try {
+        const r = await pushDirtyArticles(`${show.titleMarker}#${label}『${title}』を出演一覧に追記`, { shortId: target.shortId });
+        push = r.commit
+          ? r.dbError
+            ? "db_error"
+            : "pushed"
+          : r.conflicts
+            ? "conflict"
+            : r.blocked
+              ? "blocked"
+              : "failed";
+        if (r.commit) {
+          await logAudit({
+            actorId: user.id,
+            action: "article.push",
+            targetType: "github_commit",
+            targetId: r.commit.commitSha,
+            metadata: { url: r.commit.url, pushed: r.pushed, shortId: target.shortId },
+          });
+        }
+      } catch (e) {
+        // 行は DB に入っている (dirty)。push は /articles/push からやり直せる
+        console.error("出演一覧の push に失敗:", e);
+        push = "failed";
+      }
+    }
+  }
+  return { article: { shortId: target.shortId, title: target.title }, label, push };
 }
