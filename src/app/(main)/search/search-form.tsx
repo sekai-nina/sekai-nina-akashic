@@ -111,9 +111,11 @@ export function SearchForm({
     router.push("/search", { scroll: false });
   }, [router]);
 
-  const HIDDEN_ENTITY_TYPES = new Set(["source"]);
-  // ゲームのカード名タグは区分ごとに別のプルダウンへ分ける (一般タグが埋もれないように)
-  const entityGroups = groupEntitiesByKey(entities).filter((g) => !HIDDEN_ENTITY_TYPES.has(g.key));
+  // ゲームのカード名タグ (tag:<区分>) は絞り込みに使わないので出さない。
+  // エンティティ詳細の「検索」リンクから来たときは選択中チップとしてだけ出る
+  const entityGroups = groupEntitiesByKey(entities).filter(
+    (g) => g.key !== "source" && !g.key.startsWith("tag:")
+  );
   const entityTypes = entityGroups.map((g) => g.key);
   const entitiesByType = Object.fromEntries(entityGroups.map((g) => [g.key, g.items]));
   const filterLabels = Object.fromEntries(entityGroups.map((g) => [g.key, g.label]));
@@ -401,6 +403,7 @@ export function SearchForm({
             onToggle={toggleFilterAuthor}
           />
           <EntityFilter
+            entities={entities}
             match={entityMatch}
             onMatchChange={setEntityMatch}
             entityTypes={entityTypes}
