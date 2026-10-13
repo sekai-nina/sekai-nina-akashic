@@ -1,0 +1,34 @@
+-- public スキーマの USAGE を anon / authenticated / PUBLIC から剥がす (#60)
+--
+-- pgroonga は演算子を `?schema=public` で解決させるため public に入っている
+-- (20260807000000_add_pgroonga_indexes)。そのため `pgroonga_command()` も public にあり、
+-- この関数は Groonga のストアを直接読むので **RLS を一切通らない** (restricted 行の
+-- Asset.title / AssetText.normalizedContent 等まで見える)。
+--
+-- 関数の EXECUTE は剥がせない: 所有者・付与者が supabase_admin で、postgres からの
+-- `REVOKE EXECUTE ON FUNCTION ...` はエラーにならず無言で何も変わらない (実測)。
+-- anon / authenticated は明示的に EXECUTE を持ち、PostgREST のスキーマキャッシュにも
+-- 載っているので、ブラウザに配られる publishable key から RPC として届きうる。
+--
+-- 代わりにスキーマの USAGE を剥がす。public の USAGE の付与者は pg_database_owner で、
+-- postgres はそのメンバーなので剥がせる (実測)。USAGE が無いと public の関数もテーブルも
+-- 名前解決できないので、pgroonga_command を含めて anon / authenticated から public が
+-- 丸ごと閉じる。
+--
+-- 剥がしてよいことの確認 (2026-10-14):
+--   - akashic の supabase クライアント (src/lib/supabase/*) は auth 専用で `.from` / `.rpc` を
+--     使っていない。GoTrue は auth スキーマを自前のロールで読むので影響しない
+--   - この Supabase プロジェクトを使うのは akashic だけ (ほかのリポジトリ・sakura の設定に
+--     プロジェクト ref が無い)
+--   - app_runtime / postgres / service_role は **明示的な** USAGE を持つので残る。
+--     ロールバック前提のトランザクションで剥がし、anon / authenticated から
+--     `public.pgroonga_command_escape_value()` が `permission denied for schema public`
+--     になることを確認した
+--
+-- 残るもの: app_runtime は public の USAGE が要る (全テーブルがここにある) ので
+-- pgroonga_command() を引き続き実行できる。悪用には app_runtime で任意 SQL を流す経路
+-- (SQL インジェクション等) が要り、現状それは無い。
+--
+-- ⚠ 本番では SQL を先に当てる (アプリの挙動は変わらない)。
+
+REVOKE USAGE ON SCHEMA public FROM PUBLIC, anon, authenticated;
