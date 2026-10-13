@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Loader2 } from "lucide-react";
+import { Loader2, PlayCircle } from "lucide-react";
 import type { EpisodeStatus, ShowEpisodeRow, TargetStatus } from "@/lib/domain/show-progress";
 import { SHOWS, type ShowKey } from "@/lib/progress/shows";
 import { ARTICLE_TYPE_LABELS, SHOW_EPISODE_STATUS_LABELS, cn } from "@/lib/utils";
@@ -85,14 +85,28 @@ function EpisodeRow({ showKey, row, editable }: { showKey: ShowKey; row: ShowEpi
           {SHOW_EPISODE_STATUS_LABELS[row.status]}
         </span>
         <span className="shrink-0 text-sm font-semibold tabular-nums text-slate-900">#{row.episode}</span>
-        <span className="text-sm text-slate-800 truncate">{row.title}</span>
+        {row.videos[0] ? (
+          <Link href={`/assets/${row.videos[0].assetId}`} className="text-sm text-slate-800 truncate hover:underline">
+            {row.title}
+          </Link>
+        ) : (
+          <span className="text-sm text-slate-800 truncate">{row.title}</span>
+        )}
         {pending && <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-400 shrink-0" />}
       </div>
-      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-        <span className="tabular-nums">{row.date ?? "日付不明"}</span>
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+        <span className="tabular-nums mr-1">{row.date ?? "日付不明"}</span>
+        {/* 動画のアセットへ。見ながらチェックするので目立たせる */}
         {row.videos.map((v) => (
-          <Link key={v.assetId} href={`/assets/${v.assetId}`} className="hover:underline">
-            {v.extra ? show.extraLabel : "本編"}
+          <Link
+            key={v.assetId}
+            href={`/assets/${v.assetId}`}
+            title={v.title}
+            className="inline-flex items-center gap-1 h-6 max-w-[20rem] px-2 rounded-md border border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100"
+          >
+            <PlayCircle className="h-3.5 w-3.5 shrink-0" />
+            <span className="shrink-0">{v.extra ? (show.extraLabel ?? "番外編") : "本編"}</span>
+            {v.subtitle !== row.title && <span className="truncate">{v.subtitle}</span>}
           </Link>
         ))}
       </div>

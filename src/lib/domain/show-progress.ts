@@ -1,5 +1,5 @@
 /**
- * 番組 (ひなあい / ひななり) → 記事の進捗 (#208)。`/progress/hinaai` / `/progress/hinanari` の裏側。
+ * 番組 (ひなあい / まだまだ / ひななり) → 記事の進捗 (#208)。`/progress/<番組のキー>` の裏側。
  *
  * 1 回 (回番号) ごとに反映先が 2 つ:
  * - **出演一覧の行** (`list_row`): 出演一覧の記事に行があれば済 (導出)。対象外 = 出ていない回 (回ごと外す)
@@ -30,7 +30,9 @@ export type EpisodeStatus = "todo" | "partial" | "done" | "excluded";
 export interface ShowVideo {
   assetId: string;
   title: string;
-  /** 本編以外 (まだまだ / 番外編) */
+  /** 題の【】の中 (動画ごとに違う。番外編は本編と別の副題になる) */
+  subtitle: string;
+  /** 本編以外 (番外編) */
   extra: boolean;
 }
 
@@ -70,6 +72,7 @@ async function loadEpisodes(user: ActingUser, showKey: ShowKey, only?: number): 
       where: {
         kind: "video",
         title: { contains: show.titleMarker },
+        ...(show.excludeMarker ? { NOT: { title: { contains: show.excludeMarker } } } : {}),
         // 題の末尾に改行が付いたものがあるので endsWith ではなく contains (回番号は下で照合)
         ...(only === undefined ? {} : { AND: [{ title: { contains: `#${only}` } }] }),
       },
@@ -96,12 +99,12 @@ async function loadEpisodes(user: ActingUser, showKey: ShowKey, only?: number): 
       urls: [],
     };
     const extra = show.isExtra(a.title);
-    ep.videos.push({ assetId: a.id, title: a.title, extra });
+    ep.videos.push({ assetId: a.id, title: a.title, subtitle: subtitleOf(a.title), extra });
     ep.assetIds.push(a.id);
     for (const s of a.sourceRecords) if (s.url) ep.urls.push(s.url);
     const date = toJstDateOnly(a.canonicalDate);
     if (date && (!ep.date || date < ep.date)) ep.date = date;
-    // 題は本編を優先 (まだまだ・番外編は副題が別になる)
+    // 題は本編を優先 (番外編は副題が別になる)
     if (!extra || !ep.title) ep.title = subtitleOf(a.title);
     if (LEVELS.indexOf(a.classification) < LEVELS.indexOf(ep.classification)) ep.classification = a.classification;
     episodes.set(n, ep);
