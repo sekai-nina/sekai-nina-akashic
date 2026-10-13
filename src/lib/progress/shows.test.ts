@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { episodeOf, isListTitle, listedEpisodes, SHOWS, subtitleOf } from "./shows";
 
-const { hinaai, hinanari } = SHOWS;
+const { hinaai, madamada, hinanari } = SHOWS;
 
 describe("episodeOf", () => {
-  it("本編もまだまだも回番号を拾う", () => {
+  it("ひなあいとまだまだは同じ回番号でも別の番組", () => {
     expect(episodeOf(hinaai, "日向坂で会いましょう【宮崎が似合う女決定戦】#372")).toBe(372);
-    expect(episodeOf(hinaai, "まだまだ！日向坂で会いましょう【まだまだ“運”動会の裏側をお届けしましょう！】#374")).toBe(374);
+    expect(episodeOf(hinaai, "まだまだ！日向坂で会いましょう【まだまだ“運”動会の裏側をお届けしましょう！】#374")).toBeNull();
+    expect(episodeOf(madamada, "まだまだ！日向坂で会いましょう【まだまだ“運”動会の裏側をお届けしましょう！】#374")).toBe(374);
+    expect(episodeOf(madamada, "日向坂で会いましょう【宮崎が似合う女決定戦】#372")).toBeNull();
+    // 本編の副題に「まだまだ」が入るだけの回は本編
+    expect(episodeOf(hinaai, "日向坂で会いましょう【まだまだなにもがみちの世界 大野愛実を掘り下げよう！】#349")).toBe(349);
+    expect(episodeOf(madamada, "まだまだ！日向坂で会いましょう（2026年7月-9月）")).toBeNull();
   });
 
   it("ひななりは #0 から。末尾の改行は許す", () => {
@@ -23,8 +28,7 @@ describe("episodeOf", () => {
 });
 
 describe("題の扱い", () => {
-  it("まだまだ・番外編・副題・一覧記事", () => {
-    expect(hinaai.isExtra("まだまだ！日向坂で会いましょう【x】#1")).toBe(true);
+  it("番外編・副題・一覧記事", () => {
     expect(hinaai.isExtra("日向坂で会いましょう【x】#1")).toBe(false);
     expect(hinanari.isExtra("日向坂になりましょう【ザ・ハイテンション番外編】#7")).toBe(true);
     expect(hinanari.isExtra("日向坂になりましょう【番外編 私もうプロフェッショナルなんです！後半戦】#2")).toBe(true);
@@ -33,6 +37,9 @@ describe("題の扱い", () => {
     expect(isListTitle(hinaai, "【2年目】日向坂で会いましょう出演一覧")).toBe(true);
     expect(isListTitle(hinaai, "日向坂で会いましょう出演一覧")).toBe(true);
     expect(isListTitle(hinaai, "ひなあい初登場時の自己紹介")).toBe(false);
+    expect(isListTitle(hinaai, "【2年目】まだまだ！日向坂で会いましょう出演一覧")).toBe(false);
+    expect(isListTitle(madamada, "【2年目】まだまだ！日向坂で会いましょう出演一覧")).toBe(true);
+    expect(isListTitle(madamada, "【2年目】日向坂で会いましょう出演一覧")).toBe(false);
     expect(isListTitle(hinanari, "【1年目】日向坂になりましょう出演一覧")).toBe(true);
   });
 });

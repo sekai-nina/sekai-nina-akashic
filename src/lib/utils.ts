@@ -271,7 +271,7 @@ export const BLOG_QUOTE_STATUS_LABELS: Record<"todo" | "in_progress" | "done" | 
   excluded: "対象外",
 };
 
-/** 番組の回の進捗 (`/progress/hinaai` / `/progress/hinanari`, #208)。キーは `EpisodeStatus` */
+/** 番組の回の進捗 (`/progress/hinaai` / `madamada` / `hinanari`, #208)。キーは `EpisodeStatus` */
 export const SHOW_EPISODE_STATUS_LABELS: Record<"todo" | "partial" | "done" | "excluded", string> = {
   todo: "未着手",
   partial: "途中",
