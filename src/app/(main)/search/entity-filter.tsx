@@ -7,6 +7,8 @@ interface Entity {
 }
 
 interface EntityFilterProps {
+  /** 選択中チップの名前引き用。プルダウンに出さないエンティティ (ゲームのカード名タグ等) も含める */
+  entities: Entity[];
   entityTypes: string[];
   entitiesByType: Record<string, Entity[]>;
   typeLabels: Record<string, string>;
@@ -18,6 +20,7 @@ interface EntityFilterProps {
 }
 
 export function EntityFilter({
+  entities,
   entityTypes,
   entitiesByType,
   typeLabels,
@@ -28,12 +31,7 @@ export function EntityFilter({
 }: EntityFilterProps) {
   const value = [...selected].join(",");
 
-  const entityMap = new Map<string, Entity>();
-  for (const ents of Object.values(entitiesByType)) {
-    for (const e of ents) {
-      entityMap.set(e.id, e);
-    }
-  }
+  const entityMap = new Map(entities.map((e) => [e.id, e]));
 
   return (
     <>
