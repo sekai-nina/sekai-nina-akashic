@@ -102,7 +102,7 @@ function EpisodeRow({ showKey, row, editable }: { showKey: ShowKey; row: ShowEpi
             key={v.assetId}
             href={`/assets/${v.assetId}`}
             title={v.title}
-            className="inline-flex items-center gap-1 h-6 max-w-[20rem] px-2 rounded-md border border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100"
+            className="inline-flex items-center gap-1 h-6 max-w-full sm:max-w-[20rem] px-2 rounded-md border border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100"
           >
             <PlayCircle className="h-3.5 w-3.5 shrink-0" />
             <span className="shrink-0">{v.extra ? (show.extraLabel ?? "番外編") : "本編"}</span>
