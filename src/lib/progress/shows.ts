@@ -26,7 +26,14 @@ export interface Show {
   isExtra: (title: string) => boolean;
   /** 出演一覧の行の足し方 (画面の説明に出す) */
   listHint: string;
+  /** 「行を足す」で人が入れる列 (表の見出しの列名)。`mark` は ○ / — */
+  listCells: { name: string; kind: "mark" | "text" }[];
 }
+
+const GENDOU_CELLS: Show["listCells"] = [
+  { name: "言動", kind: "mark" },
+  { name: "補足", kind: "text" },
+];
 
 export const SHOWS: Record<ShowKey, Show> = {
   hinaai: {
@@ -37,6 +44,7 @@ export const SHOWS: Record<ShowKey, Show> = {
     listTitleSuffix: "日向坂で会いましょう出演一覧",
     isExtra: () => false,
     listHint: "Discord の 📤 で追加",
+    listCells: GENDOU_CELLS,
   },
   // #371 (2026-07) から本編と同じ回番号で配信されている
   madamada: {
@@ -46,6 +54,7 @@ export const SHOWS: Record<ShowKey, Show> = {
     listTitleSuffix: "まだまだ！日向坂で会いましょう出演一覧",
     isExtra: () => false,
     listHint: "出演一覧の記事に手で追加",
+    listCells: GENDOU_CELLS,
   },
   hinanari: {
     key: "hinanari",
@@ -56,6 +65,7 @@ export const SHOWS: Record<ShowKey, Show> = {
     // `日向坂になりましょう【ザ・ハイテンション番外編】#7` / `【番外編 私もうプロフェッショナルなんです！後半戦】#2`
     isExtra: (title) => subtitleOf(title).includes("番外編"),
     listHint: "出演一覧の記事に手で追加",
+    listCells: [{ name: "ゲスト", kind: "text" }],
   },
 };
 

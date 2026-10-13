@@ -16,9 +16,9 @@ export default async function HinaaiProgressPage() {
   return (
     <>
       <p className="text-slate-500 text-sm mb-4">
-        出演一覧の行は Discord の 📤 で足すと自動で済になる。出来事・属性記事を書き終えたら（書くことが無ければ）「見終わった」
+        出演一覧の行は「行を足す」か Discord の 📤 で足すと自動で済になる。出来事・属性記事を書き終えたら（書くことが無ければ）「見終わった」
       </p>
-      <ShowList showKey="hinaai" rows={rows} editable={editable} />
+      <ShowList showKey="hinaai" rows={rows} editable={editable} canPublish={session.user.role === "admin"} />
     </>
   );
 }

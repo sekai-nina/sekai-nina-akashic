@@ -7,6 +7,7 @@ import { Loader2, PlayCircle } from "lucide-react";
 import type { EpisodeStatus, ShowEpisodeRow, TargetStatus } from "@/lib/domain/show-progress";
 import { SHOWS, type ShowKey } from "@/lib/progress/shows";
 import { ARTICLE_TYPE_LABELS, SHOW_EPISODE_STATUS_LABELS, cn } from "@/lib/utils";
+import { ListRowForm } from "./list-row-form";
 import { setShowProgressAction } from "./show-actions";
 
 const FILTERS: EpisodeStatus[] = ["todo", "partial", "done", "excluded"];
@@ -20,7 +21,18 @@ const STATUS_STYLE: Record<EpisodeStatus, string> = {
 
 const BUTTON = "inline-flex items-center gap-1 h-6 px-2 rounded-md border text-[11px] disabled:opacity-50";
 
-export function ShowList({ showKey, rows, editable }: { showKey: ShowKey; rows: ShowEpisodeRow[]; editable: boolean }) {
+export function ShowList({
+  showKey,
+  rows,
+  editable,
+  canPublish,
+}: {
+  showKey: ShowKey;
+  rows: ShowEpisodeRow[];
+  editable: boolean;
+  /** 行を足したあと push できる (admin) */
+  canPublish: boolean;
+}) {
   const [filter, setFilter] = useState<EpisodeStatus | "all">("todo");
   const counts = Object.fromEntries(FILTERS.map((f) => [f, rows.filter((r) => r.status === f).length]));
   const shown = filter === "all" ? rows : rows.filter((r) => r.status === filter);
@@ -53,7 +65,7 @@ export function ShowList({ showKey, rows, editable }: { showKey: ShowKey; rows: 
       ) : (
         <ul className="bg-white border border-slate-200 rounded-lg divide-y divide-slate-100">
           {shown.map((r) => (
-            <EpisodeRow key={r.episode} showKey={showKey} row={r} editable={editable} />
+            <EpisodeRow key={r.episode} showKey={showKey} row={r} editable={editable} canPublish={canPublish} />
           ))}
         </ul>
       )}
@@ -61,11 +73,23 @@ export function ShowList({ showKey, rows, editable }: { showKey: ShowKey; rows: 
   );
 }
 
-function EpisodeRow({ showKey, row, editable }: { showKey: ShowKey; row: ShowEpisodeRow; editable: boolean }) {
+function EpisodeRow({
+  showKey,
+  row,
+  editable,
+  canPublish,
+}: {
+  showKey: ShowKey;
+  row: ShowEpisodeRow;
+  editable: boolean;
+  canPublish: boolean;
+}) {
   const show = SHOWS[showKey];
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // 行を足すフォーム。本編の行が済んだあとも番外編の行は足せる (ひななり)
+  const [adding, setAdding] = useState<"all" | "extras" | null>(null);
 
   function set(target: "list_row" | "articles", status: "done" | "excluded" | null, note = "") {
     setError(null);
@@ -115,9 +139,21 @@ function EpisodeRow({ showKey, row, editable }: { showKey: ShowKey; row: ShowEpi
         {/* 出演一覧の行 */}
         <Target label="出演一覧" status={row.listRow.status} excludedLabel="出演なし">
           {row.listRow.article ? (
-            <Link href={`/articles/${row.listRow.article.shortId}`} className="hover:underline truncate">
-              {row.listRow.article.title}
-            </Link>
+            <>
+              <Link href={`/articles/${row.listRow.article.shortId}`} className="hover:underline truncate">
+                {row.listRow.article.title}
+              </Link>
+              {editable && row.videos.some((v) => v.extra) && (
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() => setAdding((v) => (v ? null : "extras"))}
+                  className={cn(BUTTON, "border-slate-200 text-slate-600 hover:bg-slate-50")}
+                >
+                  {show.extraLabel ?? "番外編"}の行を足す
+                </button>
+              )}
+            </>
           ) : notAppearing ? (
             editable && (
               <button type="button" disabled={pending} onClick={() => set("list_row", null)} className={cn(BUTTON, "border-slate-200 text-slate-600 hover:bg-slate-50")}>
@@ -126,7 +162,18 @@ function EpisodeRow({ showKey, row, editable }: { showKey: ShowKey; row: ShowEpi
             )
           ) : (
             <>
-              <span className="text-slate-400">{show.listHint}</span>
+              {editable ? (
+                <button
+                  type="button"
+                  disabled={pending || row.videos.length === 0}
+                  onClick={() => setAdding((v) => (v ? null : "all"))}
+                  className={cn(BUTTON, "border-slate-900 bg-slate-900 text-white hover:bg-slate-800")}
+                >
+                  行を足す
+                </button>
+              ) : (
+                <span className="text-slate-400">{show.listHint}</span>
+              )}
               {editable && (
                 <button
                   type="button"
@@ -163,6 +210,18 @@ function EpisodeRow({ showKey, row, editable }: { showKey: ShowKey; row: ShowEpi
           )}
         </Target>
       </div>
+      {adding && (
+        <ListRowForm
+          showKey={showKey}
+          videos={adding === "extras" ? row.videos.filter((v) => v.extra) : row.videos}
+          canPublish={canPublish}
+          onDone={() => {
+            setAdding(null);
+            router.refresh();
+          }}
+          onCancel={() => setAdding(null)}
+        />
+      )}
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
     </li>
   );
