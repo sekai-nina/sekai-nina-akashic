@@ -97,6 +97,11 @@ const clearance = auth.clearance;
 
 既存分は `20260919020000_revoke_anon_on_unprotected`（`Job` / `JobRun` / `StatusCheckState` / `LlmUsageDaily` / `LlmCostDaily` / `CreditSnapshot`）と `20260919030000_revoke_anon_on_article`（`Article`）で塞いだ。**現在 RLS 非対象のテーブルはすべて PostgREST から閉じている**ので、足すときに書き忘れるとそこだけ穴になる。akashic の supabase クライアント（`src/lib/supabase/*`）は auth 専用でテーブルを触らないため、剥がしてもアプリには影響しない。
 
+**さらに public スキーマの USAGE を `anon` / `authenticated` / `PUBLIC` から剥がしてある**（`20261014000000_revoke_public_schema_from_anon`、#60）。きっかけは PGroonga の `pgroonga_command()`。Groonga のストアを直接読むので RLS を通らず、関数の EXECUTE は付与者が `supabase_admin` のため `postgres` からは剥がせない（REVOKE が無言で no-op になる）。スキーマごと閉じたので、PostgREST からは public のテーブルも関数も届かない。テーブル単位の REVOKE は多層防御として引き続き書く（Supabase 側の操作でスキーマの権限が戻ったときの保険）。
+
+- **`app_runtime` は `pgroonga_command()` を実行できる。** public の USAGE が要るので剥がせない。アプリが組み立てる SQL に利用者の入力を文字列連結しない（`$queryRaw` のタグ付きテンプレートを使い、`$queryRawUnsafe` に入力を混ぜない）ことでしか守れない
+- 確認: `SELECT has_schema_privilege('anon', 'public', 'USAGE');` が `false`
+
 `Announcement`（お知らせ `/announcements`）は公開サイトに出すための文章しか持たないので非保護（`Article` と同じ扱い。`20260920180000_announcement` で REVOKE 済み）。書けるのは admin / member（Server Action は `requireRole`、REST は write キー）。
 
 `Song` / `Release` / `ReleaseTrack`（曲マスタ #167。曲名・収録シングル・発売日）は公式ディスコグラフィそのものなので非保護。`LiveSong` 側は保護されるので「どのライブで何を歌ったか」は漏れない（`/songs` の披露回数・披露した公演は `withClearance` で見える範囲だけ）。`Song.participation`（坂井新奈の参加楽曲か）も公開情報の範囲。`20260921000000_live` / `20260921100000_song_master` で `REVOKE` 済み。取り込みは `pnpm cli:import-songs`（`DIRECT_URL`）。
