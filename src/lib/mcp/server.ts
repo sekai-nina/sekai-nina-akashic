@@ -18,6 +18,8 @@ const INSTRUCTIONS = [
   "- エンティティは名前で指定する。一致しなかった名前は紐づかず unresolvedEntities として返るので、",
   "  正式名称を調べ直すか、新規で問題ないと確認できたときだけ createMissingEntities: true を付ける。",
   "- akashic_create_asset で作ったアセットは必ず status=inbox に入る。人間が仕分けする前提の下書きとして扱う。",
+  "- 画像・動画などのファイル本体は akashic_begin_upload → 手元で curl -X PUT → akashic_complete_upload の順で登録する。",
+  "  ファイルパスやバイト列をツール引数で渡すことはできない。",
   "- 日付は JST 基準。canonicalDate は投稿日ではなく「内容の公開日・放送日」を入れる。",
   "- 記事 (公開サイトの世界新奈) は akashic_list_articles { hasPending: true } で未反映の紐づけがある記事を探し、",
   "  akashic_get_article で本文と sources (pending の excerpt) を読む。反映は akashic_apply_article_source で",

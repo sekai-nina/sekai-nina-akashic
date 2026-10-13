@@ -310,7 +310,12 @@ export async function uploadToFolder(
 export async function createResumableUploadSession(
   filename: string,
   mimeType: string,
-  folderIdOverride?: string
+  folderIdOverride?: string,
+  /**
+   * ファイルに付ける appProperties (このアプリからしか見えないキー値)。
+   * 完了時に「誰が何を上げると宣言したファイルか」を確かめるのに使う (MCP の upload ツール)
+   */
+  appProperties?: Record<string, string>
 ): Promise<string | null> {
   const auth = getAuth();
   // 番組ごとに保存先フォルダを分けたい場合は folderIdOverride を渡す（省略時は既定フォルダ）
@@ -348,6 +353,7 @@ export async function createResumableUploadSession(
         // PUT 側が Content-Type を付け忘れても (Shortcuts は octet-stream で送ることがある)
         // Drive 上の MIME が正しくなるように、メタデータにも入れておく
         mimeType,
+        ...(appProperties ? { appProperties } : {}),
       }),
     }
   );
@@ -385,6 +391,7 @@ export interface DriveFileMeta {
   parents: string[];
   createdTime: Date | null;
   trashed: boolean;
+  appProperties: Record<string, string>;
 }
 
 /**
@@ -398,7 +405,7 @@ export async function getDriveFileMeta(fileId: string): Promise<DriveFileMeta | 
   try {
     const res = await drive.files.get({
       fileId,
-      fields: "id,name,mimeType,size,sha256Checksum,parents,createdTime,trashed",
+      fields: "id,name,mimeType,size,sha256Checksum,parents,createdTime,trashed,appProperties",
       supportsAllDrives: true,
     });
     const d = res.data;
@@ -412,6 +419,7 @@ export async function getDriveFileMeta(fileId: string): Promise<DriveFileMeta | 
       parents: d.parents ?? [],
       createdTime: d.createdTime ? new Date(d.createdTime) : null,
       trashed: d.trashed === true,
+      appProperties: (d.appProperties as Record<string, string> | null | undefined) ?? {},
     };
   } catch (err) {
     // gaxios は HTTP ステータスを status に、JSON 本文の error.code を code に入れる

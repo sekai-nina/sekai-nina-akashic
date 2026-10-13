@@ -49,6 +49,8 @@ pnpm cli:keygen <user-email> <key-name>
 | `akashic_list_places` | read | 聖地一覧（緯度経度・住所・種類・エリアつき） |
 | `akashic_create_asset` | write | アセットの下書き登録（`status` は必ず `inbox`） |
 | `akashic_update_asset` | write | メタデータ・ステータス・本文の更新 |
+| `akashic_begin_upload` | write | ファイル本体の Drive アップロード URL を発行（重複なら発行せず既存 ID） |
+| `akashic_complete_upload` | write | Drive に上げたファイルをアセットとして登録（`status` は必ず `inbox`） |
 | `akashic_create_place` | write | 聖地登録（Google Maps URL / 緯度経度） |
 | `akashic_update_place` | write | 聖地更新 |
 | `akashic_list_articles` | read | 記事一覧（`hasPending: true` で未反映の紐づけがある記事） |
@@ -123,6 +125,29 @@ AI は `entityId` を知らないので `entityNames` に名前を渡す。正�
 同名エンティティが複数の種別に存在する場合は紐づけず、`ambiguousEntities` に候補を返す。
 
 この設計は `findOrCreateEntity` が `canonicalName` の完全一致 upsert であることに由来する。「坂井 新奈」のような表記ゆれをそのまま通すと重複エンティティが増える（`cli:merge-entities` が要るようになる）。
+
+### ファイル本体は Drive に直接上げる（#84）
+
+MCP サーバーは Vercel 上のリモート HTTP なので、**エージェントの手元のファイルパスは読めず、バイト列を引数で送ると 4.5MB の body 上限に当たる。** そのため本体はエージェントが Drive に直接 PUT し、MCP は前後の 2 手だけを担う。
+
+```
+1. akashic_begin_upload { filename, mimeType, sha256 }
+   → { uploadUrl, command: "curl -sS --fail-with-body -X PUT -H 'Content-Type: video/mp4' --upload-file '<path>' '<uploadUrl>'" }
+2. エージェントが command を実行 → Drive が {"id": "1AbC…", …} を返す
+3. akashic_complete_upload { driveFileId: "1AbC…", sha256, title, canonicalDate, entityNames, … }
+   → akashic_create_asset と同じ返却形 (+ duplicate: false)
+```
+
+- `sha256` はエージェントが `shasum -a 256 <path>` で求める。begin の時点で既存アセットと一致したら URL を出さず `existingId` を返す（アップロード不要）
+- **重複時は既存アセットを書き換えない。** REST の `/api/v1/upload/*` は一致したアセットにメタデータを無言でマージするが、MCP では `existingId` を返すだけにして、追記は `akashic_update_asset` に寄せる。AI が仕分け済みのアセットを上書きしないため
+- complete の引数は `akashic_create_asset` と同じ（`src/lib/mcp/asset-input.ts` で共有）。`kind` は省略すると Drive 上の MIME から決まる。サイズ・MIME・ファイル名は Drive のメタデータを正とする
+- **保存先は `GOOGLE_DRIVE_FOLDER_ID` 固定。** `driveFolderId` は受けない
+- **begin はファイルに `appProperties`（発行したキーの ID と申告された sha256）を刻み、complete はそれが呼び出し元のキー・引数の sha256 と一致するファイルしか受けない。** 加えて「そのフォルダにあり、ゴミ箱になく、作成から 8 日以内で、どのアセットの実体にもなっていない」ことも確かめる。`finalizeDriveUpload` はファイルを「リンクを知っていれば誰でも閲覧可」にするので、検証しないと任意の `driveFileId`（REST や iPad ワーカーが上げ途中のファイルを含む）を公開する口になる
+- **sha256 は Drive が計算した `sha256Checksum` と突き合わせる。** Drive がまだ値を出していなければエラー（再実行を促す）。申告値だけを信じると、重複判定をすり抜けて上位機密と同じ中身を下位で登録できてしまう
+- complete の時点で既存と重複していたら、送られた実体はゴミ箱に入れて（30 日は戻せる）`existingId` を返す。**ただし、どれかのアセットがその `driveFileId` を実体として指しているなら触らない**（同じ complete の並行リトライで、相手が作ったアセットの原本を消さないため）
+- 既存がキーのクリアランスを超える場合は ID を返さない（「既に登録されている」とだけ伝える）
+- 画像は REST と同じく R2 のサムネイルを作る。ただし MIME が `image/*` かつ 50MB 以下のときだけ（`kind` は上書きできるので、大きな動画を画像扱いで丸ごと読まない）。失敗してもアセットは残る
+- `mimeType` は `type/subtype` の形に絞る。返す `command` に埋め込むので、シェルのメタ文字を通さない
 
 ### `sourceType` の決まり方
 
