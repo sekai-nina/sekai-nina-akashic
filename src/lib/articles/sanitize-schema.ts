@@ -30,7 +30,7 @@ const ALLOWED_CLASSES = [
   // figure-caption.ts
   "article-figure", "figure-caption",
   // footnote-refs.ts
-  "footnote-ref",
+  "footnote-ref", "footnote-link",
   // obsidian-callouts.ts (callout-<type> は動的なので個別に足す)
   "callout", "callout-content", "callout-title",
   // 折りたたみ形式 (> [!note]- のように - が付くもの)
@@ -43,7 +43,7 @@ const ALLOWED_CLASSES = [
   // tweets.ts
   "twitter-tweet",
   // wikilinks.ts
-  "wikilink", "wikilink-missing",
+  "wikilink", "wikilink-missing", "internal-link", "broken-link",
   // remark-math → rehype-katex の受け渡し用マーカー
   "math", "math-inline", "math-display",
 ];

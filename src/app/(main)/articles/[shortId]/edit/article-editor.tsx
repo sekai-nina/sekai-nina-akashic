@@ -17,6 +17,7 @@ import {
 import { previewArticleAction, updateArticleAction, type ArticlePreview, type UpdateArticleState } from "./actions";
 import { FootnoteAuditWarnings } from "../footnote-audit-warnings";
 import { TagInput } from "./tag-input";
+import { isListArticle } from "@/lib/articles/list-article";
 
 declare global {
   interface Window {
@@ -187,11 +188,12 @@ export function ArticleEditor({
               </div>
             )}
             {preview && <FootnoteAuditWarnings audit={preview.audit} className="mb-2" />}
-            <div className="bg-white border border-slate-200 rounded-lg p-5 min-h-[60vh]">
+            <div className="bg-[#f8f7f4] border border-slate-200 rounded-lg p-5 min-h-[60vh]">
               {preview && !isPreviewing ? (
                 <div
                   ref={previewRef}
                   className="article-content"
+                  data-list-article={isListArticle(values.title) ? "" : undefined}
                   // 詳細ページと同じ。自リポジトリの記事 Markdown なので入力は信頼できる
                   dangerouslySetInnerHTML={{ __html: preview.html }}
                 />

@@ -1,0 +1,854 @@
+/* ⚠ 生成ファイル。手で編集しない。
+   pnpm cli:port-article-css --site <sekai-nina-site のパス> で作り直す (src/cli/port-article-css.ts)。
+   sekai-nina-site の src/pages/articles/[...slug].astro の <style> から本文まわりだけを抜き出したもの。
+   akashic 側の調整 (変数・Tailwind preflight の打ち消し) は article-content.css に書く。 */
+
+/* 一覧テーブルの並び替えトグル（JS動的生成なので :global で当てる・ピル型） */
+.article-content .table-sort-controls {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 0.6rem;
+}
+
+.article-content .table-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.32rem 0.85rem 0.32rem 0.68rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: var(--fs-label);
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.article-content .table-sort-btn:hover {
+  color: var(--brand-teal-ink);
+  border-color: var(--brand-teal);
+}
+
+.article-content .table-sort-icon {
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+/* 古い順のときは矢印を上向きに反転 */
+.article-content .table-sort-btn.is-asc .table-sort-icon {
+  transform: rotate(180deg);
+}
+
+.article-content {
+  line-height: 1.9;
+  margin-bottom: 2rem;
+}
+
+.article-content h2 {
+  font-size: var(--fs-h3);
+  margin-top: 2.5rem;
+  margin-bottom: 0.9rem;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 0.5rem;
+  /* 目次ジャンプ時に見出しが上に詰まりすぎないよう少し余白を確保 */
+  scroll-margin-top: 1.5rem;
+}
+
+.article-content h3 {
+  font-size: var(--fs-h3);
+  margin-top: 1.5rem;
+  margin-bottom: 0.8rem;
+}
+
+.article-content p {
+  margin-bottom: 1rem;
+}
+
+/* 区切り線は薄く、前後（特に下の中央寄せ）とのあいだに余白をとる */
+.article-content hr {
+  border: none;
+  border-top: 1px solid rgba(45, 74, 82, 0.12);
+  margin: 2rem 0 2.5rem;
+}
+
+.article-content ul,
+.article-content ol {
+  margin-left: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.article-content li {
+  margin-bottom: 0.5rem;
+}
+
+.article-content code {
+  background: rgba(255, 255, 255, 0.65);
+  border: 1px solid var(--border);
+  padding: 0.2rem 0.4rem;
+  border-radius: 8px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9em;
+}
+
+.article-content pre {
+  background: rgba(255, 255, 255, 0.65);
+  border: 1px solid var(--border);
+  padding: 1rem;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  margin-bottom: 1rem;
+}
+
+.article-content pre code {
+  padding: 0;
+  background: none;
+}
+
+.article-content img {
+  display: block;
+  max-width: min(100%, 600px);
+  height: auto;
+  border-radius: var(--radius-sm);
+  margin: 1.25rem auto;
+}
+
+.article-content .cardlink img {
+  display: block;
+  max-width: 100%;
+  border-radius: 0;
+  margin: 0;
+}
+
+/* 画像 + キャプション (figure) */
+.article-content figure.article-figure {
+  margin: 1.25rem auto;
+  max-width: min(100%, 600px);
+  text-align: center;
+}
+
+.article-content figure.article-figure img {
+  display: block;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.article-content .figure-caption {
+  margin-top: 0.5rem;
+  font-size: var(--fs-meta);
+  line-height: 1.5;
+  color: var(--muted);
+  text-align: center;
+}
+
+.article-content .figure-caption a {
+  color: var(--brand-teal);
+  text-decoration: underline;
+}
+
+.article-content .twitter-tweet,
+.article-content .twitter-tweet-rendered {
+  max-width: 100% !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+/* ミーグリレポ等の連続ツイート埋め込みを2列の Pinterest 風レイアウトで表示。
+   CSS columns は Twitter の非同期 iframe と相性が悪いため、JS で2列に振り分けた
+   .tweet-col を flex で横並びにする。 */
+.article-content .tweet-embeds {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  margin: 1.25rem 0;
+}
+
+/* ミーグリページ（.mg-report-embeds）と同じ構成。列は通常ブロック、
+   間隔はツイートの margin-bottom で取る。 */
+.article-content .tweet-embeds .tweet-col {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.article-content .tweet-embeds .twitter-tweet,
+.article-content .tweet-embeds .twitter-tweet-rendered {
+  margin: 0 0 1rem !important;
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+/* .content :global(iframe) の margin:1rem 0 がツイート iframe に効いて
+   余分な縦余白になるのを打ち消す（ミーグリページにはこの指定が無い）。 */
+.article-content .tweet-embeds iframe {
+  margin: 0 !important;
+}
+
+/* TikTok 埋め込み（縦長プレイヤー）は折り返しグリッドで並べる。 */
+.article-content .tiktok-embeds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  justify-content: center;
+  margin: 1.25rem 0;
+}
+
+.article-content .tiktok-embeds .tiktok-embed {
+  margin: 0 !important;
+  flex: 0 1 325px;
+}
+
+.article-content .tiktok-embeds iframe {
+  margin: 0 !important;
+}
+
+@media (max-width: 640px) {
+  .article-content .tweet-embeds {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+.article-content iframe {
+  max-width: 100%;
+}
+
+.article-content iframe {
+  border-radius: var(--radius-sm);
+  margin: 1rem 0;
+}
+
+/* スマホサイズのみレスポンシブ対応 */
+@media (max-width: 768px) {
+  .article-content .iframe-wrapper {
+    position: relative;
+    width: 100%;
+    padding-top: 75%; /* 4:3 aspect ratio (600/450 = 1.33) */
+    height: 0;
+    margin: 1rem 0;
+  }
+
+  .article-content .iframe-wrapper iframe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    border-radius: var(--radius-sm);
+  }
+}
+
+.article-content .table-wrapper {
+  margin: 1.5rem 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.article-content table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+  table-layout: auto;
+}
+
+.article-content thead {
+  background: rgba(42, 157, 143, 0.08);
+}
+
+.article-content th {
+  padding: 0.6rem 0.8rem;
+  text-align: left;
+  font-weight: 700;
+  border-bottom: 1px solid rgba(45, 74, 82, 0.2);
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.article-content td {
+  padding: 0.5rem 0.8rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.article-content tbody tr:hover {
+  background: rgba(42, 157, 143, 0.04);
+}
+
+.article-content td ul {
+  margin: 0;
+  padding-left: 1.2em;
+  list-style: disc;
+}
+
+.article-content td li {
+  margin-bottom: 0.15em;
+  line-height: 1.5;
+}
+
+/* 一覧系ページ: モバイルでカードレイアウト */
+@media (max-width: 640px) {
+  .article-content[data-list-article] table {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .article-content[data-list-article] thead {
+    display: none;
+  }
+
+  .article-content[data-list-article] tbody {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .article-content[data-list-article] tr {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0 0.5rem;
+    padding: 0.6rem 0.8rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+  }
+
+  .article-content[data-list-article] td {
+    padding: 0.1rem 0;
+    border-bottom: none;
+  }
+
+  /* 1列目: # (通し番号) */
+  .article-content[data-list-article] td:nth-child(1) {
+    grid-row: 1 / 3;
+    align-self: center;
+    font-weight: 700;
+    font-size: var(--fs-meta);
+    color: var(--muted);
+    min-width: 1.5rem;
+  }
+
+  /* 2列目: 日付 */
+  .article-content[data-list-article] td:nth-child(2) {
+    font-size: var(--fs-label);
+    color: var(--muted);
+  }
+
+  /* 3列目: タイトル */
+  .article-content[data-list-article] td:nth-child(3) {
+    font-weight: 600;
+  }
+
+  /* 4列目以降: 補足情報（全幅） */
+  .article-content[data-list-article] td:nth-child(n+4) {
+    grid-column: 1 / -1;
+    font-size: var(--fs-meta);
+    color: var(--muted);
+    padding-top: 0.3rem;
+    border-top: 1px dashed var(--border);
+    margin-top: 0.2rem;
+  }
+
+  /* data-label がある場合、ラベルを前置表示 */
+  .article-content[data-list-article] td[data-label]:nth-child(n+4)::before {
+    content: attr(data-label) ": ";
+    font-weight: 600;
+    color: var(--muted);
+  }
+
+  .article-content[data-list-article] td:nth-child(n+4) ul {
+    margin: 0;
+    padding-left: 1.1em;
+    list-style: disc;
+  }
+
+  .article-content[data-list-article] td:nth-child(n+4) li {
+    margin-bottom: 0.15em;
+    line-height: 1.45;
+  }
+
+  /* 空セルは非表示 */
+  .article-content[data-list-article] td:nth-child(n+4):empty {
+    display: none;
+  }
+
+  /* 中央揃えセル（言動 ○/— など）をインラインに */
+  .article-content[data-list-article] td[style*="text-align: center"],
+  .article-content[data-list-article] td[align="center"] {
+    text-align: left !important;
+  }
+
+  /* 汎用テーブル: モバイルでカードレイアウト */
+  .article-content table.table--card-mobile {
+    display: block;
+  }
+
+  .article-content table.table--card-mobile thead {
+    display: none;
+  }
+
+  .article-content table.table--card-mobile tbody {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .article-content table.table--card-mobile tr {
+    display: flex;
+    flex-direction: column;
+    padding: 0.7rem 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+  }
+
+  .article-content table.table--card-mobile td {
+    display: flex;
+    padding: 0.15rem 0;
+    border-bottom: none;
+    white-space: normal !important;
+  }
+
+  .article-content table.table--card-mobile td[data-label]::before {
+    content: attr(data-label) ": ";
+    font-weight: 600;
+    color: var(--muted);
+    margin-right: 0.4rem;
+    flex-shrink: 0;
+  }
+
+  .article-content table.table--card-mobile td:empty {
+    display: none;
+  }
+}
+
+/* 引用: 端に色帯を置かず、地の薄いグレーと引用符だけで示す */
+.article-content blockquote {
+  margin: 1.5rem 0;
+  padding: 1rem 1.5rem;
+  background: rgba(45, 74, 82, 0.045);
+  border-radius: var(--radius-sm);
+  /* 引用文（本人の発言）が薄すぎたので濃くして可読性を上げる */
+  color: rgba(45, 74, 82, 0.85);
+  position: relative;
+}
+
+.article-content blockquote p {
+  margin-bottom: 0.5rem;
+}
+
+.article-content blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+.article-content blockquote::before {
+  content: '"';
+  position: absolute;
+  top: -0.2rem;
+  left: 0.5rem;
+  /* design-law: allow B2 ── 装飾の引用符 */
+  font-size: 3rem;
+  color: var(--brand-teal);
+  opacity: 0.3;
+  font-family: Georgia, serif;
+  line-height: 1;
+}
+
+/* SNS 埋め込み（Twitter/TikTok）は引用 blockquote のスタイルを継承しない */
+.article-content blockquote.twitter-tweet,
+.article-content blockquote.tiktok-embed {
+  background: none;
+  border-left: 0;
+  border-radius: 0;
+  padding: 0;
+  color: inherit;
+}
+
+.article-content blockquote.twitter-tweet::before,
+.article-content blockquote.tiktok-embed::before {
+  content: none;
+}
+
+/* Obsidian Callout / Toggle */
+.article-content .callout {
+  margin: 1.5rem 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.article-content .callout-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 1rem;
+  font-weight: 600;
+  font-size: var(--fs-sm);
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  cursor: default;
+}
+
+.article-content details.callout > summary.callout-title {
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.article-content details.callout > summary.callout-title::-webkit-details-marker {
+  display: none;
+}
+
+.article-content details.callout > summary.callout-title::after {
+  content: '';
+  margin-left: auto;
+  width: 0.45rem;
+  height: 0.45rem;
+  /* design-law: allow A3 ── 枠線で描いた山形(∨)の記号。面の枠ではない */
+  border-right: 2px solid var(--muted);
+  /* design-law: allow A3 ── 同上 */
+  border-bottom: 2px solid var(--muted);
+  transform: rotate(-45deg);
+  /* design-law: allow F1 ── 開閉の応答(F5) */
+  transition: transform 0.2s ease;
+}
+
+.article-content details[open].callout > summary.callout-title::after {
+  transform: rotate(45deg);
+}
+
+.article-content details:not([open]).callout > .callout-title {
+  border-bottom: none;
+}
+
+.article-content .callout-content {
+  padding: 0.75rem 1rem;
+  font-size: var(--fs-sm);
+  color: var(--text);
+}
+
+.article-content .callout-content > p:first-child {
+  margin-top: 0;
+}
+
+.article-content .callout-content > p:last-child {
+  margin-bottom: 0;
+}
+
+/* Toggle (list-item style) */
+.article-content .callout-toggle {
+  margin: 0.25rem 0;
+}
+
+.article-content .callout-toggle-title {
+  display: list-item;
+  list-style: none;
+  padding: 0.2rem 0;
+  font-size: var(--fs-body);
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.article-content .callout-toggle-title::-webkit-details-marker {
+  display: none;
+}
+
+.article-content .callout-toggle-title::before {
+  content: '▶';
+  font-size: var(--fs-xs);
+  color: var(--brand-teal);
+  /* design-law: allow F1 ── 開閉の応答(F5) */
+  transition: transform 0.15s ease;
+  display: inline-block;
+  margin-right: 0.4rem;
+  vertical-align: middle;
+}
+
+.article-content details[open].callout-toggle > .callout-toggle-title::before {
+  transform: rotate(90deg);
+}
+
+.article-content .callout-toggle-content {
+  margin-left: 0.85rem;
+  padding: 0.5rem 0 0.5rem 1rem;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  line-height: 1.8;
+}
+
+.article-content .callout-toggle-content > p:first-child {
+  margin-top: 0;
+}
+
+.article-content .callout-toggle-content > p:last-child {
+  margin-bottom: 0;
+}
+
+/* 脚注リンク */
+.footnote-ref {
+  font-size: 0.75em;
+  line-height: 1;
+  vertical-align: super;
+}
+
+.footnote-link {
+  color: var(--brand-teal);
+  text-decoration: none;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0 0.1em;
+  border-radius: 3px;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.footnote-link:hover {
+  background-color: rgba(42, 157, 143, 0.15);
+  color: var(--brand-teal-ink);
+  text-decoration: none;
+}
+
+/* スナップ記事: 各リスト項目の時点日付（脚注由来・自動付与） */
+/* 本文・脚注の直後にインラインで小さく添える（対応が一目で分かる） */
+.article-content .li-date {
+  margin-left: 0.5rem;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  opacity: 0.75;
+  user-select: none;
+}
+
+/* PC ツールチップ */
+.footnote-tooltip {
+  position: absolute;
+  z-index: 9999;
+  max-width: 360px;
+  min-width: 180px;
+  background: var(--surface-solid);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  padding: 0.6rem 0.8rem;
+  font-size: var(--fs-meta);
+  line-height: 1.5;
+  pointer-events: auto;
+  animation: tooltipFadeIn 0.15s ease;
+}
+
+@keyframes tooltipFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.footnote-tooltip-header {
+  font-weight: 700;
+  color: var(--brand-teal-ink);
+  margin-bottom: 0.2rem;
+  font-size: var(--fs-label);
+}
+
+.footnote-tooltip-date {
+  color: var(--muted);
+  font-size: var(--fs-label);
+  font-weight: 600;
+  margin-bottom: 0.3rem;
+}
+
+.footnote-tooltip-label {
+  margin-bottom: 0.35rem;
+  word-break: break-word;
+  line-height: 1.4;
+}
+
+.footnote-tooltip-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+/* 行き先は淡い色地のチップ: 外部=coral、サイト内=teal、記事=本文色(design-law: allow A3 ── 同系の淡い枠) */
+.tt-action {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  text-decoration: none;
+  transition: background-color 0.15s;
+}
+
+.tt-action:hover {
+  text-decoration: none;
+}
+
+.tt-action--external {
+  color: var(--brand-coral);
+  background: rgba(217, 121, 89, 0.1);
+  border-color: rgba(217, 121, 89, 0.25);
+}
+
+.tt-action--external:hover {
+  background: rgba(217, 121, 89, 0.2);
+}
+
+.tt-action--internal {
+  color: var(--brand-teal-ink);
+  background: rgba(90, 154, 146, 0.1);
+  border-color: rgba(90, 154, 146, 0.25);
+}
+
+.tt-action--internal:hover {
+  background: rgba(90, 154, 146, 0.2);
+}
+
+.tt-action--article {
+  color: var(--text);
+  background: rgba(45, 74, 82, 0.08);
+  border-color: rgba(45, 74, 82, 0.2);
+}
+
+.tt-action--article:hover {
+  background: rgba(45, 74, 82, 0.15);
+}
+
+/* モバイル ポップアップ */
+.footnote-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.3);
+  z-index: 9998;
+  animation: overlayFadeIn 0.2s ease;
+}
+
+@keyframes overlayFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.footnote-popup {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  background: var(--surface-solid);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: var(--shadow-md);
+  padding: 1.2rem 1.2rem calc(1.2rem + env(safe-area-inset-bottom, 0px));
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  animation: popupSlideUp 0.25s ease;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+@keyframes popupSlideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.footnote-popup .footnote-tooltip-header {
+  font-size: var(--fs-sm);
+  margin-bottom: 0.3rem;
+}
+
+.footnote-popup .footnote-tooltip-label {
+  margin-bottom: 0.6rem;
+  font-size: var(--fs-sm);
+}
+
+.footnote-popup .footnote-tooltip-actions {
+  margin-bottom: 0.8rem;
+}
+
+.footnote-popup .tt-action {
+  padding: 0.35rem 0.7rem;
+  font-size: var(--fs-meta);
+}
+
+.footnote-popup-close {
+  position: absolute;
+  top: 0.8rem;
+  right: 0.8rem;
+  background: none;
+  border: none;
+  font-size: var(--fs-h2);
+  color: var(--muted, rgba(45, 74, 82, 0.65));
+  cursor: pointer;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: background-color 0.15s;
+}
+
+.footnote-popup-close:hover {
+  background: rgba(45, 74, 82, 0.08);
+}
+
+.footnote-popup-goto {
+  display: block;
+  text-align: center;
+  padding: 0.6rem 1rem;
+  background: var(--surface-solid);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--brand-teal-ink);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: var(--fs-sm);
+  transition: border-color 0.15s;
+}
+
+.footnote-popup-goto:hover {
+  border-color: var(--brand-teal);
+  text-decoration: none;
+}
+
+/* 内部記事リンク（ウィキリンク変換後） */
+.internal-link {
+  color: var(--brand-teal);
+  text-decoration: none;
+  border-bottom: 1.5px dashed rgba(42, 157, 143, 0.4);
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.internal-link:hover {
+  color: var(--brand-teal-ink);
+  border-bottom-color: var(--brand-teal-ink);
+  text-decoration: none;
+}
+
+/* マッチしなかったウィキリンク */
+.broken-link {
+  color: var(--muted);
+  border-bottom: 1px dashed rgba(45, 74, 82, 0.3);
+}
+
+/* ソースURLと一致する本文中のリンク */
+.source-ref-link {
+  position: relative;
+}
+
+.source-ref-link::after {
+  content: '';
+  display: inline-block;
+  width: 0.65em;
+  height: 0.65em;
+  margin-left: 0.2em;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235a9a92' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6'/%3E%3Cpolyline points='15 3 21 3 21 9'/%3E%3Cline x1='10' y1='14' x2='21' y2='3'/%3E%3C/svg%3E");
+  background-size: contain;
+  background-repeat: no-repeat;
+  vertical-align: super;
+  font-size: 0.7em;
+  opacity: 0.6;
+}

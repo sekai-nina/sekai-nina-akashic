@@ -94,10 +94,13 @@ export async function previewArticleAction(shortId: string, body: string): Promi
   const [titleIndex, sources] = await Promise.all([
     getArticleTitleIndex(),
     withClearance(user.clearance, (tx) =>
-      tx.articleSource.findMany({ where: { article: { shortId } }, select: { sourceNo: true } }),
+      tx.articleSource.findMany({ where: { article: { shortId } }, select: { sourceNo: true, url: true } }),
     ),
   ]);
-  const html = await renderArticleBody(normalized, { wikilinks: titleIndex });
+  const html = await renderArticleBody(normalized, {
+    wikilinks: titleIndex,
+    sourceUrls: sources.map((s) => s.url),
+  });
   const audit = auditFootnotes(
     normalized,
     sources.map((s) => s.sourceNo),
