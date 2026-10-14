@@ -18,6 +18,8 @@ import { remarkTweets } from "./remark/tweets";
 import { remarkWikilinks } from "./remark/wikilinks";
 import { remarkTableWrapper } from "./remark/table-wrapper";
 import { rehypeDropEmptyParagraphs } from "./remark/drop-empty-paragraphs";
+import { rehypeCellLists } from "./remark/cell-lists";
+import { rehypeSourceRefLinks } from "./remark/source-ref-links";
 import { articleSanitizeSchema } from "./sanitize-schema";
 
 /**
@@ -30,7 +32,10 @@ import { articleSanitizeSchema } from "./sanitize-schema";
  * 自作プラグインは {type:'html'} の生ノードを吐くため、rehype 側で
  * rehype-raw を通さないと素通りしてエスケープされる。
  */
-function buildProcessor(resolveWikilink: (title: string) => string | undefined) {
+function buildProcessor(
+  resolveWikilink: (title: string) => string | undefined,
+  sourceUrls: ReadonlySet<string>,
+) {
   return unified()
     .use(remarkParse)
     // Astro の markdown は gfm: true が既定。表・打ち消し線・autolink に要る
@@ -59,19 +64,25 @@ function buildProcessor(resolveWikilink: (title: string) => string | undefined) 
     .use(rehypeKatex)
     // blockquote が段落を割ってできる空段落を落とす
     .use(rehypeDropEmptyParagraphs)
+    // akashic 独自: 公開サイトがクライアント JS でしている変換をサーバー側で
+    .use(rehypeCellLists)
+    .use(rehypeSourceRefLinks(sourceUrls))
     .use(rehypeStringify, { allowDangerousHtml: true });
 }
 
 export interface RenderOptions {
   /** 記事タイトル -> shortId。wikilink の解決に使う */
   wikilinks?: Map<string, string>;
+  /** 記事の出典の URL。本文中の同じ URL のリンクに ↗ を付ける (公開サイトと同じ) */
+  sourceUrls?: Iterable<string | null | undefined>;
 }
 
 export async function renderArticleBody(
   markdown: string,
   opts: RenderOptions = {},
 ): Promise<string> {
-  const processor = buildProcessor((title) => opts.wikilinks?.get(title));
+  const sourceUrls = new Set([...(opts.sourceUrls ?? [])].filter((u): u is string => !!u));
+  const processor = buildProcessor((title) => opts.wikilinks?.get(title), sourceUrls);
   const file = await processor.process(markdown);
   return String(file);
 }

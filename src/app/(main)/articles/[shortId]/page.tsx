@@ -18,6 +18,7 @@ import { RemoveSource } from "./remove-source";
 import { UnpushedBadge } from "./unpushed-badge";
 import { ArticleDossier } from "./article-dossier";
 import { renderArticleBody } from "@/lib/articles/render";
+import { isListArticle } from "@/lib/articles/list-article";
 import "../article-content.css";
 import "katex/dist/katex.min.css";
 
@@ -60,7 +61,10 @@ export default async function ArticleDetailPage({
   const tags = Array.isArray(article.tags) ? (article.tags as unknown[]).map(String) : [];
   const extraKeys = frontmatterExtraKeys(article);
   const unresolvedCount = article.sources.filter((s) => s.status === "unresolved").length;
-  const bodyHtml = await renderArticleBody(article.body, { wikilinks: titleIndex });
+  const bodyHtml = await renderArticleBody(article.body, {
+    wikilinks: titleIndex,
+    sourceUrls: article.sources.map((s) => s.url),
+  });
   const hasTweets = bodyHtml.includes('class="twitter-tweet"');
 
   // 本文の ^[n] と出典の対応。描画側でリンクにするのとは別に、対応の壊れを出す
@@ -235,8 +239,13 @@ export default async function ArticleDetailPage({
       <section>
         <h2 className="text-sm font-semibold text-slate-700 mb-2">本文</h2>
         <FootnoteAuditWarnings audit={audit} className="mb-2" />
-        <div className="bg-white border border-slate-200 rounded-lg p-5">
-          <div className="article-content" dangerouslySetInnerHTML={{ __html: bodyHtml }} />
+        {/* 地の色は公開サイトの --color-bg。本文は白いカードではなく地の上に載っている */}
+        <div className="bg-[#f8f7f4] border border-slate-200 rounded-lg p-5">
+          <div
+            className="article-content"
+            data-list-article={isListArticle(article.title) ? "" : undefined}
+            dangerouslySetInnerHTML={{ __html: bodyHtml }}
+          />
         </div>
         {/* X の埋め込みは remarkTweets が blockquote.twitter-tweet を出しておき、
             widgets.js がそれを見つけて描画する。クライアント部品を挟まないのは、

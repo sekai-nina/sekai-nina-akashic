@@ -14,8 +14,10 @@ import { replaceOutsideTags } from "./html-text";
  */
 const REF = /\^\[(\d+)\]/g;
 
+// class と `[n]` の表記は公開サイト (記事ページのクライアント JS) に合わせる。
+// 見た目は article-content.site.css の `.footnote-link` が付ける
 const toAnchor = (n: string) =>
-  `<sup class="footnote-ref"><a href="#src-${n}" data-source-no="${n}">${n}</a></sup>`;
+  `<sup class="footnote-ref"><a class="footnote-link" href="#src-${n}" data-source-no="${n}">[${n}]</a></sup>`;
 
 export function remarkFootnoteRefs() {
   return (tree: Root) => {

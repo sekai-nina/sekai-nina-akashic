@@ -11,6 +11,7 @@ import { replaceOutsideTags } from "./html-text";
  *
  * 解決は「記事タイトル -> shortId」のマップで行う。見つからない記事
  * (未作成のリンク) はリンクにせず、それと分かる装いで表示する。
+ * `internal-link` / `broken-link` は公開サイトと同じ class (見た目を揃える)。
  */
 const WIKILINK = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
 
@@ -21,8 +22,8 @@ export function remarkWikilinks(resolve: (title: string) => string | undefined) 
   const toHtml = (title: string, label: string) => {
     const shortId = resolve(title);
     return shortId
-      ? `<a class="wikilink" href="/articles/${escapeHtml(shortId)}">${label}</a>`
-      : `<span class="wikilink wikilink-missing" title="未作成の記事">${label}</span>`;
+      ? `<a class="wikilink internal-link" href="/articles/${escapeHtml(shortId)}">${label}</a>`
+      : `<span class="wikilink wikilink-missing broken-link" title="未作成の記事">${label}</span>`;
   };
 
   return () => (tree: Root) => {

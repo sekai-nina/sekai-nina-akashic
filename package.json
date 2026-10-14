@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "cli:keygen": "tsx src/cli/generate-api-key.ts",
+    "cli:port-article-css": "tsx src/cli/port-article-css.ts",
     "cli:mcp-check": "tsx src/cli/mcp-check.ts",
     "cli:import": "tsx src/cli/import-assets.ts",
     "cli:backup": "tsx src/cli/backup.ts",
