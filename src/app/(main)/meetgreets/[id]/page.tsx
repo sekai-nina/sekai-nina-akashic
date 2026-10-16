@@ -11,7 +11,7 @@ import { cropsFromJson } from "@/lib/meetgreet/crop";
 import { refsFromJson } from "@/lib/meetgreet/sketch-refs";
 import { getR2PublicUrl } from "@/lib/r2";
 import { MATERIAL_WINDOW_DAYS, REPORT_WINDOW_DAYS, TALK_SUGGEST_DAYS } from "@/lib/meetgreet/config";
-import { formatDate, todayJst } from "@/lib/utils";
+import { ARTICLE_WORKFLOW_LABELS as L, formatDate, todayJst } from "@/lib/utils";
 import { MetaForm } from "./meta-form";
 import { PreviewForm } from "./preview-form";
 import { FeaturedReports } from "./featured-reports";
@@ -22,18 +22,14 @@ import {
   applyExcerptsAction,
   applyMaterialsAction,
   generateSketchAction,
-  previewArticleAction,
   proposeExcerptsAction,
   refetchReportsAction,
-  restoreExclusionsAction,
-  saveArticleAction,
   saveExtraSketchPromptAction,
   saveSketchCropsAction,
   selectSketchAction,
 } from "../actions";
 import { ExcerptStep } from "@/components/workflow/excerpt-step";
 import { ReportsStep } from "@/components/workflow/reports-step";
-import { ArticleStep } from "@/components/workflow/article-step";
 import { SketchStep } from "@/components/workflow/sketch-step";
 
 interface Props {
@@ -248,13 +244,10 @@ export default async function MeetGreetDetailPage({ params, searchParams }: Prop
             記事を書いた後にドシエが変わっています。差分を見て追記してください。
           </p>
         )}
-        <ArticleStep
-          hasArticle={!!mg.article}
-          hasDossier={!!mg.dossier}
-          onPreview={previewArticleAction.bind(null, mg.id)}
-          onSave={saveArticleAction.bind(null, mg.id)}
-          onRestore={restoreExclusionsAction.bind(null, mg.id)}
-        />
+        <p className="mb-3 text-xs text-slate-500">{L.generationHelp}</p>
+        {mg.dossier ? <Link href={`/dossiers/${mg.dossierId}/article`} className="inline-flex rounded-md bg-slate-900 px-3 py-2 text-xs text-white">
+          {mg.article ? L.continueArticle : L.openWorkflow}
+        </Link> : <p className="text-xs text-slate-500">{L.unavailableDossier}</p>}
       </StepCard>
     </div>
   );

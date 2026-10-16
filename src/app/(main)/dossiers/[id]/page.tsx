@@ -4,7 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getDossier, getDossierKind } from "@/lib/domain/dossiers";
 import { canEditDossier, canManageDossier } from "@/lib/auth/dossier-permissions";
-import { formatDate } from "@/lib/utils";
+import { ARTICLE_WORKFLOW_LABELS as L, formatDate } from "@/lib/utils";
 import { getR2PublicUrl } from "@/lib/r2";
 import { DossierItemRow } from "./item-row";
 import { DossierHeader } from "./dossier-header";
@@ -30,13 +30,8 @@ export default async function DossierDetailPage({ params }: DossierDetailProps) 
 
   const editable = canEditDossier(session.user, dossier);
   const manageable = canManageDossier(session.user, dossier);
-  // 器 (MeetGreet / Live) の素材とクリップのプールは、記事はそちらの画面で作る (#170)
-  const canMakeArticle =
-    dossier.kind === "general" &&
-    !dossier.meetGreet &&
-    !dossier.live &&
-    dossier.articleTemplate !== "meetgreet" &&
-    dossier.articleTemplate !== "live";
+  // 記事の入口は種類によらず共通。見えない器は記事画面側で拒否する。
+  const canMakeArticle = dossier.kind === "general";
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6">
@@ -65,7 +60,7 @@ export default async function DossierDetailPage({ params }: DossierDetailProps) 
             className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-800"
           >
             <FileText className="h-3.5 w-3.5" />
-            {dossier.articles.length > 0 ? "記事に追記する" : "記事にする"}
+            {dossier.articles.length > 0 ? L.appendArticle : L.makeArticle}
           </Link>
         )}
       </div>

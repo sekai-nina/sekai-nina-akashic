@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Check, FileText, FolderPlus, Loader2, Search, Trash2, X } from "lucide-react";
 import { deleteClipsAction, moveClipsAction, updateClipNoteAction } from "./actions";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ASSET_KIND_LABELS, ENTITY_TYPE_BADGE, ENTITY_TYPE_LABELS, formatDate } from "@/lib/utils";
+import { ARTICLE_WORKFLOW_LABELS as L, ASSET_KIND_LABELS, ENTITY_TYPE_BADGE, ENTITY_TYPE_LABELS, formatDate } from "@/lib/utils";
 
 /**
  * クリップ一覧 (#41) の本体。
@@ -599,6 +599,9 @@ function MoveDialog({
             <div className="flex items-center justify-end gap-2">
               <Link href={`/dossiers/${result.dossierId}`} className="text-sm text-indigo-600 hover:underline">
                 ドシエを開く →
+              </Link>
+              <Link href={`/dossiers/${result.dossierId}/article`} className="text-sm text-indigo-600 hover:underline">
+                {L.makeArticle} →
               </Link>
               <button
                 type="button"

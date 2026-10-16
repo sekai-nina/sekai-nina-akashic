@@ -428,7 +428,7 @@ export async function createLive(user: ActingUser, input: CreateLiveInput): Prom
 const listInclude = {
   entity: { select: { id: true, canonicalName: true } },
   repoCollection: { select: { id: true, name: true, lastFetchedAt: true } },
-  article: { select: { id: true, shortId: true, title: true, dirty: true, lastPushedAt: true } },
+  article: { select: { id: true, shortId: true, title: true, draft: true, dirty: true, lastPushedAt: true } },
   createdBy: { select: { id: true, name: true } },
   performances: {
     select: { id: true, date: true, venue: true, label: true, note: true, sortOrder: true },

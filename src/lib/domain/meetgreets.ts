@@ -244,7 +244,7 @@ async function createInTransaction(
 
 const listInclude = {
   repoCollection: { select: { id: true, name: true, lastFetchedAt: true } },
-  article: { select: { id: true, shortId: true, title: true, dirty: true, lastPushedAt: true } },
+  article: { select: { id: true, shortId: true, title: true, draft: true, dirty: true, lastPushedAt: true } },
   createdBy: { select: { id: true, name: true } },
 } satisfies Prisma.MeetGreetInclude;
 

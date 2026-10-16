@@ -2,178 +2,109 @@ import Link from "next/link";
 import { ArrowLeft, ExternalLink, FileText } from "lucide-react";
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { canEditDossier } from "@/lib/auth/dossier-permissions";
-import { getDossierForArticle, isContainerTemplate, suggestTemplate } from "@/lib/domain/dossier-article";
+import { getDossierKind } from "@/lib/domain/dossiers";
+import { getDossierArticleWorkflow } from "@/lib/domain/dossier-article-workflow";
+import { WorkflowInputError } from "@/lib/domain/article-workflow";
+import { suggestTemplate } from "@/lib/domain/dossier-article";
 import { selectableTemplates } from "@/lib/article-workflow/templates";
-import { ARTICLE_TEMPLATE_LABELS, ARTICLE_TYPE_LABELS } from "@/lib/utils";
+import { ARTICLE_TEMPLATE_LABELS, ARTICLE_WORKFLOW_LABELS as L, cn } from "@/lib/utils";
 import { ArticleStep } from "@/components/workflow/article-step";
-import {
-  previewDossierArticleAction,
-  restoreDossierExclusionsAction,
-  saveDossierArticleAction,
-} from "./actions";
+import { previewDossierArticleAction, restoreDossierExclusionsAction, saveDossierArticleAction } from "./actions";
 import { TemplatePicker } from "./template-picker";
 
 interface Props {
   params: Promise<{ id: string }>;
-  /** `?article=<id>` は追記先 (ドシエに記事が 2 本以上あるとき) */
   searchParams: Promise<{ article?: string }>;
 }
 
-/** TikTok の短縮 URL の解決と、本文を書く Claude の呼び出し (#171) で外部に出る。数十秒かかることがある */
+/** 外部の短縮URLの解決・AIの下書き生成を含む。 */
 export const maxDuration = 300;
 
-/**
- * 器 (MeetGreet / Live) を持たないドシエから記事を作る (#170)。
- * テンプレートを決める → 差分を見る → 保存、の 1 画面。ミーグリのステップ 4 と同じ部品を使う。
- */
+/** 一般ドシエ・ミーグリ・ライブが共通で使う記事生成の画面 (#233 段階2)。 */
 export default async function DossierArticlePage({ params, searchParams }: Props) {
   const { id } = await params;
   const { article: chosen } = await searchParams;
   const session = await auth();
   if (!session?.user) notFound();
+  if (await getDossierKind(session.user, id) === "clips") redirect("/clips");
 
-  const dossier = await getDossierForArticle(session.user, id);
-  if (!dossier) notFound();
-  if (dossier.kind === "clips") redirect("/clips");
-
-  // 器 (MeetGreet / Live) の素材ならそちらへ。器が見えなくてもテンプレートで分かる (`assertPlainDossier` と同じ)
-  const containerKind =
-    dossier.container?.kind ?? (isContainerTemplate(dossier.articleTemplate) ? dossier.articleTemplate : null);
-  const container =
-    containerKind === "meetgreet" || containerKind === "live"
-      ? {
-          kind: containerKind,
-          href: dossier.container
-            ? `/${containerKind === "meetgreet" ? "meetgreets" : "lives"}/${dossier.container.id}`
-            : `/${containerKind === "meetgreet" ? "meetgreets" : "lives"}`,
-        }
-      : null;
-
-  const templates = selectableTemplates().map((t) => ({
-    key: t.key,
-    label: ARTICLE_TEMPLATE_LABELS[t.key],
-  }));
-  const current = dossier.articleTemplate;
-  const currentSelectable = current ? templates.some((t) => t.key === current) : false;
-  const articleId =
-    chosen && dossier.articles.some((a) => a.id === chosen)
-      ? chosen
-      : dossier.articles.length === 1
-        ? dossier.articles[0].id
-        : null;
-  const target = dossier.articles.find((a) => a.id === articleId) ?? null;
-  const needsChoice = dossier.articles.length > 1 && !articleId;
+  const workflow = await getDossierArticleWorkflow(session.user, id, chosen ?? null).catch((error: unknown) => {
+    if (error instanceof WorkflowInputError) return { error: error.message };
+    throw error;
+  });
+  if (!workflow) notFound();
+  if ("error" in workflow) {
+    return <div className="max-w-4xl mx-auto px-4 py-6">
+      <Link href={`/dossiers/${id}`} className="text-xs text-indigo-700 hover:underline">{L.backToDossier}</Link>
+      <h1 className="mt-3 text-lg font-semibold">{L.makeArticle}</h1>
+      <p role="alert" className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{workflow.error}</p>
+    </div>;
+  }
+  const { dossier, preparation, template: current, article: target, articleId, needsChoice, editable } = workflow;
+  const templates = selectableTemplates().map((t) => ({ key: t.key, label: ARTICLE_TEMPLATE_LABELS[t.key] }));
+  const supported = !!preparation || templates.some((t) => t.key === current);
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6">
-      <Link
-        href={`/dossiers/${dossier.id}`}
-        className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600"
-      >
-        <ArrowLeft size={14} /> ドシエへ
+      <Link href={`/dossiers/${dossier.id}`} className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600">
+        <ArrowLeft size={14} /> {L.backToDossier}
       </Link>
-
-      <h1 className="mt-2 text-lg font-semibold text-slate-900 flex items-center gap-2">
-        <FileText className="h-4 w-4 text-indigo-600" />
-        記事にする
-      </h1>
+      <h1 className="mt-2 text-lg font-semibold text-slate-900 flex items-center gap-2"><FileText className="h-4 w-4 text-indigo-600" />{L.makeArticle}</h1>
       <p className="text-xs text-slate-500 mt-1">{dossier.title}</p>
 
-      {container ? (
-        <p className="mt-6 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-          このドシエは{ARTICLE_TEMPLATE_LABELS[container.kind]}の素材です。記事は{" "}
-          <Link href={container.href} className="underline underline-offset-2">
-            {container.href}
-          </Link>{" "}
-          の進行画面から作ってください。
-        </p>
-      ) : (
-        <>
-          <section className="mt-6 bg-white border border-slate-200 rounded-lg p-4">
-            <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">1. テンプレート</h2>
-            <TemplatePicker
-              dossierId={dossier.id}
-              current={current}
-              suggested={suggestTemplate(dossier)}
-              options={templates}
-              locked={!!current && dossier.articles.length > 0}
-              editable={canEditDossier(session.user, dossier)}
-            />
-            {current && !currentSelectable && (
-              <p className="mt-2 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-                このドシエのテンプレート「{ARTICLE_TEMPLATE_LABELS[current]}」はまだ記事の組み立てに対応していません。
-              </p>
-            )}
-          </section>
+      {preparation && <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div><h2 className="text-sm font-semibold text-slate-700">{ARTICLE_TEMPLATE_LABELS[preparation.kind]} · {L.preparation}</h2>
+            <p className="mt-1 text-xs text-slate-500">{preparation.title} · {preparation.period}</p></div>
+          <Link href={preparation.href} className="text-xs text-indigo-700 hover:underline">{L.backToPreparation} →</Link>
+        </div>
+        <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-xs">
+          <div><dt className="inline text-slate-500">{L.materials} </dt><dd className="inline">{preparation.materialCount}</dd></div>
+          <div><dt className="inline text-slate-500">{L.reports} </dt><dd className="inline">{preparation.keptReports}</dd></div>
+          <div><dt className="inline text-slate-500">{L.sketch} </dt><dd className="inline">{preparation.hasSketch ? L.ready : L.unset}</dd></div>
+        </dl>
+        <p className="mt-2 text-xs text-slate-500">{L.prepareHelp}</p>
+      </section>}
 
-          <section className="mt-4 bg-white border border-slate-200 rounded-lg p-4">
-            <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
-              <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">2. 記事</h2>
-              {target && (
-                <span className="flex flex-wrap items-center gap-3">
-                  {current === "quote_blog" && (
-                    // 言葉記事テンプレートは {q} を付けない。名言集に載せる一節は人が選ぶ (#206)
-                    <Link
-                      href={`/quotes/${target.shortId}`}
-                      className="inline-flex items-center h-7 px-2.5 rounded-md bg-emerald-600 text-white text-xs hover:bg-emerald-700"
-                    >
-                      名言集に載せる一節を選ぶ →
-                    </Link>
-                  )}
-                  <Link
-                    href={`/articles/${target.shortId}`}
-                    className="inline-flex items-center gap-1 text-xs text-slate-600 hover:text-slate-900 underline underline-offset-2"
-                  >
-                    {target.title || target.shortId}
-                    {target.draft ? "（下書き）" : ""} を開く <ExternalLink size={12} />
-                  </Link>
-                </span>
-              )}
-            </div>
+      <section className="mt-4 bg-white border border-slate-200 rounded-lg p-4">
+        <h2 className="text-xs font-semibold text-slate-500 mb-3">{L.template}</h2>
+        {preparation ? <><p className="text-sm font-medium">{ARTICLE_TEMPLATE_LABELS[preparation.kind]}</p><p className="mt-1 text-xs text-slate-500">{L.fixedTemplate}</p></> : <TemplatePicker
+          dossierId={dossier.id} current={current} suggested={suggestTemplate(dossier)} options={templates}
+          locked={!!current && dossier.articles.length > 0} editable={editable}
+        />}
+        {current && !supported && <p className="mt-2 text-xs text-amber-800">{L.unsupportedTemplate}</p>}
+      </section>
 
-            {dossier.articles.length > 1 && (
-              <div className="mb-3">
-                <p className="text-[11px] text-slate-500 mb-1.5">
-                  このドシエからの記事が {dossier.articles.length} 本あります。追記する記事を選んでください。
-                </p>
-                <ul className="flex flex-wrap gap-2">
-                  {dossier.articles.map((a) => (
-                    <li key={a.id}>
-                      <Link
-                        href={`/dossiers/${dossier.id}/article?article=${a.id}`}
-                        className={
-                          "inline-flex items-center h-7 px-2.5 rounded-md border text-xs " +
-                          (a.id === articleId
-                            ? "border-slate-900 bg-slate-900 text-white"
-                            : "border-slate-200 text-slate-700 hover:bg-slate-50")
-                        }
-                      >
-                        {a.title || a.shortId}
-                        {a.type ? ` · ${ARTICLE_TYPE_LABELS[a.type]}` : ""}
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {!current ? (
-              <p className="text-xs text-slate-400">先にテンプレートを決めてください。</p>
-            ) : needsChoice ? (
-              <p className="text-xs text-slate-400">追記する記事を選ぶと差分を出せます。</p>
-            ) : (
-              <ArticleStep
-                hasArticle={!!target}
-                hasDossier
+      <section className="mt-4 bg-white border border-slate-200 rounded-lg p-4">
+        <h2 className="text-xs font-semibold text-slate-500 mb-3">{L.article}</h2>
+        {preparation?.needsSync && <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">{L.needsSync}</p>}
+        {preparation?.kind === "live" && <p className="mb-3 text-xs text-slate-500">{L.liveAppendHelp}</p>}
+        {!preparation && dossier.articles.length > 1 && <div className="mb-3">
+          <p className="mb-2 text-xs text-slate-500">{L.chooseArticle}</p>
+          <ul className="flex flex-wrap gap-2">{dossier.articles.map((a) => <li key={a.id}>
+            <Link href={`/dossiers/${dossier.id}/article?article=${a.id}`} className={cn("inline-flex rounded-md border px-3 py-1.5 text-xs", a.id === articleId ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 text-slate-700 hover:bg-slate-50")}>{a.title || a.shortId}</Link>
+          </li>)}</ul>
+        </div>}
+        {!editable ? <p className="text-xs text-slate-500">{L.readOnly}</p>
+          : !current ? <p className="text-xs text-slate-500">{L.chooseTemplate}</p>
+            : needsChoice ? <p className="text-xs text-slate-500">{L.chooseTarget}</p>
+              : supported && <ArticleStep key={JSON.stringify([dossier.id, current, articleId])} hasArticle={!!target} hasDossier
                 onPreview={previewDossierArticleAction.bind(null, dossier.id, articleId)}
                 onSave={saveDossierArticleAction.bind(null, dossier.id, articleId)}
                 onRestore={restoreDossierExclusionsAction.bind(null, dossier.id, articleId)}
-              />
-            )}
-          </section>
-        </>
-      )}
+              />}
+      </section>
+
+      {target && <section className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
+        <h2 className="text-xs font-semibold text-slate-500">{L.next}</h2>
+        <p className="mt-2 text-sm text-slate-700">{target.title || target.shortId}{target.draft ? ` · ${L.draft}` : ""}</p>
+        <p className="mt-1 text-xs text-slate-500">{L.afterSave} {L.saveDoesNotPublish}</p>
+        <div className="mt-3 flex flex-wrap gap-3">
+          <Link href={`/articles/${target.shortId}${editable ? "/edit" : ""}`} className="inline-flex items-center gap-1 rounded-md bg-slate-900 px-3 py-2 text-xs text-white">{editable ? L.editArticle : L.viewArticle}<ExternalLink size={12} /></Link>
+          {current === "quote_blog" && editable && <Link href={`/quotes/${target.shortId}`} className="rounded-md bg-emerald-600 px-3 py-2 text-xs text-white">{L.selectQuote}</Link>}
+          {session.user.role === "admin" && <Link href="/articles/push" className="rounded-md border border-slate-200 px-3 py-2 text-xs text-slate-700">{L.publish}</Link>}
+        </div>
+      </section>}
     </div>
   );
 }

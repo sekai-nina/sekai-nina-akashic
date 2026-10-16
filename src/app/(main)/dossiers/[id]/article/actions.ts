@@ -1,5 +1,7 @@
 "use server";
 
+import { invalidateDossiers } from "@/lib/cache";
+import { requireDossierArticleWorkflow, type DossierArticleWorkflow } from "@/lib/domain/dossier-article-workflow";
 import { revalidatePath } from "next/cache";
 import { ArticleTemplate } from "@prisma/client";
 import * as z from "zod";
@@ -17,6 +19,18 @@ function errorMessage(e: unknown): string {
 }
 
 const TemplateSchema = z.enum(ArticleTemplate);
+
+function revalidateWorkflow(workflow: DossierArticleWorkflow, shortId?: string) {
+  invalidateDossiers();
+  revalidatePath(`/dossiers/${workflow.dossier.id}`);
+  revalidatePath(`/dossiers/${workflow.dossier.id}/article`);
+  revalidatePath("/articles");
+  if (shortId) revalidatePath(`/articles/${shortId}`);
+  if (workflow.preparation) {
+    revalidatePath(workflow.preparation.href);
+    revalidatePath(workflow.preparation.kind === "meetgreet" ? "/meetgreets" : "/lives");
+  }
+}
 
 /** テンプレートを決める (#170)。器を持たないドシエだけ */
 export async function setTemplateAction(dossierId: string, template: string) {
@@ -47,9 +61,8 @@ export async function previewDossierArticleAction(
   const parsed = ExclusionKeysSchema.safeParse(extraExclude);
   if (!parsed.success) return { ok: false as const, error: formatZodError(parsed.error) };
   try {
-    const dossier = await getDossierForArticle(user, dossierId);
-    if (!dossier) throw new Error("ドシエが見つかりません");
-    const preview = await previewArticle(user, { kind: "dossier", dossier, articleId }, parsed.data);
+    const workflow = await requireDossierArticleWorkflow(user, dossierId, articleId);
+    const preview = await previewArticle(user, workflow.target, parsed.data);
     return { ok: true as const, preview };
   } catch (e) {
     return { ok: false as const, error: errorMessage(e) };
@@ -66,10 +79,9 @@ export async function restoreDossierExclusionsAction(
   const parsed = ExclusionKeysSchema.safeParse(keys);
   if (!parsed.success) return { ok: false as const, error: formatZodError(parsed.error) };
   try {
-    const dossier = await getDossierForArticle(user, dossierId);
-    if (!dossier) throw new Error("ドシエが見つかりません");
-    const restored = await restoreExclusions(user, { kind: "dossier", dossier, articleId }, parsed.data);
-    revalidatePath(`/dossiers/${dossierId}/article`);
+    const workflow = await requireDossierArticleWorkflow(user, dossierId, articleId);
+    const restored = await restoreExclusions(user, workflow.target, parsed.data);
+    revalidateWorkflow(workflow, workflow.article?.shortId);
     return { ok: true as const, restored };
   } catch (e) {
     return { ok: false as const, error: errorMessage(e) };
@@ -90,20 +102,16 @@ export async function saveDossierArticleAction(
   const draft = aiDraft === undefined ? undefined : AiDraftSchema.nullable().safeParse(aiDraft);
   if (draft && !draft.success) return { ok: false as const, error: formatZodError(draft.error) };
   try {
-    const dossier = await getDossierForArticle(user, dossierId);
-    if (!dossier) throw new Error("ドシエが見つかりません");
+    const workflow = await requireDossierArticleWorkflow(user, dossierId, articleId);
     const result = await saveArticle(
       user,
-      { kind: "dossier", dossier, articleId },
+      workflow.target,
       expectedDigest,
       parsed.data,
       draft?.data
     );
     if (!result.ok) return { ok: false as const, error: result.error };
-    // ドシエ詳細の「記事にする / 追記する」の文言が紐づく記事の有無で変わる
-    revalidatePath(`/dossiers/${dossierId}`);
-    revalidatePath(`/dossiers/${dossierId}/article`);
-    revalidatePath("/articles");
+    revalidateWorkflow(workflow, result.shortId);
     return {
       ok: true as const,
       mode: result.mode,

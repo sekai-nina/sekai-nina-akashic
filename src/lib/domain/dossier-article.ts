@@ -49,7 +49,7 @@ export interface DossierForArticle {
   viewMode: DossierAccessMode;
   editMode: DossierAccessMode;
   /**
-   * 器 (MeetGreet / Live) に使われているか。使われていればそちらの画面で記事にする。
+   * 器 (MeetGreet / Live) に使われているか。共通記事画面は対応する ArticleTarget に解決する。
    * **器が自分より上の機密だと見えない** (RLS) ので、器の有無だけでなく `articleTemplate` も見る
    * (`assertPlainDossier`)
    */
