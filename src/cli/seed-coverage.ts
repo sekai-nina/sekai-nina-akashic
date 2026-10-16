@@ -107,11 +107,11 @@ const DATA_SOURCES: DataSourceSeed[] = [
     publisherPattern:
       "EX大衆%|BRODY%|週刊少年チャンピオン%|グラビアチャンピオン%|Ray%|BUBKA%|B.L.T.%",
   },
-  // 以下は Akashic にアセット未取込のため manual（取込が始まったら設定タブで導出規則を設定）。
-  { key: "instagram", name: "Instagram", kind: "sns" },
-  { key: "tiktok", name: "TikTok", kind: "sns" },
-  { key: "x_official", name: "X（公式）", kind: "sns" },
-  { key: "showroom", name: "SHOWROOM", kind: "sns" },
+  // 投稿は URL 単位。ラジオだけは出演一覧の記事の行から導出する (#233)。
+  { key: "instagram", name: "Instagram", kind: "sns", itemRule: "source_url", publisherPattern: "Instagram%" },
+  { key: "tiktok", name: "TikTok", kind: "sns", itemRule: "source_url", publisherPattern: "TikTok%" },
+  { key: "x_official", name: "X（公式）", kind: "sns", itemRule: "source_url", publisherPattern: "X（公式）%|X (公式)%|日向坂46公式X%" },
+  { key: "showroom", name: "SHOWROOM", kind: "sns", itemRule: "source_url", publisherPattern: "SHOWROOM%" },
   { key: "radio", name: "ラジオ（radiko）", kind: "radio" },
 ];
 

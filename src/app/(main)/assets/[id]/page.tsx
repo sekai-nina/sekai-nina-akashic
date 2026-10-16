@@ -6,6 +6,8 @@ import { excerptOf, listClipsForAsset } from "@/lib/domain/clips";
 import { AddToDossier } from "@/components/add-to-dossier";
 import { AddToArticle } from "@/components/add-to-article";
 import { ClipButton } from "@/components/clip-dialog";
+import { findMaterialClipProgressForAsset } from "@/lib/domain/material-clip-progress";
+import { MaterialClipPanel } from "./material-clip-panel";
 import { AssetReferencesPanel } from "./references-panel";
 import {
   addEntityToAsset,
@@ -222,10 +224,11 @@ export default async function AssetDetailPage({
   const isEditor = ["admin", "member"].includes(session.user.role);
   const canEditCoverage = isEditor;
   const canClip = isEditor;
-  const [coverageItems, activeLenses, ninaTerms] = await Promise.all([
+  const [coverageItems, activeLenses, ninaTerms, materialItems] = await Promise.all([
     findItemsForAsset(id, userClearance),
     listLenses(userClearance, false), // active のみ
     hlNina ? getNinaTerms(userClearance) : Promise.resolve([] as string[]),
+    findMaterialClipProgressForAsset(id, userClearance),
   ]);
   const highlightCount = hlNina
     ? countTermMatches(
@@ -650,6 +653,7 @@ export default async function AssetDetailPage({
           <StatusWorkflow assetId={id} initialStatus={asset.status} />
 
           {/* 記事での参照 + 含まれているドシエ + クリップ (#41): 「ここはもう記事に書いた / 取ってある」を見せる */}
+          <MaterialClipPanel items={materialItems} editable={isEditor} />
           {(articleRefs.length > 0 || containingDossiers.length > 0 || clips.length > 0) && (
             <AssetReferencesPanel
               assetId={asset.id}
