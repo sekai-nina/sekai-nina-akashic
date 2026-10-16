@@ -2297,3 +2297,9 @@ for item in results["items"]:
 ## 素材のクリップ進捗 (#233)
 
 段階 1 は画面専用。`/progress/materials/[sourceKey]` とアセット詳細の Server Action で扱い、REST / MCP の操作は追加していない。`MaterialClipStatus` は既存の `ArticleProgress`（記事化）や `LensItemCheck`（観点のチェック）とは別の印。保存先・素材キー・RLS・本番未適用 migration は [clip-progress-design.md](./clip-progress-design.md) を参照。
+
+### 記事化の共通画面（段階2）
+
+`/dossiers/[id]/article` は一般ドシエに加え、ミーグリ・ライブの記事プレビュー／保存にも対応する。生成対象はServer Actionがドシエから解決し、ミーグリ・ライブはそれぞれの既存記事に追記する。開催情報・レポ・スケッチの編集は既存画面に残す。
+
+これは画面の入口の統一であり、REST / MCP の契約は変更しない。既存のミーグリ・ライブの記事APIはそのまま使用できる。一般ドシエ向けAPIをミーグリ・ライブへ転用しない。詳細は [article-workflow-phase2-design.md](./article-workflow-phase2-design.md) を参照。
