@@ -11,12 +11,11 @@ import { jsonStringArray, MATERIAL_WINDOW_DAYS, REPORT_WINDOW_DAYS, TALK_SUGGEST
 import { cropsFromJson } from "@/lib/meetgreet/crop";
 import { refsFromJson } from "@/lib/meetgreet/sketch-refs";
 import { getR2PublicUrl } from "@/lib/r2";
-import { formatDate } from "@/lib/utils";
+import { ARTICLE_WORKFLOW_LABELS as L, formatDate } from "@/lib/utils";
 import { MaterialsStep } from "@/components/materials-step";
 import { ExcerptStep } from "@/components/workflow/excerpt-step";
 import { ReportsStep } from "@/components/workflow/reports-step";
 import { SketchStep } from "@/components/workflow/sketch-step";
-import { ArticleStep } from "@/components/workflow/article-step";
 import {
   applyExcerptsAction,
   applyMaterialsAction,
@@ -26,9 +25,6 @@ import {
   saveExtraSketchPromptAction,
   saveSketchCropsAction,
   selectSketchAction,
-  previewArticleAction,
-  restoreExclusionsAction,
-  saveArticleAction,
 } from "../actions";
 import { MetaForm } from "./meta-form";
 import { ReportTagsForm } from "./report-tags-form";
@@ -250,13 +246,10 @@ export default async function LiveDetailPage({ params }: Props) {
             記事を書いた後にドシエが変わっています。差分を見て追記してください。
           </p>
         )}
-        <ArticleStep
-          hasArticle={!!live.article}
-          hasDossier={!!live.dossier}
-          onPreview={previewArticleAction.bind(null, live.id)}
-          onSave={saveArticleAction.bind(null, live.id)}
-          onRestore={restoreExclusionsAction.bind(null, live.id)}
-        />
+        <p className="mb-3 text-xs text-slate-500">{L.generationHelp}</p>
+        {live.dossier ? <Link href={`/dossiers/${live.dossierId}/article`} className="inline-flex rounded-md bg-slate-900 px-3 py-2 text-xs text-white">
+          {live.article ? L.continueArticle : L.openWorkflow}
+        </Link> : <p className="text-xs text-slate-500">{L.unavailableDossier}</p>}
       </StepCard>
     </div>
   );

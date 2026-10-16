@@ -117,17 +117,17 @@ Issue: https://github.com/sekai-nina/sekai-nina-akashic/issues/233 (合意の経
 
 ### migration と運用上の残り
 
-`20261016000000_material_clip_status` は **本番未適用**。今回は本番接続を使わず、変更前後の Prisma schema 間の `migrate diff` で追加分を生成し、RLS とソース設定の UPDATE を追記した。
+`20261016000000_material_clip_status` は PR #234 のマージ後、ユーザーの承認を受けて **本番適用済み（GRANT 含む）**。SQL の作成時は本番接続を使わず、変更前後の Prisma schema 間の `migrate diff` で追加分を生成し、RLS とソース設定の UPDATE を追記した。
 
 - migration 適用時に Instagram / TikTok を `source_url` + `Instagram%` / `TikTok%` へ変更する。末尾の改行を許容する前方一致。
 - SHOWROOM は `source_url` + `SHOWROOM%`。X 公式は一般の X 言及と区別して `source_url` + `X（公式）%|X (公式)%|日向坂46公式X%`。今後アセット登録時にこの publisher 表記を使う（別表記の場合は DataSource 設定を追加）。未登録なら空で正しい。
 - 同じ設定を `src/cli/seed-coverage.ts` に反映した。シードは実行していない。
-- 本番適用後は migration 冒頭の `GRANT SELECT, INSERT, UPDATE, DELETE ON "MaterialClipStatus" TO app_runtime;` が必要。適用と GRANT の承認は別途ユーザーから得る。
+- migration 冒頭の `GRANT SELECT, INSERT, UPDATE, DELETE ON "MaterialClipStatus" TO app_runtime;` も本番適用済み。適用履歴・RLS・実行時ロールの CRUD と下位／未設定 clearance の拒否を確認し、検証用データは残していない。
 - magazine の既存 publisher リストは今回変えていない。新しい誌名が増えた際は DataSource 設定への追加が必要。
 - 検証: `pnpm typecheck` 成功、`pnpm test` は 695 passed / 8 skipped（51 ファイル成功・2 ファイル skip）。追加テストはラジオの行・年度別キー・同日複数番組・トークの JST 境界・関連判定・手動対象の保持・件数の重複防止・機密ガードなどを扱う。
 - ローカルの一時 PostgreSQL 17 に migration SQL を適用し、4 RLS ポリシー・ENABLE/FORCE・未設定/下位 clearance の拒否・許可された CRUD・4 ソース設定の更新・timestamp(3) の JST 日付境界を確認した。検証用コンテナは停止・削除済み。
 - 実記事 3 本から 8 素材、2025/7/11 の別番組 2 件、キーの重複なしを確認した。
-- 本番の新テーブルを使った画面の実動作確認は、migration 未適用のため未実施。
+- 全12ソースの本番読み取り確認は成功。認証済みブラウザを使った実画面の操作確認は未実施。詳細とチェック手順は [段階2の設計案](./article-workflow-phase2-design.md) を参照。
 
 ## 完了条件 (段階 1)
 
@@ -138,4 +138,4 @@ Issue: https://github.com/sekai-nina/sekai-nina-akashic/issues/233 (合意の経
 - [x] `pnpm typecheck` / `pnpm test` が緑。素材の導出 (特にラジオの行・トークの JST 日付) にテストがある
 - [x] migration は本番未適用のまま PR を出し、適用はユーザーの OK を取ってから
 
-2026-10-16 の追加指示でコミット・push・PR 作成を承認済み。本番 migration・GRANT は未実施のまま、段階 1 の PR を用意する。段階 2・3 はこの PR に含めない。
+2026-10-16 の追加指示でコミット・push・PR 作成を承認済み。PR #234 はマージ済み。その後の追加承認で本番 migration・GRANT も適用済み。段階 2・3 は別の変更として扱う。
