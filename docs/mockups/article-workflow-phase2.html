@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>記事化の流れ・段階2 画面案</title>
+<style>
+:root{color-scheme:light;--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--accent:#4338ca;--bg:#f8fafc}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.65 system-ui,-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN",sans-serif}button,select{font:inherit}button,a,select{touch-action:manipulation}button{cursor:pointer}button:focus-visible,a:focus-visible,select:focus-visible{outline:3px solid #a5b4fc;outline-offset:3px}button:disabled{opacity:.45;cursor:default}a{color:var(--accent)}.demo{padding:9px 24px;background:#eef2ff;color:#3730a3;border-bottom:1px solid #c7d2fe;font-size:12px}.shell{max-width:1060px;margin:0 auto;padding:28px 24px 56px}.top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.small{font-size:12px;color:var(--muted)}.crumb{margin:0 0 14px;color:var(--muted);font-size:12px}.flow{display:flex;gap:6px;flex-wrap:wrap;margin:20px 0 26px}.flow span{padding:4px 11px;border-radius:20px;background:#e2e8f0;color:#475569;font-size:12px}.flow .current{background:#4338ca;color:white}.flow b{color:#94a3b8;font-weight:400}.card{padding:23px;background:white;border:1px solid var(--line);border-radius:10px;margin-bottom:16px}.section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap}h1{font-size:24px;line-height:1.5;margin:5px 0}h2{font-size:15px;margin:0 0 10px}h3{font-size:13px;margin:0 0 10px}p{margin:6px 0}.badge{display:inline-block;padding:2px 9px;font-size:11px;border-radius:16px;background:#eef2ff;color:#4338ca}.button{display:inline-flex;align-items:center;justify-content:center;gap:6px;text-decoration:none;border:1px solid var(--line);border-radius:6px;background:white;color:#334155;padding:8px 14px;font-size:13px}.primary{background:#0f172a;color:white;border-color:#0f172a}.accent{background:#4338ca;color:white;border-color:#4338ca}.row{display:flex;gap:9px;align-items:center;flex-wrap:wrap}.grid{display:grid;grid-template-columns:1fr 290px;gap:20px}.summary{padding:14px;background:#f8fafc;border-radius:7px;margin-top:13px}.summary ul{padding-left:18px;margin:5px 0}.meta{display:grid;grid-template-columns:85px 1fr;gap:4px 9px;margin:10px 0 15px;font-size:13px}.meta dt{color:var(--muted)}.meta dd{margin:0}.diff{white-space:pre-wrap;padding:16px;border:1px solid #bbf7d0;border-radius:7px;background:#f0fdf4;color:#166534;font:12px/1.8 ui-monospace,monospace;margin:15px 0}.notice{padding:12px 14px;background:#fffbeb;color:#92400e;border:1px solid #fde68a;border-radius:7px;font-size:12px}.saved{color:#047857;font-size:13px}.hidden,[hidden]{display:none!important}select{padding:7px 10px;border:1px solid var(--line);border-radius:6px;background:white;color:var(--ink)}.check{display:flex;gap:8px;align-items:flex-start;padding:9px 0;border-bottom:1px solid #f1f5f9}.check input{margin-top:6px;accent-color:var(--accent)}footer{margin-top:20px}.modal-backdrop{position:fixed;inset:0;display:grid;place-items:center;background:#0f172a55;padding:20px}.modal{max-width:520px;background:white;border-radius:12px;padding:26px;box-shadow:0 20px 80px #0f172a33}.modal .button{margin-top:16px}@media(max-width:760px){.grid{grid-template-columns:1fr}.shell{padding:20px 16px}.card{padding:18px}h1{font-size:21px}}
+</style>
+</head>
+<body>
+<div class="demo">段階2の画面案です。架空の素材を使っています。プレビュー・保存・公開操作はデモで、本番データには触れません。</div>
+<main class="shell">
+<div class="top"><p class="crumb">ドシエ / <span id="breadcrumb">秋のおでかけ</span> / 記事にする</p><label class="small">種類を比較 <select id="kind"><option value="general">一般ドシエ</option><option value="meetgreet">ミーグリ</option><option value="live">ライブ</option></select></label></div>
+<h1>記事にする</h1><p id="title" class="small">秋のおでかけ</p>
+<div class="flow" aria-label="記事化の流れ"><span>素材</span><b>→</b><span>クリップ</span><b>→</b><span>ドシエ</span><b>→</b><span class="current">記事を組み立てる</span><b>→</b><span>編集・公開</span></div>
+<div class="grid"><div>
+<section class="card">
+<div class="section-head"><div><h2>1. テンプレート</h2><p class="small" id="template-help">この素材から、どんな記事を作るか選びます。</p></div><span id="fixed" class="badge" hidden>種類に合わせて固定</span></div>
+<select id="template" aria-label="記事テンプレート"><option value="outing">おでかけ</option><option value="attribute">スナップ</option><option value="quote_situational">状況つき言葉</option><option value="quote_blog">ブログの言葉</option></select><p id="fixed-template" hidden></p>
+</section>
+<section class="card">
+<div class="section-head"><div><h2>2. 差分を確認して保存</h2><p class="small">既存の記事には、まだ反映していない素材を足します。</p></div><span class="badge">下書き・未公開</span></div>
+<div class="summary"><strong>今回の素材</strong><ul><li>本人の感想・クリップ 2 件</li><li>画像 1 件</li><li id="extra-material">場所候補 1 件</li></ul><a href="#" data-dialog="素材のドシエへ戻り、クリップ・画像・場所候補を確認する想定です。">素材のドシエを開く →</a></div>
+<div class="row" style="margin-top:18px"><button class="button primary" id="preview">記事の差分を見る</button><span class="small" id="preview-hint">保存する前に確認できます。</span></div>
+<div id="preview-area" hidden>
+<div class="diff" id="diff"></div>
+<h3>今回の記事に含める素材</h3><label class="check"><input type="checkbox" checked><span>本人の感想<br><span class="small">素材に戻って元の文脈を確認できます。</span></span></label><label class="check"><input type="checkbox" checked><span>画像と補足のクリップ</span></label>
+<div class="row" style="margin-top:18px"><button class="button accent" id="save">確認した内容を保存</button><p class="small">保存しただけでは公開されません。</p></div></div>
+<p class="saved" id="saved" role="status" hidden>記事の下書きを保存しました。本文を確認してから公開へ進めます。</p>
+</section>
+<section class="card" id="next" hidden><h2>3. 本文を確認して公開へ</h2><p class="small">本文や出典を見直し、公開してよい内容になったことを確認します。</p><div class="row" style="margin-top:14px"><button class="button primary" data-dialog="既存の記事の編集画面を開く想定です。保存した下書きの本文・出典を確認します。">記事を開いて編集</button><button class="button" data-dialog="既存の記事 push 画面を開く想定です。公開前の確認と実行は admin が行います。">公開の確認へ</button></div></section>
+</div>
+<aside><section class="card" id="prep" hidden><h2 id="prep-heading">ミーグリの準備</h2><dl class="meta"><dt id="date-label">開催日</dt><dd>2026年10月17日</dd><dt>素材</dt><dd>ドシエに登録済み</dd><dt>レポ</dt><dd>採用済み 3 件</dd><dt>スケッチ</dt><dd>選択済み</dd></dl><button class="button" id="prep-link">準備画面へ戻る</button><p class="small" style="margin-top:10px">開催情報・レポ・スケッチは、今の準備画面で編集する案です。</p></section><section class="card"><h2>記事を作る場所を共通に</h2><p class="small">一般ドシエもミーグリもライブも、この画面でプレビューと保存を行います。</p><p class="small" style="margin-top:12px">ミーグリ・ライブの既存画面からは、このページへ進むリンクを表示します。</p></section><div class="notice">合意した方針：準備の編集は既存画面に残し、記事のプレビュー・保存を共通にします。</div></aside>
+</div>
+<footer class="small">画面案の対象：記事を作る入口と、保存後の次の操作。生成方法・既存の記事・公開権限は現行の仕組みを使います。</footer>
+</main>
+<div class="modal-backdrop" id="dialog" hidden><section class="modal" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><h2 id="dialog-title">画面遷移のイメージ</h2><p id="dialog-text"></p><button class="button primary" id="close-dialog">戻る</button></section></div>
+<script>
+const byId=id=>document.getElementById(id);
+const state={general:{title:'秋のおでかけ',template:'おでかけ',extra:'場所候補 1 件'},meetgreet:{title:'2026年10月17日 オンラインミーグリ',template:'ミーグリ',extra:'採用済みレポ・スケッチ'},live:{title:'秋のライブ',template:'ライブ',extra:'公演・セットリスト・採用済みレポ'}};
+function reset(){byId('preview-area').hidden=true;byId('saved').hidden=true;byId('next').hidden=true;byId('save').disabled=false;byId('preview-hint').textContent='保存する前に確認できます。'}
+function update(){const key=byId('kind').value,s=state[key],container=key!=='general';reset();byId('title').textContent=s.title;byId('breadcrumb').textContent=s.title;byId('template').hidden=container;byId('fixed-template').hidden=!container;byId('fixed-template').textContent=s.template;byId('fixed').hidden=!container;byId('template-help').textContent=container?'この素材の種類に合うテンプレートを使います。':'この素材から、どんな記事を作るか選びます。';byId('extra-material').textContent=s.extra;byId('prep').hidden=!container;byId('prep-heading').textContent=s.template+'の準備';byId('date-label').textContent=key==='live'?'公演日':'開催日';}
+byId('kind').addEventListener('change',update);byId('template').addEventListener('change',reset);
+byId('preview').addEventListener('click',()=>{const key=byId('kind').value,s=state[key];byId('diff').textContent='+ ## '+(key==='live'?'公演':key==='meetgreet'?'本人の感想':'できごと')+'\n+ '+s.title+'の素材から本文を組み立てます。\n+ 本人の感想とクリップを出典つきで反映します。';byId('preview-area').hidden=false;byId('preview-hint').textContent='内容を確認してから保存してください。';});
+byId('save').addEventListener('click',()=>{byId('saved').hidden=false;byId('next').hidden=false;byId('save').disabled=true;});
+function openDialog(text){byId('dialog-text').textContent=text;byId('dialog').hidden=false;byId('close-dialog').focus();}
+document.querySelectorAll('[data-dialog]').forEach(el=>el.addEventListener('click',e=>{e.preventDefault();openDialog(el.dataset.dialog);}));
+byId('prep-link').addEventListener('click',()=>openDialog(state[byId('kind').value].template+'の既存の進行画面へ戻り、日付・会場・レポ・スケッチを編集する想定です。'));
+byId('close-dialog').addEventListener('click',()=>{byId('dialog').hidden=true;});document.addEventListener('keydown',e=>{if(e.key==='Escape')byId('dialog').hidden=true;});
+update();
+if(new URLSearchParams(location.search).has('selftest')){let ok=true;for(const kind of Object.keys(state)){byId('kind').value=kind;update();byId('preview').click();ok=ok&&!byId('preview-area').hidden;byId('save').click();ok=ok&&!byId('next').hidden&&byId('save').disabled;}document.documentElement.dataset.selftest=ok?'passed':'failed';byId('kind').value='meetgreet';update();byId('preview').click();}
+</script>
+</body></html>
