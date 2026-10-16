@@ -2293,3 +2293,7 @@ for item in results["items"]:
         image_url = f"http://localhost:3000{item['thumbnailUrl']}"
         # image_url から画像をダウンロード（認証不要）
 ```
+
+## 素材のクリップ進捗 (#233)
+
+段階 1 は画面専用。`/progress/materials/[sourceKey]` とアセット詳細の Server Action で扱い、REST / MCP の操作は追加していない。`MaterialClipStatus` は既存の `ArticleProgress`（記事化）や `LensItemCheck`（観点のチェック）とは別の印。保存先・素材キー・RLS・本番未適用 migration は [clip-progress-design.md](./clip-progress-design.md) を参照。
