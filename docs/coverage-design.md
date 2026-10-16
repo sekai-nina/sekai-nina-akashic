@@ -64,7 +64,10 @@ v1 は「セルに手動の日付カーソル（collectedUntil）を持つ」設
 | hinachan | source_url | `日向坂ちゃんねる%` | — | publisher = チャンネル名 (youtube_watch が付ける。#101) |
 | official_ch | source_url | `日向坂46公式チャンネル%` | — | 同上 |
 | magazine | source_url | `EX大衆%\|BRODY%\|週刊少年チャンピオン%\|グラビアチャンピオン%\|Ray%\|BUBKA%\|B.L.T.%` | — | 誌名=publisher。新誌が来たら設定タブで追記 |
-| instagram / tiktok / x_official / showroom / radio | manual | — | — | **Akashic にアセット未取込**のため導出不能。取込が始まったら設定 |
+| instagram / tiktok | source_url | Instagram% / TikTok% | — | 登録された投稿・動画の URL (#233、migration 未適用) |
+| showroom | source_url | SHOWROOM% | — | 登録済み URL。未登録なら空 (#233) |
+| x_official | source_url | X（公式）% / X (公式)% / 日向坂46公式X% | — | 一般の X 言及とは区別して登録 (#233) |
+| radio | manual | — | — | `/progress` のクリップ進捗ではラジオ出演一覧の表の行から導出。coverage の観点チェックは従来どおり (#233) |
 
 実DB検証（2026-07-12）: 上記パターンで Lemino 109 URL → hinaai 57 + ninarimashou 52（**重複0・取りこぼし0**）、
 YouTube 28 URL → hinachan 20 + official_ch 8（未振り分け0）、magazine 8。

@@ -20,6 +20,7 @@
  * （ハードコードしない）。canonicalName + aliases を一致語に使う。
  */
 
+import { matchesLikeOr } from "@/lib/clip-progress/material-items";
 import { ItemRule, Prisma } from "@prisma/client";
 import { unstable_cache } from "next/cache";
 import { withClearance, withSession, type TransactionClient } from "@/lib/db";
@@ -621,29 +622,6 @@ export interface AssetCoverageItem {
   itemKey: string; // url または "YYYY-MM-DD"
   itemTitle: string | null;
   checkedLensKeys: string[]; // 現在のチェック状態（全観点）
-}
-
-/**
- * SQL LIKE パターン（% と _）を JS の正規表現に変換する（大文字小文字は区別 = Postgres LIKE と同じ）。
- * `|` OR は呼び出し側で分割する。
- */
-function likeToRegex(pattern: string): RegExp {
-  const escaped = pattern
-    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    .replace(/%/g, "[\\s\\S]*")
-    .replace(/_/g, "[\\s\\S]");
-  return new RegExp(`^${escaped}$`);
-}
-
-/** 値が `|` 区切り LIKE パターンのいずれかに一致するか。パターン空/null は不問(true)。 */
-function matchesLikeOr(value: string | null | undefined, pattern: string | null): boolean {
-  const parts = (pattern ?? "")
-    .split("|")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-  if (parts.length === 0) return true;
-  const v = value ?? "";
-  return parts.some((p) => likeToRegex(p).test(v));
 }
 
 /**

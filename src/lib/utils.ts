@@ -530,3 +530,18 @@ export function formatJpDateRange(first: string, last: string): string {
   const tail = fy === ly ? `${Number(lm)}月${Number(ld)}日` : formatJpDate(last);
   return `${formatJpDate(first)}〜${tail}`;
 }
+
+/** 素材のクリップ進捗 (#233)。データソースのキーは coverage と共通。 */
+export const MATERIAL_SOURCE_LABELS: Record<string, string> = {
+  blog: "ブログ", talk: "トーク", hinaai: "ひなあい・まだまだ", ninarimashou: "ひななり",
+  hinachan: "日向坂ちゃんねる", official_ch: "公式チャンネル", magazine: "雑誌",
+  instagram: "Instagram", tiktok: "TikTok", radio: "ラジオ", showroom: "SHOWROOM", x_official: "X 公式",
+};
+export const MATERIAL_PROGRESS_LABELS = {
+  title: "素材のクリップ・記事化の進捗", clipProgress: "クリップ進捗", articleProgress: "記事化の進捗",
+  markDone: "済にする", done: "クリップ済", unfinished: "未クリップ", finish: "この素材はクリップし切った", undo: "クリップ済を解除",
+  include: "対象に入れる", exclude: "手動対象を解除", other: "その他", relevant: "対象の素材",
+  description: "本人著・本文で言及ありの素材と、手動で対象に入れた素材が分母です。割合とクリップ数は閲覧できる範囲で集計し、移動先のドシエも含めます。共有進捗を更新できない場合は、保存時にお知らせします。",
+  clips: "クリップ", empty: "素材はありません", manual: "手動対象", noAssets: "アセット未登録",
+  saving: "保存中…", failed: "保存に失敗しました", daily: "この日（JST）全体の進捗です", previous: "前へ", next: "次へ",
+} as const;

@@ -712,6 +712,7 @@ model DataSource {
   titlePattern     String? // SourceRecord.title への SQL LIKE（null=不問。番組回の切り分け用）
   coverages        Coverage[]
   itemChecks       LensItemCheck[]
+  clipStatuses     MaterialClipStatus[]
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 
@@ -1856,5 +1857,23 @@ model XMentionHit {
   @@unique([watchId, tweetId])
   @@index([tweetId])
   @@index([createdAt])
+  @@index([classification])
+}
+
+/// 素材のクリップ進捗 (#233)。記事化の ArticleProgress と独立した共有の印。
+model MaterialClipStatus {
+  id             String         @id @default(cuid())
+  dataSourceKey  String
+  dataSource     DataSource     @relation(fields: [dataSourceKey], references: [key], onDelete: Cascade)
+  itemKey        String
+  done           Boolean        @default(false)
+  /// 自動の関連判定で拾えなかった素材を分母に含める記録。済の解除でも残す。
+  included       Boolean        @default(false)
+  classification ClearanceLevel @default(internal)
+  updatedById    String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@unique([dataSourceKey, itemKey])
   @@index([classification])
 }
