@@ -279,3 +279,9 @@ prismaInternal  → DIRECT_URL   → postgres（RLS バイパス）
 ```
 
 `prisma` を使う限り、RLS が自動で効きます。ただし `withClearance` でクリアランスを設定しないと、何も見えません（フェイルセーフ）。
+
+### ドシエからの記事生成先の解決（#233 段階2）
+
+共通画面は `getDossierArticleWorkflow` が `withSession` 経由の既存読み出しで `Dossier` と `MeetGreet` / `Live` を確認し、正しい `ArticleTarget` を組む。器がRLSで見えなくても `articleTemplate` が `meetgreet` / `live` なら一般ドシエ扱いにしない。器とドシエの不一致、テンプレートの不一致、器の既存記事と違う追記先も拒否する。
+
+プレビュー・保存・除外の復元は、Server Actionの `requireRole(admin/member)` と `requireDossierArticleWorkflow` のドシエ編集権限検査を通す。閲覧だけの利用者には生成操作を表示しない。公開は既存のadmin向けpush画面に分離し、本文・出典を公開する際の既存の機密ガードを変更しない。
