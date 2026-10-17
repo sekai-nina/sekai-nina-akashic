@@ -139,3 +139,7 @@ Issue: https://github.com/sekai-nina/sekai-nina-akashic/issues/233 (合意の経
 - [x] migration は本番未適用のまま PR を出し、適用はユーザーの OK を取ってから
 
 2026-10-16 の追加指示でコミット・push・PR 作成を承認済み。PR #234 はマージ済み。その後の追加承認で本番 migration・GRANT も適用済み。段階 2・3 は別の変更として扱う。
+
+## 段階3の実装
+
+観点別のアイテムチェックを終了し、`/coverage` を観点×ソースの確認済み日付の直接更新へ変更する。クリップ済とは別の印を維持する。詳細・検証・本番適用前の手順は [段階3の記録](./coverage-phase3-design.md)。本番 migration は未適用。
