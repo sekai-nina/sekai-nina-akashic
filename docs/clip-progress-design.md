@@ -142,4 +142,4 @@ Issue: https://github.com/sekai-nina/sekai-nina-akashic/issues/233 (合意の経
 
 ## 段階3の実装
 
-観点別のアイテムチェックを終了し、`/coverage` を観点×ソースの確認済み日付の直接更新へ変更する。クリップ済とは別の印を維持する。詳細・検証・本番適用前の手順は [段階3の記録](./coverage-phase3-design.md)。本番 migration は未適用。
+観点別のアイテムチェックを終了し、`/coverage` を観点×ソースの確認済み日付の直接更新へ変更する。クリップ済とは別の印を維持する。詳細・検証・適用記録は [段階3の記録](./coverage-phase3-design.md)。段階3の本番 migration は2026-10-18にユーザー承認を受け適用済み。
