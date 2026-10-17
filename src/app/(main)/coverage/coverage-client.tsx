@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState, useTransition, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { COVERAGE_LABELS as L, jstDayString } from "@/lib/utils";
 import type { CoverageMatrixDTO } from "@/lib/domain/coverage";
 import type { CoverageStatus, DataSourceKind, ItemRule } from "@prisma/client";
 import {
@@ -49,14 +50,8 @@ const ITEM_RULE_LABELS: Record<ItemRule, string> = {
   manual: "導出なし (manual)",
 };
 
-/** "YYYY-MM-DD" -> "M/D" */
-function shortDate(dateStr: string): string {
-  const [, m, d] = dateStr.split("-");
-  return `${Number(m)}/${Number(d)}`;
-}
-
 function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
+  return jstDayString(new Date());
 }
 
 /** continuousUntil(YYYY-MM-DD) から今日までの経過日数。 */
@@ -86,7 +81,7 @@ export function CoverageClient({
     <div>
       <div className="flex gap-1 mb-4 border-b border-slate-200">
         <TabButton active={tab === "matrix"} onClick={() => setTab("matrix")}>
-          マトリクス
+          {L.matrix}
         </TabButton>
         <TabButton active={tab === "settings"} onClick={() => setTab("settings")}>
           観点・ソース管理
@@ -210,6 +205,7 @@ function Matrix({ matrix, canEdit }: { matrix: CoverageMatrixDTO; canEdit: boole
                         onEditToggle={() => setOpenKey(openKey === key ? null : key)}
                         onClose={() => setOpenKey(null)}
                         lensKey={lens.key}
+                        lensName={lens.name}
                         onDone={(m) => {
                           setMsg(m ?? null);
                           setOpenKey(null);
@@ -225,194 +221,89 @@ function Matrix({ matrix, canEdit }: { matrix: CoverageMatrixDTO; canEdit: boole
         </table>
       </div>
       <p className="text-xs text-slate-400 mt-3">
-        セル = <span className="tabular-nums">済/総</span> と「〜M/D済」（連続チェック済みの日付）。
-        セルをクリックするとアイテム一覧が開きます。グレー「—」= 対象外(not_applicable)。
-        {canEdit && " 右上の ⋯ で対象外/メモを編集。"}
+        {L.legend}
       </p>
     </div>
   );
 }
 
-function MatrixCell({
-  cell,
-  dataSource,
-  canEdit,
-  open,
-  onEditToggle,
-  onClose,
-  lensKey,
-  onDone,
-}: {
-  cell: Cell | null;
-  dataSource: DataSource;
-  canEdit: boolean;
-  open: boolean;
-  onEditToggle: () => void;
-  onClose: () => void;
-  lensKey: string;
-  onDone: (msg?: string) => void;
+function MatrixCell({ cell, dataSource, canEdit, open, onEditToggle, onClose, lensKey, lensName, onDone }: {
+  cell: Cell | null; dataSource: DataSource; canEdit: boolean; open: boolean;
+  onEditToggle: () => void; onClose: () => void; lensKey: string; lensName: string; onDone: (msg?: string) => void;
 }) {
-  const router = useRouter();
-
-  function goToItems() {
-    router.push(`/coverage/${dataSource.key}?lens=${lensKey}`);
-  }
-
-  let content: React.ReactNode;
-  if (cell && cell.status === "not_applicable") {
-    content = <span className="text-slate-300">—</span>;
-  } else if (dataSource.totalItems === 0) {
-    content =
-      dataSource.itemRule === "manual" ? (
-        <span className="text-slate-300 text-[11px]">アイテム未定義</span>
-      ) : (
-        <span className="text-slate-400 tabular-nums">0/0</span>
-      );
-  } else {
-    const checked = cell?.checkedItems ?? 0;
-    const total = dataSource.totalItems;
-    const complete = checked >= total && total > 0;
-    content = (
-      <div className="leading-tight">
-        <div className={`tabular-nums ${complete ? "text-emerald-600 font-medium" : "text-slate-800"}`}>
-          {checked}/{total}
-        </div>
-        {cell?.continuousUntil ? (
-          <div className={`text-[10px] ${freshnessClass(daysAgo(cell.continuousUntil))}`}>
-            〜{shortDate(cell.continuousUntil)}済
-          </div>
-        ) : (
-          <div className="text-[10px] text-slate-300">未</div>
-        )}
+  const content = cell?.status === "not_applicable" ? <span className="text-slate-300">—</span>
+    : cell?.continuousUntil ? (
+      <div className={freshnessClass(daysAgo(cell.continuousUntil))}>
+        <div className="tabular-nums">{cell.continuousUntil.replaceAll("-", "/")}</div>
+        <div className="text-[10px]">{L.until}</div>
       </div>
-    );
-  }
-
+    ) : <span className="text-slate-400">{L.unknown}</span>;
   return (
     <>
-      <button
-        onClick={goToItems}
-        className="w-full h-full px-2 py-2 text-xs min-h-[3rem] cursor-pointer hover:bg-slate-100"
-        title={`${dataSource.name} のアイテム一覧を開く`}
-      >
+      <button type="button" onClick={onEditToggle} disabled={!canEdit}
+        className="w-full px-2 py-2 text-xs min-h-[3rem] hover:bg-slate-100 disabled:cursor-default disabled:hover:bg-transparent"
+        title={`${lensName} / ${dataSource.name}: ${L.edit}`}>
         {content}
       </button>
-      {canEdit && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onEditToggle();
-          }}
-          className="absolute top-0.5 right-0.5 text-[11px] leading-none text-slate-300 hover:text-slate-600 px-1"
-          title="対象外/メモを編集"
-        >
-          ⋯
-        </button>
-      )}
-      {open && canEdit && (
-        <CellNotePopover
-          cell={cell}
-          lensKey={lensKey}
-          dataSourceKey={dataSource.key}
-          onClose={onClose}
-          onDone={onDone}
-        />
-      )}
+      {open && canEdit && <CellDateDialog cell={cell} lensKey={lensKey} dataSourceKey={dataSource.key}
+        title={`${lensName} / ${dataSource.name}`} onClose={onClose} onDone={onDone} />}
     </>
   );
 }
 
-function CellNotePopover({
-  cell,
-  lensKey,
-  dataSourceKey,
-  onClose,
-  onDone,
-}: {
-  cell: Cell | null;
-  lensKey: string;
-  dataSourceKey: string;
-  onClose: () => void;
-  onDone: (msg?: string) => void;
+function CellDateDialog({ cell, lensKey, dataSourceKey, title, onClose, onDone }: {
+  cell: Cell | null; lensKey: string; dataSourceKey: string; title: string;
+  onClose: () => void; onDone: (msg?: string) => void;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLDialogElement>(null);
   const [isPending, startTransition] = useTransition();
   const [status, setStatus] = useState<CoverageStatus>(cell?.status ?? "tracked");
-  const [note, setNote] = useState<string>(cell?.note ?? "");
+  const [date, setDate] = useState(cell?.continuousUntil ?? "");
+  const [note, setNote] = useState(cell?.note ?? "");
   const [err, setErr] = useState<string | null>(null);
-
   useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    function onClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    }
-    document.addEventListener("keydown", onKey);
-    document.addEventListener("mousedown", onClick);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.removeEventListener("mousedown", onClick);
-    };
-  }, [onClose]);
-
-  function save() {
+    const dialog = ref.current;
+    dialog?.showModal();
+    return () => dialog?.close();
+  }, []);
+  function save(e: React.FormEvent) {
+    e.preventDefault();
     setErr(null);
     startTransition(async () => {
-      const res = await upsertCellAction({
-        lensKey,
-        dataSourceKey,
-        status,
-        note: note.trim() || null,
-      });
-      if (!res.ok) setErr(res.error);
-      else onDone();
+      try {
+        const res = await upsertCellAction({ lensKey, dataSourceKey, status, confirmedUntil: date || null, note: note.trim() || null });
+        if (!res.ok) setErr(res.error);
+        else onDone();
+      } catch { setErr(L.failed); }
     });
   }
-
   return (
-    <div
-      ref={ref}
-      className="absolute z-30 top-full right-0 mt-1 w-64 bg-white border border-slate-300 rounded-lg shadow-lg p-3 text-left"
-      onClick={(e) => e.stopPropagation()}
-    >
-      <label className="block text-xs text-slate-500 mb-1">状態</label>
-      <select
-        value={status}
-        onChange={(e) => setStatus(e.target.value as CoverageStatus)}
-        className="w-full px-2 py-1.5 rounded-md border border-slate-200 text-sm mb-2"
-      >
-        <option value="tracked">追跡する（済/総を表示）</option>
-        <option value="not_applicable">対象外（—）</option>
-      </select>
-
-      <label className="block text-xs text-slate-500 mb-1">メモ（内部・非公開）</label>
-      <textarea
-        value={note}
-        onChange={(e) => setNote(e.target.value)}
-        rows={2}
-        className="w-full px-2 py-1.5 rounded-md border border-slate-200 text-sm mb-2"
-      />
-
-      {err && <p className="text-xs text-rose-600 mb-2">{err}</p>}
-
-      <div className="flex gap-2">
-        <button
-          onClick={save}
-          disabled={isPending}
-          className="flex-1 px-3 py-1.5 text-sm rounded-md border border-slate-300 hover:bg-slate-100 disabled:opacity-50"
-        >
-          保存
-        </button>
-        <button
-          onClick={onClose}
-          disabled={isPending}
-          className="px-3 py-1.5 text-sm rounded-md text-slate-500 hover:bg-slate-100"
-        >
-          閉じる
-        </button>
-      </div>
-    </div>
+    <dialog ref={ref} aria-labelledby="coverage-date-title"
+      onCancel={(e) => { e.preventDefault(); if (!isPending) onClose(); }}
+      className="m-auto w-[min(24rem,calc(100vw-2rem))] max-h-[90dvh] overflow-y-auto rounded-lg border border-slate-300 bg-white p-5 shadow-xl backdrop:bg-black/40 text-left">
+      <h2 id="coverage-date-title" className="font-semibold text-sm mb-4">{title}</h2>
+      <form onSubmit={save}>
+        <label htmlFor="coverage-date-status" className="block text-xs text-slate-500 mb-1">{L.status}</label>
+        <select id="coverage-date-status" value={status} disabled={isPending} onChange={(e) => setStatus(e.target.value as CoverageStatus)}
+          className="w-full px-2 py-1.5 rounded-md border border-slate-200 text-sm mb-3">
+          <option value="tracked">{L.tracked}</option><option value="not_applicable">{L.notApplicable}</option>
+        </select>
+        <label htmlFor="coverage-date" className="block text-xs text-slate-500 mb-1">{L.date}</label>
+        <input id="coverage-date" type="date" autoFocus min="1900-01-01" max={todayStr()} value={date} disabled={isPending}
+          onChange={(e) => setDate(e.target.value)} aria-describedby="coverage-date-help"
+          className="w-full px-2 py-1.5 rounded-md border border-slate-200 text-sm" />
+        <p id="coverage-date-help" className="text-xs text-slate-500 mt-1 mb-3">{L.dateHelp}</p>
+        {cell?.dateOrigin === "legacy" && <p className="text-xs text-slate-500 mb-3">{L.legacy}</p>}
+        <label htmlFor="coverage-date-note" className="block text-xs text-slate-500 mb-1">{L.note}</label>
+        <textarea id="coverage-date-note" value={note} disabled={isPending} maxLength={10000} onChange={(e) => setNote(e.target.value)} rows={2}
+          className="w-full px-2 py-1.5 rounded-md border border-slate-200 text-sm mb-3" />
+        {err && <p role="alert" className="text-xs text-rose-600 mb-3">{err}</p>}
+        <div className="flex gap-2">
+          <button type="submit" disabled={isPending} className="flex-1 px-3 py-1.5 text-sm rounded-md border border-slate-300 hover:bg-slate-100 disabled:opacity-50">{isPending ? L.saving : L.save}</button>
+          <button type="button" disabled={isPending} onClick={onClose} className="px-3 py-1.5 text-sm rounded-md text-slate-500 hover:bg-slate-100">{L.close}</button>
+        </div>
+      </form>
+    </dialog>
   );
 }
 
@@ -795,7 +686,7 @@ function DataSourceRow({ ds, canEdit }: { ds: DataSource; canEdit: boolean }) {
         </div>
         <div className="text-xs text-slate-400 font-mono">{ds.key}</div>
         <div className="text-[11px] text-slate-500 mt-0.5">
-          {ITEM_RULE_LABELS[ds.itemRule]} · {ds.totalItems} 件
+          {ITEM_RULE_LABELS[ds.itemRule]}
           {ds.publisherPattern && (
             <span className="ml-1 text-slate-400">pub: {ds.publisherPattern}</span>
           )}

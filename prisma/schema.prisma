@@ -720,24 +720,27 @@ model DataSource {
 }
 
 model Coverage {
-  id             String         @id @default(cuid())
-  lensId         String
-  lens           Lens           @relation(fields: [lensId], references: [id], onDelete: Cascade)
-  dataSourceId   String
-  dataSource     DataSource     @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
-  status         CoverageStatus @default(tracked)
-  note           String? // 内部メモ（公開しない）
-  classification ClearanceLevel @default(internal)
-  updatedById    String?
-  updatedAt      DateTime       @updatedAt
-  createdAt      DateTime       @default(now())
+  id                 String         @id @default(cuid())
+  lensId             String
+  lens               Lens           @relation(fields: [lensId], references: [id], onDelete: Cascade)
+  dataSourceId       String
+  dataSource         DataSource     @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+  status             CoverageStatus @default(tracked)
+  confirmedUntil     DateTime?      @db.Date // 観点×ソースの確認済み日付（JST の暦日）
+  freshnessUpdatedAt DateTime? // null=旧チェックから導出。設定後は confirmedUntil=null も未確認として尊重
+  note               String? // 内部メモ（公開しない）
+  classification     ClearanceLevel @default(internal)
+  updatedById        String?
+  updatedAt          DateTime       @updatedAt
+  createdAt          DateTime       @default(now())
 
   @@unique([lensId, dataSourceId])
   @@index([dataSourceId])
   @@index([classification])
 }
 
-// v2: アイテム単位チェックの本体。「このアイテム(itemKey)をこの観点(Lens)で見た」の記録。
+// 旧v2の記録（#233 段階3で新規チェック操作を終了、既存行は保持）。
+// アイテム単位チェックの本体。「このアイテム(itemKey)をこの観点(Lens)で見た」の記録。
 // アイテムは DataSource.itemRule で SourceRecord/Asset から導出する（テーブル実体化しない）。
 model LensItemCheck {
   id             String         @id @default(cuid())

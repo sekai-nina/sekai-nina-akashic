@@ -72,11 +72,11 @@ APIキーは `pnpm cli:keygen <user-email> <key-name> [permissions]` で発行�
 | GET | `/datasources` | read | データソース一覧 |
 | POST | `/datasources` | write | データソース作成 |
 | PATCH | `/datasources/:id` | write | データソース更新 |
-| GET | `/coverage` | read | カバレッジ・マトリクス（導出値入りセル） |
-| PUT | `/coverage` | write | セル注記 upsert（not_applicable / note） |
+| GET | `/coverage` | read | 公開鮮度マトリクス（確認済み日付） |
+| PUT | `/coverage` | write | 鮮度日付・対象外・内部メモの upsert |
 | GET | `/coverage/items` | read | ソースのアイテム一覧 |
-| PUT | `/coverage/checks` | write | アイテムチェックのトグル |
-| POST | `/coverage/checks/bulk` | write | 範囲一括チェック |
+| PUT | `/coverage/checks` | write | 終了（410） |
+| POST | `/coverage/checks/bulk` | write | 終了（410） |
 | GET | `/coverage/summary` | read | 公開サイト用の要約 |
 | GET | `/articles` | read | 記事一覧（`hasPending=true` で未反映の紐づけがある記事） |
 | POST | `/articles` | write | 記事の新規作成（`shortId` / `path` はサーバ採番。既定 `draft: true`） |
@@ -676,11 +676,11 @@ GET <そのパス> → 画像バイナリ
 
 ---
 
-## 収集カバレッジ (Coverage) — v2（アイテム単位チェック）
+## 公開サイトの鮮度 (Coverage) — 確認済み日付の直接更新
 
-観点 (Lens) × データソース (DataSource) の2軸。v2 ではチェックの最小単位を **アイテム**（ソースごとの投稿/ドキュメント単位: ブログ記事1本・トーク1日分・番組回1つ）にした。アイテムはテーブル実体化せず、`DataSource.itemRule` に従って `SourceRecord`/`Asset` から導出する（導出ビュー）。セルの表示値（済/総・「〜◯日まで反映済み」= `continuousUntil`）は `LensItemCheck` からの**導出値**。v1 の日付カーソル `collectedUntil` は廃止。詳細は `docs/coverage-design.md` を参照。
+観点 (Lens) × データソース (DataSource) の公開鮮度を管理する（#233 段階3）。確認済み日付は直接入力し、素材ごとのクリップ済とは分ける。詳細は `docs/coverage-design.md`。
 
-Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` を持ち RLS が有効（clearance ベース）。導出クエリも clearance トランザクション経由なので Asset/SourceRecord の RLS が効く。`public` は「公開サイトの鮮度表示に出すか」を表す別の関心事。`Coverage` セルは v2 で **not_applicable マーク・メモ専用**に格下げ（追跡値は持たない）。
+Lens / DataSource / Coverage / LensItemCheck は classification ベースの RLS 対象。`public` は「公開サイトに出すか」を表す。Coverage は確認済み日付・明示設定日時・対象外・内部メモを持つ。旧 LensItemCheck は保存するが新たな書き込みは終了。
 
 **itemRule**（`DataSource`）: `blog_url`（publisher が一致する SourceRecord の distinct url = 記事1本）/ `talk_date`（publisher が一致する Asset の canonicalDate 日単位 distinct）/ `source_url`（pattern が一致する distinct url = 番組回・動画単位）/ `manual`（導出なし）。`publisherPattern` / `titlePattern` は SourceRecord への SQL LIKE（null=不問）。いずれも `|` 区切りで複数パターンを書ける（いずれかに一致で OR。番組の切り分け・雑誌の複数誌対応。空要素は無視）。
 
@@ -722,33 +722,35 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 
 ### GET /coverage
 
-マトリクス全体（`lenses` / `dataSources` / `cells`）を返す。`?public=1` を付けると public かつ active な行・列のみに絞り、各セルの `note`（内部メモ）を除去する。`dataSources` には `itemRule` / `publisherPattern` / `titlePattern` / `totalItems`（導出アイテム総数）を含む。`cells` は全 lens×source の組み合わせ分（導出値入り）。
+マトリクス全体（`lenses` / `dataSources` / `cells`）。`?public=1` は public かつ active な行・列だけを返し、セルの内部メモを null にする。件数関連の `dataSources.totalItems` / `cells.totalItems` / `checkedItems` / `lastCheckedAt` は廃止。
 
 ```json
 {
-  "lenses": [ { "id": "...", "key": "food", "name": "食べたもの", "sortOrder": 50, "active": true, "public": true, "classification": "internal" } ],
-  "dataSources": [ { "id": "...", "key": "blog", "name": "公式ブログ", "kind": "blog", "sortOrder": 10, "active": true, "public": true, "classification": "internal", "itemRule": "blog_url", "publisherPattern": "日向坂46公式ブログ", "titlePattern": null, "totalItems": 3421 } ],
-  "cells": [
-    {
-      "lensId": "...", "dataSourceId": "...",
-      "lensKey": "food", "dataSourceKey": "blog",
-      "status": "tracked", "note": null,
-      "totalItems": 3421, "checkedItems": 120,
-      "continuousUntil": "2026-06-25", "lastCheckedAt": "2026-07-11T..."
-    }
-  ]
+  "lenses": [{"id":"lens1","key":"food","name":"食べたもの","description":"","sortOrder":50,"active":true,"public":true,"classification":"internal"}],
+  "dataSources": [{"id":"source1","key":"blog","name":"公式ブログ","kind":"blog","description":null,"sortOrder":10,"active":true,"public":true,"classification":"internal","itemRule":"blog_url","publisherPattern":"日向坂46公式ブログ","titlePattern":null}],
+  "cells": [{
+    "lensId":"lens1","dataSourceId":"source1","lensKey":"food","dataSourceKey":"blog",
+    "status":"tracked","note":null,"continuousUntil":"2026-10-01",
+    "dateOrigin":"manual","freshnessUpdatedAt":"2026-10-18T00:00:00.000Z"
+  }]
 }
 ```
 
-セル導出値: `totalItems`（ソース共通の導出アイテム総数）/ `checkedItems`（当該観点でチェック済みの件数）/ `continuousUntil`（最古の未チェックの直前アイテムの日付。全チェックなら最新日、先頭から未チェックなら null）/ `lastCheckedAt`。`status=not_applicable` は対象外マーク（Coverage 行がある場合のみ。無ければ `tracked` 扱い）。
+`continuousUntil` は確認済み日付（YYYY-MM-DD、JST の暦日）。既存の公開キー名を維持する。`dateOrigin` は `manual` / `legacy` / null。明示設定前だけ可視の旧チェックから導出し、明示 null にした後は旧チェックの日付を復活させない。`status=not_applicable` は公開対象外。
 
 ### PUT /coverage
 
-セル注記を upsert する（`lensKey` + `dataSourceKey`）。v2 では日付カーソルを廃止し、`status`（`tracked` / `not_applicable`）と `note` のみ。
+セルを upsert する。**ボディ:** `lensKey`, `dataSourceKey` は必須。`confirmedUntil`（YYYY-MM-DD / null）, `status`（tracked / not_applicable）, `note`（最大10000字 / null）, `classification` は任意。
 
-**ボディ:** `lensKey`（必須）, `dataSourceKey`（必須）, `status`（既定 `tracked`）, `note`, `classification`。監査は AuditLog `coverage.update`。
+- `confirmedUntil` 省略は保持、null は未確認へ戻す。日付は1900-01-01から今日（JST）までの有効な暦日。設定・解除の両方で `freshnessUpdatedAt` を記録。
+- status / note の省略も既存値を保持。新規 status は tracked。
+- 機密は親 Lens・DataSource・既存セルより下げない。同一セルを transaction advisory lock で直列化してから判定する。
+- 応答は id / lensKey / dataSourceKey / status / note / classification / confirmedUntil / freshnessUpdatedAt / updatedAt。GET の continuousUntil は旧記録も含む有効日付、PUT 応答の confirmedUntil は保存値。
+- 認証・write 権限必須。入力不正は400、共有行との権限競合は403。内部例外の詳細は返さない。監査は `coverage.update`。
 
 ### GET /coverage/items
+
+**旧記録の参照用に維持する。** チェックの更新は終了しており、返される checked / checkedLensKeys は過去の記録。現在の素材作業は `/progress` で管理する。
 
 ソースのアイテム一覧（トリアージ・エンリッチ込み）。**クエリ:** `source`（必須・DataSource.key）, `lens`（省略時は全観点の `checkedLensKeys` 付き）, `checked`（`0`/`1`。`lens` 指定時のみ有効）, `relevant`（`1`=坂井新奈に**関連あり**〈言及 ∪ 本人著〉のみ / `0`=関連なしのみ。url 系ソースのみ有効・talk/manual では無視。旧名 `mentions` もエイリアスとして受付）, `order`（`asc`〈既定〉/`desc`）, `page`（既定 1）, `pageSize`（既定 100・最大 500）。`total` はフィルタ後の件数（ページング前）。
 
@@ -784,33 +786,31 @@ Lens / DataSource / Coverage / LensItemCheck はいずれも `classification` �
 
 `lens` 指定時は各アイテムに `checkedLensKeys` の代わりに `checked`（boolean）が付く。
 
-### PUT /coverage/checks
+### PUT /coverage/checks / POST /coverage/checks/bulk
 
-アイテムチェックのトグル（冪等）。**ボディ:** `lensKey`, `dataSourceKey`, `itemKey`, `checked`（boolean・必須）, `note?`, `classification?`。`checked=true` は upsert（`itemDate`/`itemTitle` は導出値のスナップショットを保存。導出に無い `itemKey` は 400）、`checked=false` は削除。監査は AuditLog `coverage.check`。
-
-### POST /coverage/checks/bulk
-
-範囲一括チェック。**ボディ:** `dataSourceKey`, `lensKeys[]`, `untilDate?`（`YYYY-MM-DD`・省略時は**全期間**〈v2.3〉）, `onlyIrrelevant?`（boolean・既定 false）, `classification?`。`itemDate <= untilDate` の全導出アイテムを対象 lens すべてに `createMany skipDuplicates`。`onlyIrrelevant=true` のときは**関連なし = 言及なし かつ 本人著でない**アイテムだけに絞る（v2.4「関連なしをここまで✓」。本人ブログには本人への言及が無いことがあるため著者軸も除外条件に含めて誤爆を防ぐ。キー集合はソース全体で導出・数分キャッシュ。url 系のみ有効・talk は全件本人）。返り値 `{ created, targetItems, lensKeys }`。監査は AuditLog `coverage.bulk_check`。
+観点別アイテムチェックは終了。認証・write 権限検証後に **410 Gone** を返す。入力本文は処理せず、旧記録への INSERT / UPDATE / DELETE はしない。
 
 ### GET /coverage/summary
 
-公開サイト用の要約（`note` なし）。public かつ active な Lens × DataSource で、導出アイテムのある（`total > 0`）かつ not_applicable でないセルのみ。`minContinuousUntil` はその観点で最も遅れているソースの `continuousUntil`（どれか1つでも先頭から未チェック=null なら null）。
+公開サイト用の日付要約。public かつ active な Lens × DataSource のうち not_applicable でないセル。素材の登録数に依存せず、manual のソースも日付管理できる。内部メモ・設定日時・件数を含めない。
+
+`minContinuousUntil` はソース日付の最小値。一つでも未設定なら null。対象ソースがない観点は省略。
 
 ```json
 {
-  "generatedAt": "2026-07-12T...",
-  "lenses": [
-    {
-      "key": "food", "name": "食べたもの",
-      "sources": [
-        {"key": "blog", "name": "公式ブログ", "continuousUntil": "2026-06-25", "checked": 120, "total": 150},
-        {"key": "talk", "name": "トーク", "continuousUntil": "2026-05-30", "checked": 80, "total": 200}
-      ],
-      "minContinuousUntil": "2026-05-30"
-    }
-  ]
+  "generatedAt":"2026-10-18T00:00:00.000Z",
+  "lenses":[{
+    "key":"food","name":"食べたもの",
+    "sources":[
+      {"key":"blog","name":"公式ブログ","continuousUntil":"2026-10-01"},
+      {"key":"talk","name":"トーク","continuousUntil":null}
+    ],
+    "minContinuousUntil":null
+  }]
 }
 ```
+
+**移行順:** 公開サイト `/status` を先に新旧応答互換の日付表示へ変更する。その後 migration と Akashic の新コードを適用する。旧サイトは checked / total に依存するため、Akashic を先に切り替えない。stats Worker は JSON を中継し、最大30分の更新待ちがある。
 
 ---
 

@@ -1,5 +1,7 @@
 "use client";
 
+import { COVERAGE_LABELS } from "@/lib/utils";
+
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -66,7 +68,7 @@ const navItems = [
   { href: "/lives", label: "ライブ", icon: Music },
   { href: "/progress", label: "記事化の進捗", icon: ListChecks },
   { href: "/songs", label: "曲", icon: ListMusic },
-  { href: "/coverage", label: "収集カバレッジ", icon: Grid3x3 },
+  { href: "/coverage", label: COVERAGE_LABELS.title, icon: Grid3x3 },
   { href: "/ai-questions", label: "案内AIへの質問", icon: MessageCircleQuestion },
   { href: "/graph", label: "グラフ", icon: Network },
   { href: "/analysis", label: "テキスト分析", icon: BarChart3 },

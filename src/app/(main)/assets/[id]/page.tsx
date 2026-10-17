@@ -24,13 +24,11 @@ import {
   formatDate,
 } from "@/lib/utils";
 import { getAssetRelations, getAssetGraph } from "@/lib/domain/relations";
-import { findItemsForAsset, getNinaTerms } from "@/lib/domain/coverage-items";
-import { listLenses } from "@/lib/domain/coverage";
+import { getNinaTerms } from "@/lib/domain/coverage-items";
 import type { ClearanceLevel } from "@prisma/client";
 import { SubmitButton } from "@/components/submit-button";
 import { BackButton } from "@/components/back-button";
 import { StatusWorkflow } from "./status-workflow";
-import { AssetCoveragePanel } from "./coverage-panel";
 import { NinaHighlightBanner } from "./nina-highlight-banner";
 import { CopySourceRef } from "./copy-source-ref";
 import { AnniversaryLink } from "./anniversary-link";
@@ -219,14 +217,10 @@ export default async function AssetDetailPage({
   if (!pageData) notFound();
   const { asset, relations, graph, duplicates, embeddedImageAssets, prevAsset, nextAsset } = pageData;
 
-  // カバレッジパネル（v2.4）: このアセットが属するカバレッジアイテムの逆引き＋アクティブ観点
-  // ハイライト語彙（?hl=nina 時のみ）も並列で取得
+  // 素材ごとのクリップ済と、必要な場合だけ言及ハイライトを取得する。
   const isEditor = ["admin", "member"].includes(session.user.role);
-  const canEditCoverage = isEditor;
   const canClip = isEditor;
-  const [coverageItems, activeLenses, ninaTerms, materialItems] = await Promise.all([
-    findItemsForAsset(id, userClearance),
-    listLenses(userClearance, false), // active のみ
+  const [ninaTerms, materialItems] = await Promise.all([
     hlNina ? getNinaTerms(userClearance) : Promise.resolve([] as string[]),
     findMaterialClipProgressForAsset(id, userClearance),
   ]);
@@ -673,21 +667,6 @@ export default async function AssetDetailPage({
                 createdBy: c.createdBy?.name ?? null,
               }))}
               canEdit={canClip}
-            />
-          )}
-
-          {/* Coverage panel (v2.4): 所属カバレッジアイテムへの観点チェック */}
-          {coverageItems.length > 0 && activeLenses.length > 0 && (
-            <AssetCoveragePanel
-              items={coverageItems.map((ci) => ({
-                sourceKey: ci.sourceKey,
-                sourceName: ci.sourceName,
-                itemKey: ci.itemKey,
-                itemTitle: ci.itemTitle,
-                checkedLensKeys: ci.checkedLensKeys,
-              }))}
-              lenses={activeLenses.map((l) => ({ key: l.key, name: l.name }))}
-              canEdit={canEditCoverage}
             />
           )}
 

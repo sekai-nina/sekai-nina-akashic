@@ -20,11 +20,9 @@
  * （ハードコードしない）。canonicalName + aliases を一致語に使う。
  */
 
-import { matchesLikeOr } from "@/lib/clip-progress/material-items";
 import { ItemRule, Prisma } from "@prisma/client";
 import { unstable_cache } from "next/cache";
 import { withClearance, withSession, type TransactionClient } from "@/lib/db";
-import { jstDayString } from "@/lib/utils";
 import {
   getDerivedItems,
   itemRuleIsUrl,
@@ -608,98 +606,5 @@ export async function listItems(
       relevant: relevantApplicable ? opts.relevant ?? null : null,
       items: pageItems,
     };
-  });
-}
-
-// ============================================================
-// アセット → 所属カバレッジアイテムの逆引き (findItemsForAsset) — v2.4
-// ============================================================
-
-export interface AssetCoverageItem {
-  sourceKey: string;
-  sourceName: string;
-  itemRule: ItemRule;
-  itemKey: string; // url または "YYYY-MM-DD"
-  itemTitle: string | null;
-  checkedLensKeys: string[]; // 現在のチェック状態（全観点）
-}
-
-/**
- * アセットが属するカバレッジアイテムを逆引きする（アセットページ内チェックパネル用・v2.4）。
- * アセットの SourceRecord.url / canonicalDate(JST日) を、derivable な各 DataSource の
- * publisher/title パターン（LIKE・`|` OR）とアプリ側で突き合わせる。通常 0〜1 件。
- * クエリはアセット1・データソース1・チェック1 の計3本（アイテム毎の導出クエリは発行しない）。
- */
-export async function findItemsForAsset(
-  assetId: string,
-  clearance: string
-): Promise<AssetCoverageItem[]> {
-  return withClearance(clearance, async (tx) => {
-    const asset = await tx.asset.findUnique({
-      where: { id: assetId },
-      select: {
-        id: true,
-        canonicalDate: true,
-        sourceRecords: { select: { url: true, publisher: true, title: true } },
-      },
-    });
-    if (!asset || asset.sourceRecords.length === 0) return [];
-
-    const sources = await tx.dataSource.findMany({
-      where: { active: true, itemRule: { not: "manual" } },
-      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-    });
-
-    const found: {
-      ds: (typeof sources)[number];
-      itemKey: string;
-      itemTitle: string | null;
-    }[] = [];
-    const seen = new Set<string>();
-
-    for (const ds of sources) {
-      const matching = asset.sourceRecords.filter(
-        (sr) =>
-          matchesLikeOr(sr.publisher, ds.publisherPattern) &&
-          matchesLikeOr(sr.title, ds.titlePattern)
-      );
-      if (matching.length === 0) continue;
-
-      if (ds.itemRule === "talk_date") {
-        if (!asset.canonicalDate) continue; // 導出対象外（deriveItems と同条件）
-        const day = jstDayString(asset.canonicalDate);
-        const dedupe = `${ds.id}:${day}`;
-        if (seen.has(dedupe)) continue;
-        seen.add(dedupe);
-        found.push({ ds, itemKey: day, itemTitle: `トーク ${day}` });
-      } else {
-        // blog_url / source_url — url を持つ SourceRecord のみアイテムになる
-        for (const sr of matching) {
-          if (!sr.url) continue;
-          const dedupe = `${ds.id}:${sr.url}`;
-          if (seen.has(dedupe)) continue;
-          seen.add(dedupe);
-          found.push({ ds, itemKey: sr.url, itemTitle: sr.title || null });
-        }
-      }
-    }
-    if (found.length === 0) return [];
-
-    // 現在のチェック状態（全観点）を1クエリで
-    const checks = await tx.lensItemCheck.findMany({
-      where: { OR: found.map((f) => ({ dataSourceId: f.ds.id, itemKey: f.itemKey })) },
-      select: { dataSourceId: true, itemKey: true, lens: { select: { key: true } } },
-    });
-    const checkedByItem = new Map<string, string[]>();
-    for (const c of checks) pushMap(checkedByItem, `${c.dataSourceId}:${c.itemKey}`, c.lens.key);
-
-    return found.map((f) => ({
-      sourceKey: f.ds.key,
-      sourceName: f.ds.name,
-      itemRule: f.ds.itemRule,
-      itemKey: f.itemKey,
-      itemTitle: f.itemTitle,
-      checkedLensKeys: checkedByItem.get(`${f.ds.id}:${f.itemKey}`) ?? [],
-    }));
   });
 }

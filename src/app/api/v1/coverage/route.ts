@@ -1,7 +1,15 @@
 import { NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
 import { getMatrix, upsertCell } from "@/lib/domain/coverage";
-import type { ClearanceLevel, CoverageStatus } from "@prisma/client";
+import { CoverageInputError, CoveragePermissionError } from "@/lib/coverage/freshness";
+import { z } from "zod";
+
+const cellSchema = z.object({
+  lensKey: z.string().min(1).max(128), dataSourceKey: z.string().min(1).max(128),
+  status: z.enum(["tracked", "not_applicable"]).optional(), confirmedUntil: z.string().nullable().optional(),
+  note: z.string().max(10000).nullable().optional(),
+  classification: z.enum(["public", "internal", "confidential", "restricted"]).optional(),
+});
 
 export async function GET(request: Request) {
   const auth = await requireApiAuth(request, "read");
@@ -18,28 +26,14 @@ export async function PUT(request: Request) {
   const auth = await requireApiAuth(request, "write");
   if (auth instanceof NextResponse) return auth;
 
-  const body = await request.json();
-  if (!body.lensKey || !body.dataSourceKey) {
-    return NextResponse.json(
-      { error: "lensKey and dataSourceKey are required" },
-      { status: 400 }
-    );
-  }
-
+  const parsed = cellSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: "入力を確認してください" }, { status: 400 });
   try {
-    const cell = await upsertCell(
-      {
-        lensKey: body.lensKey,
-        dataSourceKey: body.dataSourceKey,
-        status: body.status as CoverageStatus | undefined,
-        note: body.note,
-        classification: body.classification as ClearanceLevel | undefined,
-      },
-      auth.clearance,
-      auth.id
-    );
+    const cell = await upsertCell(parsed.data, auth.clearance, auth.id);
     return NextResponse.json(cell);
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+    if (e instanceof CoverageInputError) return NextResponse.json({ error: e.message }, { status: 400 });
+    if (e instanceof CoveragePermissionError) return NextResponse.json({ error: e.message }, { status: 403 });
+    return NextResponse.json({ error: "鮮度日付を更新できませんでした" }, { status: 400 });
   }
 }
