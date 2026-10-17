@@ -57,14 +57,26 @@ Akashicの要約 → stats Worker/KV → 公開サイト `/status`。WorkerはJS
 - 公開サイトのChromeローカルfixtureで、新旧API・未設定の表示、件数非表示、動的DOMへのgrid適用を確認し、スクリーンショットを目視確認。
 - 認証済み本番ブラウザでの操作確認は未実施。ローカルfixtureの確認と区別する。
 
-## 本番適用手順（未実施）
+## 本番適用手順と実施記録
 
 1. 公開サイト側の変更を先にマージ・反映し、旧API応答でも日付表示できることを確認する。
 2. ユーザー承認後、Akashicのmigration `20261018000000_coverage_freshness` を本番適用する。既存コードと互換性のあるnullable列追加のみ。新規テーブルがないため追加GRANT不要。
 3. migration適用後にAkashicの新コードをマージ・反映する。自動デプロイより先にDB列を用意する。
 4. 本番画面で日付編集・空への解除・対象外・viewer閲覧を確認し、公開サイトの反映を確認する。旧表示が残る場合はページを再読込し、Worker更新を待つ。
 
-本番migration・本番データ書き込み・環境変数変更・デプロイ・マージは実施していない。コミット・PR作成は継続作業での承認範囲に沿って行う。
+### 2026-10-18 の承認と適用
+
+ユーザーから「マージしていいよ」と承認を受け、公開サイト PR #81 を squash merge（7273cdb31dc6f70e38bb1e5b444e3e4adb0b5e1a）。本番DBは別途の承認が必要という最初の指定に沿って確認し、「はい、migrationを適用してからマージする」と回答を受けた。
+
+- 適用待ちは今回のmigration一件のみ、失敗履歴なし。以前からのchecksum不一致2件（20260517000000_add_trgm_indexes / 20260916000000_article_edited_at）は変更していない。
+- `prisma migrate deploy` で `20261018000000_coverage_freshness` を本番適用済み。追加GRANT不要。
+- 実行中に公開サイトの本番ビルドが成功。`https://sekai-nina.com/status/` のHTTP200と新しい日付表示用HTMLを確認。AkashicのAPI切り替えはこの確認後に行う。
+- 適用履歴のchecksum、DATE / nullableとtimestamp / nullableの列定義、既存RLS4種/ENABLE/FORCE、app_runtimeの4操作権限を読み取りで確認。
+- Coverage 0行・旧LensItemCheck 164行は適用前後で同じ。既存業務データ・旧チェックの更新/削除や確認用行の作成はしていない。
+- 新コードのgetMatrix / getSummaryを本番DBで読み取り実行し、9観点×12ソース・108セル、公開射影の件数/メモ非公開を確認。旧記録のある9セルは初回入力前の導出を使用。全セルの日付は未設定のため、実際に確認した日付を運営者が今後入力する。
+- 認証済み本番ブラウザでの保存/解除・viewer操作確認は引き続き未実施。ローカルの実コンポーネント検証と区別する。
+
+Akashicのマージ・デプロイの最終状態は [PR #236](https://github.com/sekai-nina/sekai-nina-akashic/pull/236) を参照。
 
 ## 完了条件
 
@@ -74,7 +86,8 @@ Akashicの要約 → stats Worker/KV → 公開サイト `/status`。WorkerはJS
 - [x] 公開サイトを日付表示へ変更し、新旧API互換を検証
 - [x] 型チェック・テスト・レビュー
 - [x] PRへ提出する実装・検証・適用手順を用意。本番migrationは未適用
-- [ ] 承認後の本番適用と認証済み実画面での確認
+- [x] 個別承認後の本番migration適用・公開サイト反映・本番DBの読み取り確認
+- [ ] 認証済み実画面での保存/解除・viewer確認
 
 ## 変更ファイル一覧
 
