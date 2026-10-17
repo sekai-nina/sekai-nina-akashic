@@ -52,6 +52,6 @@
 
 旧チェックは未編集セルについて一括取得。チェックのないソースは素材導出しない。チェックがあるソースは一ソース一回、最大3並列で既存キャッシュ付き getDerivedItems を利用する。全セルを入力すれば旧チェックと素材の導出は不要になる。
 
-migration `20261018000000_coverage_freshness` は nullable 2列追加だけ。本番未適用。既存テーブルのRLS/GRANTを引き継ぐため追加GRANTなし。schema同士の migrate diff とローカルPostgreSQLで検証する。本番適用はユーザーの承認後。
+migration `20261018000000_coverage_freshness` は nullable 2列追加だけ。2026-10-18 にユーザー承認を受け本番適用済み。既存テーブルのRLS/GRANTを引き継ぐため追加GRANTなし。schema同士の migrate diff とローカルPostgreSQLで検証する。本番適用履歴・型・RLS・権限・既存行数の保持と新コードの読み取りを確認済み。
 
 公開サイトを先に更新し、その後に後方互換の列追加、最後にAkashic新コードを適用する。詳細は [段階3の記録](./coverage-phase3-design.md)。
