@@ -6,7 +6,6 @@ import { getCachedClipCount } from "@/lib/cache";
 import type { ClearanceLevel } from "@prisma/client";
 import { NavigationProgress } from "@/components/navigation-progress";
 import { QuickCreateModal } from "@/components/quick-create-modal";
-import { CoverageScrollMemory } from "./coverage/scroll-memory";
 
 export default async function MainLayout({
   children,
@@ -26,9 +25,6 @@ export default async function MainLayout({
     <div className="flex h-dvh">
       <Suspense>
         <NavigationProgress />
-      </Suspense>
-      <Suspense>
-        <CoverageScrollMemory />
       </Suspense>
       <Sidebar user={session.user} clipCount={clipCount} />
       <main className="flex-1 overflow-auto mt-12 md:mt-0">
