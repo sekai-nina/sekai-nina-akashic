@@ -1,6 +1,5 @@
 import * as z from "zod";
 import { $Enums } from "@prisma/client";
-import { parseDateOnly } from "@/lib/domain/coverage";
 import type { AssetIntakeData } from "@/lib/domain/asset-intake";
 
 export const DISCORD_MEMO_CHANNELS = {
@@ -73,8 +72,8 @@ function toJstDate(iso: string): Date {
   }).formatToParts(new Date(iso));
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value;
   const dateOnly = `${part("year")}-${part("month")}-${part("day")}`;
-  const parsed = parseDateOnly(dateOnly);
-  if (!parsed) throw new Error("Discord 投稿日時を JST 日付へ変換できません");
+  const parsed = new Date(`${dateOnly}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) throw new Error("Discord 投稿日時を JST 日付へ変換できません");
   return parsed;
 }
 
