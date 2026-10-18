@@ -48,6 +48,7 @@ pnpm cli:keygen <user-email> <key-name>
 | `akashic_list_entities` | read | 人物・聖地・タグ・番組の検索 |
 | `akashic_list_places` | read | 聖地一覧（緯度経度・住所・種類・エリアつき） |
 | `akashic_create_asset` | write | アセットの下書き登録（`status` は必ず `inbox`） |
+| `akashic_import_discord_memo` | write | 承諾済みの新奈メモ・フィールドワーク投稿を `inbox` へ登録 |
 | `akashic_update_asset` | write | メタデータ・ステータス・本文の更新 |
 | `akashic_begin_upload` | write | ファイル本体の Drive アップロード URL を発行（重複なら発行せず既存 ID） |
 | `akashic_complete_upload` | write | Drive に上げたファイルをアセットとして登録（`status` は必ず `inbox`） |
@@ -60,6 +61,18 @@ pnpm cli:keygen <user-email> <key-name>
 | `akashic_apply_article_source` | write | 紐づけを反映済みにし脚注番号を採る（公開判断。internal 以下のみ） |
 
 削除系のツールは意図的に用意していない。削除は画面から人間が行う。記事に出典を pending で紐づけるツールも無い（#110）。
+
+### Discordメモの取り込み
+
+ふぃたんは毎日 09:00 JST に「新奈メモ」「フィールドワーク」の新着を候補として要約し、
+人の明示承諾を受けてから `akashic_import_discord_memo` を使う。候補の提示・承諾会話は、
+元投稿と同じチャンネルで行う。
+
+- 保存するのは本文、投稿者、投稿日時、元メッセージ URL とチャンネル種別だけ。添付ファイルは初回対象外
+- 新規アセットは `kind: text`、`status: inbox`、`sourceType: discord`。classification の既定は `internal`
+- `guildId`・`channelId`・`messageId` と URL の対応を検証する。3値の一意制約により、同じ投稿を再承諾してもアセットを増やさない
+- 投稿後の編集・削除には追従しない。Akashic に保存した承諾時点の本文を記録として扱う
+- ツールは `write` 権限を持つ MCP キーでだけ公開される。人の承諾はアプリケーション外のふぃたん側で管理する
 
 ### 検索語の区切り
 
