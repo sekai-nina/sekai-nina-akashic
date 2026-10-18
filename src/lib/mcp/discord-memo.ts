@@ -57,7 +57,7 @@ export function parseDiscordMemoInput(input: unknown): DiscordMemoInput {
 
 export function isAllowedDiscordMemoChannel(
   input: Pick<DiscordMemoInput, "channel" | "guildId" | "channelId">,
-  env: NodeJS.ProcessEnv = process.env
+  env: Record<string, string | undefined> = process.env as Record<string, string | undefined>
 ): boolean {
   const expectedChannel = input.channel === "nina_memo" ? env.NINA_MEMO_CHANNEL_ID : env.FIELDWORK_CHANNEL_ID;
   return Boolean(expectedChannel && env.DISCORD_MEMO_GUILD_ID && input.guildId === env.DISCORD_MEMO_GUILD_ID && input.channelId === expectedChannel);
