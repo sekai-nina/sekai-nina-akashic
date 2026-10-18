@@ -274,6 +274,7 @@ model Asset {
   @@index([canonicalDate])
   @@index([createdAt])
   @@index([classification])
+  @@unique([discordGuildId, discordChannelId, discordMessageId])
 }
 
 model AssetText {
