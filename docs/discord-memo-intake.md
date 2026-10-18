@@ -28,7 +28,8 @@
 
 ## ふぃたん側に必要な設定
 
-ふぃたんには対象2チャンネルの Discord ID と、Akashic の write 権限付き MCP キーを設定する。
+Akashic には `DISCORD_MEMO_GUILD_ID`、`NINA_MEMO_CHANNEL_ID`、`FIELDWORK_CHANNEL_ID` を設定し、
+ふぃたんには同じ対象2チャンネルの Discord ID と、Akashic の write 権限付き MCP キーを設定する。
 巡回処理は前回確認した message ID 以降だけを候補にし、投稿者・本文・メッセージ URL を読み取る。
 候補の承諾は、候補を提案した後の返信でのみ有効にする。これはミーグリappの issue
 候補と同じ承諾方式で、過去の「OK」を別候補へ使い回さないためである。

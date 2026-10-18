@@ -26,7 +26,7 @@ import { toAssetDetail, toEntitySummary, toPlaceSummary, toSearchItem } from "./
 import { fail, ok, toToolError } from "./result";
 import { registerArticleReadTools, registerArticleWriteTools } from "./tools-articles";
 import { registerUploadTools } from "./tools-upload";
-import { DiscordMemoInputSchema, parseDiscordMemoInput, toDiscordMemoAsset } from "./discord-memo";
+import { DiscordMemoInputSchema, isAllowedDiscordMemoChannel, parseDiscordMemoInput, toDiscordMemoAsset } from "./discord-memo";
 
 // ============================================================
 // 共通ヘルパー
@@ -342,6 +342,9 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
     },
     async (rawArgs) => {
       const args = parseDiscordMemoInput(rawArgs);
+      if (!isAllowedDiscordMemoChannel(args)) {
+        return fail("このDiscordチャンネルからのメモ取り込みは許可されていません。");
+      }
       const classification = args.classification ?? "internal";
       const above = rejectAboveClearance(user, classification);
       if (above) return above;
@@ -385,7 +388,7 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
           if (concurrent) {
             return ok({ ...createdAssetPayload(concurrent, null, baseUrl), created: false, duplicate: true });
           }
-          return fail("同じDiscordメッセージは既に登録されています。クリアランスが足りない可能性があります。");
+          return fail("Discordメモを登録できませんでした。");
         }
         return toToolError(err, "Discordメモの登録に失敗しました。");
       }

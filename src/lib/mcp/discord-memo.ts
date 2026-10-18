@@ -25,6 +25,14 @@ export const DiscordMemoInputSchema = z
     classification: z.enum($Enums.ClearanceLevel).optional(),
   })
   .superRefine((value, ctx) => {
+    const date = /^(\d{4})-(\d{2})-(\d{2})T/.exec(value.postedAt);
+    if (date) {
+      const [year, month, day] = date.slice(1).map(Number);
+      const check = new Date(Date.UTC(year, month - 1, day));
+      if (check.getUTCFullYear() !== year || check.getUTCMonth() !== month - 1 || check.getUTCDate() !== day) {
+        ctx.addIssue({ code: "custom", path: ["postedAt"], message: "存在しない日時です" });
+      }
+    }
     let url: URL;
     try {
       url = new URL(value.messageUrl);
@@ -45,6 +53,14 @@ export type DiscordMemoInput = z.infer<typeof DiscordMemoInputSchema>;
 
 export function parseDiscordMemoInput(input: unknown): DiscordMemoInput {
   return DiscordMemoInputSchema.parse(input);
+}
+
+export function isAllowedDiscordMemoChannel(
+  input: Pick<DiscordMemoInput, "channel" | "guildId" | "channelId">,
+  env: NodeJS.ProcessEnv = process.env
+): boolean {
+  const expectedChannel = input.channel === "nina_memo" ? env.NINA_MEMO_CHANNEL_ID : env.FIELDWORK_CHANNEL_ID;
+  return Boolean(expectedChannel && env.DISCORD_MEMO_GUILD_ID && input.guildId === env.DISCORD_MEMO_GUILD_ID && input.channelId === expectedChannel);
 }
 
 /** Discord の投稿時刻を、アセットの日付列用の JST 暦日に正規化する。 */
