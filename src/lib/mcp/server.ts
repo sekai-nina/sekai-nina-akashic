@@ -18,6 +18,7 @@ const INSTRUCTIONS = [
   "- エンティティは名前で指定する。一致しなかった名前は紐づかず unresolvedEntities として返るので、",
   "  正式名称を調べ直すか、新規で問題ないと確認できたときだけ createMissingEntities: true を付ける。",
   "- akashic_create_asset で作ったアセットは必ず status=inbox に入る。人間が仕分けする前提の下書きとして扱う。",
+  "- 「新奈メモ」「フィールドワーク」の投稿は、毎日の候補提示で人から承諾を得た後だけ akashic_import_discord_memo で登録する。添付は渡さない。",
   "- 画像・動画などのファイル本体は akashic_begin_upload → 手元で curl -X PUT → akashic_complete_upload の順で登録する。",
   "  ファイルパスやバイト列をツール引数で渡すことはできない。",
   "- 日付は JST 基準。canonicalDate は投稿日ではなく「内容の公開日・放送日」を入れる。",

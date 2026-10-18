@@ -26,6 +26,7 @@ import { toAssetDetail, toEntitySummary, toPlaceSummary, toSearchItem } from "./
 import { fail, ok, toToolError } from "./result";
 import { registerArticleReadTools, registerArticleWriteTools } from "./tools-articles";
 import { registerUploadTools } from "./tools-upload";
+import { DiscordMemoInputSchema, parseDiscordMemoInput, toDiscordMemoAsset } from "./discord-memo";
 
 // ============================================================
 // 共通ヘルパー
@@ -327,6 +328,70 @@ function registerReadTools(server: McpServer, { user, baseUrl }: ToolContext) {
 // ------------------------------------------------------------
 
 function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
+  server.registerTool(
+    "akashic_import_discord_memo",
+    {
+      title: "承諾済みDiscordメモの登録",
+      description:
+        "人間から明示的に承諾された「新奈メモ」または「フィールドワーク」の投稿を、" +
+        "Akashic の inbox アセットとして登録する。承諾前の候補には使わない。" +
+        "添付ファイルは扱わず、本文・投稿者・投稿時刻・元メッセージURLだけを保存する。" +
+        "同じDiscordメッセージは重複登録せず、既存のアセットを返す。",
+      inputSchema: DiscordMemoInputSchema,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+    },
+    async (rawArgs) => {
+      const args = parseDiscordMemoInput(rawArgs);
+      const classification = args.classification ?? "internal";
+      const above = rejectAboveClearance(user, classification);
+      if (above) return above;
+
+      const findExisting = () =>
+        withClearance(user.clearance, (tx) =>
+          tx.asset.findUnique({
+            where: {
+              discordGuildId_discordChannelId_discordMessageId: {
+                discordGuildId: args.guildId,
+                discordChannelId: args.channelId,
+                discordMessageId: args.messageId,
+              },
+            },
+            select: { id: true, title: true, kind: true, status: true, classification: true },
+          })
+        );
+
+      const existing = await findExisting();
+      if (existing) {
+        return ok({ ...createdAssetPayload(existing, null, baseUrl), created: false, duplicate: true });
+      }
+
+      try {
+        const asset = await intakeAsset(toDiscordMemoAsset(args), user.id, user.clearance);
+
+        await logMcpToolCall({
+          user,
+          tool: "import_discord_memo",
+          targetType: "Asset",
+          targetId: asset.id,
+          args: { channel: args.channel, messageId: args.messageId, classification },
+        });
+
+        return ok({ ...createdAssetPayload(asset, null, baseUrl), created: true, duplicate: false });
+      } catch (err) {
+        // findUnique → create の間に同じ投稿を別の承諾処理が登録した場合も、
+        // 閲覧可能なら既存行を返す。見えない場合は存在を明かさない。
+        if (err instanceof Error && err.message.includes("Unique constraint failed")) {
+          const concurrent = await findExisting();
+          if (concurrent) {
+            return ok({ ...createdAssetPayload(concurrent, null, baseUrl), created: false, duplicate: true });
+          }
+          return fail("同じDiscordメッセージは既に登録されています。クリアランスが足りない可能性があります。");
+        }
+        return toToolError(err, "Discordメモの登録に失敗しました。");
+      }
+    }
+  );
+
   server.registerTool(
     "akashic_create_asset",
     {
