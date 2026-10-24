@@ -1,4 +1,4 @@
-import type { ClearanceLevel, ItemRule } from "@prisma/client";
+import type { AssetKind, ClearanceLevel, ItemRule } from "@prisma/client";
 import { jstDayString } from "@/lib/utils";
 
 export const MATERIAL_SOURCE_KEYS = [
@@ -38,6 +38,7 @@ export function matchesLikeOr(value: string | null | undefined, pattern: string 
 
 export interface MaterialAsset {
   id: string;
+  kind: AssetKind;
   title: string;
   canonicalDate: Date | null;
   classification: ClearanceLevel;

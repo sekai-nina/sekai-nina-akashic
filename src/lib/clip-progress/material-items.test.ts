@@ -10,7 +10,7 @@ const radio = (shortId = "year1", title = "【1年目】ラジオ出演一覧", 
 ].join("\n")) => ({ shortId, title, body });
 
 const asset = (date: string | null, overrides: Partial<MaterialAsset> = {}): MaterialAsset => ({
-  id: "asset", title: "録音", canonicalDate: date ? new Date(date) : null, classification: "internal",
+  id: "asset", kind: "audio", title: "録音", canonicalDate: date ? new Date(date) : null, classification: "internal",
   sourceRecords: [{ url: "https://talk.test/1", publisher: "Talk (Sony Music)", title: "トーク" }],
   ...overrides,
 });
