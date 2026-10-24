@@ -15,5 +15,7 @@
 -- AlterTable
 ALTER TABLE "Asset" ADD COLUMN "mentionsNina" BOOLEAN NOT NULL DEFAULT false;
 
--- CreateIndex
-CREATE INDEX "Asset_mentionsNina_idx" ON "Asset"("mentionsNina");
+-- true は千数百件 (Asset の約 1.5%) なので、true の行だけの部分索引にする。
+-- Prisma の schema では書けないので schema 管理外。`prisma migrate diff` がこの索引の
+-- DROP を出すので、PGroonga の索引と同じく捨てること。
+CREATE INDEX "Asset_mentionsNina_idx" ON "Asset"(id) WHERE "mentionsNina";
