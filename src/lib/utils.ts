@@ -580,11 +580,11 @@ export const ARTICLE_WORKFLOW_LABELS = {
 
 /** 公開サイトの鮮度管理 (#233 段階3)。 */
 export const COVERAGE_LABELS = {
-  title: "公開サイトの鮮度", description: "観点・情報源ごとの確認済み日付を管理します。日付の更新は公開サイトの鮮度表示に反映されます。",
-  progressLink: "素材のクリップ進捗へ", readOnly: "（閲覧のみ）", matrix: "確認済み日付",
-  legend: "日付は JST 基準です。— は対象外、未確認は日付未設定です。セルを開くと日付・対象外・内部メモを編集できます。",
-  until: "まで確認済み", unknown: "未確認", legacy: "旧記録からの表示", edit: "確認済み日付を編集",
-  date: "確認済み日付（JST）", dateHelp: "その日までの情報を、この観点で確認・反映できた日付を入力してください。空にすると未確認に戻ります。",
-  status: "状態", tracked: "確認済み日付を表示", notApplicable: "対象外（—）", note: "メモ（内部・非公開）",
+  title: "収集状況", description: "ソースごとに、いつまでの分を取り込んだか（収集済みの日付）を管理します。公開サイトの /status に出ます。",
+  progressLink: "人がどこまで見たかは記事化の進捗へ", readOnly: "（閲覧のみ）", list: "収集済みの日付", settings: "ソース管理",
+  legend: "日付は JST 基準です。自動のソースは bot が最後に正常に動いた日で、投稿の無い日も進みます。bot が止まると日付も止まります。",
+  until: "まで収集済み", unknown: "未確認", auto: "自動", manual: "手入力", noReport: "報告なし", lastError: "直近はエラー",
+  latest: "最新の取り込み", items: "件", edit: "収集済みの日付を編集", updatedBy: "更新",
+  date: "収集済みの日付（JST）", dateHelp: "その日までの分を取り込めた日付を入力してください。空にすると未確認に戻ります。公開サイトに出ます。",
   save: "保存", saving: "保存中…", close: "閉じる", failed: "保存に失敗しました。時間をおいて再度お試しください。",
 } as const;

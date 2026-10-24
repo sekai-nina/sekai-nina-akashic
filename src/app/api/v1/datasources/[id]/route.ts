@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
-import { updateDataSource } from "@/lib/domain/coverage";
+import { setCollectedUntil, updateDataSource } from "@/lib/domain/coverage";
+import { CoverageInputError, CoveragePermissionError } from "@/lib/coverage/collection";
 import type { ClearanceLevel, DataSourceKind, ItemRule } from "@prisma/client";
 
 export async function PATCH(
@@ -12,9 +13,12 @@ export async function PATCH(
 
   const { id } = await params;
   const body = await request.json();
+  if (body.collectedUntil !== undefined && body.collectedUntil !== null && typeof body.collectedUntil !== "string") {
+    return NextResponse.json({ error: "collectedUntil は YYYY-MM-DD か null で指定してください" }, { status: 400 });
+  }
 
   try {
-    const source = await updateDataSource(
+    let source = await updateDataSource(
       id,
       {
         name: body.name,
@@ -31,8 +35,14 @@ export async function PATCH(
       auth.clearance,
       auth.id
     );
+    // 手入力の収集済みの日付 (#253)。省略は保持、null は未確認に戻す
+    if (body.collectedUntil !== undefined) {
+      source = await setCollectedUntil(source.key, body.collectedUntil, auth.clearance, auth.id);
+    }
     return NextResponse.json(source);
   } catch (e) {
+    if (e instanceof CoveragePermissionError) return NextResponse.json({ error: e.message }, { status: 403 });
+    if (e instanceof CoverageInputError) return NextResponse.json({ error: e.message }, { status: 400 });
     return NextResponse.json({ error: (e as Error).message }, { status: 400 });
   }
 }

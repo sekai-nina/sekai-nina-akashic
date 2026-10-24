@@ -35,7 +35,7 @@ const JOB_RUN_STATUS_STYLE: Record<JobRunStatus, string> = {
 
 /** グループのセクションから関連ページへ飛ぶリンク */
 const GROUP_LINKS: Partial<Record<CheckGroup, { href: string; label: string }>> = {
-  collect: { href: "/coverage", label: "収集カバレッジ (観点ごとの確認状況)" },
+  collect: { href: "/coverage", label: "収集状況 (ソースごとの収集済みの日付)" },
   articles: { href: "/articles/push", label: "GitHub へ push" },
 };
 

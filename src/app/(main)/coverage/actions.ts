@@ -1,18 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { CoverageInputError, CoveragePermissionError } from "@/lib/coverage/freshness";
+import { CoverageInputError, CoveragePermissionError } from "@/lib/coverage/collection";
 import { COVERAGE_LABELS } from "@/lib/utils";
 import { auth } from "@/lib/auth";
-import type { CoverageStatus } from "@prisma/client";
 import {
-  createLens,
-  updateLens,
   createDataSource,
   updateDataSource,
-  upsertCell,
-  type CreateLensInput,
-  type UpdateLensInput,
+  setCollectedUntil,
   type CreateDataSourceInput,
   type UpdateDataSourceInput,
 } from "@/lib/domain/coverage";
@@ -30,46 +25,16 @@ function errorMessage(e: unknown): string {
   return String(e);
 }
 
-// ---- 公開鮮度の日付・対象外・内部メモ ----
+// ---- 手入力の収集済みの日付 ----
 
-export async function upsertCellAction(input: {
-  lensKey: string;
-  dataSourceKey: string;
-  status: CoverageStatus;
-  confirmedUntil: string | null;
-  note: string | null;
-}) {
+export async function setCollectedUntilAction(dataSourceKey: string, collectedUntil: string | null) {
   const user = await requireEditor();
   try {
-    const cell = await upsertCell(input, user.clearance, user.id);
-    revalidatePath("/coverage");
-    return { ok: true as const, cell };
-  } catch (e) {
-    return { ok: false as const, error: e instanceof CoverageInputError || e instanceof CoveragePermissionError ? e.message : COVERAGE_LABELS.failed };
-  }
-}
-
-// ---- lenses ----
-
-export async function createLensAction(input: CreateLensInput) {
-  const user = await requireEditor();
-  try {
-    const lens = await createLens(input, user.clearance, user.id);
-    revalidatePath("/coverage");
-    return { ok: true as const, id: lens.id };
-  } catch (e) {
-    return { ok: false as const, error: errorMessage(e) };
-  }
-}
-
-export async function updateLensAction(id: string, input: UpdateLensInput) {
-  const user = await requireEditor();
-  try {
-    await updateLens(id, input, user.clearance, user.id);
+    await setCollectedUntil(dataSourceKey, collectedUntil, user.clearance, user.id);
     revalidatePath("/coverage");
     return { ok: true as const };
   } catch (e) {
-    return { ok: false as const, error: errorMessage(e) };
+    return { ok: false as const, error: e instanceof CoverageInputError || e instanceof CoveragePermissionError ? e.message : COVERAGE_LABELS.failed };
   }
 }
 
