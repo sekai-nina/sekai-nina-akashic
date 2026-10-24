@@ -3,7 +3,8 @@ import { jstDayString } from "@/lib/utils";
 /**
  * ソースごとの「いつまでの分を取り込んだか（収集済みの日付）」(#253)。
  *
- * bot のハートビートで出せるソースは、その bot が最後に正常に動いた日（JST）を収集済みの日付とする。
+ * bot のハートビートで出せるソースは、その bot が最後に正常に動いた日（JST）の前日を収集済みの日付とする。
+ * 0:05 に動いた回はその日の後半をまだ見ていないので、日付が丸ごと取れたと言えるのは前日まで。
  * 投稿の無い日も「確認して何も無かった」として進み、bot が止まれば日付も止まる。
  * それ以外のソースは DataSource.collectedUntil に手で入れる。
  */
@@ -30,9 +31,12 @@ export function heartbeatJobKey(sourceKey: string): string | null {
   return SOURCE_HEARTBEAT_JOBS[sourceKey] ?? null;
 }
 
-/** ハートビートの最終成功時刻 → 収集済みの日付（JST の暦日）。報告が無ければ null。 */
+/** ハートビートの最終成功時刻 → 収集済みの日付（その JST 暦日の前日）。報告が無ければ null。 */
 export function autoCollectedUntil(lastOkAt: Date | null | undefined): string | null {
-  return lastOkAt ? jstDayString(lastOkAt) : null;
+  if (!lastOkAt) return null;
+  const day = new Date(`${jstDayString(lastOkAt)}T00:00:00.000Z`);
+  day.setUTCDate(day.getUTCDate() - 1);
+  return day.toISOString().slice(0, 10);
 }
 
 /** JST の暦日。日付の繰り上がりや未来の日付を許可しない。保存は UTC 00:00 の DATE。 */
