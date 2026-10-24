@@ -45,6 +45,9 @@ export async function refreshNinaMentions(db: TransactionClient, { apply }: { ap
   ]);
   const matchedSet = new Set(matched);
   const currentSet = new Set(current.map((a) => a.id));
+  // 検索が 0 件なのに印が付いているのは、索引の作り直しなどで検索が壊れたときに起きる。
+  // そのまま書くと全件の印を無言で外し、/progress と /coverage の分母が縮むので止める
+  if (!matched.length && currentSet.size) throw new Error(`本文検索が 0 件です (印の付いたアセット ${currentSet.size} 件)。検索の故障とみなして書き込みません`);
   const added = matched.filter((id) => !currentSet.has(id));
   const removed = [...currentSet].filter((id) => !matchedSet.has(id));
   if (apply) {

@@ -40,6 +40,11 @@ describe("新奈への言及の付け直し", () => {
     await refreshNinaMentions(db as never, { apply: true });
     expect(db.$executeRaw).not.toHaveBeenCalled();
   });
+  it("検索が 0 件なのに印が付いていれば、検索の故障とみなして外さない", async () => {
+    const db = fakeDb([], ["a", "b"]);
+    await expect(refreshNinaMentions(db as never, { apply: true })).rejects.toThrow();
+    expect(db.$executeRaw).not.toHaveBeenCalled();
+  });
   it("エンティティが引けないときは全件を外さずに止める", async () => {
     mocks.entity.mockResolvedValue(null);
     const db = fakeDb([], ["a"]);

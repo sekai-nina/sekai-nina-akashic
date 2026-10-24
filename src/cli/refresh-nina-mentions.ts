@@ -2,7 +2,8 @@
  * Asset.mentionsNina (本文が坂井新奈に言及しているか) を付け直す。
  *
  * 普段は 15 分ごとの cron (/api/cron/nina-mentions) が同じ処理を回す。これは初回の埋め込みと、
- * 別名を足したあとに結果を下見するためのもの。
+ * 別名を足したあとに結果を下見するためのもの。`pnpm cli:restore` は mentionsNina を戻さない
+ * (全件 false になる) ので、リストア後にも --apply で回す (回さなくても最長 15 分で cron が埋める)。
  *
  * Usage:
  *   pnpm cli:refresh-nina-mentions            # 下見 (何もしない)

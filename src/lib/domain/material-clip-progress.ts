@@ -1,9 +1,8 @@
-import { createHash } from "node:crypto";
 import { unstable_cache } from "next/cache";
 import { Prisma, type DataSource } from "@prisma/client";
 import { withClearance, withSession, type TransactionClient } from "@/lib/db";
 import { assertClearance, isAboveClearance } from "@/lib/classification";
-import { deriveItems, getDerivedItems, sourcePatternConds, TALK_DAY_SQL, toDateOnlyString } from "./coverage";
+import { deriveItems, getDerivedItems, sourcePatternConds, TALK_DAY_SQL, toDateOnlyString, type DerivedItem } from "./coverage";
 import { getSourceAuthorKeys, getSourceMentionKeys } from "./coverage-items";
 import { logAudit } from "./audit";
 import {
@@ -51,32 +50,32 @@ async function getSource(key: string, clearance: string) {
   return source;
 }
 
+const toMaterial = (item: DerivedItem): MaterialItem => ({ ...item, itemDate: toDateOnlyString(item.itemDate) });
+
 /**
- * 分母に入る素材だけを返す。トーク (全日本人) とラジオ (出演一覧の行) は全件が対象。
- * それ以外はソース全体 (ブログなら全メンバー約 3,000 本) を導出せず、関連キー
- * (本人著 ∪ 言及 ∪ 状態のある素材) だけを url で引く。全体の導出は冷えた DB で数秒かかる。
+ * 自動で分母に入る素材。トーク (全日本人) とラジオ (出演一覧の行) は全件。
+ * それ以外はソース全体 (ブログなら全メンバー約 3,000 本) を導出せず、本人著 ∪ 言及の
+ * キーだけを url で引く。全体の導出は冷えた DB で数秒かかる。
+ * キャッシュのキーに済の状態を含めない (含めると済を押すたびに外れる)。
  */
-async function getRelevantMaterials(
-  source: DataSource, clearance: string, statusKeys: string[],
-): Promise<{ items: MaterialItem[]; automatic: Set<string> }> {
-  if (source.key === "radio" || source.itemRule === "talk_date") {
-    const items = source.key === "radio" ? await withClearance(clearance, radioItems)
-      : (await getDerivedItems(source.key, clearance)).map((item) => ({ ...item, itemDate: toDateOnlyString(item.itemDate) }));
-    return { items, automatic: new Set(items.map((i) => i.itemKey)) };
+async function getAutomaticMaterials(source: DataSource, clearance: string): Promise<{ items: MaterialItem[]; automatic: string[] }> {
+  if (source.key === "radio") {
+    const items = await withClearance(clearance, radioItems);
+    return { items, automatic: items.map((i) => i.itemKey) };
   }
-  const statusKey = createHash("sha256").update(statusKeys.slice().sort().join("\n")).digest("hex");
-  // 導出元の getDerivedItems と同じ寿命・タグ。状態のキーが変わる (済を付ける) と別のキャッシュになる。
-  const cached = unstable_cache(async () => {
+  if (source.itemRule === "talk_date") {
+    const items = (await getDerivedItems(source.key, clearance)).map(toMaterial);
+    return { items, automatic: items.map((i) => i.itemKey) };
+  }
+  // 導出元の getDerivedItems と同じ寿命・タグ
+  return unstable_cache(async () => {
     const [authors, mentions] = await Promise.all([
       getSourceAuthorKeys(source.key, clearance), getSourceMentionKeys(source.key, clearance),
     ]);
     const automatic = [...new Set([...authors, ...mentions])];
-    const keys = [...new Set([...automatic, ...statusKeys])];
-    const items = await withClearance(clearance, (tx) => deriveItems(tx, source, { onlyKeys: keys }), { timeout: 30_000 });
-    return { items: items.map((item) => ({ ...item, itemDate: toDateOnlyString(item.itemDate) })), automatic };
-  }, ["material-relevant-items", source.key, clearance, statusKey], { revalidate: 90, tags: ["coverage-derived-items"] });
-  const { items, automatic } = await cached();
-  return { items, automatic: new Set(automatic) };
+    const items = await withClearance(clearance, (tx) => deriveItems(tx, source, { onlyKeys: automatic }), { timeout: 30_000 });
+    return { items: items.map(toMaterial), automatic };
+  }, ["material-automatic-items", source.key, clearance], { revalidate: 90, tags: ["coverage-derived-items"] })();
 }
 
 /** ページ分のアセットだけを一括取得する。URL の重複 SourceRecord でクリップを水増ししない。 */
@@ -123,14 +122,20 @@ async function assetsForItems(tx: TransactionClient, source: DataSource, items: 
 export async function listMaterialClipProgress(
   user: Actor, sourceKey: string, options: { page?: number } = {},
 ): Promise<MaterialProgressResult> {
-  const [source, statuses] = await Promise.all([
-    getSource(sourceKey, user.clearance),
+  const sourcePromise = getSource(sourceKey, user.clearance);
+  const [source, statuses, auto] = await Promise.all([
+    sourcePromise,
     withClearance(user.clearance, (tx) => tx.materialClipStatus.findMany({ where: { dataSourceKey: sourceKey } })),
+    sourcePromise.then((source) => getAutomaticMaterials(source, user.clearance)),
   ]);
   const byKey = new Map(statuses.map((s) => [s.itemKey, s]));
-  const { items, automatic } = await getRelevantMaterials(
-    source, user.clearance, statuses.filter((s) => s.included || s.done).map((s) => s.itemKey),
-  );
+  const automatic = new Set(auto.automatic);
+  // 自動判定に漏れて手で対象にした素材 (ふつうは 0 件) だけをその場で引き足す
+  const extraKeys = statuses.filter((s) => (s.included || s.done) && !automatic.has(s.itemKey)).map((s) => s.itemKey);
+  const extras = extraKeys.length && source.key !== "radio" && source.itemRule !== "talk_date"
+    ? (await withClearance(user.clearance, (tx) => deriveItems(tx, source, { onlyKeys: extraKeys }))).map(toMaterial)
+    : [];
+  const items = [...auto.items, ...extras];
   const selected = items.filter((i) => isRelevantMaterial(i.itemKey, automatic, byKey.get(i.itemKey))).sort((a, b) =>
     (b.itemDate ?? "").localeCompare(a.itemDate ?? "") || a.itemKey.localeCompare(b.itemKey));
   const pageSize = 50;
