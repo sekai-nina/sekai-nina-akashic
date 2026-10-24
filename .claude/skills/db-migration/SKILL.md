@@ -7,6 +7,10 @@ description: Prisma のスキーマ変更とマイグレーション追加を行
 
 akashic のマイグレーションは **`pnpm db:migrate` (= `prisma migrate dev`) が必ず失敗する**ため、専用手順が要る。
 
+> **`.env` の `DATABASE_URL` / `DIRECT_URL` は本番。シャドウ DB に渡さない (CLAUDE.md「最重要」0)。**
+> 2026-10-24 に `migrate diff --from-migrations --shadow-database-url "$DIRECT_URL"` で本番の `public` が消えた。
+> 差分確認は `--from-schema-datamodel` / `--to-schema-datamodel` の schema 同士 (DB 不要) で行う。本番に向けてよいのは `migrate status` と、了承を得た `migrate deploy` だけ。
+
 ## 前提: なぜ `migrate dev` が使えないか
 
 `prisma migrate dev` は shadow DB に既存マイグレーションを再適用するが、`20260504_simplify_categories` がデータ依存のマイグレーションで、空の shadow DB では
