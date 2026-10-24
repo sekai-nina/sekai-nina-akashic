@@ -240,6 +240,21 @@ class AkashicClient:
             body["sourceRecords"] = source_records
         return self._request("PATCH", f"/assets/{asset_id}", json=body)
 
+    def set_nina_appearance(self, asset_id: str, status: str) -> dict[str, Any]:
+        """坂井新奈が出ているかを置く (#261)。Discord の ✅ / ❌ 用。
+
+        Args:
+            status: "appears" (出ている) / "absent" (確認して出ていない) / "unchecked" (未確認に戻す)
+
+        Returns:
+            {"id": str, "ninaAppearance": str}
+
+        坂井新奈が著者 (author) のアセットを absent / unchecked にすると 409 (AkashicError)。
+        """
+        return self._request(
+            "PUT", f"/assets/{asset_id}/nina-appearance", json={"status": status}
+        )
+
     def delete_asset(self, asset_id: str) -> dict[str, Any]:
         """アセットを削除する。"""
         return self._request("DELETE", f"/assets/{asset_id}")
@@ -261,10 +276,13 @@ class AkashicClient:
         entity_ids: list[str] | None = None,
         date_from: str | None = None,
         date_to: str | None = None,
+        nina_appearance: str | None = None,
         page: int = 1,
         per_page: int = 20,
     ) -> dict[str, Any]:
         """全文検索。
+
+        nina_appearance ("appears" / "absent" / "unchecked") で坂井新奈の出演を絞れる。
 
         entity_ids を複数指定すると AND 検索になる。
 
@@ -285,6 +303,7 @@ class AkashicClient:
                 "entityIds": ",".join(entity_ids) if entity_ids else None,
                 "dateFrom": date_from,
                 "dateTo": date_to,
+                "ninaAppearance": nina_appearance,
                 "page": page,
                 "perPage": per_page,
             },
