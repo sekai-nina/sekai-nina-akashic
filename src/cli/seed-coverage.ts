@@ -105,7 +105,7 @@ const DATA_SOURCES: DataSourceSeed[] = [
     kind: "magazine",
     itemRule: "source_url",
     publisherPattern:
-      "EX大衆%|BRODY%|週刊少年チャンピオン%|グラビアチャンピオン%|Ray%|BUBKA%|B.L.T.%",
+      "EX大衆%|BRODY%|週刊少年チャンピオン%|グラビアチャンピオン%|Ray%|BUBKA%|B.L.T.%|IDOL AND READ%",
   },
   // 投稿は URL 単位。ラジオだけは出演一覧の記事の行から導出する (#233)。
   { key: "instagram", name: "Instagram", kind: "sns", itemRule: "source_url", publisherPattern: "Instagram%" },
