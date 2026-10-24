@@ -20,3 +20,5 @@ jobs:
       - run: pnpm db:generate
       - run: pnpm typecheck
       - run: pnpm test
+      # 本番 DB を守る PreToolUse フックの判定 (.claude/hooks/guard-prod-db.py)
+      - run: python3 -m unittest discover -s .claude/hooks
