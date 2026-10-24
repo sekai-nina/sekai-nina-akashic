@@ -11,6 +11,10 @@ const ERROR_MESSAGES: Record<string, string> = {
   auth_failed: "認証に失敗しました。もう一度お試しください。",
   no_code: "認証コードがありません。",
   no_email: "メールアドレスを取得できませんでした。",
+  provider_no_email:
+    "Discord アカウントのメールアドレスを取得できませんでした。Discord の設定でメールアドレスを登録・認証してから、もう一度お試しください。",
+  oauth_cancelled: "Discord での認証がキャンセルされました。",
+  oauth_error: "Discord での認証に失敗しました。もう一度お試しください。",
 };
 
 function LoginForm() {
