@@ -29,6 +29,8 @@ import type { ClearanceLevel } from "@prisma/client";
 import { SubmitButton } from "@/components/submit-button";
 import { BackButton } from "@/components/back-button";
 import { StatusWorkflow } from "./status-workflow";
+import { NinaAppearancePanel } from "./nina-appearance-panel";
+import { ninaAppearanceOf } from "@/lib/nina";
 import { NinaHighlightBanner } from "./nina-highlight-banner";
 import { CopySourceRef } from "./copy-source-ref";
 import { AnniversaryLink } from "./anniversary-link";
@@ -648,6 +650,7 @@ export default async function AssetDetailPage({
 
           {/* Status */}
           <StatusWorkflow assetId={id} initialStatus={asset.status} />
+          <NinaAppearancePanel assetId={asset.id} initial={ninaAppearanceOf(asset)} editable={isEditor} />
 
           {/* 記事での参照 + 含まれているドシエ + クリップ (#41): 「ここはもう記事に書いた / 取ってある」を見せる */}
           <MaterialClipPanel items={materialItems} editable={isEditor} />

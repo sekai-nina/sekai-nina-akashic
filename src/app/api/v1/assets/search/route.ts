@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
 import { search } from "@/lib/search";
 import type { SearchQuery } from "@/lib/search";
+import { NINA_APPEARANCES, isNinaAppearance } from "@/lib/nina";
 
 export async function GET(request: Request) {
   const auth = await requireApiAuth(request, "read");
@@ -9,6 +10,14 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const q = url.searchParams.get("q") || "";
+
+  const ninaAppearance = url.searchParams.get("ninaAppearance") || undefined;
+  if (ninaAppearance !== undefined && !isNinaAppearance(ninaAppearance)) {
+    return NextResponse.json(
+      { error: `ninaAppearance must be one of: ${NINA_APPEARANCES.join(", ")}` },
+      { status: 400 }
+    );
+  }
 
   const query: SearchQuery = {
     q,
@@ -28,6 +37,7 @@ export async function GET(request: Request) {
       : undefined,
     dateFrom: url.searchParams.get("dateFrom") ? new Date(url.searchParams.get("dateFrom")!) : undefined,
     dateTo: url.searchParams.get("dateTo") ? new Date(url.searchParams.get("dateTo")!) : undefined,
+    ninaAppearance,
     page: Number(url.searchParams.get("page")) || 1,
     perPage: Math.min(Number(url.searchParams.get("perPage")) || 20, 100),
   };

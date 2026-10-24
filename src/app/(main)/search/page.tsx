@@ -4,6 +4,7 @@ import { search, splitQueryTerms } from "@/lib/search";
 import { auth } from "@/lib/auth";
 import { getCachedEntityList } from "@/lib/cache";
 import { listEditableDossiers } from "@/lib/domain/dossiers";
+import { isNinaAppearance } from "@/lib/nina";
 import { AddToDossier } from "@/components/add-to-dossier";
 import { ASSET_KIND_LABELS, formatDate } from "@/lib/utils";
 import { SearchForm } from "./search-form";
@@ -120,7 +121,9 @@ async function SearchResults({
     ? params.authorIds.split(",").filter(Boolean)
     : [];
 
-  const hasFilters = !!(effectiveKinds.length > 0 || effectiveSourceType || params.dateFrom || params.dateTo || effectiveEntityIds.length > 0 || selectedAuthorIds.length > 0);
+  const ninaAppearance = isNinaAppearance(params.nina) ? params.nina : undefined;
+
+  const hasFilters = !!(effectiveKinds.length > 0 || effectiveSourceType || params.dateFrom || params.dateTo || effectiveEntityIds.length > 0 || selectedAuthorIds.length > 0 || ninaAppearance);
 
   if (!q.trim() && !hasFilters) {
     return (
@@ -138,6 +141,7 @@ async function SearchResults({
     authorIds: selectedAuthorIds.length > 0 ? selectedAuthorIds : undefined,
     dateFrom: params.dateFrom ? new Date(params.dateFrom) : undefined,
     dateTo: params.dateTo ? new Date(params.dateTo) : undefined,
+    ninaAppearance,
     page, perPage: 20,
   }, clearance);
 
@@ -329,7 +333,7 @@ export default async function SearchPage({
     ? params.authorIds.split(",").filter(Boolean)
     : [];
 
-  const hasQuery = !!(q.trim() || selectedKinds.length > 0 || params.dateFrom || params.dateTo || selectedEntityIds.length > 0 || selectedAuthorIds.length > 0);
+  const hasQuery = !!(q.trim() || selectedKinds.length > 0 || params.dateFrom || params.dateTo || selectedEntityIds.length > 0 || selectedAuthorIds.length > 0 || isNinaAppearance(params.nina));
 
   return (
     <div className="max-w-4xl mx-auto">

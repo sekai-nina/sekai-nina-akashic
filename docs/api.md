@@ -25,7 +25,7 @@ APIキーは `pnpm cli:keygen <user-email> <key-name> [permissions]` で発行�
 キーには `read` と `write` のパーミッションがある（デフォルトは両方付与）。
 
 - `read`: GET系のエンドポイント
-- `write`: POST / PATCH / ファイルアップロード
+- `write`: POST / PUT / PATCH / ファイルアップロード
 - `insta_worker`: iPad の story ワーカー専用（`/insta/jobs/:id/start` 等の報告と、自分のジョブの参照だけ）。`pnpm cli:keygen <email> "ipad-insta-worker" insta_worker` で **read / write を持たないキー**を作って iPad に置く。permission はルートを絞るだけで RLS の範囲は持ち主のクリアランスのままなので、**clearance が internal の専用ユーザー**に発行する。なお `GET /insta/targets` `/insta/account` `/ai-status` は「キーが有効なら誰でも読める」設計なので、このキーからも読める
 - `article_push`: 記事 1 本を公開リポジトリに push する（`POST /articles/:shortId/push`）。`write` とは別に持たせる。Discord bot のキーにだけ付ける（#209）
 
@@ -46,6 +46,7 @@ APIキーは `pnpm cli:keygen <user-email> <key-name> [permissions]` で発行�
 | POST | `/assets` | write | アセット作成 |
 | GET | `/assets/:id` | read | アセット詳細 |
 | PATCH | `/assets/:id` | write | アセット更新 |
+| PUT | `/assets/:id/nina-appearance` | write | 坂井新奈が出ているか（出ている / 出ていない / 未確認）を置く |
 | GET | `/assets/:id/thumbnail` | セッション or read | サムネイルへ 302 リダイレクト（`<img>` 埋め込み用。同一オリジンの `<img>` はセッション cookie で通る。clearance の RLS 適用。サムネイルが無ければ 404） |
 | GET | `/assets/search` | read | 全文検索 |
 | GET | `/entities` | read | エンティティ一覧・検索 |
@@ -301,9 +302,13 @@ API キーからは **引き上げしかできない。** `PATCH /assets/:id` / 
   ],
   "sourceRecords": [...],
   "annotations": [...],
-  "collectionItems": [...]
+  "collectionItems": [...],
+  "ninaAbsent": false,
+  "ninaAppearance": "appears"
 }
 ```
+
+`ninaAppearance` は坂井新奈が出ているか（#261）。`appears` = 坂井新奈のエンティティが紐づいている（roleLabel は問わない） / `absent` = 確認して出ていない（`ninaAbsent: true`） / `unchecked` = どちらも無い（未確認）。書き換えは `PUT /assets/:id/nina-appearance` で行う。
 
 **エラー:**
 
@@ -346,12 +351,46 @@ API キーからは **引き上げしかできない。** `PATCH /assets/:id` / 
 - 渡された entityId が既にアセットに紐付いていれば `roleLabel` を更新する
 - 紐付いていなければ新規追加する
 - 渡さなかった既存の紐付けは削除されない（追加・更新のみ）
+- 坂井新奈を渡すと `ninaAbsent`（確認して出ていない）は外れる（出ている / 出ていないを両立させない）
+- `ninaAbsent` 自体はボディに入れても無視される。`PUT /assets/:id/nina-appearance` で変える
 
 **sourceRecords の挙動:**
 - 渡されたレコードはすべて新規追加される
 - 既存の sourceRecords は削除されない
 
 **レスポンス:** 更新後のアセット（リレーション含む）が返る。
+
+### PUT /assets/:id/nina-appearance
+
+アセットに坂井新奈が出ているかを 3 状態のどれかに置く（#261）。Discord bot の ✅ / ❌（lemino_label / youtube_watch）が叩く。
+
+**リクエストボディ (JSON):**
+
+```json
+{ "status": "absent" }
+```
+
+| `status` | 結果 |
+|---|---|
+| `appears` | 坂井新奈を roleLabel「出演」で紐づけ、`ninaAbsent` を外す。既に紐づいていれば roleLabel はそのまま |
+| `absent` | 坂井新奈の紐づけを外し、`ninaAbsent` を立てる |
+| `unchecked` | 両方外す（未確認に戻す） |
+
+同じ状態を何度置いても結果は変わらない（冪等）。
+
+**レスポンス:**
+
+```json
+{ "id": "cm...", "ninaAppearance": "absent" }
+```
+
+**エラー:**
+
+```json
+{ "error": "status must be one of: appears, absent, unchecked" }  // 400
+{ "error": "Not found" }  // 404 (無い、またはクリアランス外)
+{ "error": "坂井新奈が著者 (author) のアセットは「出ていない」「未確認」にできません" }  // 409
+```
 
 ---
 
@@ -367,15 +406,18 @@ API キーからは **引き上げしかできない。** `PATCH /assets/:id` / 
 
 | パラメータ | 型 | デフォルト | 説明 |
 |-----------|-----|----------|------|
-| `q` | string | **必須** | 検索クエリ |
+| `q` | string | `""` | 検索クエリ。空なら下の絞り込みだけで引く（絞り込みも無ければ 0 件） |
 | `target` | string | `all` | `all`, `assets`, `texts` |
 | `kind` | string | - | アセット種別フィルタ |
 | `status` | string | - | ステータスフィルタ |
 | `trustLevel` | string | - | 信頼度フィルタ |
 | `sourceType` | string | - | ソース種別フィルタ |
 | `entityId` | string | - | 特定エンティティに紐づくもののみ |
+| `entityIds` | string | - | カンマ区切りのエンティティ ID。既定はいずれかに紐づくもの (OR) |
+| `entityMatch` | string | `any` | `all` にすると `entityIds` のすべてに紐づくもの (AND) |
 | `dateFrom` | string (ISO 8601) | - | canonicalDate の開始日 |
 | `dateTo` | string (ISO 8601) | - | canonicalDate の終了日 |
+| `ninaAppearance` | string | - | 坂井新奈が出ているか: `appears` / `absent` / `unchecked`（#261）。`q` が空でも絞り込みだけで引ける。例: `?q=&kind=video&entityIds=<日向坂46公式チャンネル>&ninaAppearance=unchecked` で公式チャンネルの未確認の動画 |
 | `page` | number | 1 | ページ番号 |
 | `perPage` | number | 20 | 件数（最大100） |
 

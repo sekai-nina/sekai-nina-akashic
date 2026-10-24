@@ -10,6 +10,7 @@
 
 import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
+import { NINA_ENTITY_ID } from "@/lib/nina";
 
 // 既定の DATABASE_URL は RLS 有効の app_runtime ロールなので、
 // AssetEntity などが見えない。CLI は DIRECT_URL (postgres) で繋ぐ。
@@ -92,6 +93,10 @@ async function main() {
     ),
     ...(duplicated.length > 0
       ? [prisma.assetEntity.deleteMany({ where: { id: { in: duplicated.map((l) => l.id) } } })]
+      : []),
+    // 坂井新奈へ統合したら、付け替えたアセットの「出ていない」を外す (両立させない。#261)
+    ...(toId === NINA_ENTITY_ID && moved.length > 0
+      ? [prisma.asset.updateMany({ where: { id: { in: moved.map((l) => l.assetId) }, ninaAbsent: true }, data: { ninaAbsent: false } })]
       : []),
     ...(testimonials.length > 0
       ? [prisma.testimonial.updateMany({ where: { entityId: fromId }, data: { entityId: toId } })]
