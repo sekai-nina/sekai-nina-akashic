@@ -323,11 +323,11 @@ export async function deleteDossier(user: ActingUser, id: string) {
     ]);
     if (meetGreet) {
       throw new Error(
-        `${meetGreet.date} のミーグリで使われているドシエです。先にミーグリのほうを削除してください`
+        `${meetGreet.date} のミーグリで使われている企画です。先にミーグリのほうを削除してください`
       );
     }
     if (live) {
-      throw new Error(`ライブ「${live.name}」で使われているドシエです。先にライブのほうを削除してください`);
+      throw new Error(`ライブ「${live.name}」で使われている企画です。先にライブのほうを削除してください`);
     }
     await tx.dossier.delete({ where: { id } });
   });

@@ -12,9 +12,9 @@ export default async function NewDossierPage() {
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
       <Link href="/dossiers" className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600">
-        <ArrowLeft size={14} /> ドシエ一覧へ
+        <ArrowLeft size={14} /> 企画一覧へ
       </Link>
-      <h1 className="text-xl font-bold tracking-tight mt-3 mb-4">新規ドシエ</h1>
+      <h1 className="text-xl font-bold tracking-tight mt-3 mb-4">新規企画</h1>
       <form action={createDossierAction} className="space-y-4 bg-white border border-slate-200 rounded-lg p-5">
         <div>
           <label className="block text-xs font-semibold text-slate-600 mb-1">タイトル</label>

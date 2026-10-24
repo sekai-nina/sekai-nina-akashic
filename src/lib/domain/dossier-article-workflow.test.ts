@@ -42,7 +42,7 @@ describe("一般ドシエの生成対象", () => {
     expect(await getDossierArticleWorkflow(user, "d1")).toMatchObject({ needsChoice: true, target: null });
     await expect(requireDossierArticleWorkflow(user, "d1", null)).rejects.toThrow("追記する記事を選んでください");
     expect(await requireDossierArticleWorkflow(user, "d1", "a2")).toMatchObject({ target: { kind: "dossier", articleId: "a2" } });
-    await expect(getDossierArticleWorkflow(user, "d1", "foreign")).rejects.toThrow("このドシエに紐づいていません");
+    await expect(getDossierArticleWorkflow(user, "d1", "foreign")).rejects.toThrow("この企画に紐づいていません");
   });
   it("テンプレート未選択では生成せず、設定を求める", async () => {
     mocks.dossier.mockResolvedValue(dossier({ articleTemplate: null }));

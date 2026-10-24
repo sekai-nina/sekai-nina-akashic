@@ -44,12 +44,12 @@ export function renderQuoteBlogArticle(input: DossierRenderInput): RenderedArtic
   const quoted = quotedBlogs(blogs);
   if (quoted.length === 0) {
     throw new TemplateInputError(
-      "本人ブログの抜粋がドシエにありません。ブログ本文を範囲選択して抜粋を入れてください"
+      "本人ブログの抜粋が企画にありません。ブログ本文を範囲選択して抜粋を入れてください"
     );
   }
   if (quoted.length > 1) {
     throw new TemplateInputError(
-      `抜粋のあるブログが ${quoted.length} 本あります。言葉記事は 1 本のブログにつき 1 記事なので、ドシエを分けてください`
+      `抜粋のあるブログが ${quoted.length} 本あります。言葉記事は 1 本のブログにつき 1 記事なので、企画を分けてください`
     );
   }
   const blog = quoted[0];

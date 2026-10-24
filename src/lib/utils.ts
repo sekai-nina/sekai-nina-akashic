@@ -548,7 +548,7 @@ export const MATERIAL_PROGRESS_LABELS = {
   title: "素材のクリップ・記事化の進捗", clipProgress: "クリップ進捗", articleProgress: "記事化の進捗",
   markDone: "済にする", done: "クリップ済", unfinished: "未クリップ", finish: "この素材はクリップし切った", undo: "クリップ済を解除",
   exclude: "手動対象を解除",
-  description: "本人著・本文で言及ありの素材と、アセット詳細でクリップ済にした素材が分母です。割合とクリップ数は閲覧できる範囲で集計し、移動先のドシエも含めます。共有進捗を更新できない場合は、保存時にお知らせします。",
+  description: "本人著・本文で言及ありの素材と、アセット詳細でクリップ済にした素材が分母です。割合とクリップ数は閲覧できる範囲で集計し、移動先の企画も含めます。共有進捗を更新できない場合は、保存時にお知らせします。",
   clips: "クリップ", empty: "素材はありません", manual: "手動対象", noAssets: "アセット未登録",
   saving: "保存中…", failed: "保存に失敗しました", daily: "この日（JST）全体の進捗です", previous: "前へ", next: "次へ",
   authorFilter: "書き手で絞り込む",
@@ -561,21 +561,21 @@ export const MATERIAL_AUTHOR_FILTER_LABELS = {
 
 /** 記事を作る入口の共通文言 (#233 段階2)。 */
 export const ARTICLE_WORKFLOW_LABELS = {
-  makeArticle: "記事にする", appendArticle: "記事に追記する", openWorkflow: "ドシエで記事を作る",
-  continueArticle: "記事の差分を確認する", backToDossier: "素材のドシエへ", fixedTemplate: "素材の種類に合わせたテンプレートです。",
+  makeArticle: "記事にする", appendArticle: "記事に追記する", openWorkflow: "企画で記事を作る",
+  continueArticle: "記事の差分を確認する", backToDossier: "素材の企画へ", fixedTemplate: "素材の種類に合わせたテンプレートです。",
   template: "1. テンプレート", article: "2. 差分を確認して保存", next: "3. 本文を確認して公開へ",
   preparation: "準備状況", prepareHelp: "開催情報・公演・レポ・スケッチの編集は準備画面で行えます。",
   backToPreparation: "準備画面へ", materials: "素材", reports: "採用済みレポ", sketch: "スケッチ",
   ready: "選択済み", unset: "未選択", needsSync: "記事を作った後に素材が変わっています。差分を確認してください。",
   liveAppendHelp: "公演の表は追記時に作り直します。本人の感想・レポ・関連メディアは、まだ無いものだけを足します。",
-  chooseArticle: "このドシエには複数の記事があります。追記する記事を選んでください。",
+  chooseArticle: "この企画には複数の記事があります。追記する記事を選んでください。",
   chooseTemplate: "先にテンプレートを選んでください。", chooseTarget: "追記する記事を選ぶと差分を確認できます。",
   unsupportedTemplate: "このテンプレートは記事の組み立てに対応していません。",
   readOnly: "この記事を作成・更新する権限がありません。", viewArticle: "記事を開く", editArticle: "記事を開いて編集",
   selectQuote: "名言集に載せる一節を選ぶ", publish: "公開の確認へ", afterSave: "保存した記事の本文・出典を確認してから公開へ進めます。",
   saved: "記事を保存しました。", draft: "下書き", saveDoesNotPublish: "保存しただけでは公開されません。",
-  generationHelp: "記事のプレビュー・保存は、素材のドシエから共通の記事画面で行います。",
-  unavailableDossier: "素材のドシエを閲覧できないため、記事を生成できません。",
+  generationHelp: "記事のプレビュー・保存は、素材の企画から共通の記事画面で行います。",
+  unavailableDossier: "素材の企画を閲覧できないため、記事を生成できません。",
 } as const;
 
 /** 公開サイトの鮮度管理 (#233 段階3)。 */

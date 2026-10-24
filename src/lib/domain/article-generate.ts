@@ -263,14 +263,14 @@ function resolveDossier(
   let articleId: string | null = null;
   if (chosenArticleId) {
     if (!dossier.articles.some((a) => a.id === chosenArticleId)) {
-      throw new DossierArticleError("指定された記事はこのドシエに紐づいていません");
+      throw new DossierArticleError("指定された記事はこの企画に紐づいていません");
     }
     articleId = chosenArticleId;
   } else if (dossier.articles.length === 1) {
     articleId = dossier.articles[0].id;
   } else if (dossier.articles.length > 1) {
     throw new DossierArticleError(
-      `このドシエには記事が ${dossier.articles.length} 本紐づいています。追記する記事を選んでください`
+      `この企画には記事が ${dossier.articles.length} 本紐づいています。追記する記事を選んでください`
     );
   }
 
@@ -289,7 +289,7 @@ function resolveDossier(
   const writeExclusions = async (tx: Parameters<Parameters<typeof withSession>[1]>[0], next: string[]) => {
     const written =
       await tx.$executeRaw`UPDATE "Dossier" SET "articleExclusions" = ${JSON.stringify(next)}::jsonb WHERE "id" = ${dossier.id}`;
-    if (written === 0) throw new DossierArticleError("ドシエを更新できませんでした (権限が変わったか削除されています)");
+    if (written === 0) throw new DossierArticleError("企画を更新できませんでした (権限が変わったか削除されています)");
   };
   return {
     template,
@@ -692,7 +692,7 @@ export async function saveArticle(
     if (!created.ok) {
       const message =
         created.reason === "path_exists"
-          ? `「${rendered.title}」と同じ名前の記事が既にあります (${created.existingTitle})。その記事に紐づけてから追記するか、ドシエのタイトルを変えてください`
+          ? `「${rendered.title}」と同じ名前の記事が既にあります (${created.existingTitle})。その記事に紐づけてから追記するか、企画のタイトルを変えてください`
           : created.reason === "path_exists_upstream"
             ? `公開リポジトリに同じ名前のファイルがあります (${created.path})。先に取り込んでください`
             : created.reason === "invalid_path"

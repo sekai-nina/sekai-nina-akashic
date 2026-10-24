@@ -215,7 +215,7 @@ export function SketchStep({
   if (sources.length === 0) {
     return (
       <p className="text-xs text-slate-500">
-        ドシエに画像がありません。先に素材を反映してから生成してください。
+        企画に画像がありません。先に素材を反映してから生成してください。
       </p>
     );
   }

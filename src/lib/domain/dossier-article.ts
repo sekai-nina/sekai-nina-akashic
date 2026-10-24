@@ -117,10 +117,10 @@ export function assertPlainDossier(dossier: DossierForArticle): void {
   if (dossier.kind === "clips") throw new WorkflowInputError("クリップのプールは記事にできません");
   const container = dossier.container?.kind ?? (isContainerTemplate(dossier.articleTemplate) ? dossier.articleTemplate : null);
   if (container === "meetgreet") {
-    throw new WorkflowInputError("このドシエはミーグリの素材です。記事は /meetgreets から作ってください");
+    throw new WorkflowInputError("この企画はミーグリの素材です。記事は /meetgreets から作ってください");
   }
   if (container === "live") {
-    throw new WorkflowInputError("このドシエはライブの素材です。記事は /lives から作ってください");
+    throw new WorkflowInputError("この企画はライブの素材です。記事は /lives から作ってください");
   }
 }
 
@@ -147,7 +147,7 @@ export async function setDossierTemplate(
   if (dossier.articleTemplate === template) return;
   if (dossier.articleTemplate && dossier.articles.length > 0) {
     throw new WorkflowInputError(
-      "既にこのドシエから記事を作っているのでテンプレートは変えられません (別のドシエを作ってください)"
+      "既にこの企画から記事を作っているのでテンプレートは変えられません (別の企画を作ってください)"
     );
   }
   if (!canEditDossier(user, dossier)) {
@@ -158,7 +158,7 @@ export async function setDossierTemplate(
   const written = await withSession(user, (tx) =>
     tx.$executeRaw`UPDATE "Dossier" SET "articleTemplate" = ${template}::"ArticleTemplate" WHERE "id" = ${dossier.id}`
   );
-  if (written === 0) throw new WorkflowInputError("ドシエを更新できませんでした (権限が変わったか削除されています)");
+  if (written === 0) throw new WorkflowInputError("企画を更新できませんでした (権限が変わったか削除されています)");
   await logAudit({
     actorId: user.id,
     action: "dossier.template.set",
@@ -213,13 +213,13 @@ export async function buildDossierArticle(
   // ドシエのサムネ・外部リンクが素通りするので、ドシエの機密も入口で見る
   if (!PUBLISHABLE.has(dossier.classification)) {
     throw new TemplateInputError(
-      `ドシエが ${dossier.classification} なので記事にできません (公開リポジトリに載るため ${MAX_ARTICLE_CLEARANCE} 以下のみ)`
+      `企画が ${dossier.classification} なので記事にできません (公開リポジトリに載るため ${MAX_ARTICLE_CLEARANCE} 以下のみ)`
     );
   }
   // 本文を AI が書くテンプレートは、ドシエの中身 (タイトル・抜粋・キャプション) を外部に出す
   if (template.needsAi && !EXTERNAL_AI_OK.has(dossier.classification)) {
     throw new TemplateInputError(
-      `ドシエが ${dossier.classification} なので AI に渡せません (${MAX_EXTERNAL_AI_CLEARANCE} 以下のみ)`
+      `企画が ${dossier.classification} なので AI に渡せません (${MAX_EXTERNAL_AI_CLEARANCE} 以下のみ)`
     );
   }
 
@@ -229,10 +229,10 @@ export async function buildDossierArticle(
   const loaded = await withSession(user, (tx) =>
     loadDossierForArticle(tx, dossier.id, { withTexts: generating, withExtraBlogTexts: template.needsAi })
   );
-  if (!loaded) throw new TemplateInputError("ドシエが見つかりません (権限がないか削除されています)");
+  if (!loaded) throw new TemplateInputError("企画が見つかりません (権限がないか削除されています)");
   // 上の判定は呼び出し側のスナップショット。読み直した行でもう一度見る (機密を上げられた直後)
   if (!PUBLISHABLE.has(loaded.classification)) {
-    throw new TemplateInputError(`ドシエが ${loaded.classification} なので記事にできません`);
+    throw new TemplateInputError(`企画が ${loaded.classification} なので記事にできません`);
   }
 
   const materials = shapeDossierMaterials(loaded);
@@ -303,7 +303,7 @@ async function draftForTemplate(
   if (prompt.included === 0) {
     return {
       draft: null,
-      ai: aiStatus("unavailable", { ...counts, reason: "本文のある素材 (ブログ / トーク) がドシエにありません" }),
+      ai: aiStatus("unavailable", { ...counts, reason: "本文のある素材 (ブログ / トーク) が企画にありません" }),
     };
   }
 

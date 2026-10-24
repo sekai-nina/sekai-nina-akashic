@@ -99,7 +99,7 @@ export function AssetReferencesPanel({ assetId, references, dossiers, clips, can
         <section>
           <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
             <FolderSearch className="h-3.5 w-3.5" />
-            含まれているドシエ ({dossiers.length})
+            含まれている企画 ({dossiers.length})
           </h2>
           <ul className="space-y-1">
             {dossiers.map((d) => (
@@ -165,7 +165,7 @@ function DossierRow({ dossier, assetId }: { dossier: DossierView; assetId: strin
               type="button"
               onClick={remove}
               disabled={isPending}
-              title="このドシエから外す"
+              title="この企画から外す"
               className="inline-flex items-center text-slate-400 hover:text-red-600 disabled:opacity-50"
             >
               {isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}

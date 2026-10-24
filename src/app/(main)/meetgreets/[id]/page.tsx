@@ -111,11 +111,11 @@ export default async function MeetGreetDetailPage({ params, searchParams }: Prop
         no={1}
         title="素材"
         done={itemCount > 0}
-        summary={mg.dossier ? `ドシエに ${itemCount} 件` : "ドシエが見えません"}
+        summary={mg.dossier ? `企画に ${itemCount} 件` : "企画が見えません"}
         action={
           mg.dossier ? (
             <Link href={`/dossiers/${mg.dossierId}`} className={linkCls}>
-              ドシエを開く <ExternalLink size={12} />
+              企画を開く <ExternalLink size={12} />
             </Link>
           ) : null
         }
@@ -125,9 +125,9 @@ export default async function MeetGreetDetailPage({ params, searchParams }: Prop
             <p className="text-xs text-slate-500 mb-3">
               当日〜{MATERIAL_WINDOW_DAYS} 日後のブログ・トークから候補を出しています。
               <strong className="text-slate-700">チェックは入っていません</strong>
-              ので、入れるものを選んで「ドシエに反映」を押してください。本文にミーグリの話があるブログと、当日〜
+              ので、入れるものを選んで「企画に反映」を押してください。本文にミーグリの話があるブログと、当日〜
               {TALK_SUGGEST_DAYS === 1 ? "翌日" : `${TALK_SUGGEST_DAYS} 日後`}
-              のトーク画像 / 動画 ({suggestedCount} 件) は「おすすめ」としてまとめて入れられます。抜粋 (本人の感想) はドシエ側で範囲選択します。
+              のトーク画像 / 動画 ({suggestedCount} 件) は「おすすめ」としてまとめて入れられます。抜粋 (本人の感想) は企画側で範囲選択します。
             </p>
             <MaterialsStep
               groups={candidates}
@@ -142,7 +142,7 @@ export default async function MeetGreetDetailPage({ params, searchParams }: Prop
           </>
         ) : (
           <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-3">
-            素材置き場のドシエが表示できません (所有者が非公開に戻したか、機密レベルが上がっています)。所有者にドシエの公開範囲を戻してもらってください。
+            素材置き場の企画が表示できません (所有者が非公開に戻したか、機密レベルが上がっています)。所有者に企画の公開範囲を戻してもらってください。
           </p>
         )}
       </StepCard>
@@ -243,7 +243,7 @@ export default async function MeetGreetDetailPage({ params, searchParams }: Prop
       >
         {mg.needsSync && (
           <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-3">
-            記事を書いた後にドシエが変わっています。差分を見て追記してください。
+            記事を書いた後に企画が変わっています。差分を見て追記してください。
           </p>
         )}
         <p className="mb-3 text-xs text-slate-500">{L.generationHelp}</p>

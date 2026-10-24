@@ -39,7 +39,7 @@ export async function setTemplateAction(dossierId: string, template: string) {
   if (!parsed.success) return { ok: false as const, error: formatZodError(parsed.error) };
   try {
     const dossier = await getDossierForArticle(user, dossierId);
-    if (!dossier) throw new Error("ドシエが見つかりません");
+    if (!dossier) throw new Error("企画が見つかりません");
     await setDossierTemplate(user, dossier, parsed.data);
     revalidatePath(`/dossiers/${dossierId}/article`);
     return { ok: true as const };

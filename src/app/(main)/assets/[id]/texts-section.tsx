@@ -174,7 +174,7 @@ export function TextsSection({
         <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">テキスト</h2>
         {(canClip || editableDossiers.length > 0) && (
           <span className="text-[10px] text-slate-400">
-            本文を選択すると{canClip ? "クリップや" : ""}ドシエへの引用追加ができます
+            本文を選択すると{canClip ? "クリップや" : ""}企画への引用追加ができます
           </span>
         )}
       </div>

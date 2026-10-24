@@ -97,7 +97,7 @@ describe("renderQuoteBlogArticle", () => {
 
   it("本人ブログの抜粋が無ければ入力エラー (ひなたぼっこ日記の抜粋は数えない)", () => {
     expect(() => renderQuoteBlogArticle(input([]))).toThrow(TemplateInputError);
-    expect(() => renderQuoteBlogArticle(input([blog([])]))).toThrow(/抜粋がドシエにありません/);
+    expect(() => renderQuoteBlogArticle(input([blog([])]))).toThrow(/抜粋が企画にありません/);
     const staff = asset({
       id: "staff",
       title: "ひなたぼっこ日記「集合」",

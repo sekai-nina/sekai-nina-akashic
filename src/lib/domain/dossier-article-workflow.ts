@@ -65,7 +65,7 @@ export async function getDossierArticleWorkflow(
     return containerWorkflow(common, row, { kind: "live", live: row }, row.name, livePeriodLabel(row));
   }
   if (chosenArticleId && !dossier.articles.some((a) => a.id === chosenArticleId)) {
-    throw new WorkflowInputError("指定された記事はこのドシエに紐づいていません");
+    throw new WorkflowInputError("指定された記事はこの企画に紐づいていません");
   }
   const articleId = chosenArticleId ?? (dossier.articles.length === 1 ? dossier.articles[0].id : null);
   const needsChoice = dossier.articles.length > 1 && !articleId;
@@ -123,8 +123,8 @@ function containerWorkflow(
 /** 各 Server Action が同じ検査を通る。保存対象をクライアントの kind / containerId で決めない。 */
 export async function requireDossierArticleWorkflow(user: ActingUser, dossierId: string, articleId: string | null) {
   const workflow = await getDossierArticleWorkflow(user, dossierId, articleId);
-  if (!workflow) throw new WorkflowInputError("ドシエが見つかりません");
-  if (!workflow.editable) throw new WorkflowInputError("このドシエの記事を作成・更新する権限がありません");
+  if (!workflow) throw new WorkflowInputError("企画が見つかりません");
+  if (!workflow.editable) throw new WorkflowInputError("この企画の記事を作成・更新する権限がありません");
   if (!workflow.target) {
     throw new WorkflowInputError(workflow.needsChoice ? "追記する記事を選んでください" : "先にテンプレートを選んでください");
   }

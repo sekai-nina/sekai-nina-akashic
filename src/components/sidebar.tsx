@@ -58,7 +58,7 @@ const navItems = [
   { href: "/places", label: "聖地マップ", icon: MapPin },
   { href: "/anniversaries", label: "記念日", icon: CalendarHeart },
   { href: "/announcements", label: "お知らせ", icon: Megaphone },
-  { href: "/dossiers", label: "特定支援", icon: FolderSearch },
+  { href: "/dossiers", label: "企画", icon: FolderSearch },
   { href: "/clips", label: "クリップ", icon: Scissors },
   { href: "/articles", label: "記事", icon: FileText },
   { href: "/testimonials", label: "口コミ管理", icon: MessageCircle },
