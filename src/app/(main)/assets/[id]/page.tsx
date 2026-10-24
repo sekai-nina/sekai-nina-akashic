@@ -117,8 +117,6 @@ export default async function AssetDetailPage({
 }) {
   const { id } = await params;
   const sp = await searchParams;
-  // 言及ハイライト（カバレッジのアイテム一覧からの遷移で ?hl=nina が付く）
-  const hlNina = sp.hl === "nina";
   const session = await auth();
   // middleware がログインへ飛ばすが、レンダリングはそれと競合して走る。
   // ガードしないと未認証リクエストのたびにサーバー側で例外になる
@@ -216,6 +214,11 @@ export default async function AssetDetailPage({
 
   if (!pageData) notFound();
   const { asset, relations, graph, duplicates, embeddedImageAssets, prevAsset, nextAsset } = pageData;
+
+  // 言及ハイライト。本文が新奈に言及しているアセット (他メンバーのブログなど) は既定で付ける。
+  // 本人が書いたもの (author) は名前が署名などに出るだけでうるさいので、?hl=nina のときだけ
+  const authoredByNina = asset.entities.some((ae) => ae.roleLabel === "author" && ae.entity.type === "person" && ae.entity.canonicalName === "坂井新奈");
+  const hlNina = sp.hl === "nina" || (sp.hl !== "off" && asset.mentionsNina && !authoredByNina);
 
   // 素材ごとのクリップ済と、必要な場合だけ言及ハイライトを取得する。
   const isEditor = ["admin", "member"].includes(session.user.role);

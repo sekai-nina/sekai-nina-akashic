@@ -2,27 +2,32 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { isMaterialSourceKey } from "@/lib/clip-progress/material-items";
-import { MaterialProgressInputError, listMaterialClipProgress } from "@/lib/domain/material-clip-progress";
-import { MATERIAL_PROGRESS_LABELS as L, MATERIAL_SOURCE_LABELS } from "@/lib/utils";
+import {
+  MATERIAL_AUTHOR_FILTERS, MaterialProgressInputError, listMaterialClipProgress, type MaterialAuthorFilter,
+} from "@/lib/domain/material-clip-progress";
+import { MATERIAL_AUTHOR_FILTER_LABELS as AUTHOR_FILTER_LABELS, MATERIAL_PROGRESS_LABELS as L, MATERIAL_SOURCE_LABELS } from "@/lib/utils";
 import { MaterialProgressButton, MaterialProgressControls } from "../../material-button";
 
 export default async function MaterialProgressPage({ params, searchParams }: {
   params: Promise<{ sourceKey: string }>;
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<{ page?: string; author?: string }>;
 }) {
   const { sourceKey } = await params;
   if (!isMaterialSourceKey(sourceKey)) notFound();
   const session = await auth();
   if (!session?.user) notFound();
-  const requestedPage = Number((await searchParams).page);
+  const sp = await searchParams;
+  const requestedPage = Number(sp.page);
+  const author = MATERIAL_AUTHOR_FILTERS.find((f) => f === sp.author) ?? "all";
   const progress = await listMaterialClipProgress(session.user, sourceKey, {
-    page: Number.isFinite(requestedPage) ? requestedPage : 1,
+    page: Number.isFinite(requestedPage) ? requestedPage : 1, author,
   }).catch((error: unknown) => {
     if (error instanceof MaterialProgressInputError) notFound();
     throw error;
   });
   const editable = ["admin", "member"].includes(session.user.role);
-  const href = (page: number) => `/progress/materials/${sourceKey}?page=${page}`;
+  const href = (page: number, filter: MaterialAuthorFilter = author) =>
+    `/progress/materials/${sourceKey}?page=${page}${filter === "all" ? "" : `&author=${filter}`}`;
   const percent = progress.total ? Math.round(progress.done / progress.total * 100) : 0;
   return (
     <div className="space-y-4">
@@ -32,6 +37,15 @@ export default async function MaterialProgressPage({ params, searchParams }: {
         <progress className="mt-2 h-2 w-full accent-emerald-600" value={progress.done} max={Math.max(1, progress.total)} aria-label={L.clipProgress} />
         <p className="mt-2 text-xs text-slate-500">{L.description}</p>
       </div>
+      {progress.authorTotals && (
+        <nav className="flex gap-4 text-sm" aria-label={L.authorFilter}>
+          {MATERIAL_AUTHOR_FILTERS.map((f) => (
+            <Link key={f} href={href(1, f)} className={f === author ? "font-semibold underline" : "text-slate-500 hover:text-slate-800"}>
+              {AUTHOR_FILTER_LABELS[f]} ({progress.authorTotals![f]})
+            </Link>
+          ))}
+        </nav>
+      )}
       {sourceKey === "talk" && <p className="text-xs text-slate-500">{L.daily}</p>}
       <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
         {progress.items.map((item) => (

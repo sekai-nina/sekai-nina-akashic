@@ -89,6 +89,23 @@ describe("素材のクリップ進捗の一覧", () => {
     expect(mocks.authors).toHaveBeenCalledWith("blog", "internal");
     expect(mocks.mentions).toHaveBeenCalledWith("blog", "internal");
   });
+  it("ブログは本人のブログと他メンバーのブログ (言及あり) で絞り込める", async () => {
+    mocks.derive.mockResolvedValue([item(url), item("mention")]);
+    mocks.mentions.mockResolvedValue(["mention"]);
+    const all = await listMaterialClipProgress(user, "blog");
+    expect(all).toMatchObject({ total: 2, authorTotals: { all: 2, self: 1, others: 1 } });
+    const self = await listMaterialClipProgress(user, "blog", { author: "self" });
+    expect(self.items.map((i) => i.itemKey)).toEqual([url]);
+    expect(self.total).toBe(1);
+    const others = await listMaterialClipProgress(user, "blog", { author: "others" });
+    expect(others.items.map((i) => i.itemKey)).toEqual(["mention"]);
+  });
+  it("ブログ以外は書き手で絞り込まない", async () => {
+    mocks.tx.dataSource.findUnique.mockResolvedValue({ ...source, key: "hinachan", itemRule: "source_url" });
+    const result = await listMaterialClipProgress(user, "hinachan", { author: "self" });
+    expect(result.authorTotals).toBeNull();
+    expect(result.total).toBe(1);
+  });
   it("行のリンク先は画像より本文のアセットを優先する", async () => {
     mocks.tx.$queryRaw.mockResolvedValue([{ id: "img" }, { id: "a1" }]);
     mocks.tx.asset.findMany.mockResolvedValue([{ ...a, id: "img", kind: "image" }, a]);
