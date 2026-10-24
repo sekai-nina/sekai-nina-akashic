@@ -193,6 +193,7 @@ Shortcuts に try/catch は無いので、HTTP が失敗するとその場で止
 | プロフィール / ハイライトの選択、保存先の選択、フォルダ名の入力を削除 | 無人にならない |
 | 「毎回きく」設定の分岐 6 つを無効化 (一覧表示 / グリッド / 日付 / VP9 変換 / キャプション / アプリ切替) | 設定が ask のままでも聞かれないように |
 | 落とす直前の 4 箇所に **`POST /api/v1/insta/media-urls` + 終了** を挿入 | 実体は落とさず URL だけ送る |
+| story のデータを **API ではなくページの埋め込み JSON から取る** + 例外時に報告して抜ける (2026-10-24) | 下の「story は埋め込み JSON から取る」 |
 
 挿入した 4 箇所には `mark` を付けてある (`dl1` / `dl2` / `ashell` / `end`)。どこを通ったかは
 サーバ側のジョブの `error` 欄に `media-urls mark=ashell に N 件届きました` として残る
@@ -214,6 +215,50 @@ shortcuts sign --mode anyone --input in.shortcut --output "Instagram Download (u
 
 この Mac には端末のショートカットが iCloud 同期で来ており、`shortcuts list` / `shortcuts run` で見える。
 ただし `~/Library/Shortcuts/Shortcuts.sqlite` は TCC で読めないので、中身の確認は plist 側で行う。
+
+**署名済みの `.shortcut` からも plist は取り出せる** (`scripts/insta-shortcut/unsign.py`)。中身は AEA1 で、
+ヘッダの `SigningCertificateChain[0]` の公開鍵で `aea decrypt -sign-pub` → `aa extract` すると
+`Shortcut.wflow` が出てくる。手元の改変版を直すときは、本家を取り直さずにこれを起点にしてよい。
+
+Scriptable の「Run Inline Script」の本文は `attachmentsByRange` 付きの文字列 (変数を `￼` で埋め込む)。
+本文を編集したら **`￼` の位置 (UTF-16 単位) を振り直す**こと (`patch-story-embedded.py` の `edit_token_string`)。
+
+**端末に入れ直すときの罠:**
+
+- 同じ名前のまま取り込むと **「Instagram Download (urls) 1」として別に入り、ラッパーは古い方を呼び続ける**
+  (`shortcuts list` で 2 つ並んでいれば踏んでいる)。古い方を消して名前を戻し、ラッパーの「ショートカットを実行」の宛先を確かめる
+- iCloud Drive の同期は遅れることがある (2026-10-21 に数十分止まった)。古いファイルを取り込んでも気づけないので、
+  AirDrop などで直接渡す方が確実
+- 新しい版が動いているかは、ジョブの `error` 欄で分かる: 成功なら `media-urls mark=… に N 件届きました`、
+  失敗なら `scriptable error: …`。どちらも来ずに 20 分で失敗するなら、古い版が動いている
+
+### story は埋め込み JSON から取る (2026-10-24)
+
+10/12 頃から story の取得がほぼ全滅した (10/12〜10/23 で 37 件中 8 件しか完了しない)。失敗の見え方は 2 つあるが、原因は 1 つ:
+
+1. Instagram Download の Scriptable 部分は、WebView で story ページを開いて 500ms 後にページ内の
+   `require("PolarisConfig")` 等からヘッダを作り、`/api/v1/feed/reels_media/` (失敗時 `feed/user/<uid>/story/`) を叩く
+2. この API が弾かれるようになった。UA を Chrome に偽装すると HTML のトップページ、偽装しなければ
+   `reels_media` は 500「something went wrong」、`feed/user/…/story/` は 400 + `spam`。`reel_ids` だけ・
+   ページ内 fetch など叩き方を変えても通らない (ログイン・トークン・uid / mid は正常)
+3. 例外が try/catch の無い `Timer` の中で出るので、**WebView が story を表示したまま黙って止まる**。
+   ショートカット側はクリップボードを待ち続ける → `processing` で 20 分後に失敗
+4. 止まった Scriptable が前面を占めるので Pushcut が戻れず、**以降のジョブが「start が来ないまま 10 分」で連続失敗する**
+
+ページ自体は story のデータを `<script type="application/json">` に埋め込んでいる
+(`xdt_api__v1__feed__reels_media.reels_media[0]`。items・`image_versions2`・`video_versions`・`video_dash_manifest` 入り)。
+そこで `scripts/insta-shortcut/patch-story-embedded.py` で次を入れた:
+
+- ページ内の評価で `reel` (埋め込みの reels_media[0]) も返し、`igCheck` の story 分岐は **uid が一致すればそれを使う**。
+  新しい API 呼び出しはしない。見つからないときだけ従来の API に落ちる
+- 自動経路の UA 偽装をやめる
+- `Timer` の中身を try/catch で包み、例外時は `media-urls` に `{text: "scriptable error: …", mark: "scriptable-error"}` を
+  送って (ジョブの `error` 欄に残る)、クリップボードに `{"profile":1}` を書き (ショートカットはこれで exit する)、
+  `Script.complete()` で WebView を閉じる
+
+切り分けに使った手順: Scriptable に単体の診断スクリプトを置き、同じ手順を 1 段ずつ try/catch して結果を Alert に出す
+(トークンは長さだけ表示)。iCloud の Scriptable フォルダ (`~/Library/Mobile Documents/iCloud~dk~simonbs~Scriptable/Documents/`)
+に置けば端末に出るが、同期が止まることがあるので、Mac で `pbcopy` してユニバーサルクリップボードで貼る方が速い。
 
 ## 動作確認
 
@@ -252,8 +297,9 @@ curl -s "$API/jobs?status=failed&limit=10" -H "$H"
 | 症状 | 見るところ |
 |---|---|
 | `pending` のまま | Pushcut 未設定 (`/admin/insta` に警告) / 前のジョブが走っている / `error` 欄に `送信に失敗: Pushcut 401` (キー違い) `404` (Shortcut 名・サーバ名違い) `502` `504` (端末が Automation Server として繋がっていない) |
-| `dispatched` のまま 10 分で失敗 | Pushcut は受けたがラッパーが `start` を叩けていない。端末でラッパーを手で走らせて `start` の応答を見る (401 ならキー、404 なら URL) |
-| `processing` で報告が 20 分途絶えて失敗 | 内側の Shortcut が POST まで到達していない。`error` 欄に `media-urls mark=…` が出ていれば届いてはいる |
+| `dispatched` のまま 10 分で失敗 | Pushcut は受けたがラッパーが `start` を叩けていない。**まず端末の画面を見る**: Scriptable が story を表示したまま止まっていれば、前のジョブの残骸が前面を占めている (下の行)。そうでなければ Pushcut が前面か・Automation Server が動いているか・画面ロックされていないか。それでもだめなら端末でラッパーを手で走らせて `start` の応答を見る (401 ならキー、404 なら URL) |
+| `processing` で報告が 20 分途絶えて失敗 | 内側の Shortcut が POST まで到達していない。`error` 欄に `media-urls mark=…` が出ていれば届いてはいる。端末で Scriptable が story を表示したまま止まっているなら、Scriptable 部分の例外 (「story は埋め込み JSON から取る」)。修正版なら `scriptable error: …` が残るはずなので、何も残らなければ古い版が動いている |
+| `scriptable error: …` | Scriptable 部分で例外が出た。本文にスタックが入っている。Instagram 側のページ構造が変わった可能性が高い |
 | `media-urls … に URL が 1 件も入っていませんでした: {…}` | 届いた本文がそのまま記録されるので、それを見て原因を切り分ける (空なら Shortcut 側が URL を渡せていない) |
 | `failed`「ファイルが 1 件も届きませんでした」 | `complete` が先に走った (ラッパーから `complete` を外す) か、URL が 1 件も取れなかった |
 | `completed` だが Discord に来ない | `DISCORD_INSTA_WEBHOOK_URL` 未設定か送信失敗 (`error` 欄に `Discord 通知に失敗`)。登録はできているので Asset は /inbox にある。動画は変換してから送るので、完了から届くまで 1 本あたり数十秒かかる |
