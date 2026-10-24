@@ -260,6 +260,7 @@ model Asset {
   updatedAt DateTime @updatedAt
 
   texts             AssetText[]
+  textRevisions     AssetTextRevision[]
   entities          AssetEntity[]
   sourceRecords     SourceRecord[]
   annotations       Annotation[]
@@ -294,9 +295,33 @@ model AssetText {
   createdById String?
   createdBy   User?   @relation("AssetTextCreatedBy", fields: [createdById], references: [id])
 
+  revisions AssetTextRevision[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([assetId])
+}
+
+/// 本文の版 (#262)。公式ブログは公開後に本文が直されることがあるので、取り直して違っていたら版を積む。
+/// AssetText は常に最新版のまま (検索・記事化はそちらを読む)。最初に版を積むとき、それまでの本文を
+/// version 1 として種まきするので、版が 1 行でもあれば全版がそろっている。
+/// RLS は親 Asset の classification に従う (assetId は RLS のために AssetText から複製して持つ)
+model AssetTextRevision {
+  id          String    @id @default(cuid())
+  assetId     String
+  asset       Asset     @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  assetTextId String
+  assetText   AssetText @relation(fields: [assetTextId], references: [id], onDelete: Cascade)
+  /// 1 始まり。大きいほど新しい
+  version     Int
+  content     String
+  /// 公式から取得した日時 (種まきした version 1 は AssetText.createdAt)
+  fetchedAt   DateTime
+
+  createdAt DateTime @default(now())
+
+  @@unique([assetTextId, version])
   @@index([assetId])
 }
 
