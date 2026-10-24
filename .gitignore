@@ -7,3 +7,5 @@ uploads/
 /icon.jpg
 .vercel
 .claude/worktrees/
+
+__pycache__/
