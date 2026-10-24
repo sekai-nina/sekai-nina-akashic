@@ -65,7 +65,7 @@ const clearance = auth.clearance;
 - `SourceRecord`, `Annotation`, `Testimonial`
 - `Dossier`, `DossierItem`, `DossierPlaceCandidate`, `Place`
 - `RepoCollection`, `RepoTweet`, `RepoTweetMedia`
-- `Lens`, `DataSource`, `Coverage`, `LensItemCheck`（#233 段階3: Coverage の鮮度日付は親・既存行の最大 classification を保持し、セルごとの transaction advisory lock + assertClearance で保存する。LensItemCheck は過去の記録として保存し、書き込みAPIは410）
+- `Lens`, `DataSource`, `Coverage`, `LensItemCheck`（#253: 手入力の収集済みの日付は `DataSource.collectedUntil` に `withClearance` で書く。Lens / Coverage / LensItemCheck は過去の記録として残し、読み書きするコードは無い。旧 API は 410）
 - `ArticleSource`（`Article` 自体は公開記事のミラーなので非保護）
 - `MeetGreet`（ミーグリ記事ワークフロー。ドシエを include する読みは所有者判定が要るので `withSession`）
 - `SketchSetting`（スケッチ生成のプロンプトと画風の見本。**全体で 1 行**で、個人のデータではないので読み書きは固定のクリアランス（`MAX_EXTERNAL_AI_CLEARANCE`）で行う。操作者のクリアランスで読むと、低い人のときだけ無言で既定の文面に化ける）
