@@ -1,4 +1,30 @@
 {
+  "permissions": {
+    "deny": [
+      "Bash(npx prisma migrate dev*)",
+      "Bash(npx prisma migrate reset*)",
+      "Bash(npx prisma migrate diff *--from-migrations*)",
+      "Bash(npx prisma db push *--force-reset*)",
+      "Bash(npx prisma db push *--accept-data-loss*)",
+      "Bash(pnpm exec prisma migrate dev*)",
+      "Bash(pnpm exec prisma migrate reset*)",
+      "Bash(pnpm exec prisma migrate diff *--from-migrations*)",
+      "Bash(pnpm exec prisma db push *--force-reset*)",
+      "Bash(pnpm exec prisma db push *--accept-data-loss*)",
+      "Bash(pnpm prisma migrate dev*)",
+      "Bash(pnpm prisma migrate reset*)",
+      "Bash(pnpm prisma migrate diff *--from-migrations*)",
+      "Bash(pnpm prisma db push *--force-reset*)",
+      "Bash(pnpm prisma db push *--accept-data-loss*)",
+      "Bash(prisma migrate dev*)",
+      "Bash(prisma migrate reset*)",
+      "Bash(prisma migrate diff *--from-migrations*)",
+      "Bash(prisma db push *--force-reset*)",
+      "Bash(prisma db push *--accept-data-loss*)",
+      "Bash(pnpm db:migrate*)",
+      "Bash(pnpm run db:migrate*)"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {
