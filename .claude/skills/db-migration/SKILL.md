@@ -94,7 +94,7 @@ npx prisma generate
 pnpm typecheck
 ```
 
-`postgres` が作った新テーブルには、既定権限 (`ALTER DEFAULT PRIVILEGES`) で `akashic_cli` の読み書きが自動で付く。`app_runtime` は付かないので、ステップ 5 の GRANT は引き続き要る。
+`postgres` が作った新テーブルには、既定権限 (`ALTER DEFAULT PRIVILEGES`) で `akashic_cli` (手元の CLI) と `app_internal` (Vercel の `prismaInternal`) の読み書きが自動で付く。`app_runtime` は付かないので、ステップ 5 の GRANT は引き続き要る。
 
 ### 7. 本番 (Supabase) への適用
 
@@ -112,7 +112,7 @@ migration を入れたら、アプリからのアクセス方法も揃える:
 |---|---|
 | ユーザーへのデータ返却 / CRUD | `withClearance(clearance, tx => …)` |
 | Dossier 系 (= 所有者判定が要る) | `withSession({ id, clearance }, tx => …)` |
-| CLI・Bot・全体統計 | `prismaInternal` (`DIRECT_URL`。手元は `akashic_cli` ロール、RLS バイパス・DDL 不可) |
+| CLI・Bot・全体統計 | `prismaInternal` (`DIRECT_URL`。手元は `akashic_cli`、Vercel は `app_internal` ロール。どちらも RLS バイパス・DDL 不可) |
 | `User` / `Entity` など非保護テーブル | 素の `prisma` |
 
 書き込み時のクリアランス超過は RLS では止まらない箇所があるので、`src/lib/classification.ts` の `assertClearance` を通す。
