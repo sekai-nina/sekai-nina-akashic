@@ -26,10 +26,17 @@ export interface MaterialProgressRow extends MaterialItem {
   clipCount: number;
   assetId: string | null;
 }
+/** ブログの絞り込み。本人のブログと他メンバーのブログ (言及あり) は情報量がかなり違うので分けて見る */
+export type MaterialAuthorFilter = "all" | "self" | "others";
+export const MATERIAL_AUTHOR_FILTERS: readonly MaterialAuthorFilter[] = ["all", "self", "others"];
+
 export interface MaterialProgressResult {
   sourceKey: string;
+  /** 絞り込み後の件数 */
   total: number;
   done: number;
+  /** 本人著で分けられるソース (ブログ) だけ。絞り込み前の内訳 */
+  authorTotals: { all: number; self: number; others: number } | null;
   page: number;
   pageSize: number;
   items: MaterialProgressRow[];
@@ -58,14 +65,16 @@ const toMaterial = (item: DerivedItem): MaterialItem => ({ ...item, itemDate: to
  * キーだけを url で引く。全体の導出は冷えた DB で数秒かかる。
  * キャッシュのキーに済の状態を含めない (含めると済を押すたびに外れる)。
  */
-async function getAutomaticMaterials(source: DataSource, clearance: string): Promise<{ items: MaterialItem[]; automatic: string[] }> {
+async function getAutomaticMaterials(
+  source: DataSource, clearance: string,
+): Promise<{ items: MaterialItem[]; automatic: string[]; authors: string[] }> {
   if (source.key === "radio") {
     const items = await withClearance(clearance, radioItems);
-    return { items, automatic: items.map((i) => i.itemKey) };
+    return { items, automatic: items.map((i) => i.itemKey), authors: [] };
   }
   if (source.itemRule === "talk_date") {
     const items = (await getDerivedItems(source.key, clearance)).map(toMaterial);
-    return { items, automatic: items.map((i) => i.itemKey) };
+    return { items, automatic: items.map((i) => i.itemKey), authors: [] };
   }
   // 導出元の getDerivedItems と同じ寿命・タグ
   return unstable_cache(async () => {
@@ -74,8 +83,8 @@ async function getAutomaticMaterials(source: DataSource, clearance: string): Pro
     ]);
     const automatic = [...new Set([...authors, ...mentions])];
     const items = await withClearance(clearance, (tx) => deriveItems(tx, source, { onlyKeys: automatic }), { timeout: 30_000 });
-    return { items: items.map(toMaterial), automatic };
-  }, ["material-automatic-items", source.key, clearance], { revalidate: 90, tags: ["coverage-derived-items"] })();
+    return { items: items.map(toMaterial), automatic, authors };
+  }, ["material-automatic-items-v2", source.key, clearance], { revalidate: 90, tags: ["coverage-derived-items"] })();
 }
 
 /** ページ分のアセットだけを一括取得する。URL の重複 SourceRecord でクリップを水増ししない。 */
@@ -120,7 +129,7 @@ async function assetsForItems(tx: TransactionClient, source: DataSource, items: 
 }
 
 export async function listMaterialClipProgress(
-  user: Actor, sourceKey: string, options: { page?: number } = {},
+  user: Actor, sourceKey: string, options: { page?: number; author?: MaterialAuthorFilter } = {},
 ): Promise<MaterialProgressResult> {
   const sourcePromise = getSource(sourceKey, user.clearance);
   const [source, statuses, auto] = await Promise.all([
@@ -136,8 +145,14 @@ export async function listMaterialClipProgress(
     ? (await withClearance(user.clearance, (tx) => deriveItems(tx, source, { onlyKeys: extraKeys }))).map(toMaterial)
     : [];
   const items = [...auto.items, ...extras];
-  const selected = items.filter((i) => isRelevantMaterial(i.itemKey, automatic, byKey.get(i.itemKey))).sort((a, b) =>
-    (b.itemDate ?? "").localeCompare(a.itemDate ?? "") || a.itemKey.localeCompare(b.itemKey));
+  const relevant = items.filter((i) => isRelevantMaterial(i.itemKey, automatic, byKey.get(i.itemKey)));
+  const authors = new Set(auto.authors);
+  const byAuthor = source.key === "blog";
+  const filter = byAuthor ? options.author ?? "all" : "all";
+  const selected = relevant
+    .filter((i) => filter === "all" || (filter === "self") === authors.has(i.itemKey))
+    .sort((a, b) => (b.itemDate ?? "").localeCompare(a.itemDate ?? "") || a.itemKey.localeCompare(b.itemKey));
+  const self = relevant.filter((i) => authors.has(i.itemKey)).length;
   const pageSize = 50;
   const requestedPage = Number.isFinite(options.page) ? Math.floor(options.page!) : 1;
   const page = Math.max(1, Math.min(Math.max(1, Math.ceil(selected.length / pageSize)), requestedPage));
@@ -164,6 +179,7 @@ export async function listMaterialClipProgress(
   }, { timeout: 30_000 });
   return {
     sourceKey, total: selected.length, done: selected.filter((i) => byKey.get(i.itemKey)?.done).length,
+    authorTotals: byAuthor ? { all: relevant.length, self, others: relevant.length - self } : null,
     page, pageSize, items: rows,
   };
 }

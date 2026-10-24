@@ -544,6 +544,12 @@ export const MATERIAL_PROGRESS_LABELS = {
   description: "本人著・本文で言及ありの素材と、アセット詳細でクリップ済にした素材が分母です。割合とクリップ数は閲覧できる範囲で集計し、移動先のドシエも含めます。共有進捗を更新できない場合は、保存時にお知らせします。",
   clips: "クリップ", empty: "素材はありません", manual: "手動対象", noAssets: "アセット未登録",
   saving: "保存中…", failed: "保存に失敗しました", daily: "この日（JST）全体の進捗です", previous: "前へ", next: "次へ",
+  authorFilter: "書き手で絞り込む",
+} as const;
+
+/** ブログの書き手での絞り込み (/progress/materials/blog) */
+export const MATERIAL_AUTHOR_FILTER_LABELS = {
+  all: "すべて", self: "本人のブログ", others: "他メンバーのブログ（言及あり）",
 } as const;
 
 /** 記事を作る入口の共通文言 (#233 段階2)。 */
