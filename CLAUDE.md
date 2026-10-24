@@ -13,6 +13,7 @@
    - 本番に向けてよいのは、読み取りと `prisma migrate status`、それとユーザーの了承を得た `prisma migrate deploy` だけ
    - マイグレーションの差分確認は、DB の要らない `prisma migrate diff --from-schema-datamodel <旧> --to-schema-datamodel <新> --script` か、自分で立てた使い捨てのローカル Postgres で行う
    - DB の URL を取るコマンドは、実行前にどの URL かを確かめる。本番を書き換え・削除しうるなら止めてユーザーに聞く
+   - **機械的にも止めている**: `.claude/settings.json` の PreToolUse フック (`.claude/hooks/guard-prod-db.py`) が、上の禁止コマンドを実行前に拒否し、`migrate deploy` / `db execute` / `db push` / `db:seed` などは毎回ユーザーに確認させる。フックを外したり迂回したりしない
 
 1. **保護テーブルへのアクセスは必ず `withClearance` / `withSession` を通す。** 素の `prisma` で触ると **エラーではなく無言で 0 行**が返る。認可まわりのテストは無いので本番まで気づけない
 2. **静的ゲートは `pnpm typecheck` と `pnpm test` の 2 つ。** lint 設定は無く、`next.config.ts` は `typescript.ignoreBuildErrors: true`。**ビルドが通っても型は壊れうる**。テストは記事の frontmatter 往復 (`src/lib/articles/`) しか無いので、それ以外は依然として実 DB で確かめるしかない
