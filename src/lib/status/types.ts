@@ -58,6 +58,8 @@ export const SOURCE_FRESHNESS_MAX_AGE_HOURS: Record<string, number> = {
 
 /** tiktok-watch (#179) のハートビート key。`/admin/tiktok` からも参照する */
 export const TIKTOK_JOB_KEY = "bot.tiktok_watch";
+/** Asset.mentionsNina の付け直し (`/api/cron/nina-mentions`) */
+export const NINA_MENTIONS_JOB_KEY = "cron.nina_mentions";
 
 /**
  * ハートビートを期待するジョブ。報告が一度も無ければ「未報告」(unknown) と出す。
@@ -73,6 +75,7 @@ export const EXPECTED_JOBS: { key: string; name: string; group: CheckGroup }[] =
   { key: TIKTOK_JOB_KEY, name: "tiktok-watch: TikTok 監視", group: "collect" },
   { key: "cron.x_mentions", name: "X 言及監視 (日次)", group: "collect" },
   { key: "bot.discovery", name: "bot: 今日の発見の抽出", group: "process" },
+  { key: NINA_MENTIONS_JOB_KEY, name: "新奈への言及の付け直し (15 分)", group: "process" },
   { key: "worker.stats", name: "stats-worker (ダッシュボード集計)", group: "workers" },
   { key: "worker.drive_backup", name: "Drive バックアップ", group: "workers" },
   { key: "worker.sync", name: "sekai-nina-sync", group: "workers" },

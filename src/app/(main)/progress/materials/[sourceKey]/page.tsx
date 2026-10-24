@@ -8,23 +8,21 @@ import { MaterialProgressButton, MaterialProgressControls } from "../../material
 
 export default async function MaterialProgressPage({ params, searchParams }: {
   params: Promise<{ sourceKey: string }>;
-  searchParams: Promise<{ other?: string; page?: string }>;
+  searchParams: Promise<{ page?: string }>;
 }) {
   const { sourceKey } = await params;
   if (!isMaterialSourceKey(sourceKey)) notFound();
   const session = await auth();
   if (!session?.user) notFound();
-  const sp = await searchParams;
-  const other = sp.other === "1";
-  const requestedPage = Number(sp.page);
+  const requestedPage = Number((await searchParams).page);
   const progress = await listMaterialClipProgress(session.user, sourceKey, {
-    other, page: Number.isFinite(requestedPage) ? requestedPage : 1,
+    page: Number.isFinite(requestedPage) ? requestedPage : 1,
   }).catch((error: unknown) => {
     if (error instanceof MaterialProgressInputError) notFound();
     throw error;
   });
   const editable = ["admin", "member"].includes(session.user.role);
-  const href = (page: number, showOther = other) => `/progress/materials/${sourceKey}?page=${page}${showOther ? "&other=1" : ""}`;
+  const href = (page: number) => `/progress/materials/${sourceKey}?page=${page}`;
   const percent = progress.total ? Math.round(progress.done / progress.total * 100) : 0;
   return (
     <div className="space-y-4">
@@ -34,10 +32,6 @@ export default async function MaterialProgressPage({ params, searchParams }: {
         <progress className="mt-2 h-2 w-full accent-emerald-600" value={progress.done} max={Math.max(1, progress.total)} aria-label={L.clipProgress} />
         <p className="mt-2 text-xs text-slate-500">{L.description}</p>
       </div>
-      <nav className="flex gap-4 text-sm">
-        <Link className={!other ? "font-semibold underline" : "text-slate-500"} href={href(1, false)}>{L.relevant} ({progress.total})</Link>
-        <Link className={other ? "font-semibold underline" : "text-slate-500"} href={href(1, true)}>{L.other} ({progress.otherTotal})</Link>
-      </nav>
       {sourceKey === "talk" && <p className="text-xs text-slate-500">{L.daily}</p>}
       <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
         {progress.items.map((item) => (
@@ -51,10 +45,8 @@ export default async function MaterialProgressPage({ params, searchParams }: {
               <p className="mt-1 text-xs text-slate-500">{item.itemDate} · {L.clips} {item.clipCount}{!item.assetId && ` · ${L.noAssets}`}{!item.automatic && item.included && ` · ${L.manual}`}</p>
             </div>
             <MaterialProgressControls>
-              {other ? <MaterialProgressButton sourceKey={sourceKey} itemKey={item.itemKey} field="included" value={true} label={L.include} editable={editable} /> : <>
-                <MaterialProgressButton sourceKey={sourceKey} itemKey={item.itemKey} value={!item.done} editable={editable} />
-                {!item.automatic && item.included && <MaterialProgressButton sourceKey={sourceKey} itemKey={item.itemKey} field="included" value={false} label={L.exclude} editable={editable} />}
-              </>}
+              <MaterialProgressButton sourceKey={sourceKey} itemKey={item.itemKey} value={!item.done} editable={editable} />
+              {!item.automatic && item.included && <MaterialProgressButton sourceKey={sourceKey} itemKey={item.itemKey} field="included" value={false} label={L.exclude} editable={editable} />}
             </MaterialProgressControls>
           </li>
         ))}
@@ -62,8 +54,8 @@ export default async function MaterialProgressPage({ params, searchParams }: {
       </ul>
       <nav className="flex items-center justify-between text-sm">
         {progress.page > 1 ? <Link href={href(progress.page - 1)}>{L.previous}</Link> : <span />}
-        <span>{progress.page} / {Math.max(1, Math.ceil(progress.filteredTotal / progress.pageSize))}</span>
-        {progress.page * progress.pageSize < progress.filteredTotal ? <Link href={href(progress.page + 1)}>{L.next}</Link> : <span />}
+        <span>{progress.page} / {Math.max(1, Math.ceil(progress.total / progress.pageSize))}</span>
+        {progress.page * progress.pageSize < progress.total ? <Link href={href(progress.page + 1)}>{L.next}</Link> : <span />}
       </nav>
     </div>
   );

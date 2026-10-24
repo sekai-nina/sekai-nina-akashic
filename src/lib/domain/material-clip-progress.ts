@@ -1,7 +1,8 @@
+import { unstable_cache } from "next/cache";
 import { Prisma, type DataSource } from "@prisma/client";
 import { withClearance, withSession, type TransactionClient } from "@/lib/db";
 import { assertClearance, isAboveClearance } from "@/lib/classification";
-import { deriveItems, getDerivedItems, sourcePatternConds, TALK_DAY_SQL, toDateOnlyString } from "./coverage";
+import { deriveItems, getDerivedItems, sourcePatternConds, TALK_DAY_SQL, toDateOnlyString, type DerivedItem } from "./coverage";
 import { getSourceAuthorKeys, getSourceMentionKeys } from "./coverage-items";
 import { logAudit } from "./audit";
 import {
@@ -29,8 +30,6 @@ export interface MaterialProgressResult {
   sourceKey: string;
   total: number;
   done: number;
-  otherTotal: number;
-  filteredTotal: number;
   page: number;
   pageSize: number;
   items: MaterialProgressRow[];
@@ -51,19 +50,32 @@ async function getSource(key: string, clearance: string) {
   return source;
 }
 
-async function getMaterials(source: DataSource, clearance: string): Promise<MaterialItem[]> {
-  if (source.key === "radio") return withClearance(clearance, radioItems);
-  const items = await getDerivedItems(source.key, clearance);
-  return items.map((item) => ({ ...item, itemDate: toDateOnlyString(item.itemDate) }));
-}
+const toMaterial = (item: DerivedItem): MaterialItem => ({ ...item, itemDate: toDateOnlyString(item.itemDate) });
 
-async function automaticKeys(source: DataSource, items: MaterialItem[], clearance: string): Promise<Set<string>> {
-  // 出演一覧の各行は本人の出演を記録した素材。トークも全件本人。
-  if (source.key === "radio" || source.itemRule === "talk_date") return new Set(items.map((i) => i.itemKey));
-  const [authors, mentions] = await Promise.all([
-    getSourceAuthorKeys(source.key, clearance), getSourceMentionKeys(source.key, clearance),
-  ]);
-  return new Set([...authors, ...mentions]);
+/**
+ * 自動で分母に入る素材。トーク (全日本人) とラジオ (出演一覧の行) は全件。
+ * それ以外はソース全体 (ブログなら全メンバー約 3,000 本) を導出せず、本人著 ∪ 言及の
+ * キーだけを url で引く。全体の導出は冷えた DB で数秒かかる。
+ * キャッシュのキーに済の状態を含めない (含めると済を押すたびに外れる)。
+ */
+async function getAutomaticMaterials(source: DataSource, clearance: string): Promise<{ items: MaterialItem[]; automatic: string[] }> {
+  if (source.key === "radio") {
+    const items = await withClearance(clearance, radioItems);
+    return { items, automatic: items.map((i) => i.itemKey) };
+  }
+  if (source.itemRule === "talk_date") {
+    const items = (await getDerivedItems(source.key, clearance)).map(toMaterial);
+    return { items, automatic: items.map((i) => i.itemKey) };
+  }
+  // 導出元の getDerivedItems と同じ寿命・タグ
+  return unstable_cache(async () => {
+    const [authors, mentions] = await Promise.all([
+      getSourceAuthorKeys(source.key, clearance), getSourceMentionKeys(source.key, clearance),
+    ]);
+    const automatic = [...new Set([...authors, ...mentions])];
+    const items = await withClearance(clearance, (tx) => deriveItems(tx, source, { onlyKeys: automatic }), { timeout: 30_000 });
+    return { items: items.map(toMaterial), automatic };
+  }, ["material-automatic-items", source.key, clearance], { revalidate: 90, tags: ["coverage-derived-items"] })();
 }
 
 /** ページ分のアセットだけを一括取得する。URL の重複 SourceRecord でクリップを水増ししない。 */
@@ -108,18 +120,23 @@ async function assetsForItems(tx: TransactionClient, source: DataSource, items: 
 }
 
 export async function listMaterialClipProgress(
-  user: Actor, sourceKey: string, options: { other?: boolean; page?: number } = {},
+  user: Actor, sourceKey: string, options: { page?: number } = {},
 ): Promise<MaterialProgressResult> {
-  const source = await getSource(sourceKey, user.clearance);
-  const [items, statuses] = await Promise.all([
-    getMaterials(source, user.clearance),
+  const sourcePromise = getSource(sourceKey, user.clearance);
+  const [source, statuses, auto] = await Promise.all([
+    sourcePromise,
     withClearance(user.clearance, (tx) => tx.materialClipStatus.findMany({ where: { dataSourceKey: sourceKey } })),
+    sourcePromise.then((source) => getAutomaticMaterials(source, user.clearance)),
   ]);
-  const automatic = await automaticKeys(source, items, user.clearance);
   const byKey = new Map(statuses.map((s) => [s.itemKey, s]));
-  const relevant = items.filter((i) => isRelevantMaterial(i.itemKey, automatic, byKey.get(i.itemKey)));
-  const other = items.filter((i) => !isRelevantMaterial(i.itemKey, automatic, byKey.get(i.itemKey)));
-  const selected = (options.other ? other : relevant).slice().sort((a, b) =>
+  const automatic = new Set(auto.automatic);
+  // 自動判定に漏れて手で対象にした素材 (ふつうは 0 件) だけをその場で引き足す
+  const extraKeys = statuses.filter((s) => (s.included || s.done) && !automatic.has(s.itemKey)).map((s) => s.itemKey);
+  const extras = extraKeys.length && source.key !== "radio" && source.itemRule !== "talk_date"
+    ? (await withClearance(user.clearance, (tx) => deriveItems(tx, source, { onlyKeys: extraKeys }))).map(toMaterial)
+    : [];
+  const items = [...auto.items, ...extras];
+  const selected = items.filter((i) => isRelevantMaterial(i.itemKey, automatic, byKey.get(i.itemKey))).sort((a, b) =>
     (b.itemDate ?? "").localeCompare(a.itemDate ?? "") || a.itemKey.localeCompare(b.itemKey));
   const pageSize = 50;
   const requestedPage = Number.isFinite(options.page) ? Math.floor(options.page!) : 1;
@@ -145,8 +162,8 @@ export async function listMaterialClipProgress(
     });
   }, { timeout: 30_000 });
   return {
-    sourceKey, total: relevant.length, done: relevant.filter((i) => byKey.get(i.itemKey)?.done).length,
-    otherTotal: other.length, filteredTotal: selected.length, page, pageSize, items: rows,
+    sourceKey, total: selected.length, done: selected.filter((i) => byKey.get(i.itemKey)?.done).length,
+    page, pageSize, items: rows,
   };
 }
 

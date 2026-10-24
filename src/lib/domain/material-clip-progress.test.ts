@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => {
   return { tx, withClearance: vi.fn(), withSession: vi.fn(), derived: vi.fn(), derive: vi.fn(), authors: vi.fn(), mentions: vi.fn(), audit: vi.fn() };
 });
 vi.mock("@/lib/db", () => ({ withClearance: mocks.withClearance, withSession: mocks.withSession }));
+vi.mock("next/cache", () => ({ unstable_cache: (fn: () => unknown) => fn }));
 vi.mock("./coverage", async () => {
   // DB を開かず、素材の導出結果とソース条件を差し替える。
   const { Prisma } = await import("@prisma/client");
@@ -60,17 +61,31 @@ beforeEach(() => {
 
 describe("素材のクリップ進捗の一覧", () => {
   it("本人著・言及・手動対象を分母にし、消えた素材の状態を数えない", async () => {
-    mocks.derived.mockResolvedValue([item(url), item("mention"), item("manual"), item("other")]);
+    // 自動対象の導出と、手動対象の引き足し。消えた素材 (deleted) は導出で返らない
+    mocks.derive.mockResolvedValueOnce([item(url), item("mention")]).mockResolvedValueOnce([item("manual")]);
     mocks.mentions.mockResolvedValue(["mention"]);
     mocks.tx.materialClipStatus.findMany.mockResolvedValue([
       { itemKey: url, done: true, included: true }, { itemKey: "manual", done: false, included: true },
-      { itemKey: "deleted", done: true, included: true },
+      { itemKey: "deleted", done: true, included: true }, { itemKey: "untouched", done: false, included: false },
     ]);
     const result = await listMaterialClipProgress(user, "blog");
-    expect(result).toMatchObject({ total: 3, done: 1, otherTotal: 1 });
+    expect(result).toMatchObject({ total: 3, done: 1 });
     expect(new Set(result.items.map((i) => i.itemKey))).toEqual(new Set([url, "mention", "manual"]));
-    const other = await listMaterialClipProgress(user, "blog", { other: true });
-    expect(other.items.map((i) => i.itemKey)).toEqual(["other"]);
+  });
+  it("ソース全体は導出せず、関連キーと状態のある素材だけを引く", async () => {
+    mocks.mentions.mockResolvedValue(["mention"]);
+    mocks.tx.materialClipStatus.findMany.mockResolvedValue([
+      { itemKey: "manual", done: false, included: true }, { itemKey: "untouched", done: false, included: false },
+    ]);
+    await listMaterialClipProgress(user, "blog");
+    expect(mocks.derived).not.toHaveBeenCalled();
+    // 自動対象 (済の状態に依存しないのでキャッシュできる) と、手動対象の引き足しを分ける
+    expect(new Set(mocks.derive.mock.calls[0][2].onlyKeys)).toEqual(new Set([url, "mention"]));
+    expect(mocks.derive.mock.calls[1][2].onlyKeys).toEqual(["manual"]);
+  });
+  it("手動対象が無ければ引き足さない", async () => {
+    await listMaterialClipProgress(user, "blog");
+    expect(mocks.derive).toHaveBeenCalledTimes(1);
     expect(mocks.authors).toHaveBeenCalledWith("blog", "internal");
     expect(mocks.mentions).toHaveBeenCalledWith("blog", "internal");
   });

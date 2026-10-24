@@ -5,7 +5,7 @@
  * ドシエ登録済みかで分岐→未登録はアセットを開いて登録してから✓）を支える形に再設計する。
  * 返却するページ分のアイテムに以下をエンリッチする（アイテム毎の N+1 は禁止・バッチクエリ）:
  *
- * - mentions: 坂井新奈への言及有無（(a) AssetEntity リンク OR (b) AssetText 本文一致）。
+ * - mentions: 坂井新奈への言及有無（(a) AssetEntity リンク OR (b) 本文一致 = Asset.mentionsNina）。
  * - authored / authors: 坂井新奈が著者か・著者エンティティ名（roleLabel='author'）。v2.4
  * - excerpts: 一致箇所の前後スニペット（url 系・全一致をウィンドウ化、表示は最大5件＋excerptsMore で残数明示）。talk は本文先頭プレビュー（最大2件）。
  * - dossiers: アイテム所属アセットを含むドシエ（/dossiers/[id] 導線）。
@@ -31,7 +31,6 @@ import {
   TALK_DAY_SQL,
   type DerivedItem,
 } from "./coverage";
-import { normalizeText } from "@/lib/utils";
 
 // ============================================================
 // DTO
@@ -92,7 +91,7 @@ interface NinaEntity {
   terms: string[]; // canonicalName + aliases
 }
 
-async function getNinaEntity(tx: TransactionClient): Promise<NinaEntity | null> {
+export async function getNinaEntity(tx: TransactionClient): Promise<NinaEntity | null> {
   const e = await tx.entity.findUnique({
     where: { type_canonicalName: { type: "person", canonicalName: "坂井新奈" } },
     select: { id: true, canonicalName: true, aliases: true },
@@ -121,9 +120,6 @@ export async function getNinaTerms(clearance: string): Promise<string[]> {
 // ============================================================
 
 async function computeSourceMentionKeys(clearance: string, sourceKey: string): Promise<string[]> {
-  // かつては AssetText 全体への ILIKE スキャンが重く 30s まで延ばしていたが、
-  // PGroonga の &@ + MATERIALIZED CTE で最大 2 秒程度になったので既定 (15s) に戻した。
-  // 結果はキャッシュされる。
   return withClearance(
     clearance,
     async (tx) => {
@@ -145,32 +141,19 @@ async function computeSourceMentionKeys(clearance: string, sourceKey: string): P
       WHERE ${whereBase} AND ae."entityId" = ${entity.id}
     `;
 
-    // (b) 本文が canonicalName/aliases のいずれかに一致するアセットの url
-    let bRows: { itemKey: string }[] = [];
-    if (entity.terms.length > 0) {
-      // ILIKE (texticlike) は leakproof でないため RLS 下では索引が効かず AssetText を
-      // Seq Scan していた。PGroonga の &@ は leakproof なので索引が使える。
-      // 索引は normalizedContent 側なので検索語も normalizeText を通す。
-      //
-      // ただし素直に JOIN 条件へ入れるとプランナが SourceRecord 側の URL 絞り込みを
-      // 先に選び、かえって遅くなる (実測 blog ソースで ILIKE 4,954ms → &@ 15,734ms)。
-      // MATERIALIZED CTE で「本文一致を先に確定させる」順序を固定すると
-      // 2,030ms (ウォーム 146ms) になる。件数はいずれも同じ 464 件。
-      const termConds = entity.terms.map(
-        (t) => Prisma.sql`t."normalizedContent" &@ ${normalizeText(t)}`
-      );
-      bRows = await tx.$queryRaw<{ itemKey: string }[]>`
-        WITH hits AS MATERIALIZED (
-          SELECT DISTINCT t."assetId"
-          FROM "AssetText" t
-          WHERE (${Prisma.join(termConds, " OR ")})
-        )
-        SELECT DISTINCT sr.url AS "itemKey"
-        FROM "SourceRecord" sr
-        JOIN hits ON hits."assetId" = sr."assetId"
-        WHERE ${whereBase}
-      `;
-    }
+    // (b) 本文が canonicalName/aliases のいずれかに一致するアセットの url。
+    // 本文検索は開くたびに走らせると冷えた DB で約 3.6 秒かかるので、結果を Asset.mentionsNina に
+    // 溜めてある (15 分ごとの cron。src/lib/domain/nina-mentions.ts)。一致するアセットは千件前後なので、
+    // MATERIALIZED CTE で先に確定させてから SourceRecord を引く (逆順だとソース全体を舐める)。
+    const bRows = await tx.$queryRaw<{ itemKey: string }[]>`
+      WITH hits AS MATERIALIZED (
+        SELECT a.id FROM "Asset" a WHERE a."mentionsNina"
+      )
+      SELECT DISTINCT sr.url AS "itemKey"
+      FROM "SourceRecord" sr
+      JOIN hits ON hits.id = sr."assetId"
+      WHERE ${whereBase}
+    `;
 
     const set = new Set<string>();
     for (const r of aRows) set.add(r.itemKey);

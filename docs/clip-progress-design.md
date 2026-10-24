@@ -41,7 +41,7 @@ Issue: https://github.com/sekai-nina/sekai-nina-akashic/issues/233 (合意の経
    | `showroom` / `x_official` | 登録済み SourceRecord の URL | アセット登録が前提。収集の仕組みが無いので当面は空で正しい |
 
 3. **対象は全 12 データソース。**
-4. **分母は「新奈に関係あるもの」だけ** = 本人著 ∪ 本文で言及あり。`/coverage` の判定 `getSourceAuthorKeys` / `getSourceMentionKeys` (`src/lib/domain/coverage-items.ts`) を流用する。トークは全件本人なので全部。判定が拾い漏らしたものは「その他」を開いて手で対象に入れられる (= 対象に入れた記録も持つ)
+4. **分母は「新奈に関係あるもの」だけ** = 本人著 ∪ 本文で言及あり。`/coverage` の判定 `getSourceAuthorKeys` / `getSourceMentionKeys` (`src/lib/domain/coverage-items.ts`) を流用する。トークは全件本人なので全部。判定が拾い漏らしたものは手で対象に入れられる (= 対象に入れた記録も持つ。入口はアセット詳細。2026-10 に「その他」タブを廃止、下記)
 5. **ボタンは 2 か所:**
    - アセット詳細 (`src/app/(main)/assets/[id]/`、クリップを作る `references-panel.tsx` / `src/components/clip-dialog.tsx` の近く) に「この素材はクリップし切った」。トークのアセットから押すと**その日 (JST) 全体**に付く
    - `/progress` に全データソースのタブ。タブごとに済の割合、素材ごとの「クリップ数」と「済」トグル
@@ -81,7 +81,7 @@ Issue: https://github.com/sekai-nina/sekai-nina-akashic/issues/233 (合意の経
 ### 画面・操作
 
 - `/progress` は `/progress/materials/blog` へ遷移する。上段に全 12 ソースのクリップ進捗タブ、下段に従来の記事化タブを残す。
-- `/progress/materials/[sourceKey]` に対象の済割合・素材ごとのクリップ数・済の付け外しを表示する。「その他」から手動で分母へ追加でき、自動対象でない素材は追加を取り消せる。50 件ずつ、日付の新しい順で表示する。
+- `/progress/materials/[sourceKey]` に対象の済割合・素材ごとのクリップ数・済の付け外しを表示する。自動対象でない素材は手動対象を取り消せる。50 件ずつ、日付の新しい順で表示する。
 - アセット詳細のクリップ／参照パネル付近でも付け外しできる。トークは画像・本文など同日のアセットが同じ JST 日付キーを使う。
 - 操作は admin / member の Server Action に限る。viewer は閲覧のみ。新しい REST / MCP API は追加しない。
 
@@ -133,7 +133,7 @@ Issue: https://github.com/sekai-nina/sekai-nina-akashic/issues/233 (合意の経
 
 - [x] 全 12 データソースのタブが `/progress` にあり、済の割合が出る
 - [x] アセット詳細から「クリップ済」を付け外しでき、トークはその日全体に付く
-- [x] 分母が「新奈に関係あるもの」になっていて、「その他」から手で対象に入れられる
+- [x] 分母が「新奈に関係あるもの」になっていて、手で対象に入れられる (当初は「その他」タブ。2026-10 からアセット詳細)
 - [x] 素材ごとのクリップ数が出る (ドシエへ移したクリップも数える)
 - [x] `pnpm typecheck` / `pnpm test` が緑。素材の導出 (特にラジオの行・トークの JST 日付) にテストがある
 - [x] migration は本番未適用のまま PR を出し、適用はユーザーの OK を取ってから
@@ -143,3 +143,24 @@ Issue: https://github.com/sekai-nina/sekai-nina-akashic/issues/233 (合意の経
 ## 段階3の実装
 
 観点別のアイテムチェックを終了し、`/coverage` を観点×ソースの確認済み日付の直接更新へ変更する。クリップ済とは別の印を維持する。詳細・検証・適用記録は [段階3の記録](./coverage-phase3-design.md)。段階3の本番 migration は2026-10-18にユーザー承認を受け適用済み。
+
+## 「その他」タブの廃止と一覧の高速化 (2026-10)
+
+久しぶりに開くと `/progress/materials/blog` が数秒待たされていた。原因は「その他（N 件）」の件数とタブのために、毎回ソース全体（ブログなら全メンバー約 3,000 本・出典約 1.8 万行）を導出していたこと。冷えた DB では導出だけで 2〜6 秒かかった。
+
+- 「その他」タブは本番で一度も使われていなかった（`MaterialClipStatus` 0 件）。漏れた素材は検索からアセット詳細を開いて「クリップ済」を押せば対象に入る（済にすると `included` も立つ）ので、タブを廃止した
+- 一覧は関連キー（本人著 ∪ 言及 ∪ 状態のある素材）だけを `deriveItems` の `onlyKeys` で引く。ブログで出典 1,400 行（約 12 分の 1）。結果は状態のキーの集合ごとに `unstable_cache`（90 秒・`coverage-derived-items` タグ）
+- トーク（全日本人）とラジオ（出演一覧の行）は従来どおり全件が対象
+- 言及判定の本文検索（PGroonga で 17 語、冷えて約 3.6 秒）は結果を `Asset.mentionsNina` に溜め、判定は列を見るだけにした（`20261024000000_asset_mentions_nina`）
+  - 付け外しは `src/lib/domain/nina-mentions.ts` の `refreshNinaMentions`。15 分ごとの `GET /api/cron/nina-mentions`（ハートビート `cron.nina_mentions`）と `pnpm cli:refresh-nina-mentions [--apply]`。毎回全件を検索し直して差分だけ書くので、本文の編集・別名の追加にも追従する
+  - `AssetEntity` に付けないのは、検索・エンティティページ・MCP の「坂井新奈」絞り込みに機械判定（別名「坂井」「🩰」の誤一致を含む）を混ぜないため
+  - 本番の旧判定と突き合わせ、url 系 10 ソースで関連キーの差 0（ブログ 512 件）。一致アセットは 1,806 件
+  - 新着の言及だけのアセットが関連判定に出るまで最長で約 20 分（cron 15 分 + 言及キーのキャッシュ 120 秒 + 一覧のキャッシュ 90 秒）。本人のブログは著者リンク (a) で出る（キャッシュぶんの数分だけ）
+  - 一覧のキャッシュ（`material-automatic-items`）は自動対象だけを source × clearance で持つ。済の状態をキーに入れると済を押すたびに外れるため。手動対象（自動判定に漏れて済にした素材）はキャッシュの外で引き足す
+  - 索引は true の行だけの部分索引 `Asset_mentionsNina_idx`（schema 管理外。`migrate diff` が DROP を出すので捨てる）
+  - 検索が 0 件なのに印が付いているときは、検索の故障とみなして書き込まない（全件の印を無言で外さない）
+  - `/status` のハートビートには件数を載せない（RLS を通さず数えた値で、上位機密のアセットも含むため）。件数は Vercel のログ
+  - `pnpm cli:restore` は mentionsNina を戻さない。リストア後は `pnpm cli:refresh-nina-mentions --apply`（回さなくても最長 15 分で cron が埋める）
+  - 本番への入れ方: migration → `pnpm cli:refresh-nina-mentions --apply` → コードのデプロイ。逆順だと最初の cron まで言及だけの素材が分母から落ちる
+- 残る冷えたときの重さ: 表示 50 件のアセット・クリップ数（`withSession`、冷えて約 1 秒・キャッシュなし）
+

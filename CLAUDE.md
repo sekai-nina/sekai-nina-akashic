@@ -186,7 +186,7 @@ src/
 
 - **Web: Vercel**。`vercel.json` で **region `hnd1` 固定**（Supabase ap-northeast-1 とのコロケーション。既定の iad1 だとページ読み込みが 5-8 秒かかった）
 - **CI**: `.github/workflows/ci.yml` が push to `main` で `pnpm typecheck` を回すだけ（Discord bot は撤去済み）
-- **Vercel Cron**: `vercel.json` の `*/15 * * * *` が `GET /api/cron/status`、`*/10 * * * *` が `GET /api/cron/insta-jobs`（story ジョブの失効回収と再送）、`0 3 * * *`（UTC = 12:00 JST）が `GET /api/cron/costs`、`0 0 * * *`（09:00 JST）が `GET /api/cron/mentions` を呼ぶ（すべて `CRON_SECRET` 必須。未設定なら 503 で何もしない。認証は `src/lib/cron/auth.ts`）
+- **Vercel Cron**: `vercel.json` の `*/15 * * * *` が `GET /api/cron/status`、`*/10 * * * *` が `GET /api/cron/insta-jobs`（story ジョブの失効回収と再送）、`*/15 * * * *` が `GET /api/cron/nina-mentions`（本文が新奈に言及しているアセットに `Asset.mentionsNina` を付け外し）、`0 3 * * *`（UTC = 12:00 JST）が `GET /api/cron/costs`、`0 0 * * *`（09:00 JST）が `GET /api/cron/mentions` を呼ぶ（すべて `CRON_SECRET` 必須。未設定なら 503 で何もしない。認証は `src/lib/cron/auth.ts`）
 - `instrumentation.ts` が起動時に Prisma を事前接続（pooler の ~800ms コールドコネクト回避）
 
 ## ドキュメント
