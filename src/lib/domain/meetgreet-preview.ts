@@ -94,12 +94,18 @@ export interface UpcomingPreview {
 
 /**
  * 公開サイトに出す予告。開催日が `today` (既定は今日の JST) 以降で、予告が空でない回を開催日順に。
+ * `all` なら予告の無い回も含める (#242: 今後の予定として日付と形式だけでも出す。予告が付くのは
+ * 実際には通常盤のオンラインだけなので、リアルや初回盤は予告が空のまま並ぶ)。
  * 出典は `previewSourceAssetIds` の並び順を保つ。
  */
-export async function listUpcomingPreviews(clearance: string, today = todayJst()): Promise<UpcomingPreview[]> {
+export async function listUpcomingPreviews(
+  clearance: string,
+  today = todayJst(),
+  { all = false }: { all?: boolean } = {}
+): Promise<UpcomingPreview[]> {
   return withClearance(clearance, async (tx) => {
     const rows = await tx.meetGreet.findMany({
-      where: { date: { gte: today }, previewOutfit: { not: "" } },
+      where: { date: { gte: today }, ...(all ? {} : { previewOutfit: { not: "" } }) },
       orderBy: [{ date: "asc" }, { createdAt: "asc" }],
       select: {
         id: true,
