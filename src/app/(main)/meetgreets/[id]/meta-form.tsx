@@ -3,23 +3,30 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Pencil } from "lucide-react";
+import type { MeetGreetEdition } from "@prisma/client";
+import { MEETGREET_EDITION_LABELS } from "@/lib/utils";
 import { deleteMeetGreetAction, updateMeetGreetAction } from "../actions";
 
 const inputCls =
   "px-2 py-1 rounded-md border border-slate-200 bg-white text-sm text-slate-900 outline-none focus:border-slate-400";
 
-/** シングル名・呼び分けの編集と、行の削除 (ドシエ / 収集は残る) */
+/** シングル名・呼び分け・会場 / 盤・ペアの編集と、行の削除 (ドシエ / 収集は残る) */
 export function MetaForm({
   id,
   single,
   label,
   venue,
+  edition,
+  pairMember,
   isReal,
 }: {
   id: string;
   single: string;
   label: string;
   venue: string | null;
+  /** 盤とペアはオンラインだけ (公開サイトのカードに出る) */
+  edition: MeetGreetEdition | null;
+  pairMember: string;
   /** リアルミーグリのときだけ会場名を出す (記事タイトルに使うのはリアルだけ) */
   isReal: boolean;
 }) {
@@ -29,6 +36,8 @@ export function MetaForm({
   const [s, setS] = useState(single);
   const [l, setL] = useState(label);
   const [v, setV] = useState(venue ?? "");
+  const [ed, setEd] = useState<MeetGreetEdition | "">(edition ?? "");
+  const [pm, setPm] = useState(pairMember);
   const [msg, setMsg] = useState<string | null>(null);
 
   if (!editing) {
@@ -37,6 +46,8 @@ export function MetaForm({
         <span>
           {single || <span className="text-slate-400">シングル未設定</span>}
           {isReal && venue && <span className="text-slate-500"> · {venue}</span>}
+          {!isReal && edition && <span className="text-slate-500"> · {MEETGREET_EDITION_LABELS[edition]}</span>}
+          {!isReal && pairMember && <span className="text-slate-500"> · ペア: {pairMember}</span>}
         </span>
         <button
           type="button"
@@ -51,7 +62,11 @@ export function MetaForm({
 
   function save() {
     startTransition(async () => {
-      const res = await updateMeetGreetAction(id, { single: s, label: l, ...(isReal ? { venue: v } : {}) });
+      const res = await updateMeetGreetAction(id, {
+        single: s,
+        label: l,
+        ...(isReal ? { venue: v } : { edition: ed || null, pairMember: pm }),
+      });
       if (!res.ok) {
         setMsg(`エラー: ${res.error}`);
         return;
@@ -98,6 +113,30 @@ export function MetaForm({
           aria-label="会場の正式名称"
         />
       )}
+      {!isReal && (
+        <>
+          <select
+            className={inputCls}
+            value={ed}
+            onChange={(e) => setEd(e.target.value as MeetGreetEdition | "")}
+            aria-label="盤"
+          >
+            <option value="">盤: 未設定</option>
+            {(Object.keys(MEETGREET_EDITION_LABELS) as MeetGreetEdition[]).map((k) => (
+              <option key={k} value={k}>
+                {MEETGREET_EDITION_LABELS[k]}
+              </option>
+            ))}
+          </select>
+          <input
+            className={inputCls + " w-36"}
+            value={pm}
+            onChange={(e) => setPm(e.target.value)}
+            placeholder="ペアの相手 (例: 上村ひなの)"
+            aria-label="ペアレーンの相手"
+          />
+        </>
+      )}
       <button
         type="button"
         onClick={save}
@@ -124,6 +163,7 @@ export function MetaForm({
       <p className="text-xs text-slate-400 w-full">
         作成済みのドシエ・X レポ収集の名前は変わりません (それぞれの画面で変更してください)。
         {isReal && " 会場は記事タイトルに出ます (未入力なら呼び分けを使います)。"}
+        {!isReal && " 盤とペアの相手は公開サイトのミーグリページに出ます。ペアでない回は空にしてください。"}
       </p>
       {msg && <span className="text-xs text-red-600 w-full">{msg}</span>}
     </div>

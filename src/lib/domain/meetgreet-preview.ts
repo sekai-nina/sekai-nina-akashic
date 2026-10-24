@@ -13,7 +13,7 @@
  *   `/meetgreets/[id]` (1 回分の文面と出典を直す)
  */
 
-import type { MeetGreetFormat, Prisma } from "@prisma/client";
+import type { MeetGreetEdition, MeetGreetFormat, Prisma } from "@prisma/client";
 import { withClearance } from "@/lib/db";
 import { toJstDateOnly, todayJst } from "@/lib/utils";
 import { logAudit } from "./audit";
@@ -88,6 +88,8 @@ export interface UpcomingPreview {
   single: string;
   label: string;
   venue: string | null;
+  edition: MeetGreetEdition | null;
+  pairMember: string;
   outfit: string;
   sources: PreviewSource[];
 }
@@ -114,6 +116,8 @@ export async function listUpcomingPreviews(
         single: true,
         label: true,
         venue: true,
+        edition: true,
+        pairMember: true,
         previewOutfit: true,
         previewSourceAssetIds: true,
       },
@@ -126,6 +130,8 @@ export async function listUpcomingPreviews(
       single: r.single,
       label: r.label,
       venue: r.venue,
+      edition: r.edition,
+      pairMember: r.pairMember,
       outfit: r.previewOutfit,
       sources: r.previewSourceAssetIds.flatMap((id) => sources.get(id) ?? []),
     }));

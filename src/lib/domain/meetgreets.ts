@@ -11,7 +11,7 @@
  */
 
 import { Prisma } from "@prisma/client";
-import type { ClearanceLevel, MeetGreetFormat } from "@prisma/client";
+import type { ClearanceLevel, MeetGreetEdition, MeetGreetFormat } from "@prisma/client";
 import { withClearance, withSession } from "@/lib/db";
 import { assertClearance } from "@/lib/classification";
 import {
@@ -315,6 +315,10 @@ export interface UpdateMeetGreetInput {
   label?: string;
   /** 会場の正式名称 (リアルの記事タイトルに出る)。空文字で消す */
   venue?: string;
+  /** 盤 (オンラインだけ)。null で消す */
+  edition?: MeetGreetEdition | null;
+  /** ペアレーンの相手。空文字で消す */
+  pairMember?: string;
   extraSketchPrompt?: string;
 }
 
@@ -333,6 +337,8 @@ export async function updateMeetGreet(user: ActingUser, id: string, input: Updat
           ...(input.single !== undefined ? { single: input.single.trim() } : {}),
           ...(input.label !== undefined ? { label: input.label.trim() } : {}),
           ...(input.venue !== undefined ? { venue: input.venue.trim() || null } : {}),
+          ...(input.edition !== undefined ? { edition: input.edition } : {}),
+          ...(input.pairMember !== undefined ? { pairMember: input.pairMember.trim() } : {}),
           ...(input.extraSketchPrompt !== undefined ? { extraSketchPrompt: input.extraSketchPrompt } : {}),
         },
       })

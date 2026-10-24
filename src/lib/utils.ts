@@ -13,6 +13,7 @@ import {
   type LlmProvider,
   type LlmUsageSource,
   type LiveSongRole,
+  type MeetGreetEdition,
   type MeetGreetFormat,
   type PlaceKind,
   type ReleaseKind,
@@ -189,6 +190,12 @@ export const TIKTOK_VIDEO_STATUS_LABELS: Record<TiktokVideoStatus, string> = {
 export const MEETGREET_FORMAT_LABELS: Record<MeetGreetFormat, string> = {
   online: "オンライン",
   real: "リアル",
+};
+
+/** ミーグリの盤 (オンラインだけ)。公開サイトのカードにもこの表記で出る */
+export const MEETGREET_EDITION_LABELS: Record<MeetGreetEdition, string> = {
+  regular: "通常盤",
+  limited: "初回限定盤",
 };
 
 /** ドシエ名など内部向けの略称 (手作業時代の `2026-08-09 通常オンミ` に合わせる) */

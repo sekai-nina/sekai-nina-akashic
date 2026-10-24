@@ -11,6 +11,7 @@ import {
   getMeetGreet,
   refetchReports,
   updateMeetGreet,
+  type UpdateMeetGreetInput,
 } from "@/lib/domain/meetgreets";
 import { applyExcerpts, proposeExcerptsForDossier } from "@/lib/domain/excerpts";
 import { setMeetGreetPreview, setPreviewsFromAsset } from "@/lib/domain/meetgreet-preview";
@@ -65,7 +66,7 @@ export async function createMeetGreetAction(input: {
 
 export async function updateMeetGreetAction(
   id: string,
-  input: { single?: string; label?: string; extraSketchPrompt?: string }
+  input: UpdateMeetGreetInput
 ) {
   const user = await requireMember();
   const parsed = UpdateMeetGreetSchema.safeParse(input);
