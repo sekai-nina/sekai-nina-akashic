@@ -32,7 +32,7 @@ const source = {
 };
 const url = "https://blog.test/1";
 const a = {
-  id: "a1", title: "ブログ", classification: "internal", canonicalDate: new Date("2026-10-15T15:00:00Z"),
+  id: "a1", kind: "text", title: "ブログ", classification: "internal", canonicalDate: new Date("2026-10-15T15:00:00Z"),
   sourceRecords: [
     { url, title: "ブログ", publisher: "公式ブログ", classification: "internal" },
     { url, title: "ブログ画像", publisher: "公式ブログ", classification: "internal" },
@@ -88,6 +88,11 @@ describe("素材のクリップ進捗の一覧", () => {
     expect(mocks.derive).toHaveBeenCalledTimes(1);
     expect(mocks.authors).toHaveBeenCalledWith("blog", "internal");
     expect(mocks.mentions).toHaveBeenCalledWith("blog", "internal");
+  });
+  it("行のリンク先は画像より本文のアセットを優先する", async () => {
+    mocks.tx.$queryRaw.mockResolvedValue([{ id: "img" }, { id: "a1" }]);
+    mocks.tx.asset.findMany.mockResolvedValue([{ ...a, id: "img", kind: "image" }, a]);
+    expect((await listMaterialClipProgress(user, "blog")).items[0].assetId).toBe("a1");
   });
   it("URL 重複で水増しせず、移動先も含む全ドシエの件数を withSession で数える", async () => {
     const result = await listMaterialClipProgress(user, "blog");

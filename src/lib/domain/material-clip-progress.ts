@@ -103,7 +103,7 @@ async function assetsForItems(tx: TransactionClient, source: DataSource, items: 
   const assets = ids.length ? await tx.asset.findMany({
     where: { id: { in: ids.map((i) => i.id) } },
     select: {
-      id: true, title: true, canonicalDate: true, classification: true,
+      id: true, kind: true, title: true, canonicalDate: true, classification: true,
       sourceRecords: { select: { url: true, title: true, publisher: true } },
     },
   }) : [];
@@ -157,7 +157,8 @@ export async function listMaterialClipProgress(
         ...item, done: status?.done ?? false, included: status?.included ?? false,
         automatic: automatic.has(item.itemKey),
         clipCount: itemAssets.reduce((n, a) => n + (countByAsset.get(a.id) ?? 0), 0),
-        assetId: itemAssets[0]?.id ?? null,
+        // 行のリンク先。ブログは本文と画像が別アセットなので本文を優先する
+        assetId: (itemAssets.find((a) => a.kind === "text") ?? itemAssets[0])?.id ?? null,
       };
     });
   }, { timeout: 30_000 });
@@ -213,7 +214,7 @@ export async function findMaterialClipProgressForAsset(assetId: string, clearanc
   return withClearance(clearance, async (tx) => {
     const asset = await tx.asset.findUnique({
       where: { id: assetId }, select: {
-        id: true, title: true, canonicalDate: true, classification: true,
+        id: true, kind: true, title: true, canonicalDate: true, classification: true,
         sourceRecords: { select: { url: true, title: true, publisher: true } },
       },
     });
