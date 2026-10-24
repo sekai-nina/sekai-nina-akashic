@@ -39,7 +39,7 @@
 | export | 接続 | RLS |
 |---|---|---|
 | `prisma` | `DATABASE_URL`（`app_runtime` ロール） | 適用 |
-| `prismaInternal` | `DIRECT_URL`（`postgres` ロール） | バイパス |
+| `prismaInternal` | `DIRECT_URL`（Vercel は `app_internal`、手元の CLI は `akashic_cli` ロール。どちらも DDL 不可） | バイパス |
 
 バックアップ・リストア・全体統計は全行が見えないと成立しないので `prismaInternal` を使う。ユーザーに返すデータは必ず `withClearance` / `withSession` を通す。
 
