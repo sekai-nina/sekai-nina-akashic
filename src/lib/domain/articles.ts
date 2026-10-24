@@ -377,7 +377,12 @@ export interface AddAssetToArticleInput {
   excerptType?: TextType;
   excerptStart?: number;
   excerptEnd?: number;
+  /** 監査ログ `article.source.add` の主体。渡したときだけ書く */
+  actor?: ArticleActor;
 }
+
+/** 紐づけの応答に使う形 (記事詳細の sources[] と同じ include) */
+const ARTICLE_SOURCE_DETAIL_INCLUDE = ARTICLE_DETAIL_INCLUDE.sources.include;
 
 /**
  * アセット (と抜粋) を記事に紐づける。
@@ -393,41 +398,98 @@ export interface AddAssetToArticleInput {
  * internal 決め打ちにすると confidential なアセットの抜粋が internal に
  * 格下げされて下位クリアランスから読めてしまう。記事詳細は asset が RLS で
  * 落ちても label / excerpt は表示するので、実際に漏れる経路になる。
+ *
+ * pending の追加は push の出力に影響しないので、`dirty` / `editedAt` / `updatedAt` は触らない。
  */
 export async function addAssetToArticle(input: AddAssetToArticleInput, clearance: string) {
-  return withClearance(clearance, async (tx) => {
+  const created = await withClearance(clearance, async (tx) => {
     // RLS 下で引くので、見えないアセットは null になる (= 存在確認を兼ねる)
     const asset = await tx.asset.findUnique({
       where: { id: input.assetId },
       select: { classification: true },
     });
     if (!asset) throw new Error("Asset not found or not accessible");
-
-    // RLS は読みを守るが、自分より上のクリアランスを付けて書く操作は
-    // アプリ層で止める (このリポジトリの規約)
-    assertClearance(clearance, asset.classification);
-
-    const last = await tx.articleSource.findFirst({
-      where: { articleId: input.articleId },
-      orderBy: { sortOrder: "desc" },
-      select: { sortOrder: true },
-    });
-    return tx.articleSource.create({
-      data: {
-        articleId: input.articleId,
-        assetId: input.assetId,
-        status: ArticleSourceStatus.pending,
-        label: input.label ?? "",
-        excerpt: input.excerpt ?? "",
-        excerptType: input.excerptType,
-        excerptStart: input.excerptStart,
-        excerptEnd: input.excerptEnd,
-        sortOrder: (last?.sortOrder ?? -1) + 1,
-        classification: asset.classification,
-      },
-      select: { id: true, articleId: true },
-    });
+    return createPendingSource(tx, input, asset.classification, clearance);
   });
+  if (input.actor) await auditSourceAdd(input.actor, created);
+  return created;
+}
+
+async function createPendingSource(
+  tx: Prisma.TransactionClient,
+  input: AddAssetToArticleInput,
+  classification: ClearanceLevel,
+  clearance: string
+) {
+  // RLS は読みを守るが、自分より上のクリアランスを付けて書く操作は
+  // アプリ層で止める (このリポジトリの規約)
+  assertClearance(clearance, classification);
+
+  const last = await tx.articleSource.findFirst({
+    where: { articleId: input.articleId },
+    orderBy: { sortOrder: "desc" },
+    select: { sortOrder: true },
+  });
+  return tx.articleSource.create({
+    data: {
+      articleId: input.articleId,
+      assetId: input.assetId,
+      status: ArticleSourceStatus.pending,
+      label: input.label ?? "",
+      excerpt: input.excerpt ?? "",
+      excerptType: input.excerptType,
+      excerptStart: input.excerptStart,
+      excerptEnd: input.excerptEnd,
+      sortOrder: (last?.sortOrder ?? -1) + 1,
+      classification,
+    },
+    include: ARTICLE_SOURCE_DETAIL_INCLUDE,
+  });
+}
+
+function auditSourceAdd(actor: ArticleActor, source: { id: string; articleId: string; assetId: string | null }) {
+  return auditArticle(actor, {
+    action: "article.source.add",
+    targetType: "ArticleSource",
+    targetId: source.id,
+    metadata: { articleId: source.articleId, assetId: source.assetId },
+  });
+}
+
+export type AddArticleSourceResult =
+  | { ok: true; source: Prisma.ArticleSourceGetPayload<{ include: typeof ARTICLE_SOURCE_DETAIL_INCLUDE }> }
+  | { ok: false; reason: "article_not_found" | "asset_not_found" | "above_limit" };
+
+/**
+ * REST `POST /articles/:shortId/sources` と MCP `akashic_add_article_source` の入口 (#110)。
+ * `addAssetToArticle` と同じ規則で pending を作り、失敗の理由を値で返す。
+ *
+ * - `maxClassification`: これより上のアセットは紐づけない (`above_limit`)。API キーからは
+ *   上限より上の出典を apply できず、詳細でも返さない (`isApiVisibleSource`) ので、
+ *   紐づけた時点で断る方が呼び出し側に分かりやすい
+ * - 見えない / 存在しないアセットは `asset_not_found` (存在を漏らさない)
+ */
+export async function addArticleSource(
+  input: Omit<AddAssetToArticleInput, "articleId"> & {
+    shortId: string;
+    actor: ArticleActor;
+    maxClassification?: ClearanceLevel;
+  },
+  clearance: string
+): Promise<AddArticleSourceResult> {
+  const result = await withClearance(clearance, async (tx): Promise<AddArticleSourceResult> => {
+    const article = await tx.article.findUnique({ where: { shortId: input.shortId }, select: { id: true } });
+    if (!article) return { ok: false, reason: "article_not_found" };
+    const asset = await tx.asset.findUnique({ where: { id: input.assetId }, select: { classification: true } });
+    if (!asset) return { ok: false, reason: "asset_not_found" };
+    if (input.maxClassification && isAboveClearance(asset.classification, input.maxClassification)) {
+      return { ok: false, reason: "above_limit" };
+    }
+    const source = await createPendingSource(tx, { ...input, articleId: article.id }, asset.classification, clearance);
+    return { ok: true, source };
+  });
+  if (result.ok) await auditSourceAdd(input.actor, result.source);
+  return result;
 }
 
 /**

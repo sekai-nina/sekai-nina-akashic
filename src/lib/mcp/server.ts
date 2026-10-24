@@ -25,6 +25,7 @@ const INSTRUCTIONS = [
   "- 記事 (公開サイトの世界新奈) は akashic_list_articles { hasPending: true } で未反映の紐づけがある記事を探し、",
   "  akashic_get_article で本文と sources (pending の excerpt) を読む。反映は akashic_apply_article_source で",
   "  先に脚注番号を採ってから、本文に ^[n] を書いて akashic_update_article で保存する (この順で)。",
+  "  紐づけがまだ無いアセットは akashic_add_article_source で pending として紐づけてから反映する。",
   "  記事への書き込みは次の push で公開サイトに出る。updatedAt は必ず直前に読んだ値を渡す。",
 ].join("\n");
 

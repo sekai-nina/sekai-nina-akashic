@@ -4,8 +4,10 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { API_APPLY_MAX_CLASSIFICATION } from "@/lib/articles/apply";
 import { ArticleCreateSchema } from "@/lib/articles/create";
 import { ArticleEditPatchSchema, UpdatedAtSchema, hasPatchFields, parseUpdatedAt } from "@/lib/articles/patch";
-import { toArticleDetail, toArticleSummary } from "@/lib/domain/article-api";
+import { ArticleSourceAddSchema } from "@/lib/articles/source";
+import { toArticleDetail, toArticleSourceDetail, toArticleSummary } from "@/lib/domain/article-api";
 import {
+  addArticleSource,
   applyArticleSource,
   createArticle,
   getArticleByShortId,
@@ -27,6 +29,7 @@ import type { ToolContext } from "./tools";
  *   4. 返った sourceNo で本文に ^[n] を書き、akashic_update_article { body, updatedAt } で保存する
  * 3 → 4 の順にするのは、途中で止まっても本文に宛先の無い脚注が残らないようにするため。
  * 記事を起こすところから任せるときは、先に akashic_create_article (draft で作られる) を挟む。
+ * 紐づけ (pending) がまだ無ければ、2 の前に akashic_add_article_source でアセットを紐づける。
  *
  * 記事ページは cookie 依存の動的描画でサーバ側キャッシュが無く、ここからはブラウザの Router Cache も
  * 消せないので revalidate はしない (Server Action 側だけ)。監査ログは domain が `article.*` を書き、
@@ -208,6 +211,63 @@ export function registerArticleWriteTools(server: McpServer, { user }: ToolConte
         return ok({ shortId, changed: result.changed, updatedAt: result.updatedAt });
       } catch (err) {
         return toToolError(err, "記事の更新に失敗しました。");
+      }
+    }
+  );
+
+  server.registerTool(
+    "akashic_add_article_source",
+    {
+      title: "記事に出典を紐づける",
+      description:
+        "アセット (と抜粋) を記事に pending で紐づける。公開はされない (公開は akashic_apply_article_source)。" +
+        "同じアセットを抜粋ごとに何度でも紐づけられる (重複チェックなし)。" +
+        `機密レベルが ${API_APPLY_MAX_CLASSIFICATION} より上のアセットは紐づけられない (画面から人間が行う)。` +
+        "返る id を akashic_apply_article_source の sourceId に渡す。記事の updatedAt は変わらない。",
+      inputSchema: ArticleSourceAddSchema.extend({ shortId: z.string().describe("記事の shortId") }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    },
+    async ({ shortId, ...input }) => {
+      try {
+        const result = await addArticleSource(
+          {
+            ...input,
+            shortId,
+            maxClassification: API_APPLY_MAX_CLASSIFICATION,
+            actor: { id: user.id, apiKeyId: user.apiKeyId },
+          },
+          user.clearance
+        );
+        if (!result.ok) {
+          const detail = { shortId, assetId: input.assetId, reason: result.reason };
+          switch (result.reason) {
+            case "article_not_found":
+              return fail("記事が見つかりません。shortId を akashic_list_articles で確認してください。", detail);
+            case "asset_not_found":
+              return fail("アセットが見つかりません (存在しないか、見える権限がありません)。", detail);
+            case "above_limit":
+              return fail(
+                `機密レベルが ${API_APPLY_MAX_CLASSIFICATION} より上のアセットは MCP からは紐づけられません。画面から人間が操作してください。`,
+                detail
+              );
+          }
+        }
+
+        await logMcpToolCall({
+          user,
+          tool: "add_article_source",
+          targetType: "ArticleSource",
+          targetId: result.source.id,
+          args: { shortId, assetId: input.assetId },
+        });
+
+        return ok({
+          shortId,
+          ...toArticleSourceDetail(result.source),
+          hint: "本文に反映するときは akashic_apply_article_source にこの id を渡して脚注番号を採ってから ^[n] を書いてください。",
+        });
+      } catch (err) {
+        return toToolError(err, "紐づけに失敗しました。");
       }
     }
   );

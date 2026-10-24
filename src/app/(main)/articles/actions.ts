@@ -43,11 +43,12 @@ export async function addAssetToArticleAction(
       excerptType: toTextType(options?.excerptType),
       excerptStart: options?.excerptStart,
       excerptEnd: options?.excerptEnd,
+      actor: { id: user.id },
     },
     user.clearance,
   );
   revalidatePath("/articles");
-  return created;
+  return { id: created.id, articleId: created.articleId };
 }
 
 export async function removeArticleSourceAction(id: string, shortId: string) {

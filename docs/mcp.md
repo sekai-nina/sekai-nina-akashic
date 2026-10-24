@@ -58,6 +58,7 @@ pnpm cli:keygen <user-email> <key-name>
 | `akashic_get_article` | read | 記事 1 本の本文・frontmatter・出典 |
 | `akashic_create_article` | write | 記事の新規作成（`shortId` / `path` はサーバ採番。既定 `draft: true`） |
 | `akashic_update_article` | write | 記事の部分更新（`updatedAt` 必須） |
+| `akashic_add_article_source` | write | アセット（と抜粋）を記事に pending で紐づける（internal 以下のみ） |
 | `akashic_apply_article_source` | write | 紐づけを反映済みにし脚注番号を採る（公開判断。internal 以下のみ） |
 
 削除系のツールは意図的に用意していない。削除は画面から人間が行う。記事に出典を pending で紐づけるツールも無い（#110）。
@@ -208,6 +209,10 @@ MCP のツール引数はもともと zod で検証されるが、REST の `POST
 3 → 4 の順にするのは、途中で止まっても「本文から参照されていない出典」になるだけで、本文に宛先の無い `^[n]` が残らないため。apply の応答には次に何をするかの `hint` が付く。
 
 記事を起こすところから任せるときは、先に `akashic_create_article { title, type, … }` で作る（[docs/api.md の `POST /articles`](./api.md#post-articles) と同じ入力・採番規則）。作成の応答も `hint` 付き。
+
+紐づけ（pending）がまだ無いアセットは、2 の前に `akashic_add_article_source { shortId, assetId, label?, excerpt?, … }` で紐づける（[docs/api.md の `POST /articles/:shortId/sources`](./api.md#post-articlesshortidsources) と同じ入力・規則）。返る `id` を apply の `sourceId` に渡す。公開はされず、記事の `updatedAt` も変わらない。`internal` より上のアセットは `reason: "above_limit"` のエラー（画面から人間が紐づける）。
+
+つまり記事を一から任せるときの順番は「作成 → **紐づけ** → apply → 本文 → 人が push」。
 
 - **`updatedAt` の楽観ロックが必須。** 直前に読んだ値を渡し、その間に別の保存・取り込み・apply が入っていれば `reason: "conflict"` のエラーになる（現在の `updatedAt` を添えて返すので、それで再実行するか読み直す）。apply 自身も `updatedAt` を進めるので、別の apply が割り込んで番号がズレる競合もこれで検出される。エラーの `reason` が `conflict` 以外（`not_pending` / `asset_missing` / `above_limit` / `not_found`）なら再試行しても解消しない
 - `akashic_create_article` は `title` と `type` が必須で、残りは `akashic_update_article` と同じ項目を省略可。**省略時は `draft: true`**（公開サイトの記事ページに出ない。ただし **ファイル自体は次の push で公開リポジトリに載る** ので、公開できない内容を本文に書かせない担保にはならない）、`publishedAt` / `articleUpdatedAt` は今日（JST。AI が UTC で計算した「今日」は JST 0〜9 時にずれるので省略してよい）。`shortId` は 7 桁 base62、`path` は `<type>/<title>.md`（ファイル名に使えない `/ \ : * ? " < > |` は全角に置換。タイトル自体は変えない）。同じ `path` の記事があれば `reason: "path_exists"` のエラーで既存の `shortId` と `title` を返すので、再試行せず、同じ題材ならそちらを更新し、別の記事ならタイトルを変える。公開リポジトリに未取り込みの同名ファイルがあるときは `reason: "path_exists_upstream"`（人に取り込みを依頼する）。出典は作成時には付かない

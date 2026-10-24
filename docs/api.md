@@ -82,6 +82,7 @@ APIキーは `pnpm cli:keygen <user-email> <key-name> [permissions]` で発行�
 | POST | `/articles` | write | 記事の新規作成（`shortId` / `path` はサーバ採番。既定 `draft: true`） |
 | GET | `/articles/:shortId` | read | 記事詳細（本文・frontmatter・出典） |
 | PATCH | `/articles/:shortId` | write | 記事の部分更新（`updatedAt` 必須の楽観ロック） |
+| POST | `/articles/:shortId/sources` | write | アセット（と抜粋）を記事に pending で紐づける（internal 以下のみ） |
 | POST | `/articles/:shortId/sources/:sourceId/apply` | write | 紐づけを反映済みにする（公開判断。internal 以下のみ） |
 | POST | `/articles/:shortId/append` | write | 本文の置き換えと出典の追加を 1 トランザクションで（bot の一覧追記） |
 | POST | `/articles/:shortId/push` | article_push | この記事 1 本だけを公開リポジトリに push |
@@ -827,7 +828,7 @@ Lens / DataSource / Coverage / LensItemCheck は classification ベースの RLS
 
 3 → 4 の順なのは、途中で止まっても「本文から参照されていない出典」（quote 記事では普通の状態）になるだけで、本文に宛先の無い `^[n]` が残らないため。
 
-記事を起こすところから任せるときは、先に `POST /articles` で作る（`draft: true` で作られるので push されても公開サイトには出ない。出典の紐づけと draft の解除は人が画面で行う。紐づけ API は #110）。
+記事を起こすところから任せるときは、先に `POST /articles` で作る（`draft: true` で作られるので push されても公開サイトには出ない。draft の解除は人が画面で行う）。紐づけ（pending）がまだ無いアセットは、2 の前に `POST /articles/:shortId/sources` で紐づける。
 
 書き込み系（PATCH / apply）は **`updatedAt` による楽観ロックが必須**。GET が返した `updatedAt`（ISO 8601）をそのまま渡し、その間に別の保存・取り込み・apply が入っていれば `409 {"reason": "conflict", "updatedAt": "<現在>"}` が返る（読み直して作り直す）。push は `updatedAt` を動かさないので、push を挟んでも通る。
 
@@ -1084,6 +1085,36 @@ body は省略可（`subject` を省くと既定のコミットメッセージ�
 - GitHub の 422（読んでから commit するまでにブランチが進んだ）は 409（`reason: "branch_moved"`）。少し待って再送する。それ以外の GitHub の失敗は 502
 - `ARTICLES_GITHUB_TOKEN` が未設定なら 503
 - push したら監査ログに `article.push` を残す（画面の一括 push と同じ）
+
+### POST /articles/:shortId/sources
+
+アセット（と抜粋）を記事に **pending** で紐づける（#110）。公開はされない（公開は次節の apply）。画面の「記事に追加」と同じ domain 関数（`addArticleSource` → `addAssetToArticle` と同じ規則）。
+
+```json
+{
+  "assetId": "cmn3mpcty01jymowwnddkbqu4",
+  "label": "坂井新奈ブログ「17さい！」",
+  "excerpt": "……",
+  "excerptType": "body",
+  "excerptStart": 120,
+  "excerptEnd": 180
+}
+```
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `assetId` | string | ✓ | 紐づけるアセット |
+| `label` | string (≤500) | | 出典の表示名。省略時は空（apply 時に Asset のタイトルで埋まる） |
+| `excerpt` | string (≤10000) | | 本文に反映したい抜粋 |
+| `excerptType` | `TextType` | | 抜粋の出どころ（`body` / `ocr` / `transcript` など） |
+| `excerptStart` / `excerptEnd` | int ≥ 0 | | 抜粋の位置（start ≤ end） |
+
+- 応答 `201`: `GET /articles/:shortId` の `sources[]` と同じ形（`id` / `status: "pending"` / `classification` / `asset` …）に `shortId` を足したもの。`id` を apply の `:sourceId` に渡す
+- `classification` は元アセットから継承する。同じアセットを抜粋ごとに何度でも紐づけられる（重複チェックなし）
+- **`internal` より上のアセットは 403**（`reason: "above_limit"`）。API キーからは apply できず、記事詳細でも返さないため、紐づけた時点で断る（画面からは紐づけられる）
+- 見えない / 存在しないアセットは 404（`reason: "asset_not_found"`）、記事が無ければ 404（`reason: "article_not_found"`）
+- pending の追加は push の出力に影響しないので、記事の `updatedAt` / `dirty` / `editedAt` は変わらない（楽観ロック不要）
+- 監査ログ `article.source.add`（画面の「記事に追加」でも書く）
 
 ### POST /articles/:shortId/sources/:sourceId/apply
 
