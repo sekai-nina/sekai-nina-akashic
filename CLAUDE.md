@@ -144,7 +144,7 @@ src/
 └── middleware.ts
 ```
 
-主要ページ: `/search`（既定）, `/gallery`, `/assets`, `/inbox`, `/entities`, `/places`（聖地マップ）, `/anniversaries`（記念日）, `/announcements`（お知らせ。公開サイトのトップ / `/news` の正）, `/dossiers`（特定支援）, `/testimonials`, `/repo`, `/mentions`（X 言及監視）, `/meetgreets`（ミーグリ記事ワークフロー）, `/lives`（ライブ記事ワークフロー）, `/progress`（記事化の進捗。ブログ → 言葉記事・ひなあい・まだまだ・ひななり）, `/songs`（曲マスタ）, `/coverage`, `/graph`, `/analysis`, `/dashboard`, `/status`（パイプライン監視）, `/costs`（LLM コスト・admin のみ）, `/admin/*`
+主要ページ: `/search`（既定）, `/gallery`, `/assets`, `/inbox`, `/entities`, `/places`（聖地マップ）, `/anniversaries`（記念日）, `/announcements`（お知らせ。公開サイトのトップ / `/news` の正）, `/dossiers`（企画）, `/testimonials`, `/repo`, `/mentions`（X 言及監視）, `/meetgreets`（ミーグリ記事ワークフロー）, `/lives`（ライブ記事ワークフロー）, `/progress`（記事化の進捗。ブログ → 言葉記事・ひなあい・まだまだ・ひななり）, `/songs`（曲マスタ）, `/coverage`, `/graph`, `/analysis`, `/dashboard`, `/status`（パイプライン監視）, `/costs`（LLM コスト・admin のみ）, `/admin/*`
 
 ## コード規約
 
@@ -166,7 +166,8 @@ src/
 - `DossierItem` は `kind` で `asset_ref` / `external_link` / `external_image` の多態。**意図的に `@@unique([dossierId, assetId])` を持たない**（同一アセットを抜粋ごとに複数回追加できる）
 - `/coverage` は `DataSource` ごとの収集済みの日付（bot のハートビート `Job.lastOkAt` の前日か手入力の `DataSource.collectedUntil`。#253）。素材は `DataSource.itemRule` から SourceRecord/Asset を**導出**（実体化しない）。`Lens` / `Coverage` / `LensItemCheck` は #253 でやめ、テーブルだけ残る
 - `ClearanceLevel` = public / internal / confidential / restricted
-- **`Collection` は `Dossier`（特定支援）に置き換え済み。** 旧名が RLS migration 等に残っている
+- **`Collection` は `Dossier` に置き換え済み。** 旧名が RLS migration 等に残っている
+- **`Dossier` の画面上の名前は「企画」**（旧表示名「特定支援」「ドシエ」）。コード・DB・API・AI プロンプトは `Dossier` / ドシエのまま。UI 文言を足すときは「企画」と書く
 - **ドシエ → 記事はテンプレート (`Dossier.articleTemplate`) で組む (#169)。** 入口は `src/lib/domain/article-generate.ts` の `previewArticle` / `saveArticle` 1 つで、器 (`MeetGreet` / `Live`) は `ArticleTarget` の kind。テンプレートの章立ては `src/lib/article-workflow/templates/`（純粋関数）、共通コアは `render.ts`。未実装のテンプレートは登録簿に無い
 
 検索は **PGroonga**（`&@` 演算子）。トークナイザは `TokenNgram`（`unify_alphabet` / `unify_digit` / `unify_symbol` をすべて無効）、ノーマライザは `NormalizerNFKC130`。
