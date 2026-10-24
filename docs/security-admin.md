@@ -48,7 +48,7 @@
 | 変数 | 説明 |
 |------|------|
 | `DATABASE_URL` | `app_runtime` ロールで接続（RLS 適用） |
-| `DIRECT_URL` | `postgres` ロールで接続（マイグレーション用、RLS バイパス） |
+| `DIRECT_URL` | `app_internal` ロールで接続（`prismaInternal` 用。RLS バイパス、テーブルの作成・変更・削除は不可）。Production / Preview とも Sensitive |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase プロジェクト URL |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Supabase 公開キー（RLS で保護済み） |
 | `SUPABASE_SECRET_KEY` | Supabase シークレットキー（サーバーサイドのみ） |
@@ -61,3 +61,19 @@ ALTER ROLE app_runtime PASSWORD 'new_secure_password';
 ```
 
 変更後、`DATABASE_URL` の接続文字列を更新し、アプリを再デプロイしてください。
+
+### `app_internal` ロール（Vercel の `DIRECT_URL`）
+
+Vercel のアプリは `postgres` ではなく `app_internal` でつなぐ（2026-10-25〜、#251）。行の読み書きと RLS バイパスはできるが、テーブル・スキーマの作成・変更・削除・TRUNCATE は DB が拒否する。手元の CLI 用の `akashic_cli` と同じ権限で、資格情報だけ分けている（片方が漏れたら片方だけ止められる）。作成時の SQL:
+
+```sql
+-- postgres で実行
+CREATE ROLE app_internal LOGIN BYPASSRLS PASSWORD '...';
+GRANT USAGE ON SCHEMA public TO app_internal;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_internal;
+GRANT SELECT, USAGE ON ALL SEQUENCES IN SCHEMA public TO app_internal;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_internal;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT SELECT, USAGE ON SEQUENCES TO app_internal;
+```
+
+接続文字列のユーザー名は `app_internal.<プロジェクト ref>`（Supavisor 経由）。パスワードを変えたら `ALTER ROLE app_internal PASSWORD '...'` のあと、Vercel の `DIRECT_URL`（Production / Preview）を `vercel env add DIRECT_URL <env> --sensitive --force` で更新して再デプロイする。
