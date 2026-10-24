@@ -48,6 +48,7 @@ export default async function DashboardPage() {
     "日向坂ちゃんねる",
     "日向坂46公式チャンネル",
     "雑誌",
+    "外番組",
   ];
   const mediaShowIds = MEDIA_SHOW_NAMES.map(entityIdByName).filter(Boolean).join(",");
   const liveEntityId = entityIdByName("ライブ");
@@ -57,7 +58,8 @@ export default async function DashboardPage() {
     stats.media.hinanari +
     stats.media.hinach +
     stats.media.official +
-    stats.media.magazine;
+    stats.media.magazine +
+    stats.media.tv;
 
   const recentByKind = Object.fromEntries(
     kindCountsRecent.map((k) => [k.kind, typeof k._count === "number" ? k._count : (k._count as Record<string, number>)?._all ?? 0])
