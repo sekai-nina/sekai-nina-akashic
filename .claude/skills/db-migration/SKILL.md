@@ -10,6 +10,9 @@ akashic のマイグレーションは **`pnpm db:migrate` (= `prisma migrate de
 > **`.env` の `DATABASE_URL` / `DIRECT_URL` は本番。シャドウ DB に渡さない (CLAUDE.md「最重要」0)。**
 > 2026-10-24 に `migrate diff --from-migrations --shadow-database-url "$DIRECT_URL"` で本番の `public` が消えた。
 > 差分確認は `--from-schema-datamodel` / `--to-schema-datamodel` の schema 同士 (DB 不要) で行う。本番に向けてよいのは `migrate status` と、了承を得た `migrate deploy` だけ。
+>
+> **2026-10-25 から `.env` の `DIRECT_URL` は `akashic_cli` ロール** (行の読み書きと RLS バイパスだけ。テーブル・スキーマの作成・変更・削除・TRUNCATE は DB が拒否する)。
+> テーブルを作り変える `migrate deploy` / `migrate status` は、Git の外の `~/.config/sekai-nina-akashic/migrate.env` (`postgres` ロール) を読み込んで流す (ステップ 6)。
 
 ## 前提: なぜ `migrate dev` が使えないか
 
@@ -82,11 +85,16 @@ CREATE POLICY <table>_delete ON "<Table>" FOR DELETE TO app_runtime USING (
 
 ### 6. 適用
 
+`.env` の `akashic_cli` ではテーブルを変えられないので、マイグレーション専用の接続先を **そのコマンドだけ** に読み込む (サブシェルで囲み、普段のシェルに残さない)。`migrate deploy` は PreToolUse フックが毎回ユーザーに確認を求める。
+
 ```bash
-npx prisma migrate deploy   # shadow DB を使わないので過去 migration を再生しない
+(set -a; . ~/.config/sekai-nina-akashic/migrate.env; set +a; npx prisma migrate status)
+(set -a; . ~/.config/sekai-nina-akashic/migrate.env; set +a; npx prisma migrate deploy)   # shadow DB を使わないので過去 migration を再生しない
 npx prisma generate
 pnpm typecheck
 ```
+
+`postgres` が作った新テーブルには、既定権限 (`ALTER DEFAULT PRIVILEGES`) で `akashic_cli` の読み書きが自動で付く。`app_runtime` は付かないので、ステップ 5 の GRANT は引き続き要る。
 
 ### 7. 本番 (Supabase) への適用
 
@@ -104,7 +112,7 @@ migration を入れたら、アプリからのアクセス方法も揃える:
 |---|---|
 | ユーザーへのデータ返却 / CRUD | `withClearance(clearance, tx => …)` |
 | Dossier 系 (= 所有者判定が要る) | `withSession({ id, clearance }, tx => …)` |
-| CLI・Bot・全体統計 | `prismaInternal` (`DIRECT_URL` / `postgres` ロール、RLS バイパス) |
+| CLI・Bot・全体統計 | `prismaInternal` (`DIRECT_URL`。手元は `akashic_cli` ロール、RLS バイパス・DDL 不可) |
 | `User` / `Entity` など非保護テーブル | 素の `prisma` |
 
 書き込み時のクリアランス超過は RLS では止まらない箇所があるので、`src/lib/classification.ts` の `assertClearance` を通す。
