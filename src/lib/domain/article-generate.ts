@@ -519,7 +519,7 @@ async function applySources(
       continue;
     }
     const created = await addAssetToArticle(
-      { articleId, assetId: s.assetId, label: s.label },
+      { articleId, assetId: s.assetId, label: s.label, actor },
       user.clearance
     );
     const result = await applyArticleSource(

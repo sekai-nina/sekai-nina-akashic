@@ -218,6 +218,14 @@ RLS はここでは「public 行が返ってくる」方向にも頼っている
 
 DB から生成した Markdown と実ファイルの突き合わせは `pnpm cli:verify-article-push --dir <articles>` で行えます。
 
+### 紐づけの作成（pending、`addAssetToArticle` / `addArticleSource`）
+
+pending の `ArticleSource` を作る経路は 3 つ: 画面の「記事に追加」（`addAssetToArticle`）、記事生成（`article-generate.ts`、作った直後に apply する）、REST / MCP（`POST /api/v1/articles/:shortId/sources` / `akashic_add_article_source` → `addArticleSource`、#110）。どれも `createPendingSource` を通る。
+
+- classification は元アセットから継承し、`assertClearance` を通す（自分より上のアセットは紐づけられない）
+- **API キー経路は `internal` 以下のアセットしか紐づけられない**（`maxClassification = API_APPLY_MAX_CLASSIFICATION`）。それより上の pending は API から apply できず、応答にも出さない（`isApiVisibleSource`）ので、作らせない
+- pending は frontmatter に載らないので公開判断ではない。監査ログは `article.source.add`
+
 ### 紐づけの反映（pending → applied、`applyArticleSource`）
 
 `src/lib/domain/articles.ts` の `applyArticleSource` が唯一の経路。REST（`POST /api/v1/articles/:shortId/sources/:sourceId/apply`）/ MCP（`akashic_apply_article_source`）/ 画面（記事詳細の「反映済みにする」）がすべてこれを呼ぶ。
