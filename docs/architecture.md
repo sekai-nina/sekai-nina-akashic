@@ -94,7 +94,7 @@ Asset は元データの管理単位、AssetText はそこから抽出・付与�
 
 ### 収集カバレッジ
 
-`Coverage` = `Lens`（観点）× `DataSource`（情報源）のマトリクス。`LensItemCheck` のアイテムは `DataSource.itemRule` から SourceRecord / Asset を**導出**する（実体化しない）。詳細は `docs/coverage-design.md`。
+`/coverage` は `DataSource`（情報源）ごとの収集済みの日付（bot のハートビートか手入力）。素材は `DataSource.itemRule` から SourceRecord / Asset を**導出**する（実体化しない）。観点（`Lens`）× 情報源の `Coverage` / `LensItemCheck` は #253 でやめ、テーブルだけ残る。詳細は `docs/coverage-design.md`。
 
 ## 検索設計
 
