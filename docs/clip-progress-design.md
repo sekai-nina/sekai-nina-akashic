@@ -155,6 +155,12 @@ Issue: https://github.com/sekai-nina/sekai-nina-akashic/issues/233 (合意の経
   - 付け外しは `src/lib/domain/nina-mentions.ts` の `refreshNinaMentions`。15 分ごとの `GET /api/cron/nina-mentions`（ハートビート `cron.nina_mentions`）と `pnpm cli:refresh-nina-mentions [--apply]`。毎回全件を検索し直して差分だけ書くので、本文の編集・別名の追加にも追従する
   - `AssetEntity` に付けないのは、検索・エンティティページ・MCP の「坂井新奈」絞り込みに機械判定（別名「坂井」「🩰」の誤一致を含む）を混ぜないため
   - 本番の旧判定と突き合わせ、url 系 10 ソースで関連キーの差 0（ブログ 512 件）。一致アセットは 1,806 件
-  - 新着の言及は cron の次の回（最長 15 分）まで関連判定に出ない。本人のブログは著者リンク (a) で即時に出る
+  - 新着の言及だけのアセットが関連判定に出るまで最長で約 20 分（cron 15 分 + 言及キーのキャッシュ 120 秒 + 一覧のキャッシュ 90 秒）。本人のブログは著者リンク (a) で出る（キャッシュぶんの数分だけ）
+  - 一覧のキャッシュ（`material-automatic-items`）は自動対象だけを source × clearance で持つ。済の状態をキーに入れると済を押すたびに外れるため。手動対象（自動判定に漏れて済にした素材）はキャッシュの外で引き足す
+  - 索引は true の行だけの部分索引 `Asset_mentionsNina_idx`（schema 管理外。`migrate diff` が DROP を出すので捨てる）
+  - 検索が 0 件なのに印が付いているときは、検索の故障とみなして書き込まない（全件の印を無言で外さない）
+  - `/status` のハートビートには件数を載せない（RLS を通さず数えた値で、上位機密のアセットも含むため）。件数は Vercel のログ
+  - `pnpm cli:restore` は mentionsNina を戻さない。リストア後は `pnpm cli:refresh-nina-mentions --apply`（回さなくても最長 15 分で cron が埋める）
+  - 本番への入れ方: migration → `pnpm cli:refresh-nina-mentions --apply` → コードのデプロイ。逆順だと最初の cron まで言及だけの素材が分母から落ちる
 - 残る冷えたときの重さ: 表示 50 件のアセット・クリップ数（`withSession`、冷えて約 1 秒・キャッシュなし）
 
