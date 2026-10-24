@@ -17,12 +17,23 @@ export default function MfaSetupPage() {
   useEffect(() => {
     async function enroll() {
       const supabase = createClient();
+
+      // 前回 QR を出したまま検証しなかった未検証の因子が残っていると、
+      // 同じ friendlyName の enroll が mfa_factor_name_conflict で失敗し続けるので消してから作り直す
+      const { data: factors } = await supabase.auth.mfa.listFactors();
+      for (const f of factors?.all ?? []) {
+        if (f.factor_type === "totp" && f.status === "unverified") {
+          await supabase.auth.mfa.unenroll({ factorId: f.id });
+        }
+      }
+
       const { data, error } = await supabase.auth.mfa.enroll({
         factorType: "totp",
         friendlyName: "Akashic TOTP",
       });
 
       if (error || !data) {
+        console.error("mfa.enroll failed", error);
         setError("MFA の設定に失敗しました。もう一度お試しください。");
         setEnrolling(false);
         return;
