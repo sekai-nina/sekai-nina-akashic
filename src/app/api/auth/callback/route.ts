@@ -18,11 +18,17 @@ export async function GET(request: Request) {
   // Supabase / プロバイダ側で失敗すると code の代わりに error / error_description が付いて戻ってくる
   const oauthError = searchParams.get("error");
   if (oauthError) {
+    const errorCode = searchParams.get("error_code") ?? "";
     const description = searchParams.get("error_description") ?? "";
-    console.error("OAuth callback error", oauthError, searchParams.get("error_code"), description);
+    console.error("OAuth callback error", oauthError, errorCode, description.slice(0, 200));
+
+    let reason = "oauth_error";
     // Discord アカウントにメールが無い（未認証）と "Error getting user email from external provider" になる
-    const reason =
-      oauthError === "access_denied" ? "oauth_cancelled" : /email/i.test(description) ? "provider_no_email" : "oauth_error";
+    if (errorCode === "provider_email_needs_verification" || /email/i.test(description)) {
+      reason = "provider_no_email";
+    } else if (oauthError === "access_denied") {
+      reason = "oauth_cancelled";
+    }
     return NextResponse.redirect(`${origin}/login?error=${reason}`);
   }
 
