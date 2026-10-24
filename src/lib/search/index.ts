@@ -1,6 +1,7 @@
 import { withClearance } from "@/lib/db";
 import { normalizeText, jstDayStart, jstDayEndExclusive } from "@/lib/utils";
 import { Prisma, AssetKind, AssetStatus, TrustLevel, SourceType } from "@prisma/client";
+import { NINA_ENTITY_ID, type NinaAppearance } from "@/lib/nina";
 
 export interface SearchQuery {
   q: string;
@@ -20,6 +21,8 @@ export interface SearchQuery {
   entityMatch?: "any" | "all";
   /** Match assets where any of these entities is linked with roleLabel='author' (OR semantics). */
   authorIds?: string[];
+  /** 坂井新奈が出ているか (#261)。unchecked = 坂井新奈が紐づかず「出ていない」も付いていない */
+  ninaAppearance?: NinaAppearance;
   dateFrom?: Date;
   dateTo?: Date;
   page?: number;
@@ -361,6 +364,17 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
   if (query.dateTo) {
     assetWhereConditions.push(
       Prisma.sql`COALESCE(a."canonicalDate", a."createdAt") < ${jstDayEndExclusive(query.dateTo)}`
+    );
+  }
+
+  if (query.ninaAppearance) {
+    const linked = Prisma.sql`EXISTS (SELECT 1 FROM "AssetEntity" ae WHERE ae."assetId" = a."id" AND ae."entityId" = ${NINA_ENTITY_ID})`;
+    assetWhereConditions.push(
+      query.ninaAppearance === "appears"
+        ? linked
+        : query.ninaAppearance === "absent"
+          ? Prisma.sql`a."ninaAbsent" AND NOT ${linked}`
+          : Prisma.sql`NOT a."ninaAbsent" AND NOT ${linked}`
     );
   }
 

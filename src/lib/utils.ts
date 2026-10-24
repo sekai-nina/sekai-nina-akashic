@@ -2,6 +2,7 @@ import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import type { CandidateGroupKind } from "@/lib/meetgreet/candidates";
 import type { ExclusionKind } from "@/lib/meetgreet/types";
+import type { NinaAppearance } from "@/lib/nina";
 import {
   TextType,
   type AnnouncementKind,
@@ -276,6 +277,13 @@ export const BLOG_QUOTE_STATUS_LABELS: Record<"todo" | "in_progress" | "done" | 
   in_progress: "作業中",
   done: "記事化済み",
   excluded: "対象外",
+};
+
+/** 坂井新奈が出ているか (#261) */
+export const NINA_APPEARANCE_LABELS: Record<NinaAppearance, string> = {
+  appears: "出ている",
+  absent: "出ていない",
+  unchecked: "未確認",
 };
 
 /** 番組の回の進捗 (`/progress/hinaai` / `madamada` / `hinanari`, #208)。キーは `EpisodeStatus` */

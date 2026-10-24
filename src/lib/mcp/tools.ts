@@ -8,6 +8,8 @@ import { invalidateAssets, invalidatePlaces } from "@/lib/cache";
 import { parseDateOnly } from "@/lib/domain/coverage";
 import { getAsset, getAssetClassification, updateAsset } from "@/lib/domain/assets";
 import { intakeAsset } from "@/lib/domain/asset-intake";
+import { NinaAuthorConflictError, setNinaAppearance } from "@/lib/domain/nina-appearance";
+import { NINA_APPEARANCES } from "@/lib/nina";
 import { listEntities, searchEntities } from "@/lib/domain/entities";
 import { createPlace, getPlaceById, listPlaces, updatePlace } from "@/lib/domain/places";
 import { search, type SearchQuery } from "@/lib/search";
@@ -22,7 +24,7 @@ import { resolveGoogleMapsUrl } from "@/lib/places/resolve-google-maps-url";
 import { ASSET_DRAFT_FIELDS, DATE_ONLY, createdAssetPayload, prepareAssetDraft, rejectAboveClearance } from "./asset-input";
 import { logMcpToolCall } from "./audit";
 import { entityResolutionHint, resolveEntityNames } from "./entity-resolution";
-import { toAssetDetail, toEntitySummary, toPlaceSummary, toSearchItem } from "./format";
+import { assetUrl, toAssetDetail, toEntitySummary, toPlaceSummary, toSearchItem } from "./format";
 import { fail, ok, toToolError } from "./result";
 import { registerArticleReadTools, registerArticleWriteTools } from "./tools-articles";
 import { registerUploadTools } from "./tools-upload";
@@ -150,6 +152,13 @@ function registerReadTools(server: McpServer, { user, baseUrl }: ToolContext) {
           .describe("entityNames の結合方法。既定は any (いずれかを含む)"),
         dateFrom: DATE_ONLY.optional().describe("公開日/放送日の下限 (JST)"),
         dateTo: DATE_ONLY.optional().describe("公開日/放送日の上限 (JST)"),
+        ninaAppearance: z
+          .enum(NINA_APPEARANCES)
+          .optional()
+          .describe(
+            "坂井新奈が出ているかで絞る。appears = 出ている (坂井新奈が紐づく) / absent = 確認して出ていない / " +
+              "unchecked = まだ誰も確認していない。出演一覧を更新するときは kinds・entityNames・日付と組み合わせて unchecked を出す"
+          ),
         page: z.number().int().min(1).optional(),
         perPage: z.number().int().min(1).max(MAX_SEARCH_PER_PAGE).optional().describe(`既定 ${DEFAULT_PER_PAGE}、最大 ${MAX_SEARCH_PER_PAGE}`),
       }),
@@ -193,6 +202,7 @@ function registerReadTools(server: McpServer, { user, baseUrl }: ToolContext) {
         entityMatch: args.entityMatch,
         dateFrom: args.dateFrom ? parseDateOnly(args.dateFrom) ?? undefined : undefined,
         dateTo: args.dateTo ? parseDateOnly(args.dateTo) ?? undefined : undefined,
+        ninaAppearance: args.ninaAppearance,
         page: args.page ?? 1,
         perPage: args.perPage ?? 20,
       };
@@ -548,6 +558,39 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
         });
       } catch (err) {
         return toToolError(err, "アセットの更新に失敗しました。");
+      }
+    }
+  );
+
+  server.registerTool(
+    "akashic_set_nina_appearance",
+    {
+      title: "坂井新奈の出演の記録",
+      description:
+        "アセット (番組・動画など) に坂井新奈が出ているかを記録する。" +
+        "appears = 出ている (坂井新奈「出演」を紐づける) / absent = 見て確認したが出ていない / unchecked = 未確認に戻す。" +
+        "実際に確認した結果だけを記録し、推測で absent にしない。坂井新奈が著者 (author) のアセットは appears 以外にできない。",
+      inputSchema: z.object({
+        id: z.string().describe("アセット ID"),
+        status: z.enum(NINA_APPEARANCES),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+    },
+    async ({ id, status }) => {
+      try {
+        const result = await setNinaAppearance(id, status, user.id, user.clearance);
+        if (!result) {
+          return fail(
+            "アセットが見つかりません。ID が誤っているか、クリアランスが足りず参照できません。",
+            { id }
+          );
+        }
+        invalidateAssets();
+        await logMcpToolCall({ user, tool: "set_nina_appearance", targetType: "Asset", targetId: id, args: { status } });
+        return ok({ id, ninaAppearance: result, url: assetUrl(baseUrl, id) });
+      } catch (err) {
+        if (err instanceof NinaAuthorConflictError) return fail(err.message, { id });
+        return toToolError(err, "出演の記録に失敗しました。");
       }
     }
   );

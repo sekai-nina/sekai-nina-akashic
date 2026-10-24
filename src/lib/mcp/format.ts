@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { toDateOnlyString } from "@/lib/domain/coverage";
+import { ninaAppearanceOf } from "@/lib/nina";
 import type { SearchResultItem } from "@/lib/search";
 // `canonicalDate` (UTC 00:00 規約) は toDateOnlyString、`publishedAt` (実時刻) は toJstDateOnly で切る
 import { toJstDateOnly } from "@/lib/utils";
@@ -127,6 +128,7 @@ export function toAssetDetail(asset: AssetDetailInput, baseUrl: string) {
         name: ae.entity.canonicalName,
         role: ae.roleLabel,
       })) ?? [],
+    ninaAppearance: ninaAppearanceOf(asset),
     sources:
       asset.sourceRecords?.map((s) => ({
         sourceKind: s.sourceKind,

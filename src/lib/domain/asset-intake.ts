@@ -5,9 +5,7 @@ import { createAsset, type CreateAssetData } from "./assets";
 import { extractTestimonials } from "./testimonials";
 import { invalidateAssetList } from "@/lib/cache";
 import { formatZodError } from "@/lib/zod-error";
-
-/** 坂井新奈のentityId（口コミ抽出対象） */
-export const NINA_ENTITY_ID = "cmmtp8vrg0004mo381neyztvn";
+import { NINA_ENTITY_ID } from "@/lib/nina";
 
 /**
  * 外部から受け取るアセット作成リクエストの検証スキーマ。

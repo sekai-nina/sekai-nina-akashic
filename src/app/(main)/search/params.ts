@@ -11,6 +11,7 @@ export const SEARCH_PARAM_KEYS = [
   "entityIds",
   "entityMatch",
   "authorIds",
+  "nina",
   "dateFrom",
   "dateTo",
   "target",
