@@ -61,7 +61,7 @@ const clearance = auth.clearance;
 
 以下のテーブルに RLS が設定されています。素の `prisma` でアクセスすると 0 行が返ります。
 
-- `Asset`, `AssetText`, `AssetEntity`, `AssetRelation`
+- `Asset`, `AssetText`, `AssetTextRevision`（本文の版。RLS は親 Asset に従う）, `AssetEntity`, `AssetRelation`
 - `SourceRecord`, `Annotation`, `Testimonial`
 - `Dossier`, `DossierItem`, `DossierPlaceCandidate`, `Place`
 - `RepoCollection`, `RepoTweet`, `RepoTweetMedia`
