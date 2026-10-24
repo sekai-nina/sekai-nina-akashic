@@ -22,6 +22,8 @@ export interface DashboardStats {
     official: number;
     magazine: number;
     radio: number;
+    /** 外番組 (グループの冠番組以外のテレビ番組) */
+    tv: number;
   };
   live: {
     count: number;
@@ -51,6 +53,7 @@ interface CountsRow {
   official: bigint;
   magazine: bigint;
   radio: bigint;
+  tv: bigint;
   live: bigint;
 }
 
@@ -99,6 +102,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
         (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '日向坂46公式チャンネル') AS official,
         (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '雑誌') AS magazine,
         (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = 'ラジオ') AS radio,
+        (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '外番組') AS tv,
         (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."canonicalName" = 'ライブ') AS live
     `,
     prisma.$queryRaw<[CharsRow]>`
@@ -161,6 +165,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
       official: Number(counts.official),
       magazine: Number(counts.magazine),
       radio: Number(counts.radio),
+      tv: Number(counts.tv),
     },
     live: {
       count: Number(counts.live),
