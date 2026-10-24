@@ -56,7 +56,7 @@
 - **Entity**: 人物・場所・出典・イベント・タグを統一管理
 - **SourceRecord**: Asset の出典情報
 - **Annotation**: Asset に対する人手注釈
-- **Dossier**: 特定支援のための資料束（旧 `Collection`。RLS migration 等に旧名が残る）
+- **Dossier**: 1 本の記事に向けて素材を束ねたもの。**画面上の名前は「企画」**（旧表示名「特定支援」「ドシエ」。旧 `Collection`。RLS migration 等に旧名が残る）
 - **Lens × DataSource**: 収集カバレッジ（後述）
 
 ### Asset と AssetText の分離
