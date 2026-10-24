@@ -716,6 +716,10 @@ model DataSource {
   itemRule         ItemRule        @default(manual)
   publisherPattern String? // SourceRecord.publisher への SQL LIKE（null=不問）
   titlePattern     String? // SourceRecord.title への SQL LIKE（null=不問。番組回の切り分け用）
+  // #253: 手入力の収集済みの日付（JST の暦日）。bot のハートビートで出せるソースでは使わない
+  collectedUntil            DateTime? @db.Date
+  collectedUntilUpdatedAt   DateTime?
+  collectedUntilUpdatedById String?
   coverages        Coverage[]
   itemChecks       LensItemCheck[]
   clipStatuses     MaterialClipStatus[]
