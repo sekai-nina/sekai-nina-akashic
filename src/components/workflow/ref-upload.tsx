@@ -67,7 +67,7 @@ export function RefUpload({ owner }: { owner: WorkflowOwner }) {
         />
       </label>
       <span className="text-[11px] text-slate-500">
-        ドシエには入りません。{WORKFLOW_OWNER_THIS[owner.kind]}のスケッチにだけ使います
+        企画には入りません。{WORKFLOW_OWNER_THIS[owner.kind]}のスケッチにだけ使います
       </span>
       {msg && (
         <span role="status" className="text-xs text-slate-500">

@@ -49,7 +49,7 @@ export async function assertDossierEditable(
     where: { id: dossierId },
     select: { ownerId: true, classification: true, viewMode: true, editMode: true },
   });
-  if (!dossier) throw new WorkflowInputError("ドシエが見つかりません");
+  if (!dossier) throw new WorkflowInputError("企画が見つかりません");
   if (!canEditDossier(user, dossier)) {
     throw new Error("Access denied: insufficient permission to edit this dossier");
   }
@@ -80,13 +80,13 @@ export async function assertContainersFree(
         live: { select: { id: true } },
       },
     });
-    if (!found) throw new WorkflowInputError("指定されたドシエが見つかりません");
-    if (found.meetGreet) throw new WorkflowInputError("そのドシエは別のミーグリに使われています");
-    if (found.live) throw new WorkflowInputError("そのドシエは別のライブに使われています");
+    if (!found) throw new WorkflowInputError("指定された企画が見つかりません");
+    if (found.meetGreet) throw new WorkflowInputError("その企画は別のミーグリに使われています");
+    if (found.live) throw new WorkflowInputError("その企画は別のライブに使われています");
     if (found.kind === "clips") throw new WorkflowInputError("クリップのプールは素材置き場に使えません");
     if (template && found.articleTemplate && found.articleTemplate !== template) {
       throw new WorkflowInputError(
-        `そのドシエは記事テンプレート「${ARTICLE_TEMPLATE_LABELS[found.articleTemplate]}」に決まっています`
+        `その企画は記事テンプレート「${ARTICLE_TEMPLATE_LABELS[found.articleTemplate]}」に決まっています`
       );
     }
   }
@@ -121,10 +121,10 @@ export async function claimDossierTemplate(
     where: { id: dossierId },
     select: { articleTemplate: true, ownerId: true, classification: true, viewMode: true, editMode: true },
   });
-  if (!found) throw new WorkflowInputError("指定されたドシエが見つかりません");
+  if (!found) throw new WorkflowInputError("指定された企画が見つかりません");
   if (found.articleTemplate === template) return;
   if (!canEditDossier(user, found)) {
-    throw new WorkflowInputError("そのドシエの編集権限が無いので素材置き場にできません (所有者に編集を許可してもらってください)");
+    throw new WorkflowInputError("その企画の編集権限が無いので素材置き場にできません (所有者に編集を許可してもらってください)");
   }
   await tx.$executeRaw`UPDATE "Dossier" SET "articleTemplate" = ${template}::"ArticleTemplate" WHERE "id" = ${dossierId}`;
 }

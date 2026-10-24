@@ -77,7 +77,7 @@ export function MetaForm({
   }
 
   function remove() {
-    if (!confirm("このミーグリを削除します。ドシエと X レポ収集は残ります。よろしいですか？")) return;
+    if (!confirm("このミーグリを削除します。企画と X レポ収集は残ります。よろしいですか？")) return;
     startTransition(async () => {
       const res = await deleteMeetGreetAction(id);
       if (!res.ok) {
@@ -161,7 +161,7 @@ export function MetaForm({
         削除
       </button>
       <p className="text-xs text-slate-400 w-full">
-        作成済みのドシエ・X レポ収集の名前は変わりません (それぞれの画面で変更してください)。
+        作成済みの企画・X レポ収集の名前は変わりません (それぞれの画面で変更してください)。
         {isReal && " 会場は記事タイトルに出ます (未入力なら呼び分けを使います)。"}
         {!isReal && " 盤とペアの相手は公開サイトのミーグリページに出ます。ペアでない回は空にしてください。"}
       </p>

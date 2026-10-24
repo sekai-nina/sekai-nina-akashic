@@ -302,7 +302,7 @@ export default async function AssetDetailPage({
           <span className="tabular-nums text-indigo-700">抜粋 {targetExcerptCount}</span>
           <span className="ml-auto flex items-center gap-2">
             <Link href={`/dossiers/${targetDossier.id}`} className="underline underline-offset-2 hover:text-indigo-700">
-              ドシエ
+              企画
             </Link>
             <Link
               href={`/dossiers/${targetDossier.id}/article`}

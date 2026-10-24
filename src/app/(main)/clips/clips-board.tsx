@@ -302,7 +302,7 @@ export function ClipsBoard({ clips, dossiers, currentUserId, canEdit }: ClipsBoa
                 className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg bg-sky-500 hover:bg-sky-400"
               >
                 <FolderPlus className="h-3.5 w-3.5" />
-                ドシエにまとめる
+                企画にまとめる
               </button>
             </div>
             {error && <p className="w-full text-xs text-red-300">{error}</p>}
@@ -587,7 +587,7 @@ function MoveDialog({
       <DialogContent className="max-w-md mx-4 max-h-[90dvh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-base">
-            {result ? result.moved : itemIds.length} 件をドシエにまとめる
+            {result ? result.moved : itemIds.length} 件を企画にまとめる
           </DialogTitle>
         </DialogHeader>
 
@@ -598,7 +598,7 @@ function MoveDialog({
             </p>
             <div className="flex items-center justify-end gap-2">
               <Link href={`/dossiers/${result.dossierId}`} className="text-sm text-indigo-600 hover:underline">
-                ドシエを開く →
+                企画を開く →
               </Link>
               <Link href={`/dossiers/${result.dossierId}/article`} className="text-sm text-indigo-600 hover:underline">
                 {L.makeArticle} →
@@ -617,8 +617,8 @@ function MoveDialog({
             <div className="flex gap-1 border-b border-slate-200 text-sm">
               {(
                 [
-                  ["existing", "既存のドシエ"],
-                  ["new", "新しいドシエ"],
+                  ["existing", "既存の企画"],
+                  ["new", "新しい企画"],
                 ] as const
               ).map(([key, label]) => (
                 <button
@@ -641,7 +641,7 @@ function MoveDialog({
                   type="search"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="ドシエ名・記事名で検索"
+                  placeholder="企画名・記事名で検索"
                   className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded"
                 />
                 <ul className="mt-2 max-h-72 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded">
@@ -650,7 +650,7 @@ function MoveDialog({
                       該当なし
                       {q !== "" && (
                         <span className="block mt-1">
-                          記事の素材ドシエが無いときは、記事詳細の「素材ドシエを作る」で作ってから
+                          記事の企画が無いときは、記事詳細の「素材の企画を作る」で作ってから
                         </span>
                       )}
                     </li>
@@ -672,7 +672,7 @@ function MoveDialog({
                         {d.articleTitles.length > 0 && (
                           <span
                             className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 shrink-0"
-                            title="記事の素材ドシエ"
+                            title="記事の企画"
                           >
                             <FileText className="h-3 w-3" /> 記事
                           </span>
@@ -700,11 +700,11 @@ function MoveDialog({
                   type="text"
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
-                  placeholder="ドシエのタイトル (あとで記事名になる想定で)"
+                  placeholder="企画のタイトル (あとで記事名になる想定で)"
                   className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded"
                 />
                 <p className="text-[11px] text-slate-400">
-                  共有設定は非公開で作ります。ドシエの画面から変えられます
+                  共有設定は非公開で作ります。企画の画面から変えられます
                 </p>
                 <div className="flex justify-end">
                   <button

@@ -62,7 +62,7 @@ export function NewLiveForm({ events, songKeys }: { events: EventOption[]; songK
   return (
     <div className="bg-white border border-slate-200 rounded-lg p-5">
       <label className={labelCls} htmlFor="live-name">
-        ライブ名 (記事のタイトル・ドシエ名になります)
+        ライブ名 (記事のタイトル・企画名になります)
       </label>
       <input
         id="live-name"

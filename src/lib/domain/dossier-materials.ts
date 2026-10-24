@@ -382,9 +382,9 @@ export async function loadContainerMaterials(
   const data = await withSession(user, async (tx) => {
     const dossier = await loadDossierForArticle(tx, input.dossierId);
     // ドシエが見えないのは権限の話なので、呼び出し側が 400 にできる形で投げる
-    if (!dossier) throw inputError("ドシエが見つかりません (権限がないか削除されています)");
+    if (!dossier) throw inputError("企画が見つかりません (権限がないか削除されています)");
     if (!PUBLISHABLE.has(dossier.classification)) {
-      throw inputError(`ドシエが ${dossier.classification} なので記事にできません (サムネや外部リンクが公開リポジトリに載るため)`);
+      throw inputError(`企画が ${dossier.classification} なので記事にできません (サムネや外部リンクが公開リポジトリに載るため)`);
     }
     const collection = input.repoCollectionId
       ? await tx.repoCollection.findUnique({ where: { id: input.repoCollectionId }, select: { classification: true } })

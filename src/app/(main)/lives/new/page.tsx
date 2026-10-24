@@ -33,7 +33,7 @@ export default async function NewLivePage() {
       </Link>
       <h1 className="text-2xl font-bold text-slate-900 mt-2 mb-1">ライブを追加</h1>
       <p className="text-slate-500 text-sm mb-6">
-        素材のドシエと X レポ収集 (初日〜最終日
+        素材の企画と X レポ収集 (初日〜最終日
         {REPORT_WINDOW_DAYS === 1 ? "の翌日" : `+${REPORT_WINDOW_DAYS} 日`}) を用意します。
         <strong>X の収集はここでは走りません。</strong>
         公演と曲は後からも直せます。

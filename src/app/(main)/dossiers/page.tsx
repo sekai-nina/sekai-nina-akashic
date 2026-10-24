@@ -17,10 +17,10 @@ export default async function DossiersPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             <FolderSearch className="h-6 w-6 text-indigo-600" />
-            特定支援
+            企画
           </h1>
           <p className="text-slate-500 text-sm mt-1">
-            ある事柄に関わるソース・場所候補を1箇所に集めて俯瞰する
+            1 本の記事に向けて素材を束ねる。クリップから組むか、タイトルが決まっていれば最初から作る
           </p>
         </div>
         <Link
@@ -28,7 +28,7 @@ export default async function DossiersPage() {
           className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors"
         >
           <Plus className="h-4 w-4" />
-          新規ドシエ
+          新規企画
         </Link>
       </div>
 

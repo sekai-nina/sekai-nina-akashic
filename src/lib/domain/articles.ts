@@ -347,7 +347,7 @@ export async function ensureArticleDossier(
     // 先を越された。自分のは空なので消して、勝った側を返す
     await deleteDossier(user, dossier.id);
     const again = await prisma.article.findUnique({ where: { id: articleId }, select: { dossierId: true } });
-    if (!again?.dossierId) throw new ArticleDossierError("素材ドシエを作れませんでした。再読み込みしてください");
+    if (!again?.dossierId) throw new ArticleDossierError("素材の企画を作れませんでした。再読み込みしてください");
     return linkedDossier(user, again.dossierId);
   }
   await logAudit({
@@ -365,7 +365,7 @@ async function linkedDossier(user: { id: string; clearance: string }, dossierId:
   const visible = await withSession(user, (tx) =>
     tx.dossier.findUnique({ where: { id: dossierId }, select: { id: true } })
   );
-  if (!visible) throw new ArticleDossierError("この記事の素材ドシエはあなたには見えません");
+  if (!visible) throw new ArticleDossierError("この記事の素材の企画はあなたには見えません");
   return { dossierId: visible.id, created: false };
 }
 

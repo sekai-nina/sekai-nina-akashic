@@ -24,9 +24,9 @@ export default async function ImportMeetGreetsPage() {
       <Link href="/meetgreets" className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600">
         <ArrowLeft size={14} /> ミーグリ一覧へ
       </Link>
-      <h1 className="text-2xl font-bold text-slate-900 mt-2 mb-1">過去のドシエを取り込む</h1>
+      <h1 className="text-2xl font-bold text-slate-900 mt-2 mb-1">過去の企画を取り込む</h1>
       <p className="text-slate-500 text-sm mb-6">
-        ミーグリごとに手で作ってあったドシエと X レポ収集を、そのままミーグリとして扱えるようにします。
+        ミーグリごとに手で作ってあった企画と X レポ収集を、そのままミーグリとして扱えるようにします。
         素材とレポは集め直しません（<strong>X の収集は走りません</strong>）。取り込み済みのものは出ません。
       </p>
       <ImportForm candidates={candidates} />
@@ -34,8 +34,8 @@ export default async function ImportMeetGreetsPage() {
       <h2 className="text-sm font-medium text-slate-500 mt-10 mb-2">公開済みの記事を紐づける</h2>
       <p className="text-slate-500 text-sm mb-4">
         <span className="font-mono text-xs">/meetgreets</span>{" "}
-        を作る前に書いた記事は frontmatter にドシエの ID を持っているので、
-        それで突き合わせます。紐づけると、以降はドシエが増えたぶんを差分として追記できるようになります。
+        を作る前に書いた記事は frontmatter に企画の ID を持っているので、
+        それで突き合わせます。紐づけると、以降は企画が増えたぶんを差分として追記できるようになります。
       </p>
       <ArticleLinkForm candidates={linkCandidates} />
     </div>

@@ -95,7 +95,7 @@ export function NewMeetGreetForm({
       />
 
       <label className={labelCls} htmlFor="mg-label">
-        呼び分け (任意。作成時のドシエ名・収集名に付くだけ。例: 通常 / 初回限定盤 / 京都)
+        呼び分け (任意。作成時の企画名・収集名に付くだけ。例: 通常 / 初回限定盤 / 京都)
       </label>
       <input
         id="mg-label"
@@ -106,7 +106,7 @@ export function NewMeetGreetForm({
       />
 
       <label className={labelCls} htmlFor="mg-dossier">
-        素材のドシエ
+        素材の企画
       </label>
       <select
         id="mg-dossier"
@@ -123,8 +123,8 @@ export function NewMeetGreetForm({
       </select>
       {dossierId && (
         <p className="text-[11px] text-slate-400 mt-1">
-          既存のドシエを使います。ドシエ名は変わりません。X レポ収集は新しく作られます
-          （まとめて取り込むなら「過去のドシエを取り込む」のほうが早いです）。
+          既存の企画を使います。企画名は変わりません。X レポ収集は新しく作られます
+          （まとめて取り込むなら「過去の企画を取り込む」のほうが早いです）。
         </p>
       )}
 

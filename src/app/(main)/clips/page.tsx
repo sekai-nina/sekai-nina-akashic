@@ -54,13 +54,13 @@ export default async function ClipsPage() {
           クリップ
         </h1>
         <p className="text-slate-500 text-sm mt-1">
-          記事未定のまま取っておいた抜粋。共通点のあるものを選んで、ドシエにまとめる
+          記事未定のまま取っておいた抜粋。共通点のあるものを選んで、企画にまとめる
         </p>
       </div>
 
       {hasMore && (
         <p className="mb-3 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-          クリップが {MAX_CLIPS_LISTED} 件を超えています。古いものは表示していません。ドシエに振り分けるか削除してください
+          クリップが {MAX_CLIPS_LISTED} 件を超えています。古いものは表示していません。企画に振り分けるか削除してください
         </p>
       )}
 

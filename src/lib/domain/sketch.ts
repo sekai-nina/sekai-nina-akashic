@@ -179,7 +179,7 @@ export async function generateSketch(
   );
   // 指定したのに 1 枚も取れないのは、機密かドシエ外を選んでいる。黙って残りで作らない
   if (ids.length > 0 && assets.length === 0) {
-    throw new Err("ドシエにある画像を選んでください");
+    throw new Err("企画にある画像を選んでください");
   }
 
   // 切り抜き枠があれば、その範囲だけを送る (ツーショットで隣の人を拾わないように)。
@@ -351,7 +351,7 @@ export async function saveSketchCrops(
   );
   const allowedIds = new Set(known.map((a) => a.id));
   if (setIds.some((id) => !allowedIds.has(id))) {
-    throw new Err("ドシエにある画像を選んでください");
+    throw new Err("企画にある画像を選んでください");
   }
 
   const next = withCrops(cropsFromJson(owner.sketchCrops), changes);

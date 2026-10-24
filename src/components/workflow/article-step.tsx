@@ -56,7 +56,7 @@ export function ArticleStep({
   const [previewed, setPreviewed] = useState<string[]>([]);
 
   if (!hasDossier) {
-    return <p className="text-xs text-slate-400">ドシエが見えないため記事を作れません。</p>;
+    return <p className="text-xs text-slate-400">企画が見えないため記事を作れません。</p>;
   }
 
   /** 差分を取り直す。`overlay` を渡すと、外すつもりのものを引いた本文で見せる */

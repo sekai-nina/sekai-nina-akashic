@@ -28,7 +28,7 @@ export function ImportForm({ candidates }: { candidates: ImportCandidate[] }) {
 
   function importSelected() {
     if (picked.size === 0) {
-      setMsg("チェックされたドシエがありません");
+      setMsg("チェックされた企画がありません");
       return;
     }
     setMsg(`${picked.size} 件を取り込んでいます…`);
@@ -55,11 +55,11 @@ export function ImportForm({ candidates }: { candidates: ImportCandidate[] }) {
   if (candidates.length === 0) {
     return (
       <div className="bg-white border border-dashed border-slate-300 rounded-lg p-10 text-center text-sm text-slate-500">
-        取り込めるドシエはありません。
+        取り込める企画はありません。
         <br />
         <span className="text-xs">
           対象は「2026-08-01 京都リアミ」のように <code>日付 + 呼び分け + オンミ/リアミ</code> の名前が付いた、
-          まだミーグリになっていないドシエです。
+          まだミーグリになっていない企画です。
         </span>
       </div>
     );

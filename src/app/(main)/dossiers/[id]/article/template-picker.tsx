@@ -81,7 +81,7 @@ export function TemplatePicker({
         <span className="text-[11px] text-slate-500">記事を作った後はテンプレートを変えられません</span>
       )}
       {!locked && !editable && (
-        <span className="text-[11px] text-slate-500">このドシエの編集権限が無いので、テンプレートの決定と保存はできません</span>
+        <span className="text-[11px] text-slate-500">この企画の編集権限が無いので、テンプレートの決定と保存はできません</span>
       )}
       {!current && suggested && value === suggested && (
         <span className="text-[11px] text-slate-500">紐づいている記事の型から推しています</span>

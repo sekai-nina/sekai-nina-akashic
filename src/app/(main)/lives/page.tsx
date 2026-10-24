@@ -21,7 +21,7 @@ export default async function LivesPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">ライブ</h1>
           <p className="text-slate-500 text-sm mt-1">
-            ライブ名と公演から素材のドシエと X レポ収集を自動で作り、衣装・披露曲・本人の感想をまとめた記事まで持っていく
+            ライブ名と公演から素材の企画と X レポ収集を自動で作り、衣装・披露曲・本人の感想をまとめた記事まで持っていく
           </p>
         </div>
         <Link
@@ -34,7 +34,7 @@ export default async function LivesPage() {
 
       {rows.length === 0 ? (
         <div className="bg-white border border-dashed border-slate-300 rounded-lg p-10 text-center text-sm text-slate-500">
-          まだありません。「新規作成」からライブ名と公演を入れるとドシエと X レポ収集が用意されます。
+          まだありません。「新規作成」からライブ名と公演を入れると企画と X レポ収集が用意されます。
         </div>
       ) : (
         <div className="bg-white border border-slate-200 rounded-lg divide-y divide-slate-100">

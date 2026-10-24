@@ -66,7 +66,7 @@ export function MetaForm({
   function remove() {
     if (
       !confirm(
-        "このライブを削除します。公演と披露曲の入力は消えます。ドシエ・X レポ収集・イベントエンティティ・記事は残ります。よろしいですか？"
+        "このライブを削除します。公演と披露曲の入力は消えます。企画・X レポ収集・イベントエンティティ・記事は残ります。よろしいですか？"
       )
     )
       return;
@@ -121,7 +121,7 @@ export function MetaForm({
         削除
       </button>
       <p className="text-xs text-slate-400 w-full">
-        作成済みのドシエ・X レポ収集・イベントエンティティの名前は変わりません (それぞれの画面で変更してください)。
+        作成済みの企画・X レポ収集・イベントエンティティの名前は変わりません (それぞれの画面で変更してください)。
       </p>
       {msg && <span className="text-xs text-red-600 w-full">{msg}</span>}
     </div>
