@@ -236,6 +236,10 @@ model Asset {
   thumbnailUrl       String?
   messageBodyPreview String?
   classification     ClearanceLevel  @default(internal)
+  /// 本文 (AssetText) が坂井新奈の名前・別名に一致するか。`refreshNinaMentions`
+  /// (15 分ごとの cron と `pnpm cli:refresh-nina-mentions`) が付け外しする。
+  /// 人や取り込みが付ける AssetEntity とは分けて持つ (別名「坂井」「🩰」などの機械判定を混ぜない)
+  mentionsNina       Boolean         @default(false)
 
   // Discord metadata
   discordGuildId    String?
@@ -274,6 +278,7 @@ model Asset {
   @@index([canonicalDate])
   @@index([createdAt])
   @@index([classification])
+  @@index([mentionsNina])
   @@unique([discordGuildId, discordChannelId, discordMessageId])
 }
 
