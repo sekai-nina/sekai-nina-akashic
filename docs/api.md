@@ -711,12 +711,13 @@ DataSource は classification ベースの RLS 対象。`public` は「公開サ
 
 `name` / `kind` / `description` / `sortOrder` / `active` / `public` / `classification` / `itemRule` / `publisherPattern` / `titlePattern` / `collectedUntil` を更新。`key` は不変。DELETE は無く、`active=false` で無効化する。
 
-- `collectedUntil`: `"YYYY-MM-DD"`（1900-01-01 から今日（JST）までの有効な暦日）か `null`（未確認に戻す）。省略は保持。設定・解除の両方で `collectedUntilUpdatedAt` / `collectedUntilUpdatedById` を記録し、監査は `datasource.collected_until`
-- 自動のソース（`SOURCE_HEARTBEAT_JOBS` にある key）に `collectedUntil` を送ると 400。日付の形式違いも 400、RLS の競合は 403
+- `collectedUntil`: `"YYYY-MM-DD"`（1900-01-01 から今日（JST）までの有効な暦日）か `null`（未確認に戻す）。省略は保持。設定・解除の両方で `collectedUntilUpdatedAt` / `collectedUntilUpdatedById` を記録する（監査は他の項目と同じ `datasource.update`。画面からの手入力は `datasource.collected_until`）
+- 他の項目と同じ 1 回の更新で書く。自動のソース（`SOURCE_HEARTBEAT_JOBS` にある key）への `collectedUntil` や日付の形式違いは 400 で、**そのとき他の項目も保存しない**
+- JSON オブジェクトでない本文は 400、見えない / 存在しないソースは 404
 
 ### GET /coverage/summary
 
-公開サイト `/status` 用の要約。public かつ active なソースだけ。手入力の設定者・設定日時・内部の設定は含めない。
+公開サイト `/status` 用の要約。public かつ active で、classification が internal 以下のソースだけ（API キーのクリアランスが高くても confidential 以上の名前は出さない）。手入力の設定者・設定日時・内部の設定は含めない。
 
 ```json
 {
