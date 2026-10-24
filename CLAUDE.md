@@ -78,7 +78,7 @@ ARTICLES_DIR=<sekai-nina-public のパス> pnpm test              # 実記事 33
 | export | 接続 | RLS |
 |---|---|---|
 | `prisma` | `DATABASE_URL`（`app_runtime` ロール, pooler:6543） | **適用**（`app.clearance` 未設定なら 0 行） |
-| `prismaInternal` | `DIRECT_URL`（`postgres` ロール, 5432） | **バイパス** |
+| `prismaInternal` | `DIRECT_URL`（Vercel は `app_internal`、手元は `akashic_cli` ロール, 5432。どちらも DDL 不可） | **バイパス** |
 
 ```ts
 withClearance(clearance, tx => …)          // set_config('app.clearance')
