@@ -164,7 +164,7 @@ src/
 
 - `Entity` は `type`（person/place/source/event/tag）で 1 テーブル統合、`@@unique([type, canonicalName])`
 - `DossierItem` は `kind` で `asset_ref` / `external_link` / `external_image` の多態。**意図的に `@@unique([dossierId, assetId])` を持たない**（同一アセットを抜粋ごとに複数回追加できる）
-- `Coverage` = `Lens`(観点) × `DataSource`。`LensItemCheck` のアイテムは `DataSource.itemRule` から SourceRecord/Asset を**導出**（実体化しない）
+- `/coverage` は `DataSource` ごとの収集済みの日付（bot のハートビート `Job.lastOkAt` か手入力の `DataSource.collectedUntil`。#253）。素材は `DataSource.itemRule` から SourceRecord/Asset を**導出**（実体化しない）。`Lens` / `Coverage` / `LensItemCheck` は #253 でやめ、テーブルだけ残る
 - `ClearanceLevel` = public / internal / confidential / restricted
 - **`Collection` は `Dossier`（特定支援）に置き換え済み。** 旧名が RLS migration 等に残っている
 - **ドシエ → 記事はテンプレート (`Dossier.articleTemplate`) で組む (#169)。** 入口は `src/lib/domain/article-generate.ts` の `previewArticle` / `saveArticle` 1 つで、器 (`MeetGreet` / `Live`) は `ArticleTarget` の kind。テンプレートの章立ては `src/lib/article-workflow/templates/`（純粋関数）、共通コアは `render.ts`。未実装のテンプレートは登録簿に無い
