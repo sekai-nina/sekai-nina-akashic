@@ -15,6 +15,23 @@ export async function GET(request: Request) {
   const code = searchParams.get("code");
   const next = sanitizeRedirectPath(searchParams.get("next") ?? "/search");
 
+  // Supabase / プロバイダ側で失敗すると code の代わりに error / error_description が付いて戻ってくる
+  const oauthError = searchParams.get("error");
+  if (oauthError) {
+    const errorCode = searchParams.get("error_code") ?? "";
+    const description = searchParams.get("error_description") ?? "";
+    console.error("OAuth callback error", oauthError, errorCode, description.slice(0, 200));
+
+    let reason = "oauth_error";
+    // Discord アカウントにメールが無い（未認証）と "Error getting user email from external provider" になる
+    if (errorCode === "provider_email_needs_verification" || /email/i.test(description)) {
+      reason = "provider_no_email";
+    } else if (oauthError === "access_denied") {
+      reason = "oauth_cancelled";
+    }
+    return NextResponse.redirect(`${origin}/login?error=${reason}`);
+  }
+
   if (!code) {
     return NextResponse.redirect(`${origin}/login?error=no_code`);
   }

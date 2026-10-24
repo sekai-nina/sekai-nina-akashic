@@ -37,15 +37,16 @@ export async function middleware(request: NextRequest) {
   // MFA enforcement using session claims (no additional API call)
   // API キー認証の経路は matcher から外してあるのでここには来ない
   if (session?.user && !isMfaExempt) {
-    const factors = session.user.factors;
-    const hasMfaEnrolled = factors && factors.length > 0;
-    const hasVerifiedFactor = factors?.some((f) => f.status === "verified");
+    // currentLevel はこのセッションの JWT の aal、nextLevel は検証済みの因子があれば aal2
+    // 因子の有無だけを見ていると、MFA 登録済みのユーザーが Discord / パスワードだけ（aal1）で入れてしまう
+    const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
 
-    if (hasMfaEnrolled && !hasVerifiedFactor) {
-      return NextResponse.redirect(new URL("/mfa/verify", request.url));
-    }
-    if (!hasMfaEnrolled) {
+    if (aal?.nextLevel !== "aal2") {
+      // 検証済みの因子が無い（未登録 / QR を出したまま放置した未検証の因子だけ）
       return NextResponse.redirect(new URL("/mfa/setup", request.url));
+    }
+    if (aal.currentLevel !== "aal2") {
+      return NextResponse.redirect(new URL("/mfa/verify", request.url));
     }
   }
 

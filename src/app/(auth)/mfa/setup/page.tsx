@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 export default function MfaSetupPage() {
   const router = useRouter();
@@ -13,16 +13,39 @@ export default function MfaSetupPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [enrolling, setEnrolling] = useState(true);
+  // dev の StrictMode で effect が 2 回走ると、後の回が先の回で作った因子を消してしまうので 1 回に絞る
+  const enrollStarted = useRef(false);
 
   useEffect(() => {
+    if (enrollStarted.current) return;
+    enrollStarted.current = true;
+
     async function enroll() {
       const supabase = createClient();
+
+      // 前回 QR を出したまま検証しなかった未検証の因子が残っていると、
+      // 同じ friendlyName の enroll が mfa_factor_name_conflict で失敗し続けるので消してから作り直す
+      const { data: factors, error: listError } = await supabase.auth.mfa.listFactors();
+      if (listError) console.error("mfa.listFactors failed", listError);
+      // totp は検証済みの因子だけ。登録済みなら作り直さずにコード入力へ回す
+      if (factors?.totp.length) {
+        router.replace("/mfa/verify");
+        return;
+      }
+      for (const f of factors?.all ?? []) {
+        if (f.factor_type === "totp" && f.status === "unverified") {
+          const { error: unenrollError } = await supabase.auth.mfa.unenroll({ factorId: f.id });
+          if (unenrollError) console.error("mfa.unenroll failed", unenrollError);
+        }
+      }
+
       const { data, error } = await supabase.auth.mfa.enroll({
         factorType: "totp",
         friendlyName: "Akashic TOTP",
       });
 
       if (error || !data) {
+        console.error("mfa.enroll failed", error);
         setError("MFA の設定に失敗しました。もう一度お試しください。");
         setEnrolling(false);
         return;
@@ -71,7 +94,8 @@ export default function MfaSetupPage() {
       <div className="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="mb-1 text-xl font-bold">二段階認証の設定</h1>
         <p className="mb-6 text-sm text-slate-500">
-          認証アプリ（Google Authenticator 等）で QR コードをスキャンしてください
+          認証アプリ（Google Authenticator 等）で QR コードをスキャンしてください。
+          前にもこの画面でスキャンしたことがあれば、その項目は使えないので認証アプリから削除してください
         </p>
 
         {enrolling && (
