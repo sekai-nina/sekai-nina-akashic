@@ -52,6 +52,10 @@ export const UpdateMeetGreetSchema = z
     label: z.string().max(50).optional(),
     /** 会場の正式名称。リアルの記事タイトルに出る (空文字で消せる) */
     venue: z.string().max(100).optional(),
+    /** 盤 (オンラインだけ)。null で消す */
+    edition: z.enum(["regular", "limited"]).nullable().optional(),
+    /** ペアレーンの相手のメンバー名 (空文字で消せる) */
+    pairMember: z.string().max(50).optional(),
     extraSketchPrompt: z.string().max(MAX_EXTRA_SKETCH_PROMPT).optional(),
   })
   .strict()
@@ -176,6 +180,8 @@ export function projectMeetGreet(mg: MeetGreetSummary | MeetGreetDetail) {
     single: mg.single,
     label: mg.label,
     venue: mg.venue,
+    edition: mg.edition,
+    pairMember: mg.pairMember,
     classification: mg.classification,
     // ドシエが所有者に private へ戻された / 機密を上げられたときは null (RLS で見えない)
     dossier: mg.dossier
@@ -241,6 +247,8 @@ export function projectUpcomingPreview(p: UpcomingPreview) {
     single: p.single,
     label: p.label,
     venue: p.venue,
+    edition: p.edition,
+    pairMember: p.pairMember,
     outfit: p.outfit,
     sources: p.sources.map((s) => ({
       assetId: s.assetId,

@@ -94,6 +94,8 @@ export default async function MeetGreetDetailPage({ params, searchParams }: Prop
           single={mg.single}
           label={mg.label}
           venue={mg.venue}
+          edition={mg.edition}
+          pairMember={mg.pairMember}
           isReal={mg.format === "real"}
         />
         <PreviewForm

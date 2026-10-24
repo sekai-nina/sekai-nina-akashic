@@ -1200,6 +1200,8 @@ body は省略可（`subject` を省くと既定のコミットメッセージ�
       "single": "17thシングル「Kind of love」",
       "label": "京都",
       "venue": "幕張メッセ",
+      "edition": null,
+      "pairMember": "",
       "classification": "internal",
       "dossier": {"id": "…", "title": "2026-08-01 京都リアミ", "itemCount": 18, "updatedAt": "…"},
       "dossierId": "…",
@@ -1234,6 +1236,8 @@ body は省略可（`subject` を省くと既定のコミットメッセージ�
       "single": "18thシングル「イチャイチャ虫」",
       "label": "通常",
       "venue": null,
+      "edition": "regular",
+      "pairMember": "",
       "outfit": "秋らしい、茶色を基調にしたコーデ",
       "sources": [
         { "assetId": "…", "label": "坂井新奈ブログ「…」", "title": "坂井新奈ブログ「…」", "date": "2026-10-01", "url": "https://www.hinatazaka46.com/s/official/diary/detail/…" },
@@ -1332,7 +1336,7 @@ body は省略可（`subject` を省くと既定のコミットメッセージ�
 
 ### PATCH /meetgreets/:id
 
-`single` / `label` / `venue` / `extraSketchPrompt` を部分更新（渡した項目だけ変わる）。`venue` は会場の正式名称（「幕張メッセ」）で、**リアルミーグリの記事タイトルに出る**（空文字で消す）。`label` は短い呼び分け（「通常」「京都」）でドシエ名・収集名に使うだけなので、記事には出ない。`date` / `format` は変えられない（変えたければ作り直す。ドシエ・収集は残る）。更新項目が 1 つも無い（`{}`）なら 400。
+`single` / `label` / `venue` / `edition` / `pairMember` / `extraSketchPrompt` を部分更新（渡した項目だけ変わる）。`edition` は盤（`"regular"` = 通常盤 / `"limited"` = 初回限定盤、`null` で消す）、`pairMember` はペアレーンの相手のメンバー名（空文字で消す）。どちらもオンラインの回に使い、公開サイトのミーグリページ（過去のミーグリのカード・次回以降のミーグリ）に出る。`venue` は会場の正式名称（「幕張メッセ」）で、**リアルミーグリの記事タイトルに出る**（空文字で消す）。`label` は短い呼び分け（「通常」「京都」）でドシエ名・収集名に使うだけなので、記事には出ない。`date` / `format` は変えられない（変えたければ作り直す。ドシエ・収集は残る）。更新項目が 1 つも無い（`{}`）なら 400。
 
 **レスポンス:** 更新後の行（`GET /meetgreets` の 1 行と同じ形。`candidates` は付かない）。
 
