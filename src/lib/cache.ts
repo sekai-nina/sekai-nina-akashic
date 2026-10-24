@@ -224,7 +224,7 @@ export const getCachedNinaStatsRecent = unstable_cache(
       prismaInternal.assetEntity.count({
         where: {
           asset: { canonicalDate: { gte: since } },
-          entity: { type: "tag", canonicalName: { in: ["日向坂で会いましょう", "まだまだ！日向坂で会いましょう", "日向坂になりましょう", "日向坂ちゃんねる", "日向坂46公式チャンネル", "雑誌"] } },
+          entity: { type: "tag", canonicalName: { in: ["日向坂で会いましょう", "まだまだ！日向坂で会いましょう", "日向坂になりましょう", "日向坂ちゃんねる", "日向坂46公式チャンネル", "雑誌", "外番組"] } },
         },
       }),
       // 他の 3 本と同じく prismaInternal を使う (全体統計なので RLS バイパスが正)。
