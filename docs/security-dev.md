@@ -275,8 +275,10 @@ akashic が記事の真実になると、古い checkout から取り込むと D
 
 ```
 prisma          → DATABASE_URL → app_runtime（RLS 適用）
-prismaInternal  → DIRECT_URL   → postgres（RLS バイパス）
+prismaInternal  → DIRECT_URL   → app_internal（Vercel）/ akashic_cli（手元の CLI）（RLS バイパス・DDL 不可）
 ```
+
+テーブルを作る・変える権限を持つ `postgres` は、マイグレーションを当てるときだけ使います（`~/.config/sekai-nina-akashic/migrate.env`。`/db-migration` スキル）。アプリと CLI の接続先には置きません（#251）。
 
 `prisma` を使う限り、RLS が自動で効きます。ただし `withClearance` でクリアランスを設定しないと、何も見えません（フェイルセーフ）。
 
