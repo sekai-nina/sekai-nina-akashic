@@ -129,7 +129,15 @@ export default async function AssetDetailPage({
       tx.asset.findUnique({
         where: { id },
         include: {
-          texts: { orderBy: { createdAt: "asc" } },
+          texts: {
+            orderBy: { createdAt: "asc" },
+            include: {
+              revisions: {
+                orderBy: { version: "desc" },
+                select: { id: true, version: true, content: true, fetchedAt: true },
+              },
+            },
+          },
           entities: {
             where: { entity: entityClearanceWhere(userClearance) },
             include: { entity: true },
@@ -464,6 +472,12 @@ export default async function AssetDetailPage({
                 clipRanges={clipRanges}
                 highlightTerms={hlNina ? ninaTerms : []}
                 targetDossier={targetDossier}
+                revisions={Object.fromEntries(
+                  asset.texts.map((t) => [
+                    t.id,
+                    t.revisions.map((r) => ({ ...r, fetchedAt: r.fetchedAt.toISOString() })),
+                  ])
+                )}
               />
               <div className="bg-white border border-slate-200 rounded-lg p-5 mt-4">
                 <details className="border border-slate-200 rounded p-3">
