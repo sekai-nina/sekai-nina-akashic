@@ -677,7 +677,7 @@ GET <そのパス> → 画像バイナリ
 
 データソース (DataSource) ごとに「いつまでの分を取り込んだか（収集済みの日付）」を管理する（#253）。人がどこまで見たかは `/progress`、何が書いてあったかはクリップで管理する。詳細は `docs/coverage-design.md`。
 
-- **自動**: bot のハートビートで出せるソースは、その bot が最後に正常に動いた日（`Job.lastOkAt` の JST 日付）。投稿の無い日も進み、bot が止まれば日付も止まる。対応表は `src/lib/coverage/collection.ts` の `SOURCE_HEARTBEAT_JOBS`（公式ブログ → `bot.blog_watch` / トーク → `bot.talk_monitor` / 日向坂ちゃんねる・公式チャンネル → `bot.youtube_watch` / TikTok → `bot.tiktok_watch`）
+- **自動**: bot のハートビートで出せるソースは、その bot が最後に正常に動いた日の前日（`Job.lastOkAt` の JST 日付 − 1 日。0:05 の回はその日の後半を見ていないため）。投稿の無い日も進み、bot が止まれば日付も止まる。対応表は `src/lib/coverage/collection.ts` の `SOURCE_HEARTBEAT_JOBS`（公式ブログ → `bot.blog_watch` / トーク → `bot.talk_monitor` / 日向坂ちゃんねる・公式チャンネル → `bot.youtube_watch` / TikTok → `bot.tiktok_watch`）
 - **手入力**: それ以外のソースは `DataSource.collectedUntil` に入れる（`PATCH /datasources/:id`）
 
 DataSource は classification ベースの RLS 対象。`public` は「公開サイトに出すか」を表す。
@@ -724,7 +724,7 @@ DataSource は classification ベースの RLS 対象。`public` は「公開サ
 {
   "generatedAt": "2026-10-25T00:00:00.000Z",
   "sources": [
-    { "key": "blog", "name": "公式ブログ", "collectedUntil": "2026-10-25", "auto": true },
+    { "key": "blog", "name": "公式ブログ", "collectedUntil": "2026-10-24", "auto": true },
     { "key": "magazine", "name": "雑誌", "collectedUntil": null, "auto": false }
   ]
 }

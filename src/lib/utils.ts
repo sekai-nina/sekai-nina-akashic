@@ -582,7 +582,7 @@ export const ARTICLE_WORKFLOW_LABELS = {
 export const COVERAGE_LABELS = {
   title: "収集状況", description: "ソースごとに、いつまでの分を取り込んだか（収集済みの日付）を管理します。公開サイトの /status に出ます。",
   progressLink: "人がどこまで見たかは記事化の進捗へ", readOnly: "（閲覧のみ）", list: "収集済みの日付", settings: "ソース管理",
-  legend: "日付は JST 基準です。自動のソースは bot が最後に正常に動いた日で、投稿の無い日も進みます。bot が止まると日付も止まります。",
+  legend: "日付は JST 基準です。自動のソースは bot が最後に正常に動いた日の前日までで、投稿の無い日も進みます。bot が止まると日付も止まります。",
   until: "まで収集済み", unknown: "未確認", auto: "自動", manual: "手入力", noReport: "報告なし", lastError: "直近はエラー",
   latest: "最新の取り込み", items: "件", edit: "収集済みの日付を編集", lastSet: "更新",
   source: "ソース", method: "方式", private: "非公開", showOnSite: "公開サイトの /status に出す",

@@ -15,9 +15,10 @@ describe("手入力の収集済みの日付", () => {
 });
 
 describe("自動の収集済みの日付", () => {
-  it("最終成功を JST の暦日にする", () => {
-    expect(autoCollectedUntil(new Date("2026-10-24T14:59:59.999Z"))).toBe("2026-10-24");
-    expect(autoCollectedUntil(new Date("2026-10-24T15:00:00.000Z"))).toBe("2026-10-25");
+  it("最終成功の JST 暦日の前日までを収集済みとする", () => {
+    expect(autoCollectedUntil(new Date("2026-10-24T14:59:59.999Z"))).toBe("2026-10-23");
+    expect(autoCollectedUntil(new Date("2026-10-24T15:05:00.000Z"))).toBe("2026-10-24");
+    expect(autoCollectedUntil(new Date("2026-03-01T03:00:00.000Z"))).toBe("2026-02-28");
   });
   it("報告が無ければ未確認", () => expect(autoCollectedUntil(null)).toBeNull());
   it("ハートビートの無いソースは手入力", () => {

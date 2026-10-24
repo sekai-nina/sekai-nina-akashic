@@ -34,7 +34,7 @@ beforeEach(() => {
 describe("収集済みの日付の一覧", () => {
   it("bot のあるソースは最終成功の JST 日付、無いソースは手入力の日付", async () => {
     const [b, m] = await getCollectionStatus("internal");
-    expect(b).toMatchObject({ collectedUntil: "2026-10-25", auto: { jobKey: "bot.blog_watch", jobName: null }, manual: null });
+    expect(b).toMatchObject({ collectedUntil: "2026-10-24", auto: { jobKey: "bot.blog_watch", jobName: null }, manual: null });
     expect(m).toMatchObject({ collectedUntil: "2026-10-01", auto: null, manual: { updatedByName: "運営" } });
   });
 
@@ -50,7 +50,7 @@ describe("収集済みの日付の一覧", () => {
     }));
     expect(tx.user.findMany).not.toHaveBeenCalled();
     expect(summary.sources).toEqual([
-      { key: "blog", name: "公式ブログ", collectedUntil: "2026-10-25", auto: true },
+      { key: "blog", name: "公式ブログ", collectedUntil: "2026-10-24", auto: true },
       { key: "magazine", name: "雑誌", collectedUntil: "2026-10-01", auto: false },
     ]);
   });
