@@ -1,5 +1,7 @@
 # 公開サイトの鮮度表示への整理（#233 段階3）
 
+> **2026-10-25 に #253 で置き換えた。** 観点 × ソースの確認済み日付はやめ、`/coverage` はソースごとの収集済みの日付になった（[coverage-design.md](./coverage-design.md)）。以下は段階3の当時の記録。
+
 ## 合意
 
 2026-10-18、ユーザーは「観点×データソースごとの確認済み日付を直接更新する」方式に「はい」と回答した。[Issueの合意記録](https://github.com/sekai-nina/sekai-nina-akashic/issues/233#issuecomment-6235529594)。
