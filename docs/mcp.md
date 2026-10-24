@@ -43,13 +43,14 @@ pnpm cli:keygen <user-email> <key-name>
 
 | ツール | 権限 | 用途 |
 |---|---|---|
-| `akashic_search` | read | アセットの全文検索（本文・タイトル・OCR・書き起こし） |
-| `akashic_get_asset` | read | アセット 1 件の詳細（本文・エンティティ・出典） |
+| `akashic_search` | read | アセットの全文検索（本文・タイトル・OCR・書き起こし）。`ninaAppearance` で坂井新奈の出演（出ている / 出ていない / 未確認）を絞れる |
+| `akashic_get_asset` | read | アセット 1 件の詳細（本文・エンティティ・出典・`ninaAppearance`） |
 | `akashic_list_entities` | read | 人物・聖地・タグ・番組の検索 |
 | `akashic_list_places` | read | 聖地一覧（緯度経度・住所・種類・エリアつき） |
 | `akashic_create_asset` | write | アセットの下書き登録（`status` は必ず `inbox`） |
 | `akashic_import_discord_memo` | write | 承諾済みの新奈メモ・フィールドワーク投稿を `inbox` へ登録 |
 | `akashic_update_asset` | write | メタデータ・ステータス・本文の更新 |
+| `akashic_set_nina_appearance` | write | 坂井新奈が出ているかを `appears` / `absent` / `unchecked` に置く（#261） |
 | `akashic_begin_upload` | write | ファイル本体の Drive アップロード URL を発行（重複なら発行せず既存 ID） |
 | `akashic_complete_upload` | write | Drive に上げたファイルをアセットとして登録（`status` は必ず `inbox`） |
 | `akashic_create_place` | write | 聖地登録（Google Maps URL / 緯度経度） |
@@ -178,6 +179,12 @@ MCP のツール引数はもともと zod で検証されるが、REST の `POST
 ### 本文の更新は非破壊
 
 `akashic_update_asset` が公開するのは `upsertTexts` のみで、`textType` 単位の置き換えになる。指定しない `textType`（`body` 等）は消えない。全置換する `texts` は MCP には出していない。
+
+### 坂井新奈の出演は 3 状態（#261）
+
+アセットに坂井新奈が出ているかは `ninaAppearance` で読み、`akashic_set_nina_appearance` で置く。`appears` = 坂井新奈のエンティティが紐づいている / `absent` = 確認して出ていない（`Asset.ninaAbsent`） / `unchecked` = どちらも無い。「出ていない」を `AssetEntity` に混ぜると `entityNames: ["坂井新奈"]` の絞り込みが壊れるので、列を分けて持つ。
+
+出演一覧を更新するときは `akashic_search` に `kinds: ["video"]`・`entityNames`（チャンネル名など）・日付と `ninaAppearance: "unchecked"` を渡し、確認が要るものだけを出す。ツールの説明で「実際に確認した結果だけを記録し、推測で absent にしない」と AI に伝えている。坂井新奈が著者（author）のアセットは `appears` 以外にできない（ブログや本人の投稿から本人を外さない）。
 
 ### 聖地登録は Google Maps URL を受ける
 
