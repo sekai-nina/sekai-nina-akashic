@@ -4,7 +4,17 @@
 
 親ディレクトリの `hnt42-project/CLAUDE.md` の共通ルールも適用される。
 
-## 最重要の 3 つ
+## 最重要の 4 つ
+
+0. **`.env` の `DATABASE_URL` / `DIRECT_URL` は本番の Supabase。DB を作り直す Prisma コマンドに渡さない。**
+   2026-10-24 に `prisma migrate diff --from-migrations … --shadow-database-url "$DIRECT_URL"` を実行し、本番の `public` スキーマが消えた。
+   シャドウ DB は Prisma が DROP して作り直すため。PITR は契約していないので、日次バックアップ（JST 05:30 ごろ）に戻し、約 1 日分を失った
+   - **禁止**: 本番 URL を `--shadow-database-url` / `shadowDatabaseUrl` に渡すこと、`prisma migrate dev` / `migrate reset` / `db push --force-reset` / `--from-migrations` を本番に向けること
+   - 本番に向けてよいのは、読み取りと `prisma migrate status`、それとユーザーの了承を得た `prisma migrate deploy` だけ
+   - マイグレーションの差分確認は、DB の要らない `prisma migrate diff --from-schema-datamodel <旧> --to-schema-datamodel <新> --script` か、自分で立てた使い捨てのローカル Postgres で行う
+   - DB の URL を取るコマンドは、実行前にどの URL かを確かめる。本番を書き換え・削除しうるなら止めてユーザーに聞く
+   - **手元の `.env` の `DIRECT_URL` は `akashic_cli` ロール** (2026-10-25〜)。行の読み書きと RLS バイパスはできるが、テーブル・スキーマの作成・変更・削除・TRUNCATE は DB が拒否する。マイグレーションを当てるときだけ、Git の外の `~/.config/sekai-nina-akashic/migrate.env` (`postgres`) をそのコマンドに読み込む (`/db-migration` ステップ 6)。新しい worktree に `.env` をコピーしても、この 2 段は崩れない
+   - **機械的にも止めている**: `.claude/settings.json` の PreToolUse フック (`.claude/hooks/guard-prod-db.py`) が、上の禁止コマンドを実行前に拒否し、`migrate deploy` / `db execute` / `db push` / `db:seed` などは毎回ユーザーに確認させる。フックを外したり迂回したりしない
 
 1. **保護テーブルへのアクセスは必ず `withClearance` / `withSession` を通す。** 素の `prisma` で触ると **エラーではなく無言で 0 行**が返る。認可まわりのテストは無いので本番まで気づけない
 2. **静的ゲートは `pnpm typecheck` と `pnpm test` の 2 つ。** lint 設定は無く、`next.config.ts` は `typescript.ignoreBuildErrors: true`。**ビルドが通っても型は壊れうる**。テストは記事の frontmatter 往復 (`src/lib/articles/`) しか無いので、それ以外は依然として実 DB で確かめるしかない
