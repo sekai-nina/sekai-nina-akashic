@@ -102,6 +102,15 @@ export function DossierGrid({ dossiers, currentUserId }: { dossiers: DossierCard
           <p className="text-sm text-slate-500">
             {dossiers.length === 0 ? "まだ企画がありません。" : "条件に合う企画はありません。"}
           </p>
+          {dossiers.length > 0 && filter !== "all" && (
+            <button
+              type="button"
+              onClick={() => setFilter("all")}
+              className="mt-2 text-sm text-indigo-600 hover:underline"
+            >
+              すべての企画から探す
+            </button>
+          )}
         </div>
       )}
 
