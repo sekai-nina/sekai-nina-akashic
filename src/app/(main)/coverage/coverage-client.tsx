@@ -1,8 +1,8 @@
 "use client";
 
-import { useRef, useState, useTransition, useEffect } from "react";
+import { Suspense, use, useRef, useState, useTransition, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { COVERAGE_LABELS as L, jstDayString } from "@/lib/utils";
+import { COVERAGE_LABELS as L, formatDate, jstDayString } from "@/lib/utils";
 import type { CollectionSourceDTO, SourceItemStats } from "@/lib/domain/coverage";
 import type { DataSourceKind, ItemRule } from "@prisma/client";
 import { setCollectedUntilAction, createDataSourceAction, updateDataSourceAction } from "./actions";
@@ -60,19 +60,13 @@ function freshnessClass(days: number): string {
   return "text-rose-600";
 }
 
-function formatDateTime(iso: string): string {
-  return new Intl.DateTimeFormat("ja-JP", {
-    timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
-  }).format(new Date(iso));
-}
-
 export function CoverageClient({
   sources,
   stats,
   canEdit,
 }: {
   sources: Source[];
-  stats: Record<string, SourceItemStats>;
+  stats: Promise<Record<string, SourceItemStats>>;
   canEdit: boolean;
 }) {
   const [tab, setTab] = useState<"list" | "settings">("list");
@@ -127,7 +121,7 @@ function TabButton({
 // ============================================================
 
 function SourceList({ sources, stats, canEdit }: {
-  sources: Source[]; stats: Record<string, SourceItemStats>; canEdit: boolean;
+  sources: Source[]; stats: Promise<Record<string, SourceItemStats>>; canEdit: boolean;
 }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -139,9 +133,8 @@ function SourceList({ sources, stats, canEdit }: {
   if (active.length === 0) {
     return (
       <p className="text-slate-400 py-8 text-center text-sm">
-        データソースがまだありません。「{L.settings}」タブから追加するか、
+        {L.empty}
         <code className="mx-1 px-1 bg-slate-100 rounded">pnpm cli:seed-coverage</code>
-        で初期データを投入してください。
       </p>
     );
   }
@@ -152,9 +145,9 @@ function SourceList({ sources, stats, canEdit }: {
         <table className="min-w-full text-sm border-collapse">
           <thead>
             <tr className="bg-slate-50 text-slate-600">
-              <th className="px-3 py-2 text-left font-medium border-b border-slate-200">ソース</th>
+              <th className="px-3 py-2 text-left font-medium border-b border-slate-200">{L.source}</th>
               <th className="px-3 py-2 text-left font-medium border-b border-slate-200">{L.list}</th>
-              <th className="px-3 py-2 text-left font-medium border-b border-slate-200">方式</th>
+              <th className="px-3 py-2 text-left font-medium border-b border-slate-200">{L.method}</th>
               <th className="px-3 py-2 text-left font-medium border-b border-slate-200">{L.latest}</th>
             </tr>
           </thead>
@@ -163,7 +156,7 @@ function SourceList({ sources, stats, canEdit }: {
               <SourceRow
                 key={s.id}
                 source={s}
-                stats={stats[s.key] ?? null}
+                stats={stats}
                 canEdit={canEdit}
                 open={openKey === s.key}
                 onOpen={() => setOpenKey(s.key)}
@@ -183,7 +176,7 @@ function SourceList({ sources, stats, canEdit }: {
 }
 
 function SourceRow({ source, stats, canEdit, open, onOpen, onClose, onDone }: {
-  source: Source; stats: SourceItemStats | null; canEdit: boolean; open: boolean;
+  source: Source; stats: Promise<Record<string, SourceItemStats>>; canEdit: boolean; open: boolean;
   onOpen: () => void; onClose: () => void; onDone: () => void;
 }) {
   const date = source.collectedUntil ? (
@@ -196,11 +189,12 @@ function SourceRow({ source, stats, canEdit, open, onOpen, onClose, onDone }: {
     <tr className="hover:bg-slate-50/50 align-top">
       <td className="px-3 py-2 border-b border-slate-100 whitespace-nowrap">
         <span className="font-medium text-slate-800" title={source.description ?? undefined}>{source.name}</span>
-        {!source.public && <span className="ml-1.5 text-[10px] text-slate-400">非公開</span>}
+        {!source.public && <span className="ml-1.5 text-[10px] text-slate-400">{L.private}</span>}
       </td>
       <td className="px-3 py-2 border-b border-slate-100 whitespace-nowrap">
         {source.auto || !canEdit ? date : (
           <button type="button" onClick={onOpen} title={`${source.name}: ${L.edit}`}
+            aria-label={`${source.name}: ${L.edit}（${source.collectedUntil ?? L.unknown}）`}
             className="-mx-1 px-1 rounded hover:bg-slate-100 underline decoration-dotted underline-offset-4 decoration-slate-300">
             {date}
           </button>
@@ -213,7 +207,7 @@ function SourceRow({ source, stats, canEdit, open, onOpen, onClose, onDone }: {
             <span className="inline-block px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 mr-1.5">{L.auto}</span>
             {source.auto.jobName ?? source.auto.jobKey}
             <div className="mt-0.5">
-              {source.auto.lastOkAt ? formatDateTime(source.auto.lastOkAt) : L.noReport}
+              {source.auto.lastOkAt ? formatDate(source.auto.lastOkAt, true) : L.noReport}
               {source.auto.lastStatus === "error" && <span className="ml-1.5 text-rose-600">{L.lastError}</span>}
             </div>
           </>
@@ -222,7 +216,7 @@ function SourceRow({ source, stats, canEdit, open, onOpen, onClose, onDone }: {
             <span className="inline-block px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 mr-1.5">{L.manual}</span>
             {source.manual?.updatedAt && (
               <div className="mt-0.5">
-                {L.updatedBy}: {formatDateTime(source.manual.updatedAt)}
+                {L.lastSet}: {formatDate(source.manual.updatedAt, true)}
                 {source.manual.updatedByName && ` / ${source.manual.updatedByName}`}
               </div>
             )}
@@ -230,14 +224,22 @@ function SourceRow({ source, stats, canEdit, open, onOpen, onClose, onDone }: {
         )}
       </td>
       <td className="px-3 py-2 border-b border-slate-100 text-xs text-slate-500 whitespace-nowrap tabular-nums">
-        {stats ? (
-          <>
-            {stats.latestDate?.replaceAll("-", "/") ?? "—"}
-            <span className="ml-1.5 text-slate-400">{stats.count.toLocaleString()}{L.items}</span>
-          </>
-        ) : "—"}
+        <Suspense fallback={<span className="text-slate-300">…</span>}>
+          <ItemStats stats={stats} sourceKey={source.key} />
+        </Suspense>
       </td>
     </tr>
+  );
+}
+
+function ItemStats({ stats, sourceKey }: { stats: Promise<Record<string, SourceItemStats>>; sourceKey: string }) {
+  const s = use(stats)[sourceKey];
+  if (!s) return "—";
+  return (
+    <>
+      {s.latestDate?.replaceAll("-", "/") ?? "—"}
+      <span className="ml-1.5 text-slate-400">{s.count.toLocaleString()}{L.items}</span>
+    </>
   );
 }
 
@@ -360,7 +362,7 @@ function DataSourceSettings({ dataSources, canEdit }: { dataSources: Source[]; c
           </p>
           <label className="flex items-center gap-1.5 mt-2 text-sm text-slate-700">
             <input type="checkbox" checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} />
-            公開サイトの /status に出す
+            {L.showOnSite}
           </label>
           {err && <p className="text-xs text-rose-600 mt-2">{err}</p>}
           <div className="flex gap-2 mt-3">

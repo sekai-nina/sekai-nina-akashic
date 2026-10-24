@@ -11,7 +11,8 @@ export default async function CoveragePage() {
   if (!session?.user) notFound();
 
   const sources = await getCollectionStatus(session.user.clearance);
-  const stats = await getSourceItemStats(sources, session.user.clearance);
+  // 件数は参考表示。導出が重い（冷えていると数十秒）ので待たずに渡し、列だけ後から出す
+  const stats = getSourceItemStats(sources, session.user.clearance).then((m) => Object.fromEntries(m));
   const canEdit = ["admin", "member"].includes(session.user.role);
 
   return (
@@ -22,7 +23,7 @@ export default async function CoveragePage() {
         <Link href="/progress" className="text-sm text-sky-700 hover:underline">{L.progressLink}</Link>
       </div>
 
-      <CoverageClient sources={sources} stats={Object.fromEntries(stats)} canEdit={canEdit} />
+      <CoverageClient sources={sources} stats={stats} canEdit={canEdit} />
     </div>
   );
 }

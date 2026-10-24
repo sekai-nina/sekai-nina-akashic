@@ -10,6 +10,9 @@ import { jstDayString } from "@/lib/utils";
 
 export class CoverageInputError extends Error {}
 export class CoveragePermissionError extends Error {}
+export class CoverageNotFoundError extends Error {}
+
+export const AUTO_SOURCE_MESSAGE = "このソースは bot の稼働記録から自動で出すため、手では入力できません";
 
 /**
  * DataSource.key → そのソースを見ている bot のハートビート key (`Job.key`)。

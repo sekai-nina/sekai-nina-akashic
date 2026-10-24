@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 import { CoverageInputError, CoveragePermissionError } from "@/lib/coverage/collection";
 import { COVERAGE_LABELS } from "@/lib/utils";
 import { auth } from "@/lib/auth";
@@ -8,6 +8,7 @@ import {
   createDataSource,
   updateDataSource,
   setCollectedUntil,
+  DERIVED_ITEMS_TAG,
   type CreateDataSourceInput,
   type UpdateDataSourceInput,
 } from "@/lib/domain/coverage";
@@ -55,6 +56,8 @@ export async function updateDataSourceAction(id: string, input: UpdateDataSource
   const user = await requireEditor();
   try {
     await updateDataSource(id, input, user.clearance, user.id);
+    // itemRule / パターンを変えると素材の導出が変わる（/coverage の件数と /progress）
+    updateTag(DERIVED_ITEMS_TAG);
     revalidatePath("/coverage");
     return { ok: true as const };
   } catch (e) {

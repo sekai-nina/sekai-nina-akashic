@@ -3,7 +3,7 @@
  * 素材導出は /progress でも利用する。保護テーブルは withClearance 経由。
  *
  * 観点（Lens）× ソースの確認済み日付と観点ごとのチェック（#233）は #253 でやめた。
- * Lens / Coverage / LensItemCheck のテーブルと行は残すが、読み書きするコードは無い。
+ * Lens / Coverage / LensItemCheck のテーブルと行は残すが、アプリから読み書きするコードは無い（シード CLI だけが Lens を作る）。
  */
 
 import { ClearanceLevel, DataSourceKind, ItemRule, Prisma } from "@prisma/client";
@@ -11,8 +11,10 @@ import { unstable_cache } from "next/cache";
 import { withClearance, type TransactionClient } from "@/lib/db";
 import { logAudit } from "./audit";
 import {
+  AUTO_SOURCE_MESSAGE,
   autoCollectedUntil,
   CoverageInputError,
+  CoverageNotFoundError,
   CoveragePermissionError,
   heartbeatJobKey,
   parseCollectedUntil,
@@ -38,15 +40,6 @@ export function parseDateOnly(s: string | null | undefined): Date | null {
   const d = new Date(`${trimmed}T00:00:00.000Z`);
   if (isNaN(d.getTime())) throw new Error(`Invalid date: ${s}`);
   return d;
-}
-
-/** 今日 (JST) を Date(UTC 00:00) で返す。
- * このプロダクトの日付ドメインは日本時間（ブログ日付・運用者とも JST）。
- * 格納規約は「YYYY-MM-DD の UTC 00:00」で不変。 */
-export function todayDateOnly(): Date {
-  // en-CA ロケールは YYYY-MM-DD 形式を返す
-  const jst = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(new Date());
-  return new Date(jst + "T00:00:00.000Z");
 }
 
 // ============================================================
@@ -77,6 +70,8 @@ export interface UpdateDataSourceInput {
   itemRule?: ItemRule;
   publisherPattern?: string | null;
   titlePattern?: string | null;
+  /** 手入力の収集済みの日付（YYYY-MM-DD）。null は未確認に戻す。自動のソースでは拒否する */
+  collectedUntil?: string | null;
 }
 
 export async function listDataSources(clearance: string, includeInactive = true) {
@@ -125,15 +120,26 @@ export async function createDataSource(
   return ds;
 }
 
-/** key は作成後変更不可。渡されても無視する。 */
+/**
+ * key は作成後変更不可。渡されても無視する。
+ * collectedUntil（手入力の収集済みの日付）は他の項目と同じ 1 回の update で書く。
+ * 日付の検証と自動ソースの拒否を書き込みの前に済ませ、一部だけ保存されることを防ぐ。
+ */
 export async function updateDataSource(
   id: string,
   input: UpdateDataSourceInput,
   clearance: string,
   actorId?: string | null
 ) {
-  const ds = await withClearance(clearance, (tx) =>
-    tx.dataSource.update({
+  const collectedUntil =
+    input.collectedUntil === undefined ? undefined : parseCollectedUntil(input.collectedUntil);
+  const ds = await withClearance(clearance, async (tx) => {
+    if (collectedUntil !== undefined) {
+      const found = await tx.dataSource.findUnique({ where: { id }, select: { key: true } });
+      if (!found) throw new CoverageNotFoundError("データソースが見つかりません");
+      if (heartbeatJobKey(found.key)) throw new CoverageInputError(AUTO_SOURCE_MESSAGE);
+    }
+    return tx.dataSource.update({
       where: { id },
       data: {
         ...(input.name !== undefined ? { name: input.name.trim() } : {}),
@@ -150,9 +156,12 @@ export async function updateDataSource(
           ? { publisherPattern: input.publisherPattern }
           : {}),
         ...(input.titlePattern !== undefined ? { titlePattern: input.titlePattern } : {}),
+        ...(collectedUntil !== undefined
+          ? { collectedUntil, collectedUntilUpdatedAt: new Date(), collectedUntilUpdatedById: actorId ?? null }
+          : {}),
       },
-    })
-  );
+    });
+  });
 
   await logAudit({
     actorId,
@@ -333,13 +342,17 @@ async function computeDerivedItemsSerialized(
   );
 }
 
+/** getDerivedItems のキャッシュタグ */
+export const DERIVED_ITEMS_TAG = "coverage-derived-items";
+
 /**
  * ソースの導出アイテムをキャッシュ付きで返す（v2.2 P2028 対策）。
  *
  * ブログ・トーク導出は重い集約で、Postgres のキャッシュが冷えていると withClearance の
  * 既定 15s を超えうるため、導出は**キャッシュ付きの独立した小さいトランザクション**
- * （タイムアウト DERIVE_TX_TIMEOUT_MS）で実行し、buildMatrix / listItems の tx には相乗りさせない。
- * チェック操作でアイテム集合は変わらないので invalidate は TTL（90秒）任せで十分。
+ * （タイムアウト DERIVE_TX_TIMEOUT_MS）で実行し、呼び出し側（/progress・/coverage の件数表示）の tx には相乗りさせない。
+ * アイテム集合は素材の取り込みでしか変わらないので TTL（90秒）任せ。ソースの導出設定を変えたときは
+ * DERIVED_ITEMS_TAG を revalidateTag する。
  * key は source×clearance（RLS の見え方が clearance で変わるため）。
  */
 export async function getDerivedItems(
@@ -349,7 +362,7 @@ export async function getDerivedItems(
   const cached = unstable_cache(
     () => computeDerivedItemsSerialized(sourceKey, clearance),
     ["coverage-derived-items", sourceKey, clearance],
-    { revalidate: 90, tags: ["coverage-derived-items"] }
+    { revalidate: 90, tags: [DERIVED_ITEMS_TAG] }
   );
   const rows = await cached();
   // キャッシュ経由は JSON 化されるので Date に復元する
@@ -397,7 +410,8 @@ export async function getCollectionStatus(
   const { publicOnly = false } = options;
   return withClearance(clearance, async (tx) => {
     const sources = await tx.dataSource.findMany({
-      where: publicOnly ? { public: true, active: true } : {},
+      // 公開サイトに名前を出すので、API キーのクリアランスに関わらず internal 以下に限る
+      where: publicOnly ? { public: true, active: true, classification: { in: ["public", "internal"] } } : {},
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     });
     const jobKeys = [...new Set(sources.flatMap((s) => heartbeatJobKey(s.key) ?? []))];
@@ -459,10 +473,10 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
 
 /** 最新の取り込み日と件数（/coverage の参考表示）。導出はキャッシュ付きの getDerivedItems を使う。 */
 export async function getSourceItemStats(
-  sources: { key: string; itemRule: ItemRule }[],
+  sources: { key: string; itemRule: ItemRule; active: boolean }[],
   clearance: string
 ): Promise<Map<string, SourceItemStats>> {
-  const derivable = sources.filter((s) => s.itemRule !== "manual");
+  const derivable = sources.filter((s) => s.active && s.itemRule !== "manual");
   const lists = await mapWithConcurrency(derivable, DERIVE_CONCURRENCY, (s) => getDerivedItems(s.key, clearance));
   return new Map(derivable.map((s, i) => {
     let latest: Date | null = null;
@@ -482,12 +496,12 @@ export async function setCollectedUntil(
   actorId?: string | null
 ) {
   if (heartbeatJobKey(dataSourceKey)) {
-    throw new CoverageInputError("このソースは bot の稼働記録から自動で出すため、手では入力できません");
+    throw new CoverageInputError(AUTO_SOURCE_MESSAGE);
   }
   const collectedUntil = parseCollectedUntil(value);
   const ds = await withClearance(clearance, async (tx) => {
     const found = await tx.dataSource.findUnique({ where: { key: dataSourceKey }, select: { id: true } });
-    if (!found) throw new CoverageInputError("データソースが見つかりません");
+    if (!found) throw new CoverageNotFoundError("データソースが見つかりません");
     return tx.dataSource.update({
       where: { id: found.id },
       data: { collectedUntil, collectedUntilUpdatedAt: new Date(), collectedUntilUpdatedById: actorId ?? null },

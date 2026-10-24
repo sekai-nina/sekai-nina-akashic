@@ -7,6 +7,8 @@ import { GET, PUT } from "./route";
 import { GET as getItems } from "./items/route";
 import { GET as getLenses, POST as postLens } from "../lenses/route";
 import { PATCH as patchLens } from "../lenses/[id]/route";
+import { PUT as putCheck } from "./checks/route";
+import { POST as postChecks } from "./checks/bulk/route";
 
 beforeEach(() => vi.resetAllMocks());
 
@@ -17,6 +19,8 @@ describe.each([
   ["観点の一覧", getLenses, "read"],
   ["観点の作成", postLens, "write"],
   ["観点の更新", patchLens, "write"],
+  ["単一チェック", putCheck, "write"],
+  ["一括チェック", postChecks, "write"],
 ] as const)("終了した%s", (_, handler, permission) => {
   it("認証と権限の拒否を維持する", async () => {
     for (const status of [401, 403]) {
