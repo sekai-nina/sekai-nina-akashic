@@ -52,10 +52,10 @@
 
 - ソース名・収集済みの日付（手入力のソースはクリックで日付の dialog）
 - 方式: 自動 = bot 名と最終稼働日時（直近がエラーなら印）/ 手入力 = 最後の更新日時と更新者
-- 最新の取り込み日と件数（参考。`DataSource.itemRule` からの導出をキャッシュ付きの `getDerivedItems` で数える。manual は「—」）
+- 最新の取り込み日と件数（参考。`DataSource.itemRule` からの導出をキャッシュ付きの `getDerivedItems` で数える。有効なソースだけ・manual は「—」。導出が冷えていると数十秒かかるので、この列だけ Suspense で後から出す。ソースの導出設定を変えるとキャッシュを捨てる）
 - 「ソース管理」タブでデータソースの追加・編集（itemRule・パターン・公開・有効）
 
-`getSummary` → `GET /api/v1/coverage/summary` → stats Worker / KV（30 分間隔）→ 公開サイト `/status`。public かつ active なソースだけを `{ key, name, collectedUntil, auto }` で返す。手入力の設定者・設定日時は出さない。
+`getSummary` → `GET /api/v1/coverage/summary` → stats Worker / KV（30 分間隔）→ 公開サイト `/status`。public かつ active で classification が internal 以下のソースだけを `{ key, name, collectedUntil, auto }` で返す。手入力の設定者・設定日時は出さない。
 
 公開サイトは「`sources` があれば新表示（ソースごとに『YYYY-MM-DD まで収集済み』、日付なしは『未確認』、自動のソースには印）、無ければ旧表示」。公開サイトを先に出してから Akashic を切り替える。
 
