@@ -4,7 +4,8 @@ import { useEffect } from "react";
 import { Highlighter } from "lucide-react";
 
 /**
- * 言及ハイライト（?hl=nina）有効時のバナー（v2.4 追加要望）。
+ * 言及ハイライト有効時のバナー（v2.4 追加要望）。?hl=nina のときと、本文が新奈に言及している
+ * 本人著でないアセット (Asset.mentionsNina) を開いたときに出る。?hl=off で消せる。
  * マウント時に最初の <mark data-hl="nina"> へスムーズスクロールする
  * （長いブログで言及が下部にあるケースのため）。
  */
