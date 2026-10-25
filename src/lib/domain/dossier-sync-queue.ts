@@ -44,6 +44,8 @@ export interface PendingClip {
   kind: string;
   canonicalDate: Date | null;
   excerpt: string;
+  /** アイテムのメモ。雑誌など本文の無い素材は、中身がここにしか無い */
+  note: string;
   createdAt: Date;
 }
 
@@ -60,6 +62,7 @@ export interface ItemRow {
   id: string;
   assetId: string | null;
   excerpt: string;
+  note: string;
   createdAt: Date;
   asset: {
     kind: string;
@@ -176,6 +179,7 @@ export function computePending(row: DossierRow, article: ArticleState): PendingD
       kind: i.asset!.kind,
       canonicalDate: i.asset!.canonicalDate,
       excerpt: i.excerpt,
+      note: i.note,
       createdAt: i.createdAt,
     }));
   if (clips.length === 0) return null;
@@ -196,6 +200,7 @@ const DOSSIER_SELECT = {
       id: true,
       assetId: true,
       excerpt: true,
+      note: true,
       createdAt: true,
       asset: {
         select: {

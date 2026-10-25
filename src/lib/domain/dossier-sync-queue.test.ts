@@ -22,6 +22,7 @@ const item = (assetId: string, p: ItemPatch = {}): ItemRow => ({
   id: `item${++seq}`,
   assetId,
   excerpt: p.excerpt ?? "",
+  note: "",
   createdAt: p.createdAt ?? at(24),
   asset: {
     kind: p.kind ?? "text",

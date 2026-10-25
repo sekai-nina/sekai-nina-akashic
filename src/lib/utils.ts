@@ -590,11 +590,13 @@ export const ARTICLE_WORKFLOW_LABELS = {
   generationHelp: "記事のプレビュー・保存は、素材の企画から共通の記事画面で行います。",
   unavailableDossier: "素材の企画を閲覧できないため、記事を生成できません。",
   pendingClips: (n: number) => `記事に載っていないクリップ ${n} 件`,
-  pendingClipsHelp: "企画に入っているのに、まだ記事に載っていないクリップです。差分を見て追記すると載り、ここから消えます。載せないものは差分でチェックを外すと、今後足さないものとして消えます。",
+  clipNote: "メモ",
+  pendingClipsHelp: "企画に入っているのに、まだ記事に載っていないクリップです。記事に反映すると載り、ここから消えます。載せないものは、反映するときに使わない（チェックを外す）と今後足さないものとして消えます。",
   nextPending: "次の反映待ちへ", pendingQueue: (n: number) => `反映待ちの企画 ${n} 本`, noMorePending: "反映待ちの企画はこれで最後です。",
   backToPendingList: "反映待ちの一覧へ",
   aiMerge: "AI に組み込ませる（本文に書き足す）",
-  sourcesOnly: "本文は手で書くので出典だけ足す場合や、足さないものを外す場合は、下の差分を使ってください。",
+  sourcesOnly: "本文は手で書くので出典だけ足したいときや、クリップを「今後足さない」にしたいときは、下のボタンを使ってください（本文は変わりません）。",
+  sourcesOnlyButton: "出典だけ足す・外す",
 } as const;
 
 /** 企画一覧 (`/dossiers`) のタブとカード */

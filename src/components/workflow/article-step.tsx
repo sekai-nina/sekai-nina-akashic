@@ -30,9 +30,12 @@ export function ArticleStep({
   onPreview,
   onSave,
   onRestore,
+  previewLabel,
 }: {
   hasArticle: boolean;
   hasDossier: boolean;
+  /** 差分を見るボタンの文言を差し替える (AI に組み込ませる記事では「出典だけ足す・外す」#275) */
+  previewLabel?: string;
   /** 差分を組み立てる。`extraExclude` はまだ保存していない「外すつもり」のキー */
   onPreview: (extraExclude: string[]) => Promise<PreviewArticleResult>;
   /**
@@ -172,7 +175,7 @@ export function ArticleStep({
           disabled={pending}
           className="inline-flex items-center gap-1 h-8 px-3 rounded-md border border-slate-200 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
         >
-          <FileText size={12} /> {hasArticle ? "追記する差分を見る" : "記事を組み立てる"}
+          <FileText size={12} /> {previewLabel ?? (hasArticle ? "追記する差分を見る" : "記事を組み立てる")}
         </button>
         {preview && !preview.empty && (
           <button
