@@ -229,18 +229,26 @@ async function loadPending(tx: TransactionClient): Promise<PendingDossier[]> {
   });
   const sourcesByArticle = new Map<string, typeof sources>();
   for (const s of sources) sourcesByArticle.set(s.articleId, [...(sourcesByArticle.get(s.articleId) ?? []), s]);
-  // 本文は全記事ぶん引く (約 300 本)。抜粋と画像の判定に要り、絞り込む条件を先に計算するほうが複雑になる
-  const articles = await tx.article.findMany({ where: { id: { in: articleIds } }, select: { id: true, body: true } });
+  const stateOf = (r: DossierRow, bodyById: Map<string, string>): ArticleState => {
+    const mine = r.articles.flatMap((a) => sourcesByArticle.get(a.id) ?? []);
+    return {
+      citedAssets: new Set(mine.flatMap((s) => (s.assetId ? [s.assetId] : []))),
+      citedUrls: new Set(mine.flatMap((s) => (s.url ? [normalizeSourceUrl(s.url)] : []))),
+      bodies: r.articles.map((a) => bodyById.get(a.id) ?? ""),
+    };
+  };
+  // **本文は要る企画の分だけ引く。** 本文が無いと仮定して未反映が残る企画 (= 本文に行や抜粋が
+  // 載っていれば反映済みになりうる) だけ。全記事 (約 300 本) の本文を毎回運ぶと、一覧の表示が遅くなる
+  const needBodies = rows.filter((r) => computePending(r, stateOf(r, new Map())) !== null);
+  const articles = needBodies.length
+    ? await tx.article.findMany({
+        where: { id: { in: needBodies.flatMap((r) => r.articles.map((a) => a.id)) } },
+        select: { id: true, body: true },
+      })
+    : [];
   const bodyById = new Map(articles.map((a) => [a.id, a.body]));
-  return rows
-    .map((r) => {
-      const mine = r.articles.flatMap((a) => sourcesByArticle.get(a.id) ?? []);
-      return computePending(r, {
-        citedAssets: new Set(mine.flatMap((s) => (s.assetId ? [s.assetId] : []))),
-        citedUrls: new Set(mine.flatMap((s) => (s.url ? [normalizeSourceUrl(s.url)] : []))),
-        bodies: r.articles.map((a) => bodyById.get(a.id) ?? ""),
-      });
-    })
+  return needBodies
+    .map((r) => computePending(r, stateOf(r, bodyById)))
     .filter((p): p is PendingDossier => !!p)
     .sort((a, b) => b.latestAt.getTime() - a.latestAt.getTime());
 }
