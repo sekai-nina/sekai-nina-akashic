@@ -107,7 +107,7 @@ export default async function DossierArticlePage({ params, searchParams }: Props
                   <AiMergeStep key={JSON.stringify([dossier.id, articleId])} dossierId={dossier.id} articleId={articleId} />
                   <p className="mt-3 text-[11px] text-slate-500">{L.sourcesOnly}</p>
                 </div>}
-                <ArticleStep key={JSON.stringify([dossier.id, current, articleId])} hasArticle={!!target} hasDossier
+                <ArticleStep previewLabel={canAiMerge ? L.sourcesOnlyButton : undefined} key={JSON.stringify([dossier.id, current, articleId])} hasArticle={!!target} hasDossier
                 onPreview={previewDossierArticleAction.bind(null, dossier.id, articleId)}
                 onSave={saveDossierArticleAction.bind(null, dossier.id, articleId)}
                 onRestore={restoreDossierExclusionsAction.bind(null, dossier.id, articleId)}

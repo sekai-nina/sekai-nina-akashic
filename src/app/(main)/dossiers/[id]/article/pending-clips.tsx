@@ -20,7 +20,17 @@ export function PendingClips({ clips }: { clips: PendingClip[] }) {
               {ASSET_KIND_LABELS[c.kind] ?? c.kind}
               {c.canonicalDate ? ` · ${formatDate(c.canonicalDate)}` : ""}
             </p>
-            {c.excerpt && <p className="mt-1 text-xs text-slate-600 line-clamp-2">{c.excerpt}</p>}
+            {c.excerpt && (
+              <blockquote className="mt-1.5 border-l-2 border-slate-300 pl-2 text-xs text-slate-700 whitespace-pre-wrap">
+                {c.excerpt}
+              </blockquote>
+            )}
+            {c.note && (
+              <p className="mt-1.5 rounded bg-slate-50 px-2 py-1.5 text-xs text-slate-700 whitespace-pre-wrap">
+                <span className="mr-1 text-[10px] text-slate-400">{L.clipNote}</span>
+                {c.note}
+              </p>
+            )}
           </li>
         ))}
       </ul>

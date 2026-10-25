@@ -69,7 +69,7 @@ it("クリップのプールから直接記事を生成しない", async () => {
   expect(mocks.workflow).not.toHaveBeenCalled();
 });
 
-const clip = { itemId: "i1", assetId: "x", title: "ブログ", kind: "blog", canonicalDate: null, excerpt: "", createdAt: new Date() };
+const clip = { itemId: "i1", assetId: "x", title: "ブログ", kind: "blog", canonicalDate: null, excerpt: "", note: "", createdAt: new Date() };
 const queued = (dossierId: string, title: string) => ({ dossierId, title, clips: [clip], latestAt: new Date() });
 
 it("記事に載っていないクリップを出し、反映待ちの次の企画へ進める", async () => {
