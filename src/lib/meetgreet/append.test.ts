@@ -513,7 +513,7 @@ describe("本文の行を伴わない出典 (#267)", () => {
     expect(p.changedLines).toEqual([]);
     expect(p.added.bareSources).toBe(1);
     expect(p.additions).toEqual([
-      { key: "asset:mag-b", kind: "source", label: "出典「雑誌「B」」（本文は記事の編集画面で書く）" },
+      { key: "asset:mag-b", kind: "source", label: "出典: 雑誌「B」（本文は記事の編集画面で書く）" },
     ]);
     expect(p.newSources).toEqual([{ ...sources[1], sourceNo: 2 }]);
   });
@@ -530,6 +530,29 @@ describe("本文の行を伴わない出典 (#267)", () => {
     const p = planAppend({ ...args, layout: plain });
     expect(p.empty).toBe(true);
     expect(p.newSources).toHaveLength(0);
+  });
+
+  it("同じアセットの出典が 2 つあっても 1 つだけ足す", () => {
+    const p = planAppend({ ...args, sources: [...sources, { ...sources[1], sourceNo: 3 }] });
+    expect(p.additions).toHaveLength(1);
+    expect(p.newSources.map((s) => s.assetId)).toEqual(["mag-b"]);
+  });
+
+  it("本文の行が参照する出典は、行を外しても出典だけで入らない (画像の除外キーとブログの ID は別物)", () => {
+    // おでかけ: ブログ画像の行は画像の ID で外すが、出典はブログ本文の ID を持つ
+    const outing = { ...args, sources: [sources[0], { ...sources[1], assetId: "blog-c" }] };
+    const parts = { ...EMPTY_PARTS, blogImages: [{ assetId: "img-c", line: "- 【ブログ・画像】ブログ「C」^[2]" }] };
+    const shown = planAppend({ ...outing, parts });
+    expect(shown.additions.map((a) => a.kind)).toEqual(["blogImage"]);
+    expect(shown.newSources).toHaveLength(1);
+    const dropped = planAppend({ ...outing, parts, excluded: ["asset:img-c"] });
+    expect(dropped.empty).toBe(true);
+    expect(dropped.newSources).toHaveLength(0);
+  });
+
+  it("既存の番号に飛びがあっても最大値の続きで振る", () => {
+    const p = planAppend({ ...args, existingSources: [...existing, { sourceNo: 5, assetId: "other", url: null }] });
+    expect(p.newSources[0].sourceNo).toBe(6);
   });
 
   it("アセットの無い出典は提示しない (反映できないため)", () => {

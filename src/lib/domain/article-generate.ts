@@ -74,6 +74,16 @@ function createDigest(rendered: { body: string; sources: RenderedSource[] }): st
   return bodyDigest(`${rendered.body}\n--sources--\n${sources}`);
 }
 
+/**
+ * 追記の指紋も**本文 + 足す出典**で取る。出典だけを足すテンプレート (#267) は本文が変わらないので、
+ * 本文だけだとプレビューのあとで素材が増えても気づけず、見ていない出典を反映してしまう
+ */
+function appendDigest(plan: { body: string; newSources: RenderedSource[] }): string {
+  if (plan.newSources.length === 0) return bodyDigest(plan.body);
+  const sources = plan.newSources.map((s) => `${s.sourceNo}:${s.assetId ?? s.url ?? ""}`).join("\n");
+  return bodyDigest(`${plan.body}\n--sources--\n${sources}`);
+}
+
 export interface MeetGreetForArticle {
   id: string;
   date: string;
@@ -397,7 +407,7 @@ export async function previewArticle(
     // **指紋は保存時に照合するものと揃える。** 保存側は「保存済みの除外だけを当てた本文」で
     // 照合するので (= 外すつもりを渡せば照合をすり抜けられる、を塞ぐため)、
     // 重ねて見せているときも指紋は base のものを返す
-    digest: bodyDigest(base.body),
+    digest: appendDigest(base),
     addedLines: plan.changedLines,
     newSources: plan.newSources,
     droppedByClearance: rendered.droppedByClearance,
@@ -809,7 +819,7 @@ export async function saveArticle(
   // **指紋は「見せたときと同じ条件」で照合する。** 除外を足すと本文が変わるので、
   // 除外を当てる前の結果と突き合わせる (除外を渡せば照合をすり抜けられる、を防ぐ)
   const shown = planOrThrow(resolved, { ...planArgs, excluded: stored });
-  if (mismatch(bodyDigest(shown.body))) {
+  if (mismatch(appendDigest(shown))) {
     return {
       ok: false,
       error: "内容が変わりました (素材が増減したか、記事が他で編集されました)。もう一度差分を見てください",
