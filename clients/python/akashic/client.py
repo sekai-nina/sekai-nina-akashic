@@ -244,6 +244,48 @@ class AkashicClient:
         """アセットを削除する。"""
         return self._request("DELETE", f"/assets/{asset_id}")
 
+    def lookup_sources(
+        self,
+        *,
+        urls: list[str] | None = None,
+        talk_message_ids: list[str | int] | None = None,
+    ) -> dict[str, Any]:
+        """出典キー (ブログの URL / トークのメッセージ ID) から登録済みのアセットを引く。
+
+        合わせて 500 件まで。照会したキーはすべて結果に出る (無ければ空配列)。
+
+        Returns:
+            {"urls": {url: [asset, ...]}, "talkMessageIds": {id: [asset, ...]}}。
+            asset は {"id", "kind", "title", "texts": [{"textType", "content"}]}
+            (texts は body / message_body だけ)
+        """
+        return self._request(
+            "POST",
+            "/assets/lookup",
+            json={"urls": urls or [], "talkMessageIds": [str(m) for m in talk_message_ids or []]},
+        )
+
+    def add_text_revision(
+        self,
+        asset_id: str,
+        content: str,
+        *,
+        text_type: str = "body",
+        fetched_at: str | None = None,
+    ) -> dict[str, Any]:
+        """取り直した本文を送る。現行と違えば新しい版として積む (上書きで消さない)。
+
+        Args:
+            fetched_at: 公式から取得した日時。時刻と時差つきの ISO 8601 (省略時はサーバーの現在時刻)
+
+        Returns:
+            {"status": "unchanged" | "revised" | "created", "assetTextId", "version"?, ...}
+        """
+        body: dict[str, Any] = {"content": content, "textType": text_type}
+        if fetched_at:
+            body["fetchedAt"] = fetched_at
+        return self._request("POST", f"/assets/{asset_id}/revisions", json=body)
+
     # ------------------------------------------------------------------
     # Search
     # ------------------------------------------------------------------
