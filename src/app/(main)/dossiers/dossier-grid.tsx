@@ -2,8 +2,8 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { FileText, FolderSearch, Lock, Eye, Pencil, Search, ArrowRight } from "lucide-react";
-import { formatDate } from "@/lib/utils";
+import { FileText, FolderSearch, Lock, Eye, Pencil, Search, ArrowRight, Inbox } from "lucide-react";
+import { DOSSIER_LIST_LABELS as L, formatDate } from "@/lib/utils";
 
 /**
  * ドシエ一覧のカードとタイトル絞り込み。
@@ -49,9 +49,8 @@ export interface DossierCardData {
  * 既定は未記事化。記事 0 本の企画 = まだ組み立て中のもの。
  * 反映待ち = 記事はあるが、記事に載っていないクリップが入っているもの
  */
-type Filter = "draft" | "pending" | "written" | "all";
-
-const FILTERS: readonly Filter[] = ["draft", "pending", "written", "all"];
+const FILTERS = ["draft", "pending", "written", "all"] as const;
+type Filter = (typeof FILTERS)[number];
 
 export function DossierGrid({
   dossiers,
@@ -70,6 +69,12 @@ export function DossierGrid({
 
   const writtenCount = useMemo(() => dossiers.filter((d) => d.articleCount > 0).length, [dossiers]);
   const pendingCount = useMemo(() => dossiers.filter((d) => d.pendingCount > 0).length, [dossiers]);
+  const counts: Record<Filter, number> = {
+    draft: dossiers.length - writtenCount,
+    pending: pendingCount,
+    written: writtenCount,
+    all: dossiers.length,
+  };
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -99,15 +104,8 @@ export function DossierGrid({
             className="w-full pl-8 pr-3 py-2 text-sm border border-slate-200 rounded-lg bg-white"
           />
         </label>
-        <div className="flex items-center gap-1 text-xs">
-          {(
-            [
-              ["draft", `未記事化 ${dossiers.length - writtenCount}`],
-              ["pending", `反映待ち ${pendingCount}`],
-              ["written", `記事化済み ${writtenCount}`],
-              ["all", `すべて ${dossiers.length}`],
-            ] as const
-          ).map(([key, label]) => (
+        <div className="flex flex-wrap items-center gap-1 text-xs">
+          {FILTERS.map((key) => (
             <button
               key={key}
               type="button"
@@ -116,7 +114,7 @@ export function DossierGrid({
                 filter === key ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
               }`}
             >
-              {label}
+              {L[key]} {counts[key]}
             </button>
           ))}
         </div>
@@ -168,8 +166,10 @@ export function DossierGrid({
                     記事{d.articleCount > 1 ? ` ${d.articleCount} 本` : ""}
                   </p>
                   {d.pendingCount > 0 && (
-                    <p className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-800">
-                      未反映 {d.pendingCount} 件{d.pendingAt ? ` · ${formatDate(d.pendingAt)} 追加` : ""}
+                    <p className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-800">
+                      <Inbox className="h-3 w-3" />
+                      {L.pendingBadge(d.pendingCount)}
+                      {d.pendingAt ? ` · ${L.addedOn(formatDate(d.pendingAt))}` : ""}
                     </p>
                   )}
                 </div>
@@ -194,7 +194,7 @@ export function DossierGrid({
                 <span>更新 {formatDate(d.updatedAt)}</span>
                 {toArticle && (
                   <span className="inline-flex items-center gap-0.5 text-indigo-700">
-                    記事に反映する <ArrowRight className="h-3 w-3" />
+                    {L.toArticle} <ArrowRight className="h-3 w-3" />
                   </span>
                 )}
               </div>

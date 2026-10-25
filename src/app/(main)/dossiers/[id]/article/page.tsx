@@ -12,7 +12,7 @@ import { ArticleStep } from "@/components/workflow/article-step";
 import { previewDossierArticleAction, restoreDossierExclusionsAction, saveDossierArticleAction } from "./actions";
 import { TemplatePicker } from "./template-picker";
 import { PendingClips } from "./pending-clips";
-import { getUnreflectedClips, listPendingClips } from "@/lib/domain/dossier-sync-queue";
+import { listPendingDossiers } from "@/lib/domain/dossier-sync-queue";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -43,10 +43,8 @@ export default async function DossierArticlePage({ params, searchParams }: Props
     </div>;
   }
   const { dossier, preparation, template: current, article: target, articleId, needsChoice, editable } = workflow;
-  const [unreflected, queue] = await Promise.all([
-    getUnreflectedClips(session.user, dossier.id),
-    listPendingClips(session.user),
-  ]);
+  const queue = await listPendingDossiers(session.user);
+  const unreflected = queue.find((p) => p.dossierId === dossier.id)?.clips ?? [];
   // 反映待ちを 1 本ずつ進める。並びは一覧の「反映待ち」タブと同じ (新しい順) で、いまの企画の次。
   // いまの企画が片付いて列から消えていたら先頭へ
   const here = queue.findIndex((p) => p.dossierId === dossier.id);
@@ -107,7 +105,7 @@ export default async function DossierArticlePage({ params, searchParams }: Props
       </section>
 
       {unreflected.length > 0 && <section className="mt-4 rounded-lg border border-amber-200 bg-white p-4">
-        <h2 className="text-xs font-semibold text-slate-500 mb-2">{L.pendingClips} {unreflected.length} 件</h2>
+        <h2 className="text-xs font-semibold text-slate-500 mb-2">{L.pendingClips(unreflected.length)}</h2>
         <PendingClips clips={unreflected} />
       </section>}
 
@@ -123,7 +121,7 @@ export default async function DossierArticlePage({ params, searchParams }: Props
       </section>}
 
       {(here !== -1 || nextPending) && <section className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
-        <p className="text-xs text-slate-500">{L.pendingQueue} {queue.length} 本{nextPending ? "" : ` · ${L.noMorePending}`}</p>
+        <p className="text-xs text-slate-500">{L.pendingQueue(queue.length)}{nextPending ? "" : ` · ${L.noMorePending}`}</p>
         <div className="flex flex-wrap items-center gap-3">
           <Link href="/dossiers?filter=pending" className="text-xs text-slate-600 hover:underline">{L.backToPendingList}</Link>
           {nextPending && <Link href={`/dossiers/${nextPending.dossierId}/article`} className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-2 text-xs text-white hover:bg-indigo-700">

@@ -3,7 +3,7 @@ import { FolderSearch, Plus } from "lucide-react";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { listDossiers } from "@/lib/domain/dossiers";
-import { listPendingClips } from "@/lib/domain/dossier-sync-queue";
+import { listPendingDossiers } from "@/lib/domain/dossier-sync-queue";
 import { DossierGrid } from "./dossier-grid";
 
 export default async function DossiersPage({ searchParams }: { searchParams: Promise<{ filter?: string }> }) {
@@ -11,7 +11,7 @@ export default async function DossiersPage({ searchParams }: { searchParams: Pro
   const session = await auth();
   if (!session?.user) notFound();
 
-  const [dossiers, pending] = await Promise.all([listDossiers(session.user), listPendingClips(session.user)]);
+  const [dossiers, pending] = await Promise.all([listDossiers(session.user), listPendingDossiers(session.user)]);
   const pendingById = new Map(pending.map((p) => [p.dossierId, p]));
 
   return (
@@ -52,7 +52,7 @@ export default async function DossiersPage({ searchParams }: { searchParams: Pro
           updatedAt: d.updatedAt.toISOString(),
           articleCount: d._count.articles,
           articles: d.articles,
-          pendingCount: pendingById.get(d.id)?.count ?? 0,
+          pendingCount: pendingById.get(d.id)?.clips.length ?? 0,
           pendingAt: pendingById.get(d.id)?.latestAt.toISOString() ?? null,
         }))}
       />

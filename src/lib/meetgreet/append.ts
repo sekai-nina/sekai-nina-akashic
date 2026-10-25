@@ -135,7 +135,7 @@ function footnoteOf(line: string): number | null {
 }
 
 /** 抜粋の identity に使う先頭行 (重複判定と除外キーで同じものを使う) */
-function quoteHead(excerpt: string): string {
+export function quoteHead(excerpt: string): string {
   return excerpt.split("\n").find((l) => l.trim())?.trim() ?? "";
 }
 
