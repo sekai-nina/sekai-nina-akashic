@@ -589,6 +589,10 @@ export const ARTICLE_WORKFLOW_LABELS = {
   saved: "記事を保存しました。", draft: "下書き", saveDoesNotPublish: "保存しただけでは公開されません。",
   generationHelp: "記事のプレビュー・保存は、素材の企画から共通の記事画面で行います。",
   unavailableDossier: "素材の企画を閲覧できないため、記事を生成できません。",
+  pendingClips: "記事に載っていないクリップ",
+  pendingClipsHelp: "企画に入っているのに、まだ記事に載っていないクリップです。差分を見て追記すると載り、ここから消えます。載せないものは差分でチェックを外すと、今後足さないものとして消えます。",
+  nextPending: "次の反映待ちへ", pendingQueue: "反映待ちの企画", noMorePending: "反映待ちの企画はこれで最後です。",
+  backToPendingList: "反映待ちの一覧へ",
 } as const;
 
 /** 公開サイトの鮮度管理 (#233 段階3)。 */

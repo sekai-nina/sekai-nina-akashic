@@ -3,13 +3,16 @@ import { FolderSearch, Plus } from "lucide-react";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { listDossiers } from "@/lib/domain/dossiers";
+import { listPendingClips } from "@/lib/domain/dossier-sync-queue";
 import { DossierGrid } from "./dossier-grid";
 
-export default async function DossiersPage() {
+export default async function DossiersPage({ searchParams }: { searchParams: Promise<{ filter?: string }> }) {
+  const { filter } = await searchParams;
   const session = await auth();
   if (!session?.user) notFound();
 
-  const dossiers = await listDossiers(session.user);
+  const [dossiers, pending] = await Promise.all([listDossiers(session.user), listPendingClips(session.user)]);
+  const pendingById = new Map(pending.map((p) => [p.dossierId, p]));
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6">
@@ -33,6 +36,7 @@ export default async function DossiersPage() {
       </div>
 
       <DossierGrid
+        initialFilter={filter}
         currentUserId={session.user.id}
         dossiers={dossiers.map((d) => ({
           id: d.id,
@@ -48,6 +52,8 @@ export default async function DossiersPage() {
           updatedAt: d.updatedAt.toISOString(),
           articleCount: d._count.articles,
           articles: d.articles,
+          pendingCount: pendingById.get(d.id)?.count ?? 0,
+          pendingAt: pendingById.get(d.id)?.latestAt.toISOString() ?? null,
         }))}
       />
     </div>

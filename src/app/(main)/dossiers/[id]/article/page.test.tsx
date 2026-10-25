@@ -1,7 +1,7 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), kind: vi.fn(), workflow: vi.fn() }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), kind: vi.fn(), workflow: vi.fn(), unreflected: vi.fn(), queue: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ auth: mocks.auth }));
 vi.mock("@/lib/domain/dossiers", () => ({ getDossierKind: mocks.kind }));
 vi.mock("@/lib/domain/dossier-article-workflow", () => ({ getDossierArticleWorkflow: mocks.workflow }));
@@ -9,6 +9,8 @@ vi.mock("@/lib/domain/article-workflow", () => ({ WorkflowInputError: class exte
 vi.mock("@/lib/domain/dossier-article", () => ({ suggestTemplate: () => null }));
 vi.mock("@/lib/article-workflow/templates", () => ({ selectableTemplates: () => [{ key: "outing" }] }));
 vi.mock("@/components/workflow/article-step", () => ({ ArticleStep: () => <p>生成操作</p> }));
+vi.mock("@/lib/domain/dossier-sync-queue", () => ({ getUnreflectedClips: mocks.unreflected, listPendingClips: mocks.queue }));
+vi.mock("./pending-clips", () => ({ PendingClips: () => <p>未反映の一覧</p> }));
 vi.mock("./template-picker", () => ({ TemplatePicker: () => <p>テンプレート選択</p> }));
 vi.mock("./actions", () => ({ previewDossierArticleAction: vi.fn(), saveDossierArticleAction: vi.fn(), restoreDossierExclusionsAction: vi.fn() }));
 vi.mock("next/link", () => ({ default: ({ children, href, ...props }: React.ComponentProps<"a">) => <a href={href} {...props}>{children}</a> }));
@@ -26,6 +28,8 @@ beforeEach(() => {
   mocks.auth.mockResolvedValue({ user: { id: "u1", role: "member", clearance: "internal" } });
   mocks.kind.mockResolvedValue("general");
   mocks.workflow.mockResolvedValue(workflow());
+  mocks.unreflected.mockResolvedValue([]);
+  mocks.queue.mockResolvedValue([]);
 });
 it("ミーグリ・ライブにも同じ生成操作を出し、準備画面へ戻れる", async () => {
   for (const kind of ["meetgreet", "live"]) {
@@ -63,4 +67,27 @@ it("クリップのプールから直接記事を生成しない", async () => {
   mocks.kind.mockResolvedValue("clips");
   await expect(Page(props)).rejects.toThrow("redirect:/clips");
   expect(mocks.workflow).not.toHaveBeenCalled();
+});
+
+const queued = (dossierId: string, title: string) => ({ dossierId, title, count: 1, assetIds: ["x"], latestAt: new Date() });
+
+it("記事に載っていないクリップを出し、反映待ちの次の企画へ進める", async () => {
+  mocks.unreflected.mockResolvedValue([{ assetId: "x", title: "ブログ", kind: "blog", canonicalDate: null, excerpt: "" }]);
+  mocks.queue.mockResolvedValue([queued("d0", "前"), queued("d1", "素材"), queued("d2", "クラシックバレエ")]);
+  const html = renderToStaticMarkup(await Page(props));
+  expect(html).toContain("未反映の一覧");
+  expect(html).toContain('href="/dossiers/d2/article"');
+  expect(html).toContain("クラシックバレエ");
+});
+
+it("片付いていまの企画が列から消えたら、反映待ちの先頭へ進める", async () => {
+  mocks.queue.mockResolvedValue([queued("d0", "先頭"), queued("d2", "次")]);
+  const html = renderToStaticMarkup(await Page(props));
+  expect(html).not.toContain("未反映の一覧");
+  expect(html).toContain('href="/dossiers/d0/article"');
+});
+
+it("反映待ちが無ければ案内を出さない", async () => {
+  const html = renderToStaticMarkup(await Page(props));
+  expect(html).not.toContain("反映待ちの企画");
 });
