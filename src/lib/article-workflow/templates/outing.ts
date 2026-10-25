@@ -26,7 +26,7 @@ import {
   type RelatedMediaStyle,
   type RenderedArticle,
 } from "../render";
-import { aiSystemPrompt, EDITORIAL_RULES, NO_QUOTES_APPEND_LAYOUT, normalizeAiBody, normalizeAiTags } from "./shared";
+import { AI_BODY_APPEND_LAYOUT, aiSystemPrompt, EDITORIAL_RULES, normalizeAiBody, normalizeAiTags } from "./shared";
 import type { AiContext, AiDraft, AiPrompt, ArticleTemplateDef, DossierPlace, DossierRenderInput } from "./types";
 
 /** AI が使えなかったときに本文に置くプレースホルダ。記事編集画面で人が置き換える */
@@ -258,7 +258,7 @@ export const OUTING_TEMPLATE: ArticleTemplateDef = {
   key: "outing",
   articleType: "event",
   needsAi: true,
-  appendLayout: { ...NO_QUOTES_APPEND_LAYOUT, media: OUTING_MEDIA_STYLE },
+  appendLayout: { ...AI_BODY_APPEND_LAYOUT, media: OUTING_MEDIA_STYLE },
   render: renderOutingArticle,
   prompt: outingPrompt,
 };

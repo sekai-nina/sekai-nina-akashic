@@ -188,7 +188,7 @@ describe("生成 → 追記の往復", () => {
         url: s.url,
       })),
     });
-    expect(plan.added).toEqual({ quotes: 0, reports: 0, talks: 0, blogImages: 0, tiktoks: 0 });
+    expect(plan.added).toEqual({ quotes: 0, reports: 0, talks: 0, blogImages: 0, tiktoks: 0, bareSources: 0 });
     expect(plan.newSources).toHaveLength(0);
     expect(plan.empty).toBe(true);
     expect(plan.body).toBe(r.body);

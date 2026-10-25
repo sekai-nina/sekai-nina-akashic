@@ -21,7 +21,7 @@ import {
   type ArticleParts,
   type RenderedArticle,
 } from "../render";
-import { aiSystemPrompt, EDITORIAL_RULES, NO_QUOTES_APPEND_LAYOUT, normalizeAiBody, normalizeAiTags } from "./shared";
+import { AI_BODY_APPEND_LAYOUT, aiSystemPrompt, EDITORIAL_RULES, normalizeAiBody, normalizeAiTags } from "./shared";
 import type { AiContext, AiDraft, AiPrompt, ArticleTemplateDef, DossierRenderInput } from "./types";
 
 /** AI が使えなかったときに本文に置くプレースホルダ。記事編集画面で人が置き換える */
@@ -142,8 +142,8 @@ export const ATTRIBUTE_TEMPLATE: ArticleTemplateDef = {
   key: "attribute",
   articleType: "attribute",
   needsAi: true,
-  // 追記で足す章は無い (`parts` は常に空)
-  appendLayout: NO_QUOTES_APPEND_LAYOUT,
+  // 追記で足す章は無い (`parts` は常に空)。新しい素材は出典だけ提示する (#267)
+  appendLayout: AI_BODY_APPEND_LAYOUT,
   render: renderAttributeArticle,
   prompt: attributePrompt,
 };

@@ -490,3 +490,50 @@ describe("planAppend の引用の置き方 (#170)", () => {
     expect(p.body).toBe("## 名言\n\n> 古い\n\n> 新しい\n\n");
   });
 });
+
+describe("本文の行を伴わない出典 (#267)", () => {
+  const layout = {
+    quotesHeading: null,
+    quoteAttribution: false,
+    reports: { heading: "## x", lead: "y" },
+    bareSources: true,
+  };
+  const body = "坂井新奈の MBTI についてまとめる。\n\n- INFP である^[1]\n";
+  const sources: RenderedSource[] = [
+    { sourceNo: 1, label: "ブログ「A」", url: "https://example.com/a", date: "2026-08-01", assetId: "blog-a" },
+    { sourceNo: 2, label: "雑誌「B」", url: null, date: "2026-09-01", assetId: "mag-b" },
+  ];
+  const existing = [{ sourceNo: 1, assetId: "blog-a", url: "https://example.com/a" }];
+  const args = { existingBody: body, parts: EMPTY_PARTS, sources, existingSources: existing, layout };
+
+  it("既存と突き合わない出典を「足すもの」に並べ、本文は変えずに番号の続きで足す", () => {
+    const p = planAppend(args);
+    expect(p.empty).toBe(false);
+    expect(p.body).toBe(body);
+    expect(p.changedLines).toEqual([]);
+    expect(p.added.bareSources).toBe(1);
+    expect(p.additions).toEqual([
+      { key: "asset:mag-b", kind: "source", label: "出典「雑誌「B」」（本文は記事の編集画面で書く）" },
+    ]);
+    expect(p.newSources).toEqual([{ ...sources[1], sourceNo: 2 }]);
+  });
+
+  it("外したものは出典を作らない", () => {
+    const p = planAppend({ ...args, excluded: ["asset:mag-b"] });
+    expect(p.empty).toBe(true);
+    expect(p.newSources).toHaveLength(0);
+    expect(p.additions).toHaveLength(0);
+  });
+
+  it("フラグが無いテンプレートは従来どおり出典だけは足さない", () => {
+    const { bareSources: _drop, ...plain } = layout;
+    const p = planAppend({ ...args, layout: plain });
+    expect(p.empty).toBe(true);
+    expect(p.newSources).toHaveLength(0);
+  });
+
+  it("アセットの無い出典は提示しない (反映できないため)", () => {
+    const p = planAppend({ ...args, sources: [sources[0], { ...sources[1], assetId: null }] });
+    expect(p.empty).toBe(true);
+  });
+});
