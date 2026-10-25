@@ -29,4 +29,8 @@ describe("relocateExcerpt", () => {
   it("範囲が本文の外でも探し直す", () => {
     expect(relocateExcerpt("短い本文", "本文", 50, 60)).toEqual({ start: 2, end: 4 });
   });
+
+  it("空白の違いを無視して見つかった範囲は抜粋と一致しないので付け直さない", () => {
+    expect(relocateExcerpt("前置き。明日は雨。\n\nまた", "明日は雨。\nまた", 0, 3)).toBeNull();
+  });
 });

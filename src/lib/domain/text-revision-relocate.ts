@@ -25,5 +25,8 @@ export function relocateExcerpt(
   const first = locateExcerpt(content, excerpt);
   if (!first) return null;
   if (locateExcerpt(content, excerpt, first.start + 1)) return null;
+  // locateExcerpt は空白の違いを無視しても探すので、見つかった範囲が抜粋と一字一句同じとは限らない。
+  // 違うとアセット詳細のハイライト (excerptOf との一致で判定) に出ないので、付け直さない
+  if (stripImagePlaceholders(content.slice(first.start, first.end)) !== excerpt) return null;
   return first;
 }

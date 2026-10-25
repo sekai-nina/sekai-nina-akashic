@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
-import { TextType } from "@prisma/client";
+import { Prisma, TextType } from "@prisma/client";
 import { requireApiAuth } from "@/lib/api-auth";
 import { withClearance } from "@/lib/db";
 import { addTextRevision, listTextRevisions } from "@/lib/domain/text-revisions";
 
-/** 本文の版の一覧 (#262)。新しい順 */
+const ISO_DATETIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
+
+/** 本文の版の一覧 (#262)。テキストごとに新しい順 */
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const auth = await requireApiAuth(request, "read");
   if (auth instanceof NextResponse) return auth;
@@ -48,18 +50,32 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (typeof textType !== "string" || !Object.values(TextType).includes(textType as TextType)) {
     return NextResponse.json({ error: `Invalid textType: ${String(textType)}` }, { status: 400 });
   }
+  // 日付だけ・時差なしは UTC 扱いになって JST で 9 時間ずれるので、時刻と時差 (Z / +09:00) まで要る
   let fetchedAtDate = new Date();
   if (fetchedAt !== undefined) {
-    fetchedAtDate = new Date(typeof fetchedAt === "string" ? fetchedAt : NaN);
+    const valid = typeof fetchedAt === "string" && ISO_DATETIME_RE.test(fetchedAt);
+    fetchedAtDate = new Date(valid ? fetchedAt : NaN);
     if (Number.isNaN(fetchedAtDate.getTime())) {
-      return NextResponse.json({ error: "fetchedAt must be an ISO 8601 string" }, { status: 400 });
+      return NextResponse.json(
+        { error: "fetchedAt must be an ISO 8601 datetime with offset (e.g. 2026-08-27T21:10:00+09:00)" },
+        { status: 400 }
+      );
     }
   }
 
-  const result = await addTextRevision(
-    { assetId: id, textType: textType as TextType, content, fetchedAt: fetchedAtDate },
-    auth.clearance
-  );
+  let result;
+  try {
+    result = await addTextRevision(
+      { assetId: id, textType: textType as TextType, content, fetchedAt: fetchedAtDate },
+      auth.clearance
+    );
+  } catch (e) {
+    // Asset 行のロックで直列にしているが、念のため版番号の衝突は 409 で返す (送り直せば unchanged になる)
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      return NextResponse.json({ error: "Conflicting revision, retry" }, { status: 409 });
+    }
+    throw e;
+  }
   if (!result) {
     return NextResponse.json({ error: "Asset not found" }, { status: 404 });
   }

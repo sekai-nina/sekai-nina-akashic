@@ -23,7 +23,7 @@ export async function POST(request: Request) {
   }
   if (
     !Array.isArray(talkMessageIds) ||
-    !talkMessageIds.every((m) => typeof m === "string" || (typeof m === "number" && Number.isInteger(m)))
+    !talkMessageIds.every((m) => typeof m === "string" || (typeof m === "number" && Number.isSafeInteger(m)))
   ) {
     return NextResponse.json({ error: "talkMessageIds must be an array of strings or integers" }, { status: 400 });
   }

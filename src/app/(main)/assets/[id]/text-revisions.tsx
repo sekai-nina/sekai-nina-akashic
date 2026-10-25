@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { diffChars } from "diff";
 import { History } from "lucide-react";
 import { IMG_PLACEHOLDER_RE, formatDate } from "@/lib/utils";
@@ -28,18 +28,22 @@ const display = (content: string) => content.replace(IMG_PLACEHOLDER_RE, "［画
  * 本文の選択 (クリップ・引用) の対象にしないよう、TextsSection の選択範囲の外に置く。
  */
 export function TextRevisions({ label, revisions }: TextRevisionsProps) {
+  // 閉じた <details> も中身は描画されるので、開くまで差分を計算しない (長い本文で重い)
+  const [opened, setOpened] = useState(false);
   if (revisions.length < 2) return null;
   return (
-    <details className="border border-slate-200 rounded-lg p-3">
+    <details className="border border-slate-200 rounded-lg p-3" onToggle={(e) => e.currentTarget.open && setOpened(true)}>
       <summary className="text-sm text-slate-600 cursor-pointer hover:text-slate-800 flex items-center gap-1.5">
         <History className="w-3.5 h-3.5" />
         {label}の版の履歴 ({revisions.length})
       </summary>
-      <ol className="mt-3 space-y-3">
-        {revisions.map((rev, i) => (
-          <RevisionItem key={rev.id} revision={rev} previous={revisions[i + 1]} latest={i === 0} />
-        ))}
-      </ol>
+      {opened && (
+        <ol className="mt-3 space-y-3">
+          {revisions.map((rev, i) => (
+            <RevisionItem key={rev.id} revision={rev} previous={revisions[i + 1]} latest={i === 0} />
+          ))}
+        </ol>
+      )}
     </details>
   );
 }
@@ -69,6 +73,7 @@ function RevisionItem({
               <button
                 key={m}
                 type="button"
+                aria-pressed={mode === m}
                 onClick={() => setMode(m)}
                 className={`px-2 py-0.5 ${mode === m ? "bg-slate-700 text-white" : "text-slate-600 hover:bg-slate-50"}`}
               >
@@ -86,17 +91,21 @@ function RevisionItem({
 }
 
 function Diff({ before, after }: { before: string; after: string }) {
-  const parts = diffChars(display(before), display(after));
+  const parts = useMemo(() => diffChars(display(before), display(after)), [before, after]);
   return (
     <>
       {parts.map((part, i) =>
         part.added ? (
-          <ins key={i} className="bg-emerald-100 text-emerald-900 no-underline">
+          <ins key={i} title="追加" className="bg-emerald-100 text-emerald-900 no-underline">
+            <span className="sr-only">（追加: </span>
             {part.value}
+            <span className="sr-only">）</span>
           </ins>
         ) : part.removed ? (
-          <del key={i} className="bg-rose-100 text-rose-900">
+          <del key={i} title="削除" className="bg-rose-100 text-rose-900">
+            <span className="sr-only">（削除: </span>
             {part.value}
+            <span className="sr-only">）</span>
           </del>
         ) : (
           <span key={i}>{part.value}</span>

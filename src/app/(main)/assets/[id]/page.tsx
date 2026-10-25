@@ -473,10 +473,9 @@ export default async function AssetDetailPage({
                 highlightTerms={hlNina ? ninaTerms : []}
                 targetDossier={targetDossier}
                 revisions={Object.fromEntries(
-                  asset.texts.map((t) => [
-                    t.id,
-                    t.revisions.map((r) => ({ ...r, fetchedAt: r.fetchedAt.toISOString() })),
-                  ])
+                  asset.texts
+                    .filter((t) => t.revisions.length > 1)
+                    .map((t) => [t.id, t.revisions.map((r) => ({ ...r, fetchedAt: r.fetchedAt.toISOString() }))])
                 )}
               />
               <div className="bg-white border border-slate-200 rounded-lg p-5 mt-4">

@@ -10,7 +10,7 @@
  * UI の手編集 (`texts.ts` の `updateText`) は版にしない (誤字直しまで版になるのを避ける)。
  */
 import { Prisma, type TextType } from "@prisma/client";
-import { prismaInternal, withClearance, type TransactionClient } from "@/lib/db";
+import { prismaInternal, withClearance } from "@/lib/db";
 import { normalizeText } from "@/lib/utils";
 import { relocateExcerpt } from "./text-revision-relocate";
 
@@ -37,19 +37,23 @@ export type AddTextRevisionResult =
  *
  * 同じ textType のテキストが複数あるときは最初に作られたものを対象にする (bot の登録は 1 つ)。
  * 初めて版を積むときは、それまでの本文を version 1 (fetchedAt = AssetText.createdAt) として種まきする。
+ * 最新版のあとに画面で手編集されていたら、その本文も版として残してから新しい版を積む (上書きで消さない)。
+ *
+ * 同じアセットへの同時 POST は Asset 行のロックで直列にする (版番号の取り合い・本文テキストの二重作成を防ぐ)。
  */
 export async function addTextRevision(
   input: { assetId: string; textType: TextType; content: string; fetchedAt: Date },
   clearance: string
 ): Promise<AddTextRevisionResult | null> {
-  return withClearance(clearance, async (tx) => {
-    const asset = await tx.asset.findUnique({ where: { id: input.assetId }, select: { id: true } });
-    if (!asset) return null;
+  const result = await withClearance(clearance, async (tx) => {
+    const locked = await tx.$queryRaw<{ id: string }[]>`
+      SELECT id FROM "Asset" WHERE id = ${input.assetId} FOR UPDATE`;
+    if (locked.length === 0) return null;
 
     const current = await tx.assetText.findFirst({
       where: { assetId: input.assetId, textType: input.textType },
       orderBy: { createdAt: "asc" },
-      select: { id: true, content: true, createdAt: true },
+      select: { id: true, content: true, createdAt: true, updatedAt: true },
     });
     if (!current) {
       const created = await tx.assetText.create({
@@ -62,63 +66,51 @@ export async function addTextRevision(
         },
         select: { id: true },
       });
-      return { status: "created", assetTextId: created.id };
+      return { status: "created" as const, assetTextId: created.id };
     }
 
     const latest = await tx.assetTextRevision.findFirst({
       where: { assetTextId: current.id },
       orderBy: { version: "desc" },
-      select: { version: true },
+      select: { version: true, content: true },
     });
     if (current.content === input.content) {
-      return { status: "unchanged", assetTextId: current.id, version: latest?.version ?? 1 };
+      return { status: "unchanged" as const, assetTextId: current.id, version: latest?.version ?? 1 };
     }
 
-    let version = latest?.version ?? 0;
-    if (version === 0) {
-      await tx.assetTextRevision.create({
-        data: {
-          assetId: input.assetId,
-          assetTextId: current.id,
-          version: 1,
-          content: current.content,
-          fetchedAt: current.createdAt,
-        },
+    const addRevision = (version: number, content: string, fetchedAt: Date) =>
+      tx.assetTextRevision.create({
+        data: { assetId: input.assetId, assetTextId: current.id, version, content, fetchedAt },
       });
-      version = 1;
+    let version = latest?.version ?? 0;
+    if (!latest) {
+      await addRevision(++version, current.content, current.createdAt);
+    } else if (latest.content !== current.content) {
+      await addRevision(++version, current.content, current.updatedAt);
     }
-    version += 1;
-    await tx.assetTextRevision.create({
-      data: {
-        assetId: input.assetId,
-        assetTextId: current.id,
-        version,
-        content: input.content,
-        fetchedAt: input.fetchedAt,
-      },
-    });
+    await addRevision(++version, input.content, input.fetchedAt);
     await tx.assetText.update({
       where: { id: current.id },
       data: { content: input.content, normalizedContent: normalizeText(input.content) },
     });
-
-    const { relocated, unlocated } = await relocateExcerpts(tx, input.assetId, input.textType, input.content);
-    return {
-      status: "revised",
-      assetTextId: current.id,
-      version,
-      relocatedExcerpts: relocated,
-      unlocatedExcerpts: unlocated,
-    };
+    return { status: "revised" as const, assetTextId: current.id, version };
   });
+
+  if (result?.status !== "revised") return result;
+  const { relocated, unlocated } = await relocateExcerpts(input.assetId, input.textType, input.content);
+  return { ...result, relocatedExcerpts: relocated, unlocatedExcerpts: unlocated };
 }
 
 /**
  * 本文が変わったアセットの抜粋 (DossierItem = クリップ、ArticleSource = 記事の出典) の範囲を新本文で探し直す。
  * 抜粋の文字列は変えず、範囲だけ書き換える (記事の push 出力には範囲は載らないので dirty は立てない)。
+ *
+ * `prismaInternal` (RLS バイパス) で引く。`withClearance` だと app.user_id が無く、他人の private な
+ * ドシエのクリップや、API キーより上の機密の出典が見えずに取り残される。触るのは範囲だけで、
+ * 呼び出し側に返すのは件数だけ。版を積んだトランザクションの後に走るので、ここで落ちても版は残る
+ * (範囲がずれたままになり、アセット詳細で「位置未確定」になるだけ)。
  */
 async function relocateExcerpts(
-  tx: TransactionClient,
   assetId: string,
   textType: TextType,
   content: string
@@ -126,8 +118,8 @@ async function relocateExcerpts(
   const where = { assetId, excerptType: textType, excerptStart: { not: null }, excerptEnd: { not: null } };
   const select = { id: true, excerpt: true, excerptStart: true, excerptEnd: true } as const;
   const [items, sources] = await Promise.all([
-    tx.dossierItem.findMany({ where, select }),
-    tx.articleSource.findMany({ where, select }),
+    prismaInternal.dossierItem.findMany({ where, select }),
+    prismaInternal.articleSource.findMany({ where, select }),
   ]);
 
   let relocated = 0;
@@ -144,16 +136,16 @@ async function relocateExcerpts(
   };
   for (const item of items) {
     const data = plan(item);
-    if (data) await tx.dossierItem.update({ where: { id: item.id }, data });
+    if (data) await prismaInternal.dossierItem.update({ where: { id: item.id }, data });
   }
   for (const source of sources) {
     const data = plan(source);
-    if (data) await tx.articleSource.update({ where: { id: source.id }, data });
+    if (data) await prismaInternal.articleSource.update({ where: { id: source.id }, data });
   }
   return { relocated, unlocated };
 }
 
-/** アセットの本文の版 (新しい順)。版が無いテキストは含まない */
+/** アセットの本文の版。テキストごとにまとめ、その中で新しい順。版が無いテキストは含まない */
 export async function listTextRevisions(assetId: string, clearance: string) {
   return withClearance(clearance, (tx) =>
     tx.assetTextRevision.findMany({
