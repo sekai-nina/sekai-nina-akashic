@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { ArticleTemplate } from "@prisma/client";
 import * as z from "zod";
 import { requireRole } from "@/lib/auth/require-role";
-import { previewArticle, restoreExclusions, saveArticle } from "@/lib/domain/article-generate";
+import { previewArticle, proposeMerge, restoreExclusions, saveArticle, saveMerge } from "@/lib/domain/article-generate";
 import { getDossierForArticle, setDossierTemplate } from "@/lib/domain/dossier-article";
 import { AiDraftSchema, ExclusionKeysSchema } from "@/lib/meetgreet/api";
 import type { AiDraft } from "@/lib/article-workflow/templates";
@@ -119,6 +119,34 @@ export async function saveDossierArticleAction(
       added: result.added,
       sources: result.sources,
     };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+/** AI に、新しい素材を既存の本文へ組み込んだ案を作らせる (#275)。記事には書かない (費用はかかる) */
+export async function proposeMergeAction(dossierId: string, articleId: string | null) {
+  const user = await requireMember();
+  try {
+    const workflow = await requireDossierArticleWorkflow(user, dossierId, articleId);
+    return await proposeMerge(user, workflow.target);
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+const MergeBodySchema = z.string().min(1).max(200_000);
+
+/** 人が直した組み込みの案を保存する (#275) */
+export async function saveMergeAction(dossierId: string, articleId: string | null, digest: string, body: string) {
+  const user = await requireMember();
+  const parsed = MergeBodySchema.safeParse(body);
+  if (!parsed.success) return { ok: false as const, error: formatZodError(parsed.error) };
+  try {
+    const workflow = await requireDossierArticleWorkflow(user, dossierId, articleId);
+    const result = await saveMerge(user, workflow.target, digest, parsed.data);
+    if (result.ok) revalidateWorkflow(workflow, result.shortId);
+    return result;
   } catch (e) {
     return { ok: false as const, error: errorMessage(e) };
   }

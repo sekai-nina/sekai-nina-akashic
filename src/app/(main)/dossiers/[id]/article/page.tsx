@@ -6,12 +6,13 @@ import { getDossierKind } from "@/lib/domain/dossiers";
 import { getDossierArticleWorkflow } from "@/lib/domain/dossier-article-workflow";
 import { WorkflowInputError } from "@/lib/domain/article-workflow";
 import { suggestTemplate } from "@/lib/domain/dossier-article";
-import { selectableTemplates } from "@/lib/article-workflow/templates";
+import { getTemplate, selectableTemplates } from "@/lib/article-workflow/templates";
 import { ARTICLE_TEMPLATE_LABELS, ARTICLE_WORKFLOW_LABELS as L, cn } from "@/lib/utils";
 import { ArticleStep } from "@/components/workflow/article-step";
 import { previewDossierArticleAction, restoreDossierExclusionsAction, saveDossierArticleAction } from "./actions";
 import { TemplatePicker } from "./template-picker";
 import { PendingClips } from "./pending-clips";
+import { AiMergeStep } from "./ai-merge-step";
 import { listPendingDossiers } from "@/lib/domain/dossier-sync-queue";
 
 interface Props {
@@ -45,6 +46,9 @@ export default async function DossierArticlePage({ params, searchParams }: Props
   const { dossier, preparation, template: current, article: target, articleId, needsChoice, editable } = workflow;
   const queue = await listPendingDossiers(session.user);
   const unreflected = queue.find((p) => p.dossierId === dossier.id)?.clips ?? [];
+  // 本文を AI / 人が書くテンプレートの追記は、新しい素材を AI に組み込ませられる (#275)
+  // 反映待ちが無くても出しておく (保存して反映待ちが消えた直後に、結果の表示ごと消えないように)
+  const canAiMerge = !preparation && editable && !needsChoice && !!target && !!current && !!getTemplate(current)?.needsAi;
   // 反映待ちを 1 本ずつ進める。並びは一覧の「反映待ち」タブと同じ (新しい順) で、いまの企画の次。
   // いまの企画が片付いて列から消えていたら先頭へ
   const here = queue.findIndex((p) => p.dossierId === dossier.id);
@@ -97,11 +101,18 @@ export default async function DossierArticlePage({ params, searchParams }: Props
         {!editable ? <p className="text-xs text-slate-500">{L.readOnly}</p>
           : !current ? <p className="text-xs text-slate-500">{L.chooseTemplate}</p>
             : needsChoice ? <p className="text-xs text-slate-500">{L.chooseTarget}</p>
-              : supported && <ArticleStep key={JSON.stringify([dossier.id, current, articleId])} hasArticle={!!target} hasDossier
+              : supported && <>
+                {canAiMerge && <div className="mb-4 border-b border-slate-100 pb-4">
+                  <h3 className="mb-2 text-xs font-semibold text-slate-600">{L.aiMerge}</h3>
+                  <AiMergeStep key={JSON.stringify([dossier.id, articleId])} dossierId={dossier.id} articleId={articleId} />
+                  <p className="mt-3 text-[11px] text-slate-500">{L.sourcesOnly}</p>
+                </div>}
+                <ArticleStep key={JSON.stringify([dossier.id, current, articleId])} hasArticle={!!target} hasDossier
                 onPreview={previewDossierArticleAction.bind(null, dossier.id, articleId)}
                 onSave={saveDossierArticleAction.bind(null, dossier.id, articleId)}
                 onRestore={restoreDossierExclusionsAction.bind(null, dossier.id, articleId)}
-              />}
+              />
+              </>}
       </section>
 
       {unreflected.length > 0 && <section className="mt-4 rounded-lg border border-amber-200 bg-white p-4">

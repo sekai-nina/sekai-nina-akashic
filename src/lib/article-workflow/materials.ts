@@ -60,13 +60,17 @@ interface Section {
 /** 見出し行のあとに、抜粋・キャプション・本文を並べる (ブログとトークで共通) */
 function section(
   header: string[],
-  parts: { excerpts: string[]; captions: string[]; body: string | null; noBodyNote: string },
+  parts: { excerpts: string[]; notes: string[]; captions: string[]; body: string | null; noBodyNote: string },
   budget: number
 ): Section {
   const lines = [...header];
   if (parts.excerpts.length > 0) {
     lines.push("", "人が選んだ重要箇所 (抜粋):");
     for (const ex of parts.excerpts) lines.push(quoteLines(ex));
+  }
+  if (parts.notes.length > 0) {
+    lines.push("", "人のメモ (素材を読んだ人の要約。本文と同じく事実の出どころとして使ってよい):");
+    for (const n of parts.notes) lines.push(quoteLines(n));
   }
   if (parts.captions.length > 0) {
     lines.push("", "画像のキャプション:");
@@ -84,7 +88,7 @@ function section(
   return {
     text: lines.join("\n"),
     cut,
-    hasContent: !!body || parts.excerpts.length > 0 || parts.captions.length > 0,
+    hasContent: !!body || parts.excerpts.length > 0 || parts.notes.length > 0 || parts.captions.length > 0,
   };
 }
 
@@ -97,9 +101,11 @@ function blogSection(b: BlogGroup, textAsset: ArticleAssetInput | undefined, bud
     header,
     {
       excerpts: b.excerpts,
+      notes: [textAsset, ...b.images].flatMap((a) => a?.notes ?? []),
       captions: b.images.map((i) => i.caption?.trim()).filter((c): c is string => !!c),
       body: textAsset?.text ?? null,
-      noBodyNote: "(本文なし。画像だけのブログ)",
+      // 雑誌などは本文のアセットはあっても本文が無く、人のメモにだけ中身がある
+      noBodyNote: textAsset ? "(本文なし)" : "(本文なし。画像だけのブログ)",
     },
     budget
   );
@@ -113,6 +119,7 @@ function talkSection(a: ArticleAssetInput, sourceNo: number | undefined, budget:
     header,
     {
       excerpts: a.excerpts,
+      notes: a.notes ?? [],
       captions: caption ? [caption] : [],
       body: a.text ?? null,
       noBodyNote: `(本文なし。${a.kind === "video" ? "動画" : "画像"}のトーク)`,
@@ -125,7 +132,14 @@ function talkSection(a: ArticleAssetInput, sourceNo: number | undefined, budget:
  * 素材を Markdown 風の 1 つの文字列にする。出典番号は `render` と同じ (`numberSources`)。
  * 呼び出し側は `input.assets` を**機密で絞ったあと**で渡すこと (ここでは見ない)
  */
-export function buildMaterialsText(input: DossierRenderInput): MaterialsText {
+export function buildMaterialsText(
+  input: DossierRenderInput,
+  /**
+   * 中身を渡す出典 (組み立ての番号)。省略は全部。ここに無い出典は見出しだけにして、枠を使わず数えない
+   * (既存の記事に組み込む #275 では、新しい素材の中身だけ渡す。既存の出典の全文で枠を使い切らないように)
+   */
+  focus?: ReadonlySet<number>
+): MaterialsText {
   const { blogs, talks } = classifyMaterials(input.assets);
   const { talkSourceNo } = numberSources(blogs, talks);
   const textAssetById = new Map(input.assets.filter((a) => a.kind === "text").map((a) => [a.id, a]));
@@ -135,7 +149,11 @@ export function buildMaterialsText(input: DossierRenderInput): MaterialsText {
   let truncated = 0;
   let included = 0;
 
-  const push = (sec: Section) => {
+  const push = (sec: Section, sourceNo: number | undefined) => {
+    if (focus && (sourceNo === undefined || !focus.has(sourceNo))) {
+      parts.push(`${sec.text.split("\n")[0]}\n(既存の出典。中身は既存の本文に反映済み)`, "");
+      return;
+    }
     parts.push(sec.text, "");
     // 本文以外 (見出し・抜粋・キャプション) も枠を使うが、出典ごとの最低枠は残す
     remaining = Math.max(remaining - sec.text.length, 0);
@@ -146,9 +164,13 @@ export function buildMaterialsText(input: DossierRenderInput): MaterialsText {
 
   for (const b of blogs) {
     const textAsset = b.ref ? textAssetById.get(b.ref) : undefined;
-    push(blogSection(b, textAsset, budget()));
+    if (focus && !focus.has(b.sourceNo)) push(blogSection(b, undefined, 0), b.sourceNo);
+    else push(blogSection(b, textAsset, budget()), b.sourceNo);
   }
-  for (const a of talks) push(talkSection(a, talkSourceNo.get(a.id), budget()));
+  for (const a of talks) {
+    const no = talkSourceNo.get(a.id);
+    push(talkSection(a, no, focus && (no === undefined || !focus.has(no)) ? 0 : budget()), no);
+  }
 
   return { text: parts.join("\n").trimEnd() + "\n", included, truncated };
 }

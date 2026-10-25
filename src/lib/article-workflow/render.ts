@@ -43,6 +43,11 @@ export interface ArticleAssetInput {
    */
   text?: string | null;
   caption?: string;
+  /**
+   * ドシエのアイテムのメモ (AI のときだけ)。雑誌のインタビューなど本文の無い素材は、
+   * 人が読んで要約したものがここにしか無い (#275)
+   */
+  notes?: string[];
   people?: string[];
 }
 
