@@ -28,7 +28,11 @@ import { EXCLUSION_KIND_LABELS, todayJst } from "@/lib/utils";
 import { canEditDossier } from "@/lib/auth/dossier-permissions";
 import { parseFrontmatterDate } from "@/lib/articles/frontmatter";
 import { jsonStringArray, MAX_ARTICLE_CLEARANCE } from "@/lib/meetgreet/config";
-import { planAppend, isPureAppend, type AppendLayout } from "@/lib/meetgreet/append";
+import { exclusionKey, planAppend, isPureAppend, type AppendLayout } from "@/lib/meetgreet/append";
+import { checkMerge, finalizeMerge, mergePrompt, renumberMaterials, unwrapFence } from "@/lib/article-workflow/merge";
+import { buildMaterialsText } from "@/lib/article-workflow/materials";
+import { normalizeAiBody } from "@/lib/article-workflow/templates/shared";
+import { ArticleAiError } from "@/lib/article-workflow/llm";
 import type { ArticleMode, ArticlePreview } from "@/lib/meetgreet/types";
 import type { RenderedArticle, RenderedSource } from "@/lib/article-workflow/render";
 import {
@@ -53,6 +57,9 @@ import { LiveInputError } from "./lives";
 import {
   assertPlainDossier,
   buildDossierArticle,
+  generateMergeDraft,
+  loadRenderInput,
+  mergeSystemPrompt,
   requireRenderableTemplate,
   type DossierForArticle,
 } from "./dossier-article";
@@ -922,4 +929,217 @@ export async function saveArticle(
     sources: applied.applied,
     failed: applied.failed,
   };
+}
+
+// --- AI に既存の記事へ組み込ませる (#275) ---
+
+/** 組み込みの案。画面はこれを見せ、人が `body` を直して `saveMerge` に渡す */
+export interface MergeProposal {
+  /** AI の案 (足す前の本文に、差し込み・`^[n]` の追加をしたもの) */
+  body: string;
+  /** 保存時に照合する指紋 (`previewArticle` の追記の指紋と同じ) */
+  digest: string;
+  /** AI が差し込んだ / `^[n]` を足した行 (`body` の 0 始まりの位置) */
+  changedLines: number[];
+  /**
+   * AI に渡す前に機械で足した行の中身 (おでかけの関連メディアの画像・トークの行)。画面で別の色を付ける。
+   * 位置ではなく中身で持つ (AI が前に行を差し込むと位置がずれる)
+   */
+  mechanicalLines: string[];
+  /** 今回足せる出典 (番号は記事での番号) と、その素材の中身 (画面の右側に出す) */
+  newSources: { sourceNo: number; label: string; material: string }[];
+  ai: ArticleAiStatus;
+}
+
+export type MergeProposalResult = { ok: true; proposal: MergeProposal } | { ok: false; error: string };
+
+/** 組み込みの下準備: 素材・追記の計画・既存の出典。案と保存で同じものを使う (指紋を揃える) */
+async function prepareMerge(user: ActingUser, target: ArticleTarget) {
+  if (target.kind !== "dossier") throw new DossierArticleError("AI の組み込みは企画が器の記事だけです");
+  const resolved = resolveTarget(user, target);
+  if (!resolved.template.needsAi) {
+    throw resolved.inputError("このテンプレートは本文を機械で組むので、AI の組み込みは使いません (差分を追記してください)");
+  }
+  if (!resolved.articleId) throw resolved.inputError("まだ記事がありません。先に記事を作ってください");
+  resolved.assertCanSave();
+  const { input } = await loadRenderInput(user, target.dossier, resolved.template, { withTexts: true });
+  let rendered;
+  try {
+    rendered = resolved.template.render!(input, null);
+  } catch (e) {
+    if (e instanceof TemplateInputError) throw resolved.inputError(e.message);
+    throw e;
+  }
+  const article = await prisma.article.findUnique({
+    where: { id: resolved.articleId },
+    select: {
+      shortId: true,
+      body: true,
+      updatedAt: true,
+      title: true,
+      type: true,
+      tags: true,
+      date: true,
+      dateDisplay: true,
+      dateMode: true,
+      publishedAt: true,
+      draft: true,
+      unlisted: true,
+      ongoing: true,
+    },
+  });
+  if (!article) throw resolved.inputError("紐づいている記事が見つかりません");
+  const existingSources = await loadArticleSources(user, resolved.articleId);
+  const plan = planOrThrow(resolved, {
+    existingBody: article.body,
+    parts: rendered.parts,
+    sources: rendered.sources,
+    existingSources,
+    excluded: resolved.storedExclusions,
+    layout: resolved.layout,
+  });
+  return { resolved, dossierId: target.dossier.id, input, rendered, article, articleId: resolved.articleId, existingSources, plan };
+}
+
+/**
+ * AI に、新しい素材を既存の本文へ組み込んだ案を作らせる (DB の記事には書かない。費用はかかる)。
+ * AI が既存の行を書き換えた案は使わずにエラーで返す
+ */
+export async function proposeMerge(user: ActingUser, target: ArticleTarget): Promise<MergeProposalResult> {
+  const { resolved, dossierId, input, article, plan } = await prepareMerge(user, target);
+  if (plan.newSources.length === 0) {
+    return { ok: false, error: "記事に足せる新しい素材がありません" };
+  }
+  const template = resolved.template as ArticleTemplateDef & { needsAi: true };
+  const newNos = new Set(plan.newSources.map((s) => s.sourceNo));
+  // 中身を渡すのは新しい素材だけ (組み立ての番号で指定する)
+  const focus = new Set([...plan.renumber].filter(([, to]) => newNos.has(to)).map(([from]) => from));
+  const materials = buildMaterialsText(input, focus);
+  const renumbered = renumberMaterials(materials.text, plan.renumber, newNos);
+  const prompt = mergePrompt({
+    system: await mergeSystemPrompt(template, input),
+    title: article.title,
+    existingBody: plan.body,
+    materials: renumbered.text,
+    newSources: plan.newSources,
+    included: materials.included,
+    truncated: materials.truncated,
+  });
+
+  let generated;
+  try {
+    generated = await generateMergeDraft(user, dossierId, template, prompt);
+  } catch (e) {
+    if (e instanceof ArticleAiError) return { ok: false, error: e.message };
+    throw e;
+  }
+  const maxNo = Math.max(0, ...plan.renumber.values());
+  const body = normalizeAiBody(unwrapFence(generated.body), maxNo);
+  const check = checkMerge(plan.body, body);
+  if (!check.ok) return { ok: false, error: check.reason };
+
+  const materialByNo = new Map(renumbered.sections.map((s) => [s.no, s.text]));
+  return {
+    ok: true,
+    proposal: {
+      body,
+      digest: appendDigest(plan),
+      changedLines: check.changedLines,
+      mechanicalLines: plan.changedLines.map((i) => plan.body.split("\n")[i]).filter((l) => l && l.trim()),
+      newSources: plan.newSources.map((s) => ({
+        sourceNo: s.sourceNo,
+        label: s.label,
+        material: materialByNo.get(s.sourceNo) ?? "",
+      })),
+      ai: generated.ai,
+    },
+  };
+}
+
+export type SaveMergeResult =
+  | { ok: true; shortId: string; sources: number; excluded: number; failed: string[] }
+  | { ok: false; error: string };
+
+/**
+ * 人が直した案を保存する。本文で参照された新しい出典だけ足し (番号は詰めて振り直す)、
+ * 参照されなかったものは「今後足さない」にする。人の手直しは検査しない
+ */
+export async function saveMerge(
+  user: ActingUser,
+  target: ArticleTarget,
+  expectedDigest: string,
+  body: string
+): Promise<SaveMergeResult> {
+  const actor: ArticleActor = { id: user.id };
+  const { resolved, rendered, article, articleId, existingSources, plan } = await prepareMerge(user, target);
+  if (appendDigest(plan) !== expectedDigest) {
+    return { ok: false, error: "案を作ったあとで素材か記事が変わりました。もう一度 AI に組み込ませてください" };
+  }
+  if (!body.trim()) return { ok: false, error: "本文が空です" };
+
+  const sourceNos = new Set(existingSources.flatMap((s) => (s.sourceNo == null ? [] : [s.sourceNo])));
+  const bodyNos = new Set([...article.body.matchAll(/\^\[(\d+)\]/g)].map((m) => Number(m[1])));
+  // 本文に、見えない出典 (上位機密で RLS が読ませない) の番号がある。新しい出典の番号とぶつかると
+  // 既存の脚注を新しい出典に付け替えてしまうので止める
+  if (plan.newSources.some((s) => bodyNos.has(s.sourceNo) && !sourceNos.has(s.sourceNo))) {
+    return { ok: false, error: "この記事には閲覧できない出典があり、番号がぶつかるため保存できません。クリアランスの高い人が保存してください" };
+  }
+  const final = finalizeMerge(body, plan.newSources, new Set([...sourceNos, ...bodyNos]));
+  // 使わなかった出典のうち、差分で「足すもの」に出ていたもの (出典だけの提示) を除外にする。
+  // 本文の行 (画像・トーク) に付く出典は行と一緒に決まるので、ここでは触らない
+  const offered = new Set(plan.additions.map((a) => a.key));
+  const unusedKeys = final.unused
+    .flatMap((s) => (s.assetId ? [exclusionKey("source", s.assetId)] : []))
+    .filter((k) => offered.has(k));
+
+  // **出典が先。** 本文を先に書くと ^[n] の最大値の続きから番号が振られてリンク切れになる
+  const applied = await applySources(article.shortId, articleId, final.sources, user, actor, article.updatedAt);
+  // 何も足さなかった (全部使わないと決めた) なら本文は書かない (更新日と push 待ちを無駄に立てない)
+  const unchanged = final.body === article.body && final.sources.length === 0;
+  const updated = unchanged
+    ? ({ ok: true } as const)
+    : await updateArticle(
+      article.shortId,
+      applied.updatedAt,
+      {
+        title: article.title,
+        type: article.type,
+        tags: Array.isArray(article.tags) ? (article.tags as string[]) : [],
+        body: final.body,
+        date: article.date,
+        dateDisplay: article.dateDisplay,
+        dateMode: article.dateMode,
+        publishedAt: article.publishedAt,
+        articleUpdatedAt: parseFrontmatterDate(todayJst()),
+        draft: article.draft,
+        unlisted: article.unlisted,
+        ongoing: article.ongoing,
+      },
+      actor
+    );
+  if (!updated.ok) {
+    return {
+      ok: false,
+      error:
+        updated.reason === "conflict"
+          ? `記事が他で更新されました (出典 ${applied.applied} 件は足してあります)。記事の編集画面で確認してください`
+          : "記事が見つかりません",
+    };
+  }
+  // ドシエのスナップショット (要反映の判定) を今回の状態にする (`saveArticle` の追記と同じ)
+  await saveFrontmatterExtra(articleId, refreshedExtra(resolved.template, rendered.frontmatterExtra));
+  await resolved.addExclusions(unusedKeys);
+  await logAudit({
+    actorId: user.id,
+    action: `${resolved.audit.prefix}.ai_merge_save`,
+    targetType: resolved.audit.targetType,
+    targetId: resolved.audit.targetId,
+    metadata: {
+      shortId: article.shortId,
+      sources: applied.applied,
+      failed: applied.failed.length,
+      excluded: unusedKeys,
+    },
+  });
+  return { ok: true, shortId: article.shortId, sources: applied.applied, excluded: unusedKeys.length, failed: applied.failed };
 }

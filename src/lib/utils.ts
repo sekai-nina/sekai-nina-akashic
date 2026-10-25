@@ -593,6 +593,8 @@ export const ARTICLE_WORKFLOW_LABELS = {
   pendingClipsHelp: "企画に入っているのに、まだ記事に載っていないクリップです。差分を見て追記すると載り、ここから消えます。載せないものは差分でチェックを外すと、今後足さないものとして消えます。",
   nextPending: "次の反映待ちへ", pendingQueue: (n: number) => `反映待ちの企画 ${n} 本`, noMorePending: "反映待ちの企画はこれで最後です。",
   backToPendingList: "反映待ちの一覧へ",
+  aiMerge: "AI に組み込ませる（本文に書き足す）",
+  sourcesOnly: "本文は手で書くので出典だけ足す場合や、足さないものを外す場合は、下の差分を使ってください。",
 } as const;
 
 /** 企画一覧 (`/dossiers`) のタブとカード */

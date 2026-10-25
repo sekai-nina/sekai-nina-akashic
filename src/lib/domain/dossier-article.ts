@@ -14,6 +14,7 @@ import type { RenderedArticle } from "@/lib/article-workflow/render";
 import {
   getTemplate,
   type AiDraft,
+  type AiPrompt,
   type ArticleAiStatus,
   type ArticleTemplateDef,
   type DossierRenderInput,
@@ -208,7 +209,37 @@ export async function buildDossierArticle(
   options: { today?: string; aiDraft?: AiDraft | null } = {}
 ): Promise<BuiltDossierArticle> {
   if (!template.render) throw new TemplateInputError(`テンプレート ${template.key} は器が要ります`);
+  // 生成するときだけ本文全文を読む。画像しか無いブログの本文アセットは出典の宛先になるので、
+  // 保存時 (下書きを持っている) も同じに読んで、プレビューと出典がずれないようにする
+  const generating = template.needsAi && options.aiDraft === undefined;
+  const { input, droppedByClearance } = await loadRenderInput(user, dossier, template, {
+    withTexts: generating,
+    today: options.today,
+  });
 
+  if (!template.needsAi) {
+    return { ...template.render(input), droppedByClearance, ai: null, aiDraft: undefined };
+  }
+
+  const { draft, ai } = await draftForTemplate(user, template, input, options.aiDraft);
+  return {
+    ...template.render(input, draft),
+    droppedByClearance,
+    ai,
+    aiDraft: draft,
+  };
+}
+
+/**
+ * 組み立ての入力を読む (機密の入口の検査込み)。`withTexts` は本文全文 (AI に渡す) を読むか。
+ * 既存の記事に AI で組み込む (#275) ときも同じ入力を使う
+ */
+export async function loadRenderInput(
+  user: ActingUser,
+  dossier: { id: string; title: string; classification: string },
+  template: ArticleTemplateDef,
+  options: { withTexts: boolean; today?: string }
+): Promise<{ input: DossierRenderInput; droppedByClearance: number }> {
   // **記事の本文は公開リポジトリに載る。** アセット単位の絞り込み (PUBLISHABLE) だけでは
   // ドシエのサムネ・外部リンクが素通りするので、ドシエの機密も入口で見る
   if (!PUBLISHABLE.has(dossier.classification)) {
@@ -223,11 +254,8 @@ export async function buildDossierArticle(
     );
   }
 
-  // 生成するときだけ本文全文を読む。画像しか無いブログの本文アセットは出典の宛先になるので、
-  // 保存時 (下書きを持っている) も同じに読んで、プレビューと出典がずれないようにする
-  const generating = template.needsAi && options.aiDraft === undefined;
   const loaded = await withSession(user, (tx) =>
-    loadDossierForArticle(tx, dossier.id, { withTexts: generating, withExtraBlogTexts: template.needsAi })
+    loadDossierForArticle(tx, dossier.id, { withTexts: options.withTexts, withExtraBlogTexts: template.needsAi })
   );
   if (!loaded) throw new TemplateInputError("企画が見つかりません (権限がないか削除されています)");
   // 上の判定は呼び出し側のスナップショット。読み直した行でもう一度見る (機密を上げられた直後)
@@ -251,18 +279,7 @@ export async function buildDossierArticle(
     places: materials.places,
     today: options.today ?? todayJst(),
   };
-
-  if (!template.needsAi) {
-    return { ...template.render(input), droppedByClearance: materials.droppedByClearance, ai: null, aiDraft: undefined };
-  }
-
-  const { draft, ai } = await draftForTemplate(user, template, input, options.aiDraft);
-  return {
-    ...template.render(input, draft),
-    droppedByClearance: materials.droppedByClearance,
-    ai,
-    aiDraft: draft,
-  };
+  return { input, droppedByClearance: materials.droppedByClearance };
 }
 
 /** `ArticleAiStatus` を組む (null の項目を毎回書かない) */
@@ -347,6 +364,63 @@ async function draftForTemplate(
   }
   return {
     draft: generated.draft,
+    ai: aiStatus("generated", { ...counts, model: generated.model, usage: generated.usage, costUsd }),
+  };
+}
+
+/**
+ * 既存の記事に AI で組み込む (#275) ときのシステムプロンプト。テンプレートの形・鉄則・見本・語彙を
+ * 新規作成と同じに使う (キャッシュも共有される)。作業の指示はユーザーメッセージ側 (`mergePrompt`) で差し替える
+ */
+export async function mergeSystemPrompt(
+  template: ArticleTemplateDef & { needsAi: true },
+  input: DossierRenderInput
+): Promise<string[]> {
+  const [titles, tags] = await Promise.all([listPublishedTitles(), listArticleTags()]);
+  return template.prompt(input, { existingTitles: titles, tagVocabulary: tags }).system;
+}
+
+/**
+ * 組み込みの案を Claude に書かせる (#275)。費用は `/costs` に、呼んだことは監査ログに残す
+ * (落ちても結果は返す。払ったぶんを捨てない)。失敗は `ArticleAiError` (文言は画面に出してよい)
+ */
+export async function generateMergeDraft(
+  user: ActingUser,
+  dossierId: string,
+  template: ArticleTemplateDef,
+  prompt: AiPrompt
+): Promise<{ body: string; ai: ArticleAiStatus }> {
+  const counts = { included: prompt.included, truncated: prompt.truncated };
+  if (!isArticleAiConfigured()) throw new ArticleAiError("ANTHROPIC_API_KEY が未設定です");
+  const generated = await generateArticleDraft(prompt);
+  let costUsd: number | null = null;
+  try {
+    const recorded = await recordUsage({
+      provider: "anthropic",
+      model: generated.model,
+      feature: ARTICLE_AI_FEATURE,
+      inputTokens: generated.usage.inputTokens,
+      cachedInputTokens: generated.usage.cachedInputTokens,
+      outputTokens: generated.usage.outputTokens,
+      requests: 1,
+    });
+    costUsd = recorded.costUsd;
+  } catch (e) {
+    console.error("[dossier-article] recordUsage failed", e);
+  }
+  try {
+    await logAudit({
+      actorId: user.id,
+      action: "dossier.article.ai_merge",
+      targetType: "Dossier",
+      targetId: dossierId,
+      metadata: { template: template.key, model: generated.model, ...generated.usage, costUsd, ...counts },
+    });
+  } catch (e) {
+    console.error("[dossier-article] logAudit failed", e);
+  }
+  return {
+    body: generated.draft.body,
     ai: aiStatus("generated", { ...counts, model: generated.model, usage: generated.usage, costUsd }),
   };
 }

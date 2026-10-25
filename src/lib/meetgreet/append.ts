@@ -193,6 +193,12 @@ export interface AppendPlan {
   changedLines: number[];
   /** 何も増えなかった (区間の変化も無い) */
   empty: boolean;
+  /**
+   * 組み立てた出典番号 (`sources[].sourceNo`) → 記事での番号。既存の出典に当たったものは既存の番号、
+   * 今回足すものは採番した番号。どちらでもない (足さない) 出典は入らない。
+   * AI に既存の本文へ組み込ませるとき、素材の番号を記事の番号に揃えるのに使う (#275)
+   */
+  renumber: Map<number, number>;
 }
 
 /**
@@ -507,6 +513,7 @@ export function planAppend(input: {
     blocksChanged: replaced.changed,
     changedLines: changedLineIndices(existingBody, body, replaced.changed ? (parts.blocks ?? []) : []),
     empty: total === 0 && newSources.length === 0 && !replaced.changed,
+    renumber: renumberMap,
   };
 }
 

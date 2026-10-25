@@ -34,6 +34,8 @@ export interface DossierForMaterials {
     kind: "asset_ref" | "external_link" | "external_image";
     caption: string;
     excerpt: string;
+    /** アイテムのメモ。雑誌など本文の無い素材は、人が読んで要約したものがここにある (#275) */
+    note: string;
     externalUrl: string | null;
     externalImageKey: string | null;
     asset: {
@@ -129,6 +131,7 @@ function dossierSelect<A extends Prisma.AssetSelect>(asset: A) {
         kind: true,
         caption: true,
         excerpt: true,
+        note: true,
         externalUrl: true,
         externalImageKey: true,
         asset: { select: asset },
@@ -224,7 +227,7 @@ export interface DossierMaterials {
 type LoadedAsset = NonNullable<DossierForMaterials["items"][number]["asset"]>;
 
 /** 読んだアセットを組み立ての入力に (`texts` があるとき = AI のテンプレートは本文・人物も付ける) */
-function toAssetInput(a: LoadedAsset, item: { excerpt?: string; caption?: string }): ArticleAssetInput {
+function toAssetInput(a: LoadedAsset, item: { excerpt?: string; caption?: string; note?: string }): ArticleAssetInput {
   const src = a.sourceRecords[0];
   return {
     id: a.id,
@@ -242,6 +245,7 @@ function toAssetInput(a: LoadedAsset, item: { excerpt?: string; caption?: string
       ? {
           text: pickText(a.texts),
           caption: item.caption || undefined,
+          notes: item.note?.trim() ? [item.note.trim()] : [],
           people: (a.entities ?? []).map((e) => e.entity.canonicalName),
         }
       : {}),
@@ -291,6 +295,7 @@ export function shapeDossierMaterials(dossier: DossierForMaterials): DossierMate
     const existing = assets.get(a.id);
     if (existing) {
       if (item.excerpt) existing.excerpts.push(item.excerpt);
+      if (existing.notes && item.note?.trim()) existing.notes.push(item.note.trim());
       continue;
     }
     assets.set(a.id, toAssetInput(a, item));

@@ -93,6 +93,32 @@ describe("buildMaterialsText", () => {
     expect(buildMaterialsText(input([asset({ ...img, id: "img2", caption: undefined })])).included).toBe(0);
   });
 
+  it("focus に無い出典は見出しだけにして、枠を使わず数えない (#275)", () => {
+    const m = buildMaterialsText(input([talk, blog]), new Set([2]));
+    expect(m.text).toContain("### ^[1] 坂井新奈ブログ「しゃぼん🫧 坂井新奈」");
+    expect(m.text).toContain("(既存の出典。中身は既存の本文に反映済み)");
+    expect(m.text).not.toContain("家に帰ろうとすると違うところへ行ってしまう");
+    expect(m.included).toBe(1);
+  });
+
+  it("本文の無い雑誌などは、アイテムのメモ (人の要約) を素材として渡す (#275)", () => {
+    const magazine = asset({
+      id: "mag",
+      kind: "text",
+      title: "IDOL AND READ 047",
+      source: { kind: "url", title: "IDOL AND READ 047", url: "https://www.amazon.co.jp/dp/4401772652", publishedAt: null },
+      text: null,
+      notes: ["おばあちゃんはバレエの先生だった", "やめるときは申し訳ないと思った"],
+    });
+    const m = buildMaterialsText(input([magazine]));
+    expect(m.text).toContain("人のメモ");
+    expect(m.text).toContain("> おばあちゃんはバレエの先生だった");
+    expect(m.text).toContain("> やめるときは申し訳ないと思った");
+    expect(m.text).toContain("(本文なし)");
+    expect(m.text).not.toContain("画像だけのブログ");
+    expect(m.included).toBe(1);
+  });
+
   it("全体の上限に達しても、後ろの出典に最低限の本文は残す", () => {
     const blogs = Array.from({ length: 8 }, (_, i) =>
       asset({
