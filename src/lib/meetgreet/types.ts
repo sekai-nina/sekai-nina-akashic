@@ -13,7 +13,7 @@ import type { AiDraft, ArticleAiStatus } from "@/lib/article-workflow/templates/
  * 「足さない」と決めたものの種別 (#134)。
  * `append.ts` ではなくここに置く (クライアント部品が使うため。冒頭の注意を参照)
  */
-export type ExclusionKind = "quote" | "report" | "tiktok" | "talk" | "blogImage";
+export type ExclusionKind = "quote" | "report" | "tiktok" | "talk" | "blogImage" | "source";
 
 /** スケッチの参照に使えるドシエ内の画像 */
 export interface SketchSourceAsset {

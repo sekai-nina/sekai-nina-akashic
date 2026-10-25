@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { FileText } from "lucide-react";
@@ -49,6 +50,8 @@ export function ArticleStep({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
+  /** 出典だけ足したとき、本文に ^[n] を書きに行く先 (#267) */
+  const [editShortId, setEditShortId] = useState<string | null>(null);
   const [preview, setPreview] = useState<ArticlePreview | null>(null);
   /** 足すものにチェック。外したものは「今後足さない」として覚える (#134) */
   const [keep, setKeep] = useState<Set<string>>(new Set());
@@ -62,6 +65,7 @@ export function ArticleStep({
   /** 差分を取り直す。`overlay` を渡すと、外すつもりのものを引いた本文で見せる */
   function load(overlay: string[] = [], note?: string) {
     setMsg("組み立てています…");
+    setEditShortId(null);
     startTransition(async () => {
       const res = await onPreview(overlay).catch((e: unknown) => ({
         ok: false as const,
@@ -92,7 +96,9 @@ export function ArticleStep({
               ? res.preview.ai?.status === "generated"
                 ? "AI が本文を書きました。確認して保存してください (下書きとして保存されます)"
                 : "新しい記事の本文です。確認して保存してください"
-              : `${res.preview.addedLines.length} 行増えます`)
+              : res.preview.addedLines.length === 0
+                ? `出典 ${res.preview.newSources.length} 件を足します（本文は変わりません）`
+                : `${res.preview.addedLines.length} 行増えます`)
       );
     });
   }
@@ -101,6 +107,7 @@ export function ArticleStep({
     if (!preview) return;
     const exclude = preview.additions.filter((a) => !keep.has(a.key)).map((a) => a.key);
     setMsg("保存中…");
+    setEditShortId(null);
     const digest = preview.digest;
     startTransition(async () => {
       // 見せた内容と保存する内容が食い違っていたら中止させる
@@ -117,9 +124,12 @@ export function ArticleStep({
         res.mode === "create"
           ? `記事を作りました（出典 ${res.sources} 件）。${preview.ai ? "下書きなので、記事の編集画面で確認して下書きを外してください" : "公開は記事の push から"}`
           : res.added === 0
-            ? `本文は変えていません${dropped}`
+            ? res.sources > 0
+              ? `出典を ${res.sources} 件足しました。本文に ^[n] を書いてください${dropped}`
+              : `本文は変えていません${dropped}`
             : `${res.added} 行を追記しました（出典 +${res.sources}）${dropped}`
       );
+      if (res.mode === "append" && res.added === 0 && res.sources > 0) setEditShortId(res.shortId);
       setPreview(null);
       setPreviewed([]);
       router.refresh();
@@ -191,6 +201,14 @@ export function ArticleStep({
         {msg && (
           <span role="status" className="text-xs text-slate-500">
             {msg}
+            {editShortId && (
+              <>
+                {" "}
+                <Link href={`/articles/${editShortId}/edit`} className="underline hover:text-slate-700">
+                  本文を編集する
+                </Link>
+              </>
+            )}
           </span>
         )}
       </div>

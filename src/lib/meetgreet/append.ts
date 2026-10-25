@@ -37,6 +37,12 @@ export interface AppendLayout {
    * `flat` は `### トーク` などの小見出しを作らず、`## 関連メディア` の箇条書きの末尾に足す
    */
   media?: RelatedMediaStyle;
+  /**
+   * 本文に足す行が無い出典も「足すもの」に並べる (#267)。本文を AI / 人が書くテンプレートは
+   * 追記で足す章を持たないので、これが無いと新しい素材を出典にする口が無い。
+   * チェックしたものは出典だけ入り、本文の `^[n]` は人が記事の編集画面で書く
+   */
+  bareSources?: boolean;
 }
 
 export const MEETGREET_APPEND_LAYOUT: AppendLayout = {
@@ -174,7 +180,8 @@ export interface AppendPlan {
   baseBody: string;
   /** 追加する出典 (sourceNo は採番済み) */
   newSources: RenderedSource[];
-  added: { quotes: number; reports: number; talks: number; blogImages: number; tiktoks: number };
+  /** `bareSources` は本文の行を伴わない出典 (`AppendLayout.bareSources`) の数 */
+  added: { quotes: number; reports: number; talks: number; blogImages: number; tiktoks: number; bareSources: number };
   /** 足されるものの一覧。ここから外したものを除外リストに入れる */
   additions: AppendItem[];
   /** 毎回作り直す区間の中身が変わった (公演や曲を直した) */
@@ -223,7 +230,7 @@ export function exclusionKey(kind: ExclusionKind, value: string): string {
   // 抜粋は**先頭行**で見る。重複判定も先頭行なので identity を揃える
   // (下の行を直しただけで別キーになると、除外したはずの引用が復活する)
   if (kind === "quote") return `quote:${fingerprint(quoteHead(value))}`;
-  return `asset:${value}`; // talk / blogImage はアセット単位
+  return `asset:${value}`; // talk / blogImage / source はアセット単位
 }
 
 /** TikTok の URL から video ID を取り出す (短縮 URL からは取れない) */
@@ -277,7 +284,7 @@ export function planAppend(input: {
   // 既に本文にある行 (脚注番号を外したもの)。トーク / ブログ画像の重複判定に使う
   const bodyLines = new Set(existingBody.split("\n").map(lineCore).filter((l) => l.length > 0));
   const sections = parseSections(existingBody);
-  const added = { quotes: 0, reports: 0, talks: 0, blogImages: 0, tiktoks: 0 };
+  const added = { quotes: 0, reports: 0, talks: 0, blogImages: 0, tiktoks: 0, bareSources: 0 };
 
   // --- 1. 何を足すか決める (ここで除外を効かせる) ---
 
@@ -333,6 +340,18 @@ export function planAppend(input: {
     if (n !== null) neededSourceNos.add(n);
   }
 
+  // 本文の行 (引用・画像・トーク) が参照する出典。**外した / 既にある行の分も含める。**
+  // これらは行に付いて足すか足さないかが決まるので、出典だけの提示 (`bareSources`) には出さない。
+  // 出すと、画像を外したのにそのブログの出典だけが入る (画像の除外キーは画像の ID、出典はブログ本文の ID で別物)
+  const lineSourceNos = new Set<number>();
+  if (layout.bareSources) {
+    for (const q of parts.quotes) lineSourceNos.add(q.sourceNo);
+    for (const l of [...parts.blogImages, ...parts.talks]) {
+      const n = footnoteOf(l.line);
+      if (n !== null) lineSourceNos.add(n);
+    }
+  }
+
   const byAsset = new Map<string, number>();
   const byUrl = new Map<string, number>();
   let maxNo = 0;
@@ -352,7 +371,13 @@ export function planAppend(input: {
       renumberMap.set(s.sourceNo, hit);
       continue;
     }
-    if (!neededSourceNos.has(s.sourceNo)) continue; // 足すものが無い出典は作らない
+    // 足すものが無い出典は作らない。ただし本文を人が書くテンプレートは、どの行にも付かない
+    // 出典を出典だけで提示する (除外も同じ口で効く。キーはトーク / 画像と同じアセット単位)
+    if (!neededSourceNos.has(s.sourceNo)) {
+      if (!layout.bareSources || !s.assetId || lineSourceNos.has(s.sourceNo)) continue;
+      if (!take("source", s.assetId, `出典: ${s.label}（本文は記事の編集画面で書く）`)) continue;
+      added.bareSources++;
+    }
     maxNo += 1;
     renumberMap.set(s.sourceNo, maxNo);
     newSources.push({ ...s, sourceNo: maxNo });
@@ -470,6 +495,7 @@ export function planAppend(input: {
     }
   }
 
+  // 出典だけの追加 (bareSources) は行を増やさないので数えない。`empty` は newSources で見る
   const total = added.quotes + added.reports + added.talks + added.blogImages + added.tiktoks;
   const body = toBody(sections);
   return {
