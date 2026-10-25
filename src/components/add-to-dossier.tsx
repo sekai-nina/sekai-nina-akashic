@@ -210,7 +210,7 @@ export function AddToDossier({
         }}
         className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs border border-slate-300 hover:bg-slate-50"
       >
-        <FolderSearch className="h-3.5 w-3.5" /> ドシエに追加
+        <FolderSearch className="h-3.5 w-3.5" /> 企画に追加
       </button>
     ) : (
       <button
@@ -220,7 +220,7 @@ export function AddToDossier({
           e.stopPropagation();
           setOpen((v) => !v);
         }}
-        title="ドシエに追加"
+        title="企画に追加"
         className={`inline-flex items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 hover:text-indigo-600 hover:border-indigo-300 shadow-sm ${
           size === "md" ? "w-7 h-7" : "w-6 h-6"
         }`}
@@ -261,7 +261,7 @@ export function AddToDossier({
                 createAndAdd(trimmedQuery);
               }
             }}
-            placeholder="ドシエを検索 / 新規作成..."
+            placeholder="企画を検索 / 新規作成..."
             className="w-full text-xs border border-slate-300 rounded px-2 py-1 mb-2 focus:outline-none focus:ring-1 focus:ring-indigo-500"
           />
           <ul className="flex-1 min-h-0 overflow-y-auto space-y-0.5">
@@ -277,7 +277,7 @@ export function AddToDossier({
                     type="button"
                     onClick={() => (removable ? removeFrom(d.id) : addToExisting(d.id))}
                     disabled={(added && !removable) || isPending}
-                    title={removable ? "押すとこのドシエから外す" : undefined}
+                    title={removable ? "押すとこの企画から外す" : undefined}
                     className={`group w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded text-xs ${
                       removable
                         ? "text-slate-500 hover:bg-red-50 hover:text-red-700"
@@ -326,14 +326,14 @@ export function AddToDossier({
                 onClick={() => setCreating(true)}
                 className="w-full text-xs text-indigo-600 hover:underline flex items-center gap-1 px-2 py-1"
               >
-                <Plus className="h-3 w-3" /> 新規ドシエを作成
+                <Plus className="h-3 w-3" /> 新規企画を作成
               </button>
             )}
           </div>
         </>
       ) : (
         <div className="space-y-2">
-          <p className="text-xs font-semibold text-slate-600">新規ドシエ</p>
+          <p className="text-xs font-semibold text-slate-600">新規企画</p>
           <input
             autoFocus
             value={newTitle}
@@ -349,7 +349,7 @@ export function AddToDossier({
             className="w-full text-xs border border-slate-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500"
           />
           <p className="text-[10px] text-slate-400">
-            作成と同時に、このアセットを新しいドシエに追加します。
+            作成と同時に、このアセットを新しい企画に追加します。
           </p>
           <div className="flex justify-end gap-2">
             <button

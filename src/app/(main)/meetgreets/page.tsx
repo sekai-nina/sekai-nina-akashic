@@ -26,7 +26,7 @@ export default async function MeetGreetsPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">ミーグリ</h1>
           <p className="text-slate-500 text-sm mt-1">
-            日付と形式から素材のドシエと X レポ収集を自動で作り、記事まで持っていく
+            日付と形式から素材の企画と X レポ収集を自動で作り、記事まで持っていく
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -34,7 +34,7 @@ export default async function MeetGreetsPage() {
             href="/meetgreets/import"
             className="inline-flex items-center gap-1 h-9 px-3 rounded-md border border-slate-200 text-sm text-slate-700 hover:bg-slate-50"
           >
-            <Download size={14} /> 過去のドシエを取り込む
+            <Download size={14} /> 過去の企画を取り込む
           </Link>
           <Link
             href="/meetgreets/new"
@@ -49,8 +49,8 @@ export default async function MeetGreetsPage() {
 
       {rows.length === 0 ? (
         <div className="bg-white border border-dashed border-slate-300 rounded-lg p-10 text-center text-sm text-slate-500">
-          まだありません。「新規作成」から日付と形式を入れるとドシエと X レポ収集が用意されます。
-          以前に手で作ったドシエがあれば「過去のドシエを取り込む」から拾えます。
+          まだありません。「新規作成」から日付と形式を入れると企画と X レポ収集が用意されます。
+          以前に手で作った企画があれば「過去の企画を取り込む」から拾えます。
         </div>
       ) : (
         <div className="bg-white border border-slate-200 rounded-lg divide-y divide-slate-100">

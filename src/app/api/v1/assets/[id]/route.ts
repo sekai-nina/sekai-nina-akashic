@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
 import { getAsset, updateAsset, deleteAsset } from "@/lib/domain/assets";
 import type { UpdateAssetData } from "@/lib/domain/assets";
+import { ninaAppearanceOf } from "@/lib/nina";
 
 export async function GET(
   request: Request,
@@ -16,7 +17,7 @@ export async function GET(
     if (!asset) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
-    return NextResponse.json(asset);
+    return NextResponse.json({ ...asset, ninaAppearance: ninaAppearanceOf(asset) });
   } catch (err) {
     if (err instanceof Error && err.message.includes("Access denied")) {
       return NextResponse.json({ error: err.message }, { status: 403 });
@@ -45,7 +46,8 @@ export async function PATCH(
     throw err;
   }
 
-  const body = await request.json() as UpdateAssetData;
+  // ninaAbsent は PUT /assets/:id/nina-appearance でしか変えさせない (紐づけとの排他・著者チェック・監査ログを通すため)
+  const { ninaAbsent: _ninaAbsent, ...body } = (await request.json()) as UpdateAssetData & { ninaAbsent?: unknown };
 
   // Prevent classification escalation above user's clearance
   if (body.classification) {
@@ -74,7 +76,7 @@ export async function PATCH(
   }
 
   const asset = await updateAsset(id, body, auth.id, auth.clearance);
-  return NextResponse.json(asset);
+  return NextResponse.json({ ...asset, ninaAppearance: ninaAppearanceOf(asset) });
 }
 
 export async function DELETE(

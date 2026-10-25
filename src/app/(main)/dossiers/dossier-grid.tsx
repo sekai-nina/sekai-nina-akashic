@@ -41,19 +41,20 @@ export interface DossierCardData {
   articles: { shortId: string; title: string }[];
 }
 
-type Filter = "all" | "article" | "other";
+/** 既定は未記事化。記事 0 本の企画 = まだ組み立て中のもの */
+type Filter = "draft" | "written" | "all";
 
 export function DossierGrid({ dossiers, currentUserId }: { dossiers: DossierCardData[]; currentUserId: string }) {
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<Filter>("all");
+  const [filter, setFilter] = useState<Filter>("draft");
 
-  const articleCount = useMemo(() => dossiers.filter((d) => d.articleCount > 0).length, [dossiers]);
+  const writtenCount = useMemo(() => dossiers.filter((d) => d.articleCount > 0).length, [dossiers]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     return dossiers.filter((d) => {
-      if (filter === "article" && d.articleCount === 0) return false;
-      if (filter === "other" && d.articleCount > 0) return false;
+      if (filter === "written" && d.articleCount === 0) return false;
+      if (filter === "draft" && d.articleCount > 0) return false;
       if (!q) return true;
       const hay = `${d.title}\n${d.summary}\n${d.articles.map((a) => a.title).join("\n")}`.toLowerCase();
       return hay.includes(q);
@@ -76,9 +77,9 @@ export function DossierGrid({ dossiers, currentUserId }: { dossiers: DossierCard
         <div className="flex items-center gap-1 text-xs">
           {(
             [
+              ["draft", `未記事化 ${dossiers.length - writtenCount}`],
+              ["written", `記事化済み ${writtenCount}`],
               ["all", `すべて ${dossiers.length}`],
-              ["article", `記事 ${articleCount}`],
-              ["other", `その他 ${dossiers.length - articleCount}`],
             ] as const
           ).map(([key, label]) => (
             <button
@@ -99,8 +100,17 @@ export function DossierGrid({ dossiers, currentUserId }: { dossiers: DossierCard
         <div className="bg-white border border-slate-200 rounded-lg p-8 text-center">
           <FolderSearch className="h-10 w-10 mx-auto text-slate-300 mb-2" />
           <p className="text-sm text-slate-500">
-            {dossiers.length === 0 ? "まだドシエがありません。" : "条件に合うドシエはありません。"}
+            {dossiers.length === 0 ? "まだ企画がありません。" : "条件に合う企画はありません。"}
           </p>
+          {dossiers.length > 0 && filter !== "all" && (
+            <button
+              type="button"
+              onClick={() => setFilter("all")}
+              className="mt-2 text-sm text-indigo-600 hover:underline"
+            >
+              すべての企画から探す
+            </button>
+          )}
         </div>
       )}
 

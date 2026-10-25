@@ -427,7 +427,7 @@ async function findSameMeetGreet(
 function assertReusable(existing: SameMeetGreet, input: CreateMeetGreetInput): string {
   if (input.dossierId && input.dossierId !== existing.dossierId) {
     throw new MeetGreetInputError(
-      "同じ日・形式・呼び分けの回が既にあります (別のドシエが紐づいています)。呼び分け (label) を変えてください"
+      "同じ日・形式・呼び分けの回が既にあります (別の企画が紐づいています)。呼び分け (label) を変えてください"
     );
   }
   if (input.repoCollectionId && input.repoCollectionId !== existing.repoCollectionId) {

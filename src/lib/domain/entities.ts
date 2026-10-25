@@ -3,6 +3,7 @@ import { prisma, withClearance } from "@/lib/db";
 import { accessibleClassifications } from "@/lib/classification";
 import { normalizeText } from "@/lib/utils";
 import { logAudit } from "./audit";
+import { clearNinaAbsentIfLinking } from "./nina-appearance";
 
 /**
  * クリアランスで参照できない place エンティティを除くための WHERE 断片。
@@ -132,6 +133,8 @@ export async function addEntityToAsset(
   roleLabel?: string
 ) {
   const assetEntity = await withClearance(clearance, async (tx) => {
+    // 坂井新奈を付けたら「出ていない」を外す (#261)
+    await clearNinaAbsentIfLinking(tx, assetId, [entityId]);
     return tx.assetEntity.upsert({
       where: {
         assetId_entityId: { assetId, entityId },

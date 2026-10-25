@@ -77,3 +77,9 @@ export const NO_QUOTES_APPEND_LAYOUT: AppendLayout = {
   quoteAttribution: false,
   reports: { heading: "## ファンの反応", lead: "ファンの投稿（X）。" },
 };
+
+/**
+ * 本文を AI / 人が書くテンプレート (スナップ・言葉 (場面)・おでかけ) の追記の置き方。
+ * 本文の行を足せないので、新しい素材は出典だけ提示する (#267)
+ */
+export const AI_BODY_APPEND_LAYOUT: AppendLayout = { ...NO_QUOTES_APPEND_LAYOUT, bareSources: true };

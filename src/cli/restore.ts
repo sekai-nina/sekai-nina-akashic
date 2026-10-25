@@ -148,6 +148,8 @@ async function main() {
         storageUrl: (data.storageUrl as string) || null,
         thumbnailUrl: (data.thumbnailUrl as string) || null,
         messageBodyPreview: (data.messageBodyPreview as string) || null,
+        // 人が付けた「確認して出ていない」(#261)。mentionsNina と違い機械判定で作り直せないので戻す
+        ninaAbsent: data.ninaAbsent === true,
         discordGuildId: (data.discordGuildId as string) || null,
         discordChannelId: (data.discordChannelId as string) || null,
         discordMessageId: (data.discordMessageId as string) || null,

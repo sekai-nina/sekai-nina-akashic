@@ -156,7 +156,7 @@ export function MaterialsStep({
       const res = await onApply(targetIds);
       setMsg(
         res.ok
-          ? `${res.added} 件をドシエに追加しました${res.skipped > 0 ? ` (${res.skipped} 件は追加済み)` : ""}`
+          ? `${res.added} 件を企画に追加しました${res.skipped > 0 ? ` (${res.skipped} 件は追加済み)` : ""}`
           : `エラー: ${res.error}`
       );
       if (res.ok) router.refresh();
@@ -300,7 +300,7 @@ export function MaterialsStep({
           disabled={pending || targetIds.length === 0}
           className="h-9 px-4 rounded-md bg-slate-900 text-white text-sm hover:bg-slate-800 disabled:opacity-50"
         >
-          ドシエに反映 ({targetIds.length})
+          企画に反映 ({targetIds.length})
         </button>
         {msg && (
           <span role="status" className="text-xs text-slate-500">
@@ -357,7 +357,7 @@ function TextRow({
         {asset.inDossier ? (
           <span className="inline-flex w-[13px] mt-1 justify-center text-emerald-600">
             <Check size={13} aria-hidden />
-            <span className="sr-only">ドシエに追加済み</span>
+            <span className="sr-only">企画に追加済み</span>
           </span>
         ) : (
           <input
@@ -449,7 +449,7 @@ function MediaTile({
           {asset.inDossier ? (
             <>
               <Check size={14} className="text-emerald-600" aria-hidden />
-              <span className="sr-only">{asset.title} はドシエに追加済み</span>
+              <span className="sr-only">{asset.title} は企画に追加済み</span>
             </>
           ) : (
             <input

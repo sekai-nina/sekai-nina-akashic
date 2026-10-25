@@ -31,7 +31,7 @@ export function ArticleDossier({
     return (
       <p className="text-sm text-slate-600 flex items-center gap-1.5 flex-wrap">
         <FolderSearch className="h-4 w-4 text-indigo-600" />
-        素材ドシエ:
+        素材の企画:
         <Link href={`/dossiers/${dossier.id}`} className="text-indigo-700 hover:underline">
           {dossier.title || "(無題)"}
         </Link>
@@ -60,7 +60,7 @@ export function ArticleDossier({
   return (
     <div className="text-sm text-slate-600 flex items-center gap-2 flex-wrap">
       <FolderSearch className="h-4 w-4 text-slate-400" />
-      <span className="text-slate-500">素材ドシエはまだありません</span>
+      <span className="text-slate-500">素材の企画はまだありません</span>
       <button
         type="button"
         onClick={create}
@@ -69,7 +69,7 @@ export function ArticleDossier({
         title="クリップをこの記事に足せるようにする"
       >
         {isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FolderPlus className="h-3.5 w-3.5" />}
-        素材ドシエを作る
+        素材の企画を作る
       </button>
       {error && <span className="text-xs text-red-600">{error}</span>}
     </div>

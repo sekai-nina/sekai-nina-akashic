@@ -3,14 +3,14 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2, RotateCcw } from "lucide-react";
-import { ASSET_KIND_LABELS, groupEntitiesByKey } from "@/lib/utils";
+import { ASSET_KIND_LABELS, NINA_APPEARANCE_LABELS, groupEntitiesByKey } from "@/lib/utils";
 import { EntityFilter } from "./entity-filter";
 import { AuthorFilter } from "./author-filter";
 import { CARRIED_PARAM_KEYS } from "./params";
 import { readSavedQuery, saveQuery, clearSavedQuery } from "./saved-query";
 import { GENERATION_LABELS } from "@/lib/members";
+import { NINA_ENTITY_ID } from "@/lib/nina";
 
-const NINA_ENTITY_ID = "cmmtp8vrg0004mo381neyztvn";
 /** チップで一括選択できるようにしている期 */
 const FEATURED_GENERATION = 5;
 
@@ -61,6 +61,7 @@ export function SearchForm({
   const qInputRef = useRef<HTMLInputElement>(null);
   const dateFromRef = useRef<HTMLInputElement>(null);
   const dateToRef = useRef<HTMLInputElement>(null);
+  const ninaRef = useRef<HTMLSelectElement>(null);
 
   useEffect(() => {
     setSearching(false);
@@ -107,6 +108,7 @@ export function SearchForm({
     for (const ref of [qInputRef, dateFromRef, dateToRef]) {
       if (ref.current) ref.current.value = "";
     }
+    if (ninaRef.current) ninaRef.current.value = "";
     clearSavedQuery();
     router.push("/search", { scroll: false });
   }, [router]);
@@ -235,6 +237,8 @@ export function SearchForm({
     const dateTo = formData.get("dateTo") as string;
     if (dateFrom) p.set("dateFrom", dateFrom);
     if (dateTo) p.set("dateTo", dateTo);
+    const nina = formData.get("nina") as string;
+    if (nina) p.set("nina", nina);
 
     // フォームに UI が無いパラメータ（表示形式・テキスト分析からの絞り込み）は引き継ぐ
     for (const key of CARRIED_PARAM_KEYS) {
@@ -395,6 +399,23 @@ export function SearchForm({
                 defaultValue={searchParams.get("dateTo") ?? ""}
                 className="border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
+            </div>
+            <div>
+              {/* 出演一覧の更新で「まだ誰も確認していない動画」を出す (#261) */}
+              <label className="block text-xs text-slate-500 mb-1">坂井新奈の出演</label>
+              <select
+                // 保存した検索を router.replace で復元したときも表示を URL に合わせる (非制御なので key で作り直す)
+                key={searchParams.get("nina") ?? ""}
+                ref={ninaRef}
+                name="nina"
+                defaultValue={searchParams.get("nina") ?? ""}
+                className="border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              >
+                <option value="">指定しない</option>
+                {Object.entries(NINA_APPEARANCE_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
             </div>
           </div>
           <AuthorFilter

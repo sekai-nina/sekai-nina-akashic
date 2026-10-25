@@ -15,6 +15,7 @@ import { logAudit } from "./audit";
 import { backupAssetToDrive } from "@/lib/drive";
 import { assertClearance } from "@/lib/classification";
 import { entityClearanceWhere } from "./entities";
+import { clearNinaAbsentIfLinking } from "./nina-appearance";
 
 export interface CreateAssetData {
   kind: AssetKind;
@@ -261,6 +262,8 @@ export async function updateAsset(
     // 既存を 1 回引いてから「更新分」と「新規分」に分けて撃つ (最大 3 往復)
     if (entities && entities.length > 0) {
       const entityIds = entities.map((e) => e.entityId);
+      // 坂井新奈を付けるなら「出ていない」を外す (両立させない。#261)
+      await clearNinaAbsentIfLinking(tx, id, entityIds);
       const existing = await tx.assetEntity.findMany({
         where: { assetId: id, entityId: { in: entityIds } },
         select: { entityId: true },

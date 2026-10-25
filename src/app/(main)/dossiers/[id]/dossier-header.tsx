@@ -202,7 +202,7 @@ export function DossierHeader({ dossier, editable, manageable }: DossierHeaderPr
           onChange={(e) => setSummary(e.target.value)}
           onBlur={persistSummary}
           rows={summary.split("\n").length + 1}
-          placeholder="このドシエの概要を書く…"
+          placeholder="この企画の概要を書く…"
           className="mt-3 w-full text-sm text-slate-700 bg-transparent outline-none placeholder:text-slate-400 resize-none"
         />
       ) : dossier.summary ? (

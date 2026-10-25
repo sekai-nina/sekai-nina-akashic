@@ -36,7 +36,7 @@ export default async function DossierDetailPage({ params }: DossierDetailProps) 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6">
       <Link href="/dossiers" className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600">
-        <ArrowLeft size={14} /> ドシエ一覧へ
+        <ArrowLeft size={14} /> 企画一覧へ
       </Link>
 
       <DossierHeader dossier={dossier} editable={editable} manageable={manageable} />
@@ -46,7 +46,7 @@ export default async function DossierDetailPage({ params }: DossierDetailProps) 
         {dossier.articles.length > 0 && (
           <p className="mr-auto text-xs text-slate-600 flex items-center gap-1.5 flex-wrap">
             <FileText className="h-3.5 w-3.5 text-indigo-600" />
-            このドシエからの記事:
+            この企画からの記事:
             {dossier.articles.map((a) => (
               <Link key={a.shortId} href={`/articles/${a.shortId}`} className="text-indigo-700 hover:underline">
                 {a.title || a.path}

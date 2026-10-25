@@ -74,6 +74,16 @@ function createDigest(rendered: { body: string; sources: RenderedSource[] }): st
   return bodyDigest(`${rendered.body}\n--sources--\n${sources}`);
 }
 
+/**
+ * 追記の指紋も**本文 + 足す出典**で取る。出典だけを足すテンプレート (#267) は本文が変わらないので、
+ * 本文だけだとプレビューのあとで素材が増えても気づけず、見ていない出典を反映してしまう
+ */
+function appendDigest(plan: { body: string; newSources: RenderedSource[] }): string {
+  if (plan.newSources.length === 0) return bodyDigest(plan.body);
+  const sources = plan.newSources.map((s) => `${s.sourceNo}:${s.assetId ?? s.url ?? ""}`).join("\n");
+  return bodyDigest(`${plan.body}\n--sources--\n${sources}`);
+}
+
 export interface MeetGreetForArticle {
   id: string;
   date: string;
@@ -263,14 +273,14 @@ function resolveDossier(
   let articleId: string | null = null;
   if (chosenArticleId) {
     if (!dossier.articles.some((a) => a.id === chosenArticleId)) {
-      throw new DossierArticleError("指定された記事はこのドシエに紐づいていません");
+      throw new DossierArticleError("指定された記事はこの企画に紐づいていません");
     }
     articleId = chosenArticleId;
   } else if (dossier.articles.length === 1) {
     articleId = dossier.articles[0].id;
   } else if (dossier.articles.length > 1) {
     throw new DossierArticleError(
-      `このドシエには記事が ${dossier.articles.length} 本紐づいています。追記する記事を選んでください`
+      `この企画には記事が ${dossier.articles.length} 本紐づいています。追記する記事を選んでください`
     );
   }
 
@@ -289,7 +299,7 @@ function resolveDossier(
   const writeExclusions = async (tx: Parameters<Parameters<typeof withSession>[1]>[0], next: string[]) => {
     const written =
       await tx.$executeRaw`UPDATE "Dossier" SET "articleExclusions" = ${JSON.stringify(next)}::jsonb WHERE "id" = ${dossier.id}`;
-    if (written === 0) throw new DossierArticleError("ドシエを更新できませんでした (権限が変わったか削除されています)");
+    if (written === 0) throw new DossierArticleError("企画を更新できませんでした (権限が変わったか削除されています)");
   };
   return {
     template,
@@ -397,7 +407,7 @@ export async function previewArticle(
     // **指紋は保存時に照合するものと揃える。** 保存側は「保存済みの除外だけを当てた本文」で
     // 照合するので (= 外すつもりを渡せば照合をすり抜けられる、を塞ぐため)、
     // 重ねて見せているときも指紋は base のものを返す
-    digest: bodyDigest(base.body),
+    digest: appendDigest(base),
     addedLines: plan.changedLines,
     newSources: plan.newSources,
     droppedByClearance: rendered.droppedByClearance,
@@ -692,7 +702,7 @@ export async function saveArticle(
     if (!created.ok) {
       const message =
         created.reason === "path_exists"
-          ? `「${rendered.title}」と同じ名前の記事が既にあります (${created.existingTitle})。その記事に紐づけてから追記するか、ドシエのタイトルを変えてください`
+          ? `「${rendered.title}」と同じ名前の記事が既にあります (${created.existingTitle})。その記事に紐づけてから追記するか、企画のタイトルを変えてください`
           : created.reason === "path_exists_upstream"
             ? `公開リポジトリに同じ名前のファイルがあります (${created.path})。先に取り込んでください`
             : created.reason === "invalid_path"
@@ -809,7 +819,7 @@ export async function saveArticle(
   // **指紋は「見せたときと同じ条件」で照合する。** 除外を足すと本文が変わるので、
   // 除外を当てる前の結果と突き合わせる (除外を渡せば照合をすり抜けられる、を防ぐ)
   const shown = planOrThrow(resolved, { ...planArgs, excluded: stored });
-  if (mismatch(bodyDigest(shown.body))) {
+  if (mismatch(appendDigest(shown))) {
     return {
       ok: false,
       error: "内容が変わりました (素材が増減したか、記事が他で編集されました)。もう一度差分を見てください",

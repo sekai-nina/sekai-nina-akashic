@@ -25,7 +25,7 @@ APIキーは `pnpm cli:keygen <user-email> <key-name> [permissions]` で発行�
 キーには `read` と `write` のパーミッションがある（デフォルトは両方付与）。
 
 - `read`: GET系のエンドポイント
-- `write`: POST / PATCH / ファイルアップロード
+- `write`: POST / PUT / PATCH / ファイルアップロード
 - `insta_worker`: iPad の story ワーカー専用（`/insta/jobs/:id/start` 等の報告と、自分のジョブの参照だけ）。`pnpm cli:keygen <email> "ipad-insta-worker" insta_worker` で **read / write を持たないキー**を作って iPad に置く。permission はルートを絞るだけで RLS の範囲は持ち主のクリアランスのままなので、**clearance が internal の専用ユーザー**に発行する。なお `GET /insta/targets` `/insta/account` `/ai-status` は「キーが有効なら誰でも読める」設計なので、このキーからも読める
 - `article_push`: 記事 1 本を公開リポジトリに push する（`POST /articles/:shortId/push`）。`write` とは別に持たせる。Discord bot のキーにだけ付ける（#209）
 
@@ -49,6 +49,7 @@ APIキーは `pnpm cli:keygen <user-email> <key-name> [permissions]` で発行�
 | POST | `/assets/lookup` | read | 出典キー（ブログの URL / トークのメッセージ ID）から登録済みのアセットと本文をまとめて引く |
 | GET | `/assets/:id/revisions` | read | 本文の版の一覧 |
 | POST | `/assets/:id/revisions` | write | 取り直した本文を送る（現行と違えば新しい版として積む） |
+| PUT | `/assets/:id/nina-appearance` | write | 坂井新奈が出ているか（出ている / 出ていない / 未確認）を置く |
 | GET | `/assets/:id/thumbnail` | セッション or read | サムネイルへ 302 リダイレクト（`<img>` 埋め込み用。同一オリジンの `<img>` はセッション cookie で通る。clearance の RLS 適用。サムネイルが無ければ 404） |
 | GET | `/assets/search` | read | 全文検索 |
 | GET | `/entities` | read | エンティティ一覧・検索 |
@@ -304,9 +305,13 @@ API キーからは **引き上げしかできない。** `PATCH /assets/:id` / 
   ],
   "sourceRecords": [...],
   "annotations": [...],
-  "collectionItems": [...]
+  "collectionItems": [...],
+  "ninaAbsent": false,
+  "ninaAppearance": "appears"
 }
 ```
+
+`ninaAppearance` は坂井新奈が出ているか（#261）。`appears` = 坂井新奈のエンティティが紐づいている（roleLabel は問わない） / `absent` = 確認して出ていない（`ninaAbsent: true`） / `unchecked` = どちらも無い（未確認）。書き換えは `PUT /assets/:id/nina-appearance` で行う。
 
 **エラー:**
 
@@ -349,12 +354,46 @@ API キーからは **引き上げしかできない。** `PATCH /assets/:id` / 
 - 渡された entityId が既にアセットに紐付いていれば `roleLabel` を更新する
 - 紐付いていなければ新規追加する
 - 渡さなかった既存の紐付けは削除されない（追加・更新のみ）
+- 坂井新奈を渡すと `ninaAbsent`（確認して出ていない）は外れる（出ている / 出ていないを両立させない）
+- `ninaAbsent` 自体はボディに入れても無視される。`PUT /assets/:id/nina-appearance` で変える
 
 **sourceRecords の挙動:**
 - 渡されたレコードはすべて新規追加される
 - 既存の sourceRecords は削除されない
 
 **レスポンス:** 更新後のアセット（リレーション含む）が返る。
+
+### PUT /assets/:id/nina-appearance
+
+アセットに坂井新奈が出ているかを 3 状態のどれかに置く（#261）。Discord bot の ✅ / ❌（lemino_label / youtube_watch）が叩く。
+
+**リクエストボディ (JSON):**
+
+```json
+{ "status": "absent" }
+```
+
+| `status` | 結果 |
+|---|---|
+| `appears` | 坂井新奈を roleLabel「出演」で紐づけ、`ninaAbsent` を外す。既に紐づいていれば roleLabel はそのまま |
+| `absent` | 坂井新奈の紐づけを外し、`ninaAbsent` を立てる |
+| `unchecked` | 両方外す（未確認に戻す） |
+
+同じ状態を何度置いても結果は変わらない（冪等）。
+
+**レスポンス:**
+
+```json
+{ "id": "cm...", "ninaAppearance": "absent" }
+```
+
+**エラー:**
+
+```json
+{ "error": "status must be one of: appears, absent, unchecked" }  // 400
+{ "error": "Not found" }  // 404 (無い、またはクリアランス外)
+{ "error": "坂井新奈が著者 (author) のアセットは「出ていない」「未確認」にできません" }  // 409
+```
 
 ---
 
@@ -452,15 +491,18 @@ API キーからは **引き上げしかできない。** `PATCH /assets/:id` / 
 
 | パラメータ | 型 | デフォルト | 説明 |
 |-----------|-----|----------|------|
-| `q` | string | **必須** | 検索クエリ |
+| `q` | string | `""` | 検索クエリ。空なら下の絞り込みだけで引く（絞り込みも無ければ 0 件） |
 | `target` | string | `all` | `all`, `assets`, `texts` |
 | `kind` | string | - | アセット種別フィルタ |
 | `status` | string | - | ステータスフィルタ |
 | `trustLevel` | string | - | 信頼度フィルタ |
 | `sourceType` | string | - | ソース種別フィルタ |
 | `entityId` | string | - | 特定エンティティに紐づくもののみ |
+| `entityIds` | string | - | カンマ区切りのエンティティ ID。既定はいずれかに紐づくもの (OR) |
+| `entityMatch` | string | `any` | `all` にすると `entityIds` のすべてに紐づくもの (AND) |
 | `dateFrom` | string (ISO 8601) | - | canonicalDate の開始日 |
 | `dateTo` | string (ISO 8601) | - | canonicalDate の終了日 |
+| `ninaAppearance` | string | - | 坂井新奈が出ているか: `appears` / `absent` / `unchecked`（#261）。`q` が空でも絞り込みだけで引ける。例: `?q=&kind=video&entityIds=<日向坂46公式チャンネル>&ninaAppearance=unchecked` で公式チャンネルの未確認の動画 |
 | `page` | number | 1 | ページ番号 |
 | `perPage` | number | 20 | 件数（最大100） |
 
@@ -1485,7 +1527,7 @@ keep / total は `GET /meetgreets/:id` の `repoCollection` で読む。判定�
 | フィールド | 型 | 必須 | 説明 |
 |---|---|---|---|
 | `dryRun` | boolean | | `true` なら書き込まず、適用後の本文と増える行だけ返す |
-| `expectedDigest` | string | | `dryRun` が返した `digest`。渡すと、組み立て直した結果が変わっていたら 409（見せた内容と別のものを保存しない） |
+| `expectedDigest` | string | | `dryRun` が返した `digest`。渡すと、組み立て直した結果が変わっていたら 409（見せた内容と別のものを保存しない）。追記の指紋は本文 + 足す出典で取る（出典だけ足すときは本文が変わらないため） |
 | `exclude` | string[] | | **今後この回では足さない**ものの key（`dryRun` の `additions[].key`）。最大 200 件。`dryRun` と併せると「外した形」で本文を見せるだけ（覚えない）、保存では成功したときだけ覚える。**記事がまだ無い（`mode: "create"`）ときは 409**（フル生成に外す口が無いため） |
 | `restore` | string[] | | `exclude` の取り消し（`dryRun` の `excluded[].key`）。最大 200 件。**単独で送る**（`dryRun` / `exclude` / `expectedDigest` と併用すると 400。空配列でも単独でなければ 400） |
 
@@ -1516,7 +1558,7 @@ keep / total は `GET /meetgreets/:id` の `repoCollection` で読む。判定�
 - **追記は「純粋な追記」でなければ中止する**（既存行が 1 行でも消える形になったら 409）。脚注番号も既存のまま据え置き、新しい出典だけ末尾に採番する
 - **本文に載るのは `internal` 以下のアセットだけ。** `Article` は非保護テーブルで、本文は push でそのまま公開リポジトリに載るため。落とした件数は `droppedByClearance` で返す（[docs/security-dev.md](./security-dev.md)）
 - 出典は `applyArticleSource` と同じ経路で作られるので、公開に落とせる機密レベルの制限もそのまま効く
-- `additions[].kind` は `quote` / `report` / `tiktok` / `talk` / `blogImage`。`label` は画面に出す文で、**形は種別ごとに違う**（レポは URL、トーク・画像は本文に足す行そのもの）。機械で読むなら `key` を使う
+- `additions[].kind` は `quote` / `report` / `tiktok` / `talk` / `blogImage` / `source`。`source` は本文を AI / 人が書くテンプレート（スナップ・言葉（場面）・おでかけ）で、本文の行を伴わずに出典だけ足すもの。本文の `^[n]` は記事の編集画面で書く（#267）。`label` は画面に出す文で、**形は種別ごとに違う**（レポは URL、トーク・画像は本文に足す行そのもの、`source` は `出典: <出典名>（…）`）。機械で読むなら `key` を使う
 - **`mode: "create"` では `additions` / `excluded` はどちらも空。** 新規作成はフル生成で、外す仕組みが無い
 - **`additions` が「今回足すもの」、`excluded` が「足さないと覚えているもの」。** 追記は「本文に無い = まだ足していない」としか判断できないので、人が意図的に消したもの（X 側で消えたレポなど）を `exclude` で覚えさせないと、次の追記で復活する
 - **外したものの出典は作らない。** 本文に出ないのに `ArticleSource` が残ると、frontmatter に載って公開リポジトリに push されてしまう。ただし**効くのは「これから足すもの」だけ**で、すでに追記済みのものを後から外しても、そのとき作った出典は残る（手で本文の行を消した場合と同じ。取り下げは記事の編集画面から）

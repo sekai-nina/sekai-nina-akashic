@@ -54,7 +54,7 @@ export function ExcerptStep({
       setMsg(
         total === 0
           ? res.blogs.length === 0
-            ? "ドシエに本人のブログ本文がありません（先に素材を反映してください）"
+            ? "企画に本人のブログ本文がありません（先に素材を反映してください）"
             : `この${WORKFLOW_OWNER_NOUN[kind]}について書かれた部分は見つかりませんでした`
           : `${total} 件の候補が見つかりました`
       );
@@ -83,7 +83,7 @@ export function ExcerptStep({
         return;
       }
       setMsg(
-        `${res.added} 件をドシエに入れました${res.skipped > 0 ? ` (${res.skipped} 件は既にある範囲などで見送り)` : ""}`
+        `${res.added} 件を企画に入れました${res.skipped > 0 ? ` (${res.skipped} 件は既にある範囲などで見送り)` : ""}`
       );
       // 入ったぶんだけチェックを外す。見送られたものは選び直せるよう候補は残す
       setPicked(new Set());
@@ -162,10 +162,10 @@ export function ExcerptStep({
               disabled={pending || picked.size === 0}
               className="h-8 px-3 rounded-md bg-slate-900 text-white text-xs hover:bg-slate-800 disabled:opacity-50"
             >
-              ドシエに入れる ({picked.size})
+              企画に入れる ({picked.size})
             </button>
             <span className="text-[11px] text-slate-400">
-              入れたあと、引用文はドシエの画面で直せます
+              入れたあと、引用文は企画の画面で直せます
             </span>
           </div>
         </div>

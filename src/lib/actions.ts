@@ -15,6 +15,7 @@ import { createAssetRelation, deleteAssetRelation } from "@/lib/domain/relations
 import { assertClearance } from "@/lib/classification";
 import { requireRole } from "@/lib/auth/require-role";
 import { normalizeTrait } from "@/lib/domain/testimonial-traits";
+import { clearNinaAbsentIfLinking } from "@/lib/domain/nina-appearance";
 
 /** Verify the calling user has clearance to access the given asset. */
 async function requireClearanceForAsset(assetId: string, user: { clearance: string }) {
@@ -218,13 +219,15 @@ export async function addEntityToAsset(assetId: string, formData: FormData) {
     update: {},
   });
 
-  await withClearance(user.clearance, (tx) =>
-    tx.assetEntity.upsert({
+  await withClearance(user.clearance, async (tx) => {
+    await tx.assetEntity.upsert({
       where: { assetId_entityId: { assetId, entityId: entity.id } },
       create: { assetId, entityId: entity.id, roleLabel },
       update: { roleLabel },
-    })
-  );
+    });
+    // 坂井新奈を付けたら「出ていない」を外す (#261)
+    await clearNinaAbsentIfLinking(tx, assetId, [entity.id]);
+  });
 
   await logAudit({ actorId: user.id, action: "entity.add_to_asset", targetType: "AssetEntity", targetId: `${assetId}:${entity.id}` });
   backupAssetToDrive(assetId).catch((err) =>

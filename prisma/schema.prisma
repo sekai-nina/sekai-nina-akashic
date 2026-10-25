@@ -241,6 +241,9 @@ model Asset {
   /// 人や取り込みが付ける AssetEntity とは分けて持つ (別名「坂井」「🩰」などの機械判定を混ぜない)
   /// 索引は true の行だけの部分索引 (Asset_mentionsNina_idx) を migration で張っている (Prisma では書けない)
   mentionsNina       Boolean         @default(false)
+  /// 確認して坂井新奈が出ていなかった (#261)。出ている = 坂井新奈の AssetEntity があること。
+  /// どちらも無ければ未確認。両立させないよう `setNinaAppearance` (src/lib/domain/nina-appearance.ts) で付け外しする
+  ninaAbsent         Boolean         @default(false)
 
   // Discord metadata
   discordGuildId    String?

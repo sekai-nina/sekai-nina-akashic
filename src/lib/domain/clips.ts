@@ -78,7 +78,7 @@ async function ensureClipPool(user: ActingUser) {
         data: {
           ownerId: user.id,
           title: CLIP_POOL_TITLE,
-          summary: "記事未定の抜粋を溜めておく場所。/clips から新規・既存のドシエへ振り分ける",
+          summary: "記事未定の抜粋を溜めておく場所。/clips から新規・既存の企画へ振り分ける",
           classification: CLIP_POOL_CLASSIFICATION,
           viewMode: "clearance",
           editMode: "clearance",
@@ -365,7 +365,7 @@ export async function moveClips(
   let newTitle: string | null = null;
   if (target.kind === "new") {
     newTitle = target.title.trim();
-    if (!newTitle) throw new ClipInputError("ドシエのタイトルを入れてください");
+    if (!newTitle) throw new ClipInputError("企画のタイトルを入れてください");
   } else {
     if (target.dossierId === pool.id) throw new ClipInputError("移動先がプール自身です");
     const access = await requireEditAccess(user, target.dossierId);
@@ -386,7 +386,7 @@ export async function moveClips(
     ).length;
     if (tooHigh > 0) {
       throw new ClipInputError(
-        `${tooHigh} 件のアセットの機密レベルが移動先のドシエより上なので移せません`
+        `${tooHigh} 件のアセットの機密レベルが移動先の企画より上なので移せません`
       );
     }
 
