@@ -1400,7 +1400,7 @@ keep / total は `GET /meetgreets/:id` の `repoCollection` で読む。判定�
 | フィールド | 型 | 必須 | 説明 |
 |---|---|---|---|
 | `dryRun` | boolean | | `true` なら書き込まず、適用後の本文と増える行だけ返す |
-| `expectedDigest` | string | | `dryRun` が返した `digest`。渡すと、組み立て直した結果が変わっていたら 409（見せた内容と別のものを保存しない） |
+| `expectedDigest` | string | | `dryRun` が返した `digest`。渡すと、組み立て直した結果が変わっていたら 409（見せた内容と別のものを保存しない）。追記の指紋は本文 + 足す出典で取る（出典だけ足すときは本文が変わらないため） |
 | `exclude` | string[] | | **今後この回では足さない**ものの key（`dryRun` の `additions[].key`）。最大 200 件。`dryRun` と併せると「外した形」で本文を見せるだけ（覚えない）、保存では成功したときだけ覚える。**記事がまだ無い（`mode: "create"`）ときは 409**（フル生成に外す口が無いため） |
 | `restore` | string[] | | `exclude` の取り消し（`dryRun` の `excluded[].key`）。最大 200 件。**単独で送る**（`dryRun` / `exclude` / `expectedDigest` と併用すると 400。空配列でも単独でなければ 400） |
 
@@ -1431,7 +1431,7 @@ keep / total は `GET /meetgreets/:id` の `repoCollection` で読む。判定�
 - **追記は「純粋な追記」でなければ中止する**（既存行が 1 行でも消える形になったら 409）。脚注番号も既存のまま据え置き、新しい出典だけ末尾に採番する
 - **本文に載るのは `internal` 以下のアセットだけ。** `Article` は非保護テーブルで、本文は push でそのまま公開リポジトリに載るため。落とした件数は `droppedByClearance` で返す（[docs/security-dev.md](./security-dev.md)）
 - 出典は `applyArticleSource` と同じ経路で作られるので、公開に落とせる機密レベルの制限もそのまま効く
-- `additions[].kind` は `quote` / `report` / `tiktok` / `talk` / `blogImage` / `source`。`source` は本文を AI / 人が書くテンプレート（スナップ・言葉（場面）・おでかけ）で、本文の行を伴わずに出典だけ足すもの。本文の `^[n]` は記事の編集画面で書く（#267）。`label` は画面に出す文で、**形は種別ごとに違う**（レポは URL、トーク・画像は本文に足す行そのもの）。機械で読むなら `key` を使う
+- `additions[].kind` は `quote` / `report` / `tiktok` / `talk` / `blogImage` / `source`。`source` は本文を AI / 人が書くテンプレート（スナップ・言葉（場面）・おでかけ）で、本文の行を伴わずに出典だけ足すもの。本文の `^[n]` は記事の編集画面で書く（#267）。`label` は画面に出す文で、**形は種別ごとに違う**（レポは URL、トーク・画像は本文に足す行そのもの、`source` は `出典: <出典名>（…）`）。機械で読むなら `key` を使う
 - **`mode: "create"` では `additions` / `excluded` はどちらも空。** 新規作成はフル生成で、外す仕組みが無い
 - **`additions` が「今回足すもの」、`excluded` が「足さないと覚えているもの」。** 追記は「本文に無い = まだ足していない」としか判断できないので、人が意図的に消したもの（X 側で消えたレポなど）を `exclude` で覚えさせないと、次の追記で復活する
 - **外したものの出典は作らない。** 本文に出ないのに `ArticleSource` が残ると、frontmatter に載って公開リポジトリに push されてしまう。ただし**効くのは「これから足すもの」だけ**で、すでに追記済みのものを後から外しても、そのとき作った出典は残る（手で本文の行を消した場合と同じ。取り下げは記事の編集画面から）
