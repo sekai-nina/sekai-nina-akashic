@@ -11,6 +11,7 @@ import { AddToArticle, type PickerArticle } from "@/components/add-to-article";
 import { ClipDialog, type ClipDraft } from "@/components/clip-dialog";
 import { IMG_PLACEHOLDER_RE, stripImagePlaceholders } from "@/lib/utils";
 import { rememberScroll, useRestoreScroll } from "./scroll-return";
+import { TextRevisions, type TextRevision } from "./text-revisions";
 
 const TEXT_TYPE_LABELS: Record<string, string> = {
   title: "タイトル",
@@ -62,6 +63,8 @@ interface TextsSectionProps {
   highlightTerms?: string[];
   /** 抜粋の追加先 (`?dossier=`, #206)。あればフローターから 1 クリックで足せる */
   targetDossier?: EditableDossier | null;
+  /** テキスト id → 本文の版 (新しい順、#262)。2 版以上あるテキストだけ履歴を出す */
+  revisions?: Record<string, TextRevision[]>;
 }
 
 type Selection = {
@@ -84,6 +87,7 @@ export function TextsSection({
   clipRanges = {},
   highlightTerms = [],
   targetDossier = null,
+  revisions = {},
 }: TextsSectionProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [activeSelection, setActiveSelection] = useState<Selection>(null);
@@ -206,6 +210,19 @@ export function TextsSection({
           ))}
         </ul>
       </div>
+
+      {/* 版の履歴は選択範囲 (containerRef) の外に置く。旧版の文字列をクリップできないように */}
+      {texts.some((t) => (revisions[t.id]?.length ?? 0) > 1) && (
+        <div className="mt-3 space-y-2">
+          {texts.map((text) => (
+            <TextRevisions
+              key={text.id}
+              label={TEXT_TYPE_LABELS[text.textType] ?? text.textType}
+              revisions={revisions[text.id] ?? []}
+            />
+          ))}
+        </div>
+      )}
 
       {activeSelection && (
         <ExcerptFloater

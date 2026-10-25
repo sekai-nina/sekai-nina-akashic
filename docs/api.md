@@ -46,6 +46,9 @@ APIキーは `pnpm cli:keygen <user-email> <key-name> [permissions]` で発行�
 | POST | `/assets` | write | アセット作成 |
 | GET | `/assets/:id` | read | アセット詳細 |
 | PATCH | `/assets/:id` | write | アセット更新 |
+| POST | `/assets/lookup` | read | 出典キー（ブログの URL / トークのメッセージ ID）から登録済みのアセットと本文をまとめて引く |
+| GET | `/assets/:id/revisions` | read | 本文の版の一覧 |
+| POST | `/assets/:id/revisions` | write | 取り直した本文を送る（現行と違えば新しい版として積む） |
 | PUT | `/assets/:id/nina-appearance` | write | 坂井新奈が出ているか（出ている / 出ていない / 未確認）を置く |
 | GET | `/assets/:id/thumbnail` | セッション or read | サムネイルへ 302 リダイレクト（`<img>` 埋め込み用。同一オリジンの `<img>` はセッション cookie で通る。clearance の RLS 適用。サムネイルが無ければ 404） |
 | GET | `/assets/search` | read | 全文検索 |
@@ -391,6 +394,88 @@ API キーからは **引き上げしかできない。** `PATCH /assets/:id` / 
 { "error": "Not found" }  // 404 (無い、またはクリアランス外)
 { "error": "坂井新奈が著者 (author) のアセットは「出ていない」「未確認」にできません" }  // 409
 ```
+
+---
+
+### POST /assets/lookup
+
+出典キーから登録済みのアセットをまとめて引く (#262)。bot がブログ・トークの取りこぼしを毎日突き合わせるのに使う。
+
+**リクエストボディ (JSON):**
+
+```json
+{
+  "urls": ["https://www.hinatazaka46.com/s/official/diary/detail/70748"],
+  "talkMessageIds": ["482357", 482358]
+}
+```
+
+| フィールド | 説明 |
+|---|---|
+| `urls` | `SourceRecord.url` と完全一致で引く。ブログは `https://www.hinatazaka46.com/s/official/diary/detail/<番号>` |
+| `talkMessageIds` | `SourceRecord.metadata.talk_message_id` で引く。文字列でも整数でもよい |
+
+両方合わせて 500 件まで（超えると 400）。トークの ID を整数で送るときは 2^53 未満に限る（それ以上は精度が落ちるので文字列で送る）。
+
+**レスポンス:**
+
+```json
+{
+  "urls": {
+    "https://www.hinatazaka46.com/s/official/diary/detail/70748": [
+      { "id": "cm_text", "kind": "text", "title": "坂井新奈ブログ「揺れても、根を張る」",
+        "texts": [{ "textType": "body", "content": "…{{IMG:cm_img1}}…" }] },
+      { "id": "cm_img1", "kind": "image", "title": "坂井新奈ブログ「揺れても、根を張る」 (1/8)", "texts": [] }
+    ]
+  },
+  "talkMessageIds": { "482357": [], "482358": [ … ] }
+}
+```
+
+- 照会したキーはすべて結果に出る。登録が無い（または見えない）キーは空配列
+- `texts` は `body` / `message_body` だけ。本文アセットが無い（= 取り込みが画像の途中で落ちた）ブログは、`kind: "text"` のアセットが無いことで分かる
+- clearance は API キーのユーザーに従う（見えないアセットは無いものとして返る）
+
+### GET /assets/:id/revisions
+
+本文の版の一覧 (#262)。テキストごとにまとめ、その中で新しい順（`version` の降順）。版が積まれたことの無いテキストは含まない（= 初版のまま）。アセットが見えなければ 404。
+
+```json
+{
+  "revisions": [
+    { "id": "…", "assetTextId": "…", "version": 2, "content": "…", "fetchedAt": "2026-08-27T12:10:00.000Z" },
+    { "id": "…", "assetTextId": "…", "version": 1, "content": "…", "fetchedAt": "2026-08-26T11:00:00.000Z" }
+  ]
+}
+```
+
+### POST /assets/:id/revisions
+
+公式から取り直した本文を送る (#262)。公式ブログは公開後に本文が直されることがあるので、上書きせずに版として残す。
+
+**リクエストボディ (JSON):**
+
+```json
+{ "content": "…{{IMG:cm_img1}}…", "textType": "body", "fetchedAt": "2026-08-27T21:10:00+09:00" }
+```
+
+| フィールド | 必須 | 説明 |
+|---|---|---|
+| `content` | ○ | 本文。画像は登録時と同じく `{{IMG:<assetId>}}` で埋める |
+| `textType` | | 既定 `body` |
+| `fetchedAt` | | 公式から取得した日時。時刻と時差つきの ISO 8601（`2026-08-27T21:10:00+09:00` / `…Z`）。日付だけは 400。既定は今 |
+
+**挙動:**
+- 同じ `textType` のテキスト（複数あれば最初に作られたもの）と `content` を完全一致で比べる
+- 同じなら何もしない → `200 { "status": "unchanged", "assetTextId", "version" }`
+- 違えば、旧本文を版として残し、テキストを新しい本文に書き換える → `201 { "status": "revised", "assetTextId", "version", "relocatedExcerpts", "unlocatedExcerpts" }`
+  - 初めて版を積むときは、それまでの本文を第 1 版（`fetchedAt` はテキストの作成日時）として残す
+  - 最新版のあとに画面で手編集されていたら、その本文も版（`fetchedAt` はテキストの更新日時）として残してから新しい版を積む
+  - 検索・記事化など他の機能が読むのは常に最新版
+  - この本文を指すクリップ・記事の出典の抜粋範囲を新しい本文で探し直す。1 か所だけ見つかれば範囲を書き換え（`relocatedExcerpts`）、見つからない・複数あれば触らない（`unlocatedExcerpts`。アセット詳細では「位置未確定」になる）
+- テキストがまだ無ければ作る → `201 { "status": "created", "assetTextId" }`（版は積まない）
+- アセットの画面での手編集はその場では版にならない（今までどおり上書き。次に版が積まれるときに上の規則で残る）
+- アセットが見えなければ 404、入力が不正なら 400。同じアセットへの同時送信は直列に処理するが、版番号が衝突したら 409（送り直せばよい）
 
 ---
 
