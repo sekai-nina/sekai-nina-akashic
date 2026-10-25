@@ -66,8 +66,8 @@ class GuardTest(unittest.TestCase):
         self.assertIsNone(self.decide("grep x <<< 'a'\nnpx prisma generate"))
         self.assertEqual(self.decide("grep x <<< 'a'\nnpx prisma migrate reset"), "deny")
 
-    def test_unparseable_falls_back_to_ask(self):
-        self.assertEqual(self.decide('npx prisma migrate reset "unterminated'), "ask")
+    def test_unparseable_falls_back_to_review(self):
+        self.assertEqual(self.decide('npx prisma migrate reset "unterminated'), "review")
         self.assertIsNone(self.decide('echo "unterminated'))
 
     # --- 1. 接続先 -------------------------------------------------------
@@ -139,12 +139,12 @@ class GuardTest(unittest.TestCase):
     def test_unresolvable_target(self):
         os.remove(os.path.join(self.dir, ".env"))
         self.assertEqual(self.decide("npx prisma migrate reset"), "deny")
-        self.assertEqual(self.decide("npx prisma db push"), "ask")
-        self.assertEqual(self.decide("source ./missing.env && npx prisma migrate deploy"), "ask")
-        self.assertEqual(self.decide("psql -c 'UPDATE x SET y = 1'"), "ask")
+        self.assertEqual(self.decide("npx prisma db push"), "review")
+        self.assertEqual(self.decide("source ./missing.env && npx prisma migrate deploy"), "review")
+        self.assertEqual(self.decide("psql -c 'UPDATE x SET y = 1'"), "review")
 
     # --- 2. スクリプトの中身 ----------------------------------------------
-    def test_script_with_bulk_delete_asks_on_prod(self):
+    def test_script_with_bulk_delete_reviews_on_prod(self):
         for cmd in [
             "npx tsx src/cli/empty.ts",
             "pnpm cli:wipe",                      # import 先 (@/lib/danger) の DELETE を拾う
@@ -154,7 +154,7 @@ class GuardTest(unittest.TestCase):
             "npx tsx -e 'execSync(\"npx prisma migrate reset --force\")'",
         ]:
             with self.subTest(cmd=cmd):
-                self.assertEqual(self.decide(cmd), "ask")
+                self.assertEqual(self.decide(cmd), "review")
 
     def test_script_with_where_passes(self):
         self.write("src/cli/words.ts", "// delete from the list, then update x set y\nconst t = truncate(text, 10);\n")
@@ -190,7 +190,7 @@ class GuardTest(unittest.TestCase):
             "npx tsx watch src/cli/empty.ts",
         ]:
             with self.subTest(cmd=cmd):
-                self.assertEqual(self.decide(cmd), "ask")
+                self.assertEqual(self.decide(cmd), "review")
 
     def test_review_false_positives(self):
         for cmd in [
@@ -210,24 +210,47 @@ class GuardTest(unittest.TestCase):
         self.assertEqual(self.decide('echo "$(npx prisma migrate reset --force)"'), "deny")
         self.assertEqual(self.decide("x=`npx prisma migrate reset --force`"), "deny")
 
+    def test_python_stdin_dash_reads_heredoc(self):
+        self.assertIsNone(self.decide("python3 - \"$f\" <<'PY'\nprint(open(__file__).read())\nPY"))
+        self.assertEqual(self.decide("python3 - <<'PY'\ncur.execute('DELETE FROM \"Asset\"')\nPY"), "review")
+
+    # --- review: Claude が確かめて印を付ければ通る ---------------------------
+    def test_reviewed_mark_passes_review_only(self):
+        mark = guard.REVIEWED_MARK
+        self.assertIsNone(self.decide(f"{mark} npx tsx src/cli/empty.ts"))
+        self.assertIsNone(self.decide(f"cd . && {mark} pnpm cli:wipe"))
+        self.assertEqual(self.decide(f"{mark} npx prisma migrate reset --force"), "deny")
+        self.assertEqual(self.decide(f"{mark} npx prisma migrate deploy"), "ask")
+        self.assertEqual(self.decide(f"echo '{mark}x' && npx tsx src/cli/empty.ts"), "review")
+
     # --- main ------------------------------------------------------------
-    def test_hook_output_shape(self):
+    def run_main(self, command):
         import io
         import sys
-        payload = {"tool_name": "Bash", "cwd": self.dir, "tool_input": {"command": "npx prisma migrate reset"}}
+        payload = {"tool_name": "Bash", "cwd": self.dir, "tool_input": {"command": command}}
         old_in, old_out, old_env = sys.stdin, sys.stdout, os.environ.get("CLAUDE_PROJECT_DIR")
         os.environ["CLAUDE_PROJECT_DIR"] = self.dir
         sys.stdin, sys.stdout = io.StringIO(json.dumps(payload)), io.StringIO()
         try:
             guard.main()
-            out = json.loads(sys.stdout.getvalue())
+            text = sys.stdout.getvalue()
         finally:
             sys.stdin, sys.stdout = old_in, old_out
             if old_env is None:
                 os.environ.pop("CLAUDE_PROJECT_DIR", None)
             else:
                 os.environ["CLAUDE_PROJECT_DIR"] = old_env
-        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        return json.loads(text)["hookSpecificOutput"] if text else None
+
+    def test_hook_output_shape(self):
+        self.assertEqual(self.run_main("npx prisma migrate reset")["permissionDecision"], "deny")
+        self.assertEqual(self.run_main("npx prisma migrate deploy")["permissionDecision"], "ask")
+
+    def test_review_is_sent_as_deny_with_howto(self):
+        out = self.run_main("npx tsx src/cli/empty.ts")
+        self.assertEqual(out["permissionDecision"], "deny")  # ユーザーには確認を出さない
+        self.assertIn(guard.REVIEWED_MARK, out["permissionDecisionReason"])
+        self.assertIsNone(self.run_main(f"{guard.REVIEWED_MARK} npx tsx src/cli/empty.ts"))
 
 
 if __name__ == "__main__":

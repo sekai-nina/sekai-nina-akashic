@@ -9,13 +9,16 @@ worktree の .env の DATABASE_URL / DIRECT_URL は本番の Supabase を指し�
 - コマンドをシェルの構文として分解し、実行されるもの (先頭の実行ファイルと DB に効く引数) だけを見る。
   `gh issue create --body "..."` や `echo` の文字列に禁止コマンドの名前が入っていても止めない
 - DB に効くコマンドは接続先 (コマンド内の DATABASE_URL= / DIRECT_URL=、source した env ファイル、.env) を解決する。
-  本番なら migrate status (通す) と migrate deploy (確認) 以外の書き込みを拒否し、ローカルなら通す。
-  解決できないものは確認に倒す (DB を作り直すものは解決できなくても拒否)
+  本番なら migrate status (通す) と migrate deploy (ユーザーに確認) 以外の書き込みを拒否し、ローカルなら通す。
+  解決できないものは review (DB を作り直すものは解決できなくても拒否)
 - tsx / node で流すスクリプトは、リポジトリ内の import 先まで読んで一括 DELETE / UPDATE・DROP・TRUNCATE を探す。
-  あってローカル宛てでなければ確認を出す
-- 構文を解釈できないときは、文字列だけの判定に落として確認に倒す
+  あってローカル宛てでなければ review
+- 構文を解釈できないときは、文字列だけの判定に落として review
 
-決定: deny (理由を Claude に返す。回避させない) > ask (毎回ユーザーに確認させる) > 何も返さない (通常の権限判定)
+決定: deny (理由を Claude に返す。回避させない) > ask (ユーザーに確認。本番への migrate deploy だけ)
+  > review (Claude が自分で確かめ、AKASHIC_GUARD_REVIEWED=1 を付けて再実行する。ユーザーには聞かない)
+  > 何も返さない (通常の権限判定)
+ユーザーはコードを見せられても安全か判定できないので、コードの中身で迷うものはユーザーに聞かない。
 """
 import json
 import os
@@ -27,7 +30,16 @@ PROD_HOST = re.compile(r"(supabase\.(com|co)|osetzxlsemesugakntfv)", re.I)
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
 URL_KEYS = ("DATABASE_URL", "DIRECT_URL")
 
-RANK = {None: 0, "ask": 1, "deny": 2}
+# review: ユーザーには聞かず、Claude 自身に確かめさせる (コードを見せられてもユーザーは判定できない)。
+#   出力は deny + 手順。確かめたら REVIEWED_MARK を付けて再実行すれば通る
+# ask: ユーザーが判断できる問いだけ (本番への migrate deploy)
+RANK = {None: 0, "review": 1, "ask": 2, "deny": 3}
+REVIEWED_MARK = "AKASHIC_GUARD_REVIEWED=1"
+REVIEWED_RE = re.compile(r"(?:^|[\s;&|(])" + re.escape(REVIEWED_MARK) + r"(?=\s)")
+REVIEW_HOWTO = (
+    "ユーザーには聞かず、自分で確かめる: 接続先 (本番か) と、消える・書き換わる行 (対象テーブル・条件・件数を SELECT count で) を調べ、"
+    "意図どおりで取り返しがつくと判断できたら、コマンドの先頭に " + REVIEWED_MARK + " を付けて再実行する。"
+    "本番の行を広く消す・書き換えるのに意図と合わない、または確かめようがないなら実行しない")
 MAX_DEPTH = 6
 MAX_SCAN_FILES = 300
 
@@ -508,14 +520,14 @@ def check_prisma(args, ctx, v, extra_env):
                   f"prisma migrate {cmd} は DB を作り直す ({where(target)} 宛て)。.env は本番なので使わない (/db-migration スキルの手順を使う)")
             return
         if cmd == "deploy":
-            v.add(by_target(target, "ask", "ask"),
+            v.add(by_target(target, "ask", "review"),
                   f"prisma migrate deploy は {where(target)} にマイグレーションを当てる。ユーザーの了承が要る")
             return
         if cmd == "resolve":
-            v.add(by_target(target, "deny", "ask"),
+            v.add(by_target(target, "deny", "review"),
                   f"prisma migrate resolve は {where(target)} のマイグレーション履歴を書き換える")
             return
-        v.add(by_target(target, "ask", "ask"), f"prisma migrate {cmd} ({where(target)} 宛て)")
+        v.add(by_target(target, "review", "review"), f"prisma migrate {cmd} ({where(target)} 宛て)")
         return
     if sub[:1] == ["db"]:
         cmd = sub[1] if len(sub) > 1 else ""
@@ -526,7 +538,7 @@ def check_prisma(args, ctx, v, extra_env):
                 v.add(by_target(target, "deny", "deny"),
                       f"prisma db push --force-reset / --accept-data-loss は DB のデータを消す ({where(target)} 宛て)")
             else:
-                v.add(by_target(target, "deny", "ask"),
+                v.add(by_target(target, "deny", "review"),
                       f"prisma db push は {where(target)} のスキーマを書き換える。本番には /db-migration の migrate deploy で当てる")
             return
         if cmd == "execute":
@@ -535,13 +547,13 @@ def check_prisma(args, ctx, v, extra_env):
             sql_bits = [read_text(os.path.join(ctx.cwd, f)) or "" for f in opt_value(args, "--file")]
             if any(SQL_DROP_SCHEMA.search(s) for s in sql_bits) and t != "local":
                 v.add("deny", "DROP SCHEMA / DATABASE を流そうとしている")
-            v.add(by_target(t, "deny", "ask"),
+            v.add(by_target(t, "deny", "review"),
                   f"prisma db execute は {where(t)} に任意の SQL を流す。本番の変更は /db-migration の migrate deploy で行う")
             return
         if cmd == "seed":
-            v.add(by_target(target, "deny", "ask"), f"prisma db seed は {where(target)} を書き換える")
+            v.add(by_target(target, "deny", "review"), f"prisma db seed は {where(target)} を書き換える")
             return
-        v.add(by_target(target, "ask", "ask"), f"prisma db {cmd} ({where(target)} 宛て)")
+        v.add(by_target(target, "review", "review"), f"prisma db {cmd} ({where(target)} 宛て)")
         return
     # generate / format / validate / studio / version などは DB を書き換えない
 
@@ -565,25 +577,25 @@ def check_pg_client(prog, args, ctx, v, extra_env, stdin_bodies):
         v.add("deny", f"{prog} は {where(target)} の DB を消す")
         return
     if prog in ("createdb", "pg_restore"):
-        v.add(by_target(target, "deny", "ask"), f"{prog} は {where(target)} に書き込む")
+        v.add(by_target(target, "deny", "review"), f"{prog} は {where(target)} に書き込む")
         return
     sql = list(opt_value(args, "-c", "--command")) + list(stdin_bodies)
     for f in opt_value(args, "-f", "--file"):
         text = read_text(os.path.join(ctx.cwd, f))
         sql.append("-- unreadable" if text is None else text)
     if not sql:
-        v.add("ask", f"psql を対話的に {where(target)} へつなぐ (流す SQL を判定できない)")
+        v.add("review", f"psql を対話的に {where(target)} へつなぐ (流す SQL を判定できない)")
         return
     text = "\n".join(sql)
     if SQL_DROP_SCHEMA.search(text):
         v.add("deny", f"DROP SCHEMA / DATABASE を {where(target)} に流そうとしている")
     elif SQL_DDL.search(text) or SQL_WRITE.search(text) or "-- unreadable" in sql:
-        v.add(by_target(target, "deny", "ask"),
+        v.add(by_target(target, "deny", "review"),
               f"psql で {where(target)} に書き込む SQL を流そうとしている。本番の変更は /db-migration の migrate deploy で行う")
 
 
 def check_interpreter(prog, args, ctx, v, extra_env, stdin_bodies):
-    """tsx / node などで流すコードを読み、一括削除・DDL があれば接続先しだいで確認を出す。"""
+    """tsx / node などで流すコードを読み、一括削除・DDL があれば接続先しだいで review にする。"""
     codes, files = [], []
     i = 0
     while i < len(args):
@@ -596,7 +608,7 @@ def check_interpreter(prog, args, ctx, v, extra_env, stdin_bodies):
             codes.append(args[i + 1])
             i += 2
             continue
-        if a.startswith("-"):
+        if a.startswith("-") and a != "-":
             if a in ("-r", "--require", "--import", "--loader", "--env-file", "--tsconfig") and i + 1 < len(args):
                 if a == "--env-file":
                     ctx_env = read_env_file(os.path.join(ctx.cwd, args[i + 1]))
@@ -624,7 +636,7 @@ def check_interpreter(prog, args, ctx, v, extra_env, stdin_bodies):
     codes += list(stdin_bodies) if not files else []
     if files and os.path.normpath(os.path.join(ctx.cwd, files[0])) == os.path.join(ctx.project_dir, "prisma", "seed.ts"):
         target = ctx.target(extra_env)
-        v.add(by_target(target, "deny", "ask"), f"prisma/seed.ts はデモデータを {where(target)} に書き込む")
+        v.add(by_target(target, "deny", "review"), f"prisma/seed.ts はデモデータを {where(target)} に書き込む")
         return
     paths = [f if os.path.isabs(f) else os.path.join(ctx.cwd, os.path.expanduser(f)) for f in files[:1]]
     findings = scan_code(codes, paths, ctx.cwd, ctx.project_dir)
@@ -637,12 +649,12 @@ def check_interpreter(prog, args, ctx, v, extra_env, stdin_bodies):
     if target == "local":
         return
     detail = "、".join(f"{p}: {f}" for p, f in findings[:4])
-    v.add("ask", f"{prog} で流すコードに一括で消す・書き換える操作がある ({detail})。接続先は {where(target)}")
+    v.add("review", f"{prog} で流すコードに一括で消す・書き換える操作がある ({detail})。接続先は {where(target)}")
 
 
 def check_command(tokens, bodies, ctx, v, depth):
     if depth > MAX_DEPTH:
-        v.add("ask", "コマンドの入れ子が深すぎて判定できない")
+        v.add("review", "コマンドの入れ子が深すぎて判定できない")
         return
     stdin_files = [t[1] for t in tokens if isinstance(t, tuple)]
     toks = [t for t in tokens if not isinstance(t, tuple)]
@@ -800,7 +812,7 @@ def check_command(tokens, bodies, ctx, v, depth):
         cmd = rest[1] if len(rest) > 1 else ""
         remote = "--linked" in rest or any(classify_url(u) != "local" for u in opt_value(rest, "--db-url"))
         if cmd in ("reset", "push") and remote:
-            v.add("deny" if cmd == "reset" else "ask", f"supabase db {cmd} をリモートの DB に向けている")
+            v.add("deny" if cmd == "reset" else "review", f"supabase db {cmd} をリモートの DB に向けている")
         return
     # それ以外のコマンド (gh / git / echo / cat …) の引数は DB に効かないので見ない
 
@@ -817,7 +829,7 @@ def check_string(command, ctx, v, depth=0):
         check_command(tokens, bodies, ctx, v, depth)
 
 
-# 構文を解釈できないときの保険 (#249 の文字列判定)。拒否ではなく確認に倒す
+# 構文を解釈できないときの保険 (#249 の文字列判定)。拒否ではなく review に倒す
 LEGACY = [
     r"\bprisma\b[^\n;&|]*\bmigrate\s+(dev|reset|deploy|resolve)\b",
     r"--from-migrations\b",
@@ -833,7 +845,7 @@ def legacy(command, v):
     low = command.lower()
     for pattern in LEGACY:
         if re.search(pattern, low):
-            v.add("ask", "コマンドの構文を解釈できず、DB を書き換えうる語を含む")
+            v.add("review", "コマンドの構文を解釈できず、DB を書き換えうる語を含む")
             return
 
 
@@ -843,6 +855,8 @@ def decide(command, cwd=None, project_dir=None):
     v = Verdict()
     check_string(command, ctx, v)
     if not v.decision:
+        return None, None
+    if v.decision == "review" and REVIEWED_RE.search(command):
         return None, None
     return v.decision, " / ".join(v.reasons)
 
@@ -858,7 +872,11 @@ def main():
     try:
         decision, reason = decide(command, cwd=data.get("cwd"))
     except Exception as e:  # フック自身の不具合で素通しにしない
-        decision, reason = "ask", f"フックの判定中にエラー ({type(e).__name__}: {e})"
+        decision, reason = "review", f"フックの判定中にエラー ({type(e).__name__}: {e})"
+        if REVIEWED_RE.search(command):
+            decision = None
+    if decision == "review":
+        decision, reason = "deny", f"{reason}。{REVIEW_HOWTO}"
     if decision:
         print(json.dumps({
             "hookSpecificOutput": {
