@@ -67,6 +67,7 @@ const clearance = auth.clearance;
 - `RepoCollection`, `RepoTweet`, `RepoTweetMedia`
 - `Lens`, `DataSource`, `Coverage`, `LensItemCheck`（#253: 手入力の収集済みの日付は `DataSource.collectedUntil` に `withClearance` で書く。Lens / Coverage / LensItemCheck は過去の記録として残し、読み書きするコードは無い。旧 API は 410）
 - `ArticleSource`（`Article` 自体は公開記事のミラーなので非保護）
+- `ArticlePlace`（記事と聖地の紐づけ。自前の classification は持たず、紐づく `Place` に従う。#283 → 下の「公開リポジトリへ書き出すもの」）
 - `MeetGreet`（ミーグリ記事ワークフロー。ドシエを include する読みは所有者判定が要るので `withSession`）
 - `SketchSetting`（スケッチ生成のプロンプトと画風の見本。**全体で 1 行**で、個人のデータではないので読み書きは固定のクリアランス（`MAX_EXTERNAL_AI_CLEARANCE`）で行う。操作者のクリアランスで読むと、低い人のときだけ無言で既定の文面に化ける）
 - `XMentionWatch`, `XMentionSetting`, `XMentionHit`（X 言及監視。cron は `prismaInternal`、`/mentions` は `withClearance`）
@@ -215,6 +216,19 @@ R2 へ置いて使えるようにしたもので、次の 4 つで縛ってい�
 RLS はここでは「public 行が返ってくる」方向にも頼っているので、restricted 側で記事ごとの `pending` 以外の総数も数え、**public で見えた行数 + `blocked` = 総数** でなければバッチ全体を止めます（`app.clearance` が効いていない等で行が落ちると、脚注を全部失った記事を 1 コミットで公開してしまう）。
 
 したがって `pending` を `applied` に遷移させる処理は、classification を明示的に `public` に下げる「公開を決める」操作です → `applyArticleSource`（次節）。
+
+### 聖地（`locations`、`ArticlePlace`）
+
+記事↔聖地の正は `ArticlePlace`（#283）。frontmatter の `locations` のうち `place_id` の要素はここから組み立て、座標を直書きした要素だけが `frontmatterExtra.locations` に残ります。
+
+不変条件は「**`locations` に載る = 紐づく `Place` が `public` / `internal`**」。公開サイトの聖地マップが `internal` のキーで `GET /places` を読み、`internal` の聖地を公開しているので、出典（`public` だけ）と線が違います。`confidential` 以上は「公開サイトに出したくないが、どの記事・アセットに出てくるかは akashic で持ちたい」聖地（生活圏など）で、紐づけは DB にだけ残ります。
+
+1. **読み出しは固定のクリアランス + 明示条件** — `renderArticlesForPush` は `ArticlePlace` を操作者ではなく `internal` で `withClearance` し、さらに `place.classification in (public, internal)` で絞る
+2. **組み立て側でも絞る** — `buildFrontmatter` は `classification` を必須にした `ArticlePlaceRow` しか受け取らず、`isPublishablePlace` で絞る（落とした行は黙って除外してよい。本文の `^[n]` のような参照は無い）
+
+聖地の正式名・classification・削除で push の出力が変わるときは、`updatePlace` / `deletePlace` が紐づく記事に `dirty` / `editedAt` を立てます。記事の編集画面で聖地を付け外ししたときは、公開範囲の並びが変わったときだけ立てます（`saveArticlePlaces`）。取り込み（`cli:import-articles`）が置き換えるのも公開範囲の行だけで、`confidential` 以上の行はファイルに無いのが正しいので残します。
+
+**本文は守らない。** 紐づけを伏せても、本文に店名や住所を書けば公開されます（非公開にしたい場所は本文に書かない運用）。おでかけ記事の AI には、非公開の聖地の名前・座標を渡しません（ID だけで紐づける）。
 
 DB から生成した Markdown と実ファイルの突き合わせは `pnpm cli:verify-article-push --dir <articles>` で行えます。
 
