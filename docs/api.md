@@ -1852,7 +1852,7 @@ LLM の利用量を報告する。akashic が単価表で USD に換算し、**�
 
 | フィールド | 型 | 必須 | 説明 |
 |---|---|---|---|
-| `provider` | `"openai"` / `"anthropic"` / `"google"` | ✓ | |
+| `provider` | `"openai"` / `"anthropic"` / `"google"` / `"groq"` | ✓ | `groq` (音声の文字起こし) は `inputTokens` に課金秒数を入れる |
 | `model` | string (≤100) | ✓ | API に渡したモデル名そのまま。日付サフィックスや `models/` 接頭辞が付いていてもよい |
 | `feature` | string | ✓ | 呼び出し元。`^[a-z0-9][a-z0-9_.:-]{0,63}$`。`<出所>.<機能>` で揃える（`bot.discovery` / `worker.fitan_site`） |
 | `inputTokens` | integer ≥ 0 | | キャッシュ読み出しを**含まない**入力 |
