@@ -24,12 +24,14 @@ import {
   formatDate,
 } from "@/lib/utils";
 import { getAssetRelations, getAssetGraph } from "@/lib/domain/relations";
+import { TRANSCRIBABLE_CLEARANCES } from "@/lib/domain/transcribe";
 import { getNinaTerms } from "@/lib/domain/coverage-items";
 import type { ClearanceLevel } from "@prisma/client";
 import { SubmitButton } from "@/components/submit-button";
 import { BackButton } from "@/components/back-button";
 import { StatusWorkflow } from "./status-workflow";
 import { NinaAppearancePanel } from "./nina-appearance-panel";
+import { TranscribePanel } from "./transcribe-panel";
 import { ninaAppearanceOf } from "@/lib/nina";
 import { NinaHighlightBanner } from "./nina-highlight-banner";
 import { CopySourceRef } from "./copy-source-ref";
@@ -664,6 +666,21 @@ export default async function AssetDetailPage({
           {/* Status */}
           <StatusWorkflow assetId={id} initialStatus={asset.status} />
           <NinaAppearancePanel assetId={asset.id} initial={ninaAppearanceOf(asset)} editable={isEditor} />
+          {isEditor && (asset.kind === "audio" || asset.kind === "video") && (
+            <TranscribePanel
+              assetId={asset.id}
+              transcribedAt={asset.transcribedAt}
+              transcribeError={asset.transcribeError}
+              hasTranscript={asset.texts.some((t) => t.textType === "transcript")}
+              blockedReason={
+                !TRANSCRIBABLE_CLEARANCES.includes(asset.classification)
+                  ? "機密のアセットは外部に送らないため、文字起こしできません"
+                  : asset.storageProvider !== "gdrive" || !asset.storageKey
+                    ? "Drive に置かれていないので文字起こしできません"
+                    : null
+              }
+            />
+          )}
 
           {/* 記事での参照 + 含まれているドシエ + クリップ (#41): 「ここはもう記事に書いた / 取ってある」を見せる */}
           <MaterialClipPanel items={materialItems} editable={isEditor} />

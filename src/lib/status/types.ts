@@ -60,6 +60,8 @@ export const SOURCE_FRESHNESS_MAX_AGE_HOURS: Record<string, number> = {
 export const TIKTOK_JOB_KEY = "bot.tiktok_watch";
 /** Asset.mentionsNina の付け直し (`/api/cron/nina-mentions`) */
 export const NINA_MENTIONS_JOB_KEY = "cron.nina_mentions";
+/** 坂井新奈のトークの文字起こし (`/api/cron/transcribe`、#282) */
+export const TRANSCRIBE_JOB_KEY = "cron.transcribe";
 
 /**
  * ハートビートを期待するジョブ。報告が一度も無ければ「未報告」(unknown) と出す。
@@ -76,6 +78,7 @@ export const EXPECTED_JOBS: { key: string; name: string; group: CheckGroup }[] =
   { key: "cron.x_mentions", name: "X 言及監視 (日次)", group: "collect" },
   { key: "bot.discovery", name: "bot: 今日の発見の抽出", group: "process" },
   { key: NINA_MENTIONS_JOB_KEY, name: "新奈への言及の付け直し (15 分)", group: "process" },
+  { key: TRANSCRIBE_JOB_KEY, name: "トークの文字起こし (15 分)", group: "process" },
   { key: "worker.stats", name: "stats-worker (ダッシュボード集計)", group: "workers" },
   { key: "worker.drive_backup", name: "Drive バックアップ", group: "workers" },
   { key: "worker.sync", name: "sekai-nina-sync", group: "workers" },
