@@ -776,7 +776,7 @@ export async function replacePerformanceSetlist(
       tx,
       clean.map((c) => c.title)
     );
-    await tx.liveSetlistItem.deleteMany({ where: { performanceId } });
+    await tx.liveSetlistItem.deleteMany({ where: { liveId: live.id, performanceId } });
     if (clean.length > 0) {
       await tx.liveSetlistItem.createMany({
         data: clean.map((c, position) => ({

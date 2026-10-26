@@ -148,18 +148,26 @@ async function main() {
   const orphans = apply
     ? await prisma.song.findMany({
         where: { tracks: { none: {} } },
-        select: { id: true, title: true, note: true, participation: true, _count: { select: { liveSongs: true } } },
+        select: {
+          id: true,
+          title: true,
+          note: true,
+          participation: true,
+          _count: { select: { liveSongs: true, setlistItems: true } },
+        },
         orderBy: { title: "asc" },
       })
     : [...byNormalized.entries()]
         .filter(([k]) => !catalogKeys.has(k))
-        .map(([, s]) => ({ id: s.id, title: s.title, note: "", participation: "unknown" as const, _count: { liveSongs: -1 } }));
+        .map(([, s]) => ({ id: s.id, title: s.title, note: "", participation: "unknown" as const, _count: { liveSongs: -1, setlistItems: -1 } }));
   if (orphans.length > 0) {
     console.log(`\nどの作品にも入っていない曲 (${orphans.length}): ライブ限定アレンジか誤字。/songs で確認してください`);
     let pruned = 0;
     for (const o of orphans) {
-      // 誰も参照せず人も何も書いていない行は、取り込みが作って要らなくなったもの (題の修正等)。消す
-      const unused = apply && o._count.liveSongs === 0 && !o.note && o.participation === "unknown";
+      // 誰も参照せず人も何も書いていない行は、取り込みが作って要らなくなったもの (題の修正等)。消す。
+      // セトリ (坂井新奈が出ていない曲も入る) から参照されている曲は LiveSong が無くても消さない (RESTRICT で落ちる)
+      const unused =
+        apply && o._count.liveSongs === 0 && o._count.setlistItems === 0 && !o.note && o.participation === "unknown";
       console.log(`  ${o.title}${apply ? ` (披露 ${o._count.liveSongs} 回)` : ""}${unused ? " → 参照が無いので消します" : ""}`);
       if (unused) {
         await prisma.song.delete({ where: { id: o.id } });

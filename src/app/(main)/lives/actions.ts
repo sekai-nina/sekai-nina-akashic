@@ -100,6 +100,8 @@ export async function replaceSetlistAction(id: string, input: SetlistInput) {
 
 export async function replacePerformanceSetlistAction(id: string, performanceId: string, items: SetlistItemInput[]) {
   const user = await requireMember();
+  // Server Action も公開された口なので公演 ID も型を確かめる (文字列以外は Prisma の生のエラーになる)
+  if (typeof performanceId !== "string" || !performanceId) return { ok: false as const, error: "公演が指定されていません" };
   const parsed = PerformanceSetlistSchema.safeParse({ items });
   if (!parsed.success) return { ok: false as const, error: formatZodError(parsed.error) };
   try {

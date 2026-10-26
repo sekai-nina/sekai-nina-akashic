@@ -83,3 +83,27 @@ describe("deriveLiveSongs", () => {
     expect(out.common).toEqual(["a", "b"]);
   });
 });
+
+describe("parseSetlistText (表記のゆれ)", () => {
+  it("飾りの付いた MC / VTR、箇条書きの印、全角の番号、番号の無い EN を読む", () => {
+    const text = "Ｍ１ キュン\n〜MC〜\n・青春の馬\nVTR（自己紹介）\nEN キツネ\nENCORE 2\n-MC-";
+    expect(parseSetlistText(text)).toEqual([
+      { title: "キュン", section: "" },
+      { title: "青春の馬", section: "" },
+      { title: "キツネ", section: "アンコール" },
+    ]);
+  });
+
+  it("EN の後ろの番号の無い行もアンコール。半角の / は前後に空白が無ければ割らない", () => {
+    expect(parseSetlistText("M1 A\nEN1 B\nC")).toEqual([
+      { title: "A", section: "" },
+      { title: "B", section: "アンコール" },
+      { title: "C", section: "アンコール" },
+    ]);
+    expect(parseSetlistText("1/2").map((l) => l.title)).toEqual(["1/2"]);
+  });
+
+  it("M / E で始まる曲名 (Empty) は削らない", () => {
+    expect(parseSetlistText("Empty\nMy fans").map((l) => l.title)).toEqual(["Empty", "My fans"]);
+  });
+});

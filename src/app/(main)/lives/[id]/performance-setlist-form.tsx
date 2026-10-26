@@ -2,7 +2,7 @@
 
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { LivePerformanceView, LiveSetlistItemView } from "@/lib/domain/lives";
 import { MAX_SETLIST_ITEMS, parseSetlistText, SETLIST_SECTIONS } from "@/lib/live/setlist";
 import { normalizeSongTitle } from "@/lib/songs/normalize";
@@ -12,7 +12,7 @@ import { replacePerformanceSetlistAction } from "../actions";
  * 公演ごとのセトリ (出ていない曲も含めた全曲)。
  *
  * 作業の流れ: 公式やファンの投稿のセトリを貼る → 「読み込む」で曲の行になる → 坂井新奈が出ていない曲の
- * 「参加」を外し、センター曲に印を付ける → 保存。2 公演目からは「前の公演からコピー」して差分だけ直す。
+ * 「参加」を外し、センター曲に印を付ける → 保存。2 公演目からは「ほかの公演からコピー」して差分だけ直す。
  * 保存すると、上の表の共通披露曲 / 追加曲 / センター曲がセトリから組み直される (参加した曲だけ)。
  */
 export function PerformanceSetlistForm({
@@ -98,11 +98,19 @@ function PerformanceEditor({
   const [rows, setRows] = useState<Row[]>(() => toRows(performance.setlist));
   const [paste, setPaste] = useState("");
   const [dirty, setDirty] = useState(false);
+  const dirtyRef = useRef(false);
   const [msg, setMsg] = useState<string | null>(null);
   const known = useMemo(() => new Set(knownKeys), [knownKeys]);
 
+  // 保存後の refresh で返る行 (曲名は曲マスタの表記に寄っている) に、編集中でない限り追随する。
+  // 「編集中か」は ref で持つ (SetlistForm と同じ。state だと保存直後に古い行へ一瞬戻る)
+  useEffect(() => {
+    if (!dirtyRef.current) setRows(toRows(performance.setlist));
+  }, [performance.setlist]);
+
   function change(next: Row[]) {
     setRows(next);
+    dirtyRef.current = true;
     setDirty(true);
   }
   function patch(i: number, p: Partial<Row>) {
@@ -122,9 +130,10 @@ function PerformanceEditor({
       setMsg("曲を読み取れませんでした");
       return;
     }
+    const dropped = Math.max(0, parsed.length - MAX_SETLIST_ITEMS);
     change(
       toRows(
-        parsed.map((l) => ({
+        parsed.slice(0, MAX_SETLIST_ITEMS).map((l) => ({
           title: l.title,
           section: l.section,
           participated: participation[normalizeSongTitle(l.title)] !== "none",
@@ -133,7 +142,9 @@ function PerformanceEditor({
       )
     );
     setPaste("");
-    setMsg(`${parsed.length} 曲を読み込みました。参加とセンターを確かめて保存してください`);
+    setMsg(
+      `${parsed.length - dropped} 曲を読み込みました${dropped > 0 ? ` (上限 ${MAX_SETLIST_ITEMS} 曲を超えた ${dropped} 曲は落としました)` : ""}。参加とセンターを確かめて保存してください`
+    );
   }
   function copyFrom(id: string) {
     const src = others.find((o) => o.id === id);
@@ -152,6 +163,7 @@ function PerformanceEditor({
         return;
       }
       setMsg(`保存しました (${res.songs} 曲 · 参加 ${res.participated}${res.center > 0 ? ` · センター ${res.center}` : ""})`);
+      dirtyRef.current = false;
       setDirty(false);
       router.refresh();
     });

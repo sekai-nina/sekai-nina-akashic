@@ -103,8 +103,9 @@ export function SetlistEditor({
   onChange: (next: SetlistDraft) => void;
   disabled?: boolean;
   /**
-   * セトリ (全曲) が入っている公演の ID。この公演の追加曲・センター曲と共通披露曲はセトリから
-   * 組み直されるので、ここでは読み取り専用にする (直してもセトリ保存で上書きされる)
+   * セトリ (全曲) が入っている公演の ID。この公演の追加曲・センター曲はセトリから組み直されるので
+   * 読み取り専用にする。共通披露曲は **全公演にセトリがあるときだけ** 読み取り専用 (セトリの無い公演の
+   * 曲は共通披露曲 + 追加曲なので、そこから曲を外すには共通披露曲を直すしかない)
    */
   derivedIds?: string[];
   /**
@@ -117,6 +118,7 @@ export function SetlistEditor({
   const known = useMemo(() => new Set(knownKeys ?? []), [knownKeys]);
   const derived = useMemo(() => new Set(derivedIds ?? []), [derivedIds]);
   const fromSetlist = (r: PerformanceRow) => !!r.id && derived.has(r.id);
+  const commonDerived = rows.length > 0 && rows.every(fromSetlist);
   const derivedNote = <span className="text-slate-400"> (セトリから自動)</span>;
   /** マスタに無い曲 (knownKeys が無ければ判定しない) */
   const unknownIn = (text: string): string[] =>
@@ -145,7 +147,7 @@ export function SetlistEditor({
   return (
     <div>
       <label className={labelCls} htmlFor="live-common-songs">
-        共通披露曲 (全公演で披露した曲。「A / B / C」のようにスラッシュ区切り){derived.size > 0 && derivedNote}
+        共通披露曲 (全公演で披露した曲。「A / B / C」のようにスラッシュ区切り){commonDerived && derivedNote}
       </label>
       <input
         id="live-common-songs"
@@ -154,7 +156,7 @@ export function SetlistEditor({
         onChange={(e) => onChange({ ...value, commonSongs: e.target.value })}
         placeholder="NO WAR in the future 2020 / キツネ / 空飛ぶ車"
         disabled={disabled}
-        readOnly={derived.size > 0}
+        readOnly={commonDerived}
       />
       <UnknownSongs titles={unknownIn(value.commonSongs)} />
 

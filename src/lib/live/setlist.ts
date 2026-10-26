@@ -23,7 +23,9 @@ function sectionHeading(line: string): string | null {
     .normalize("NFKC")
     .replace(/^[\s\-–—=＝~〜【\[<＜(（]+|[\s\-–—=＝~〜】\]>＞)）:：]+$/g, "")
     .trim()
-    .toLowerCase();
+    .toLowerCase()
+    // 「ENCORE 1」「アンコール1」のように番号が付いた見出しもある
+    .replace(/\s*\d+$/, "");
   if (/^(本編|main)$/.test(t)) return "";
   if (/^(w|ダブル|double)\s*(アンコール|encore|en)$/.test(t)) return "Wアンコール";
   if (/^(アンコール|encore|en)$/.test(t)) return "アンコール";
@@ -31,7 +33,16 @@ function sectionHeading(line: string): string | null {
 }
 
 /** 曲ではない行 (MC・VTR・Overture など)。番号を落としたあとの文字列で判定する */
-const NOT_A_SONG = /^(mc\d*|vtr\d*|overture|over ture|se|影ナレ|開演|終演|幕間|interlude|ダンストラック|dance track)$/i;
+const NOT_A_SONG = /^(mc\d*|vtr\d*|overture|over ture|se|影ナレ|開演|終演|幕間|interlude|ダンストラック|dance track)(\s*[(（].*[)）])?$/i;
+
+/** 飾り (「〜MC〜」「-VTR-」) を落として曲でない行かを見る */
+function isNotASong(title: string): boolean {
+  const t = title
+    .normalize("NFKC")
+    .replace(/^[\s\-–—=~〜【\[<＜]+|[\s\-–—=~〜】\]>＞]+$/g, "")
+    .trim();
+  return NOT_A_SONG.test(t);
+}
 
 /**
  * 貼ったセトリを曲の行にする。
@@ -44,12 +55,19 @@ const NOT_A_SONG = /^(mc\d*|vtr\d*|overture|over ture|se|影ナレ|開演|終演
 export function parseSetlistText(text: string): ParsedSetlistLine[] {
   const raw = text.replace(/\r\n?/g, "\n").trim();
   if (!raw) return [];
-  const lines = raw.includes("\n") ? raw.split("\n") : raw.split(/\s*[/／]\s*/);
+  // 1 行なら「A / B / C」の区切りで割る。半角の「/」は前後に空白があるときだけ (「1/2」のような曲名を割らない)
+  const lines = raw.includes("\n") ? raw.split("\n") : raw.split(/\s+\/\s+|\s*／\s*/);
 
   const out: ParsedSetlistLine[] = [];
   let section = "";
   for (const line of lines) {
-    const trimmed = line.replace(/\s+/g, " ").trim();
+    const trimmed = line
+      .replace(/\s+/g, " ")
+      .trim()
+      // 箇条書きの印 (「・キュン」)
+      .replace(/^[・●○◆◇■□•▪]\s*/, "")
+      // 行頭の全角の番号・印 (「Ｍ１」「ＥＮ２」) だけ半角にする。曲名の全角記号は触らない
+      .replace(/^[Ａ-Ｚａ-ｚ０-９]+/, (m) => m.normalize("NFKC"));
     if (!trimmed || /^[※*＊#＃]/.test(trimmed)) continue;
     const heading = sectionHeading(trimmed);
     if (heading !== null) {
@@ -61,20 +79,25 @@ export function parseSetlistText(text: string): ParsedSetlistLine[] {
     // 番号の前置き。EN / WEN はアンコールの印でもある (見出しの無いセトリに多い)
     // 印 (M / EN / WEN) があれば番号の後ろの区切りは任意。数字だけのときは区切りか空白を要る
     // (「21世紀〜」のように数字で始まる曲名の頭を削らない)
-    const tagged = title.match(/^(W\s*EN|EN|M|E)\s*[0-9０-９]+\s*[.．:：)）\]】\-－、]?\s*(.+)$/i);
+    // EN / WEN は番号が無くてもよい (「EN キュン」)。M / E は番号が要る (「Empty」「Mama」を削らない)
+    const tagged =
+      title.match(/^(W\s*EN|EN|M|E)\s*[0-9０-９]+\s*[.．:：)）\]】\-－、]?\s*(.+)$/i) ??
+      title.match(/^(W\s*EN|EN)\s*[.．:：)）\]】\-－、\s]\s*(.+)$/);
     const numbered = tagged ? null : title.match(/^[0-9０-９]+\s*(?:曲目|[.．:：)）\]】\-－、]|\s)\s*(.+)$/);
     if (tagged) {
       const tag = tagged[1].replace(/\s/g, "").toUpperCase();
-      if (tag === "WEN") lineSection = "Wアンコール";
-      else if (tag === "EN" || tag === "E") lineSection = lineSection || "アンコール";
+      // EN / WEN は以降の番号の無い行にも続ける (「EN1 B」の次の「C」もアンコール)
+      if (tag === "WEN") section = lineSection = "Wアンコール";
+      else if (tag === "EN" || tag === "E") section = lineSection = lineSection || "アンコール";
       title = tagged[2].trim();
     } else if (numbered) {
       title = numbered[1].trim();
     }
-    if (!title || NOT_A_SONG.test(title.normalize("NFKC").trim())) continue;
+    if (!title || isNotASong(title)) continue;
     out.push({ title, section: lineSection });
   }
-  return out.slice(0, MAX_SETLIST_ITEMS);
+  // 上限 (MAX_SETLIST_ITEMS) で切るのは画面 (何曲落としたかを出すため)
+  return out;
 }
 
 /** セトリの 1 曲 (派生の計算に要るものだけ) */
