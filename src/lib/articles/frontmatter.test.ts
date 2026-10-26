@@ -518,6 +518,38 @@ describe("locations の聖地 (ArticlePlace) — #283", () => {
     expect(Object.keys(fm)).toEqual(["short_id", "dossier", "featured", "locations", "featured_quotes"]);
   });
 
+  it("extra に残った place_id は allowlist に無ければ落とす (backfill 前・非公開化した聖地)", () => {
+    const fm = buildFrontmatter({
+      ...base,
+      frontmatterExtra: {
+        locations: [
+          { name: "公開", place_id: "pub" },
+          { name: "非公開", place_id: "secret" },
+          { name: "直書き", lat: 1, lng: 2 },
+        ],
+      },
+      publishablePlaceIds: new Set(["pub"]),
+    });
+    expect(fm.locations).toEqual([
+      { name: "公開", place_id: "pub" },
+      { name: "直書き", lat: 1, lng: 2 },
+    ]);
+  });
+
+  it("extra と ArticlePlace に同じ聖地があれば 1 回だけ書く", () => {
+    const fm = buildFrontmatter({
+      ...base,
+      places: [place("a", ClearanceLevel.internal, 0)],
+      frontmatterExtra: { locations: [{ name: "古い名前", place_id: "a" }] },
+    });
+    expect(fm.locations).toEqual([{ name: "店a", place_id: "a" }]);
+  });
+
+  it("聖地が無ければ空配列・配列でない locations もそのまま書く", () => {
+    expect(buildFrontmatter({ ...base, frontmatterExtra: { locations: [] } }).locations).toEqual([]);
+    expect(buildFrontmatter({ ...base, frontmatterExtra: { locations: "x" } }).locations).toBe("x");
+  });
+
   it("取り込みは place_id の要素を places に分け、直書きは extra に残す", () => {
     const { places, extra } = splitLocations({
       featured: true,

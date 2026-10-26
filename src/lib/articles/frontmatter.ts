@@ -465,6 +465,13 @@ export interface ArticleFrontmatterInput {
   sources?: ArticleSourceRow[];
   /** ArticlePlace の行。絞り込み (public / internal だけ) は `buildFrontmatter` が行う */
   places?: ArticlePlaceRow[];
+  /**
+   * 書き出してよい聖地の ID (Place が public / internal)。**push は必ず渡す。**
+   * `frontmatterExtra.locations` にまだ残っている `place_id` の要素 (backfill 前・backfill が
+   * 移せなかった記事・取り込み時に akashic に無かった聖地) は、ここに無ければ落とす (fail-closed)。
+   * 渡さない (往復テスト・取り込みの dirty 判定) ときは素通し
+   */
+  publishablePlaceIds?: ReadonlySet<string>;
 }
 
 /**
@@ -579,10 +586,20 @@ export function buildFrontmatter(input: ArticleFrontmatterInput): BuiltFrontmatt
   if (sources.length) fm.source = sources;
 
   // locations = 聖地 (ArticlePlace。public / internal だけ) + 座標直書き (frontmatterExtra)
+  // 同じ sortOrder は placeId で決める (見えない行は番号を振り直されないので同値がありうる。
+  // push のたびに順序が入れ替わらないように)
   const placeLocations = (input.places ?? [])
     .filter(isPublishablePlace)
-    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .sort((a, b) => a.sortOrder - b.sortOrder || (a.placeId < b.placeId ? -1 : a.placeId > b.placeId ? 1 : 0))
     .map((p) => ({ name: p.name, place_id: p.placeId }));
+  const linkedIds = new Set(placeLocations.map((l) => l.place_id));
+  /** extra に残った `place_id` の要素。ArticlePlace と重複するもの・書き出せない聖地は落とす */
+  const keepExtraLocation = (loc: unknown) => {
+    const placeId = loc && typeof loc === "object" ? str((loc as Record<string, unknown>).place_id) : undefined;
+    if (!placeId) return true;
+    if (linkedIds.has(placeId)) return false;
+    return input.publishablePlaceIds ? input.publishablePlaceIds.has(placeId) : true;
+  };
 
   // モデル化されていないキー (featured_quotes / locations / dossier 等) を復元する。
   // 専用カラムと衝突するキーはカラム側が正なので無視する
@@ -595,7 +612,18 @@ export function buildFrontmatter(input: ArticleFrontmatterInput): BuiltFrontmatt
   let locationsDone = false;
   const writeLocations = (inline: unknown) => {
     locationsDone = true;
-    const all = [...placeLocations, ...(Array.isArray(inline) ? inline : [])];
+    // 配列でない / 空配列の locations は今までどおりそのまま書く (聖地が無いときだけ)
+    if (!Array.isArray(inline)) {
+      if (placeLocations.length) fm.locations = placeLocations;
+      else if (inline !== undefined) fm.locations = inline;
+      return;
+    }
+    const rest = inline.filter(keepExtraLocation);
+    if (!placeLocations.length && rest.length === inline.length) {
+      fm.locations = inline;
+      return;
+    }
+    const all = [...placeLocations, ...rest];
     if (all.length) fm.locations = all;
   };
   for (const [k, v] of entries) {

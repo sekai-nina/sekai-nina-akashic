@@ -1230,17 +1230,26 @@ export async function renderArticlesForPush(where: Prisma.ArticleWhereInput): Pr
   if (!articles.length) return [];
 
   const ids = articles.map((a) => a.id);
-  const placeRows = await withClearance(PLACE_PUSH_CLEARANCE, (tx) =>
-    tx.articlePlace.findMany({
-      where: { articleId: { in: ids }, place: { classification: { in: [...PUBLISHABLE_PLACE_CLEARANCES] } } },
-      select: {
-        articleId: true,
-        placeId: true,
-        sortOrder: true,
-        place: { select: { classification: true, entity: { select: { canonicalName: true } } } },
-      },
-    }),
+  const [placeRows, publishablePlaces] = await withClearance(PLACE_PUSH_CLEARANCE, (tx) =>
+    Promise.all([
+      tx.articlePlace.findMany({
+        where: { articleId: { in: ids }, place: { classification: { in: [...PUBLISHABLE_PLACE_CLEARANCES] } } },
+        orderBy: [{ sortOrder: "asc" }, { placeId: "asc" }],
+        select: {
+          articleId: true,
+          placeId: true,
+          sortOrder: true,
+          place: { select: { classification: true, entity: { select: { canonicalName: true } } } },
+        },
+      }),
+      // frontmatterExtra.locations に残った place_id を書き出してよいか (allowlist = fail-closed)
+      tx.place.findMany({
+        where: { classification: { in: [...PUBLISHABLE_PLACE_CLEARANCES] } },
+        select: { id: true },
+      }),
+    ]),
   );
+  const publishablePlaceIds = new Set(publishablePlaces.map((p) => p.id));
   const placesByArticle = new Map<string, ArticlePlaceRow[]>();
   for (const row of placeRows) {
     const item: ArticlePlaceRow = {
@@ -1306,6 +1315,7 @@ export async function renderArticlesForPush(where: Prisma.ArticleWhereInput): Pr
     const { markdown, blocked } = renderArticleMarkdown({
       ...article,
       places: placesByArticle.get(article.id) ?? [],
+      publishablePlaceIds,
     });
     // PUSH_CLEARANCE が public なら RLS が先に落とすので、ここに非 public 行が
     // 残っているのは RLS が効いていない証拠。上と同じくバッチ全体を止める

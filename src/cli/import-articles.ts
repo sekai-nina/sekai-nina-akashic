@@ -234,7 +234,7 @@ async function main() {
     for (const e of p.places) {
       if (!isPublishablePlace(placeIndex.get(e.placeId)!)) {
         warnings.push(
-          `${p.path}: 非公開の聖地 ${e.name} が公開リポジトリの locations に書かれている (記事を保存し直して push すると消える)`,
+          `${p.path}: 非公開の聖地 ${e.name} が公開リポジトリの locations に書かれている (push 待ちにするので、push すると消える)`,
         );
       }
     }

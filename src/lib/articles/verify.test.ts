@@ -151,6 +151,21 @@ describe("dirtyAfterImport", () => {
     expect(() => dirtyAfterImport(raw, rest, rows, toArticlePlaceRows(places))).toThrow(/非 public/);
   });
 
+  it("聖地だけの差分 (非公開にした・改名した) は places として dirty にする", () => {
+    const raw = article(["title: t", "short_id: abc1234", "locations:", "  - name: 旧名", "    place_id: a"]);
+    const cols = toArticleColumns(parseArticle(raw), "x.md");
+    const { sources, places: _places, ...rest } = cols;
+    const hidden = dirtyAfterImport(raw, rest, resolveOffline(sources), [
+      { placeId: "a", name: "旧名", classification: "confidential", sortOrder: 0 },
+    ]);
+    expect(hidden.verdict).toBe("places");
+    expect(hidden.dirty).toBe(true);
+    const renamed = dirtyAfterImport(raw, rest, resolveOffline(sources), [
+      { placeId: "a", name: "新名", classification: "internal", sortOrder: 0 },
+    ]);
+    expect(renamed).toMatchObject({ verdict: "places", dirty: true });
+  });
+
   it("値の差分 (取りこぼし) は dirty にせず notes で知らせる", () => {
     // type が enum 外だと push で消える = changed
     const raw = article(["title: t", "short_id: abc1234", "type: unknown_type"]);

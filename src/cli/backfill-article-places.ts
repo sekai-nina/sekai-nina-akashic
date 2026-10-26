@@ -12,8 +12,8 @@
  *      (name が聖地の正式名と違う、place_id の要素に他のキーがある、等)
  *   4. ArticlePlace を作り、`frontmatterExtra` を書き換える (1 トランザクション)
  *
- * 出力が変わらないことを確かめてから書くので dirty は立てない。`frontmatterExtra` は素の SQL で
- * 書く (`updatedAt` を進めない。編集中の人の楽観ロックを壊さない。backfill-article-dossiers と同じ)。
+ * 出力が変わらないことを確かめてから書くので dirty は立てない。`updatedAt` は進める
+ * (backfill 前に開いた編集画面が聖地 0 件のまま保存して、移した行を消すのを `conflict` で止める)。
  *
  * 書き込みは DIRECT_URL (RLS バイパス)。既定は dry-run、--apply で書く。
  *
@@ -95,7 +95,7 @@ async function main() {
       prisma.articlePlace.createMany({
         data: rows.map((r) => ({ articleId: a.id, placeId: r.placeId, sortOrder: r.sortOrder })),
       }),
-      prisma.$executeRaw`UPDATE "Article" SET "frontmatterExtra" = ${JSON.stringify(split.extra)}::jsonb WHERE id = ${a.id}`,
+      prisma.$executeRaw`UPDATE "Article" SET "frontmatterExtra" = ${JSON.stringify(split.extra)}::jsonb, "updatedAt" = now() WHERE id = ${a.id}`,
     ]);
   }
 

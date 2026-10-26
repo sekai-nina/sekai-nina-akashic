@@ -68,8 +68,10 @@ const sameIds = (a: string[], b: string[]) => a.length === b.length && a.every((
  * 記事の聖地を、操作者に見えている分だけ `placeIds` の並びに置き換える (記事の編集画面)。
  *
  * 楽観ロックは記事の編集と同じ `updatedAt`。編集画面は本文の保存 (`updateArticle`) の後に
- * これを呼ぶので、そこで返った `updatedAt` を渡す。push の出力が変わるときは `updatedAt` を
- * 進めて dirty / editedAt を立て、ロックが外れていたらトランザクションごと巻き戻す。
+ * これを呼ぶので、そこで返った `updatedAt` を渡す。並びが変わったら、push の出力に関係なく
+ * **書く前に** `updatedAt` を進める (非公開の聖地だけの付け外しでも、同じ記事を開いていた
+ * 別の人の古い一覧で上書きして消さないため)。記事の行のロックで同時の保存も直列になり、
+ * 後から来た方は `conflict` になる。push の出力が変わるときだけ dirty / editedAt も立てる。
  */
 export async function saveArticlePlaces(
   shortId: string,
@@ -105,22 +107,19 @@ export async function saveArticlePlaces(
       const publishedBefore = current.filter((r) => isPublishablePlace(r.place)).map((r) => r.placeId);
       const publishedAfter = next.filter((id) => isPublishablePlace(classOf.get(id)!));
 
-      await tx.articlePlace.deleteMany({ where: { articleId: article.id, placeId: { notIn: next } } });
-      for (const [i, placeId] of next.entries()) {
-        await tx.articlePlace.upsert({
-          where: { articleId_placeId: { articleId: article.id, placeId } },
-          create: { articleId: article.id, placeId, sortOrder: i },
-          update: { sortOrder: i },
-        });
-      }
+      const { count } = await tx.article.updateMany({
+        where: { id: article.id, updatedAt: expectedUpdatedAt },
+        data: sameIds(publishedBefore, publishedAfter)
+          ? { updatedAt: new Date() }
+          : { dirty: true, editedAt: new Date() },
+      });
+      if (count === 0) throw new SaveAbort("conflict");
 
-      if (!sameIds(publishedBefore, publishedAfter)) {
-        const { count } = await tx.article.updateMany({
-          where: { id: article.id, updatedAt: expectedUpdatedAt },
-          data: { dirty: true, editedAt: new Date() },
-        });
-        if (count === 0) throw new SaveAbort("conflict");
-      }
+      // 見えている行だけ置き換える (操作者より上のクリアランスの行は RLS で見えず、消えもしない)
+      await tx.articlePlace.deleteMany({ where: { articleId: article.id, placeId: { in: before } } });
+      await tx.articlePlace.createMany({
+        data: next.map((placeId, sortOrder) => ({ articleId: article.id, placeId, sortOrder })),
+      });
     });
   } catch (e) {
     if (e instanceof SaveAbort) return { ok: false, reason: e.reason };

@@ -43,7 +43,13 @@ export function normalizeArea(area: string | null | undefined): string | null | 
  */
 async function markArticlesForPlace(tx: Prisma.TransactionClient, placeId: string) {
   await tx.article.updateMany({
-    where: { places: { some: { placeId } } },
+    where: {
+      OR: [
+        { places: { some: { placeId } } },
+        // backfill 前・backfill が移せなかった記事は frontmatterExtra.locations に place_id が残っている
+        { frontmatterExtra: { path: ["locations"], array_contains: [{ place_id: placeId }] } },
+      ],
+    },
     data: { dirty: true, editedAt: new Date() },
   });
 }
