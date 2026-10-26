@@ -5,14 +5,15 @@ import { recordJobRun } from "@/lib/status/jobs";
 import { TRANSCRIBE_JOB_KEY } from "@/lib/status/types";
 import { isGroqConfigured } from "@/lib/transcribe/groq";
 
-// 1 件あたり Drive からの取得 (〜25 MB) と Groq の応答で数秒。BUDGET_MS で打ち切って次の回に回す
+// 1 件あたり Drive からの取得 (〜25 MB) と Groq の応答で数秒。BUDGET_MS を過ぎたら次の回に回す
 export const maxDuration = 300;
 
 const INTERVAL_SEC = 15 * 60;
 const JOB_NAME = "トークの文字起こし (15 分)";
 // Groq の無料枠は 20 回 / 分。1 件 2〜3 秒で回るので、1 回の cron で 1 分に収まる数にする
 const BATCH_LIMIT = 15;
-const BUDGET_MS = 240_000;
+// 新しい 1 件を始めてよいのはここまで。1 件は最悪 Drive 30 秒 + Groq 90 秒かかるので、300 秒に収まる
+const BUDGET_MS = 150_000;
 
 /**
  * 坂井新奈のトークの音声・動画を Groq で文字起こしする (#282)。`vercel.json` の crons から 15 分ごと。
@@ -31,9 +32,10 @@ export async function GET(request: Request) {
     );
     // 対象は internal 以下のトークだけなので、件数は /status (ログイン済み全員) に出してよい
     await recordJobRun(TRANSCRIBE_JOB_KEY, {
-      // 1 件も進まず全部が再試行に回った (キーの誤り・Groq の障害) ときだけ異常にする
-      status: r.retry > 0 && r.done + r.empty + r.failed === 0 ? "error" : "ok",
-      message: `保存 ${r.done} / 空 ${r.empty} / 失敗 ${r.failed} / 再試行 ${r.retry} / 残り ${r.remaining}`,
+      // キーの誤り・ファイルと関係ない 400 で打ち切った回と、1 件も進まなかった回は異常にする。
+      // 429 (無料枠の上限) でも打ち切るが、続くなら上限を見直す合図なので同じく異常に出す
+      status: r.stopped || (r.retry > 0 && r.done + r.empty + r.failed === 0) ? "error" : "ok",
+      message: `保存 ${r.done} / 空 ${r.empty} / 失敗 ${r.failed} / 再試行 ${r.retry}${r.stopped ? " (打ち切り)" : ""} / 残り ${r.remaining}`,
       count: r.done + r.empty + r.failed,
       durationMs: Date.now() - startedAt,
       intervalSec: INTERVAL_SEC,

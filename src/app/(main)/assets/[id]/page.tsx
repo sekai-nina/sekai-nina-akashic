@@ -24,7 +24,7 @@ import {
   formatDate,
 } from "@/lib/utils";
 import { getAssetRelations, getAssetGraph } from "@/lib/domain/relations";
-import { TRANSCRIBABLE_CLEARANCES } from "@/lib/domain/transcribe";
+import { transcribeBlockedReason } from "@/lib/domain/transcribe";
 import { getNinaTerms } from "@/lib/domain/coverage-items";
 import type { ClearanceLevel } from "@prisma/client";
 import { SubmitButton } from "@/components/submit-button";
@@ -672,13 +672,7 @@ export default async function AssetDetailPage({
               transcribedAt={asset.transcribedAt}
               transcribeError={asset.transcribeError}
               hasTranscript={asset.texts.some((t) => t.textType === "transcript")}
-              blockedReason={
-                !TRANSCRIBABLE_CLEARANCES.includes(asset.classification)
-                  ? "機密のアセットは外部に送らないため、文字起こしできません"
-                  : asset.storageProvider !== "gdrive" || !asset.storageKey
-                    ? "Drive に置かれていないので文字起こしできません"
-                    : null
-              }
+              blockedReason={transcribeBlockedReason(asset)}
             />
           )}
 

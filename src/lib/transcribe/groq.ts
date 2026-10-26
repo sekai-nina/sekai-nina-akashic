@@ -21,6 +21,9 @@ export const GROQ_MAX_BYTES = 25 * 1024 * 1024;
 /** Groq は 1 回あたり最低 10 秒分を課金する */
 export const GROQ_MIN_BILLED_SEC = 10;
 
+/** 20 秒前後のトークなら 3 秒ほどで返る。長い動画でも 1 分あれば足りる */
+export const GROQ_TIMEOUT_MS = 90_000;
+
 const ENDPOINT = "https://api.groq.com/openai/v1/audio/transcriptions";
 
 /**
@@ -36,15 +39,16 @@ export function isGroqConfigured(): boolean {
 }
 
 /**
- * Groq が受け付けなかった。`permanent` は同じファイルを送り直しても直らないもの (形式・サイズ)。
- * それ以外 (429・5xx・キーの誤り・通信) は次の回にやり直す
+ * Groq が受け付けなかった。`permanent` は同じファイルを送り直しても直らないもの (ファイルの形式・サイズ)。
+ * それ以外は次の回にやり直す。`stopBatch` は、ほかのファイルを送っても同じ結果になるもの
+ * (429・キーの誤り・ファイルと関係ない 400) で、cron はその回を打ち切る
  */
 export class GroqTranscribeError extends Error {
   constructor(
     message: string,
     readonly permanent: boolean,
-    /** 429。無料枠は 20 回 / 分・音声 7,200 秒 / 時間までなので、cron はここで打ち切る */
-    readonly rateLimited = false,
+    /** 無料枠は 20 回 / 分・音声 7,200 秒 / 時間まで。429 で残りを送っても無駄に弾かれるだけ */
+    readonly stopBatch = false,
   ) {
     super(message);
   }
@@ -77,6 +81,18 @@ export function fileNameFor(mimeType: string | null): string {
   return `audio.${(mimeType && EXTENSIONS[mimeType]) || "mp4"}`;
 }
 
+/**
+ * 送り直しても直らないファイルの問題か。**400 をまとめて「ファイルのせい」にしない。** prompt が長すぎる・
+ * モデルが廃止された、のように要求のほうが悪い 400 でアセットを失敗にすると、cron が 15 件ずつ全件を
+ * 「できなかった」にして対象から外してしまう
+ */
+export function isFileProblem(status: number, body: string): boolean {
+  if (status === 413 || status === 415) return true;
+  if (status !== 400) return false;
+  if (/prompt|model|api[_ ]key|parameter/i.test(body)) return false;
+  return /file|audio|media|format|decod|duration/i.test(body);
+}
+
 export async function transcribeWithGroq(data: Buffer, mimeType: string | null): Promise<TranscribeResult> {
   const key = process.env.GROQ_API_KEY?.trim();
   if (!key) throw new GroqTranscribeError("GROQ_API_KEY が未設定です", false);
@@ -98,7 +114,7 @@ export async function transcribeWithGroq(data: Buffer, mimeType: string | null):
       method: "POST",
       headers: { Authorization: `Bearer ${key}` },
       body: form,
-      signal: AbortSignal.timeout(120_000),
+      signal: AbortSignal.timeout(GROQ_TIMEOUT_MS),
     });
   } catch (e) {
     throw new GroqTranscribeError(`Groq に届きませんでした: ${e instanceof Error ? e.message : String(e)}`, false);
@@ -107,12 +123,18 @@ export async function transcribeWithGroq(data: Buffer, mimeType: string | null):
     const body = (await res.text().catch(() => "")).slice(0, 300);
     // 音声トラックの無い動画 (BGM も無い画面だけのもの) は「喋っていない」と同じ扱いにする
     if (res.status === 400 && body.includes("no_audio_stream")) return { text: "", durationSec: 0, billedSec: 0 };
-    // 400 / 413 / 415 は形式・サイズの問題で、送り直しても直らない。401 / 403 はキーの問題なのでアセット側は失敗にしない
-    const permanent = res.status === 400 || res.status === 413 || res.status === 415;
-    throw new GroqTranscribeError(`Groq が ${res.status} を返しました: ${body}`, permanent, res.status === 429);
+    const permanent = isFileProblem(res.status, body);
+    // 5xx は Groq の一時的な障害なので、次のファイルは通るかもしれない
+    const stopBatch = !permanent && res.status < 500;
+    throw new GroqTranscribeError(`Groq が ${res.status} を返しました: ${body}`, permanent, stopBatch);
   }
 
-  const json = (await res.json()) as { text?: string; duration?: number; segments?: WhisperSegment[] };
+  let json: { text?: string; duration?: number; segments?: WhisperSegment[] };
+  try {
+    json = (await res.json()) as typeof json;
+  } catch (e) {
+    throw new GroqTranscribeError(`Groq の応答を読めませんでした: ${e instanceof Error ? e.message : String(e)}`, false);
+  }
   const durationSec = typeof json.duration === "number" && json.duration > 0 ? json.duration : 0;
   return {
     text: json.segments ? joinSegments(json.segments) : (json.text ?? "").trim(),

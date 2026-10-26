@@ -34,7 +34,9 @@ export function TranscribePanel({
       try {
         const res = await transcribeAsset(assetId);
         if (res.error) setError(res.error);
-        else if (res.empty) setMessage("喋っている部分が見つかりませんでした");
+        else if (res.empty) {
+          setMessage(hasTranscript ? "喋っている部分が見つかりませんでした。いまの本文はそのままです" : "喋っている部分が見つかりませんでした");
+        } else setMessage("保存しました。前の本文があれば版として残っています");
       } catch {
         setError("文字起こしに失敗しました。時間をおいてもう一度試してください");
       }

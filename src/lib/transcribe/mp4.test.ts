@@ -44,6 +44,12 @@ describe("mp4HasAudioTrack", () => {
     expect(mp4HasAudioTrack(new Uint8Array(0))).toBeNull();
   });
 
+  it("映像トラックの後ろが壊れていたら「無い」と言わずに null", () => {
+    const broken = box("free", new Uint8Array(4));
+    new DataView(broken.buffer).setUint32(0, 9999);
+    expect(mp4HasAudioTrack(new Uint8Array([...ftyp, ...box("moov", track("vide"), broken)]))).toBeNull();
+  });
+
   it("壊れたサイズでも例外にしない", () => {
     const broken = box("moov", track("soun"));
     new DataView(broken.buffer).setUint32(0, 9999);

@@ -8,8 +8,19 @@
  * 戻り値: true = 音声トラックあり / false = 無い / null = MP4 として読めない (判定せず Groq に任せる)
  */
 export function mp4HasAudioTrack(data: Uint8Array): boolean | null {
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-  const moov = findBox(view, 0, data.byteLength, "moov");
+  try {
+    return findAudioTrack(new DataView(data.buffer, data.byteOffset, data.byteLength), data.byteLength);
+  } catch (e) {
+    // 途中で壊れていたら、その先に音声トラックがあるかもしれないので「無い」とは言わない
+    if (e instanceof MalformedBox) return null;
+    throw e;
+  }
+}
+
+class MalformedBox extends Error {}
+
+function findAudioTrack(view: DataView, length: number): boolean | null {
+  const moov = findBox(view, 0, length, "moov");
   if (!moov) return null;
   let sawTrack = false;
   for (const trak of boxes(view, moov.start, moov.end, "trak")) {
@@ -39,15 +50,15 @@ function* boxes(view: DataView, from: number, to: number, type: string): Generat
     let size = view.getUint32(at);
     let header = 8;
     if (size === 1) {
-      if (at + 16 > to) return;
+      if (at + 16 > to) throw new MalformedBox();
       // 64 bit のサイズ。上位 32 bit が立つほど大きいファイルは扱わない
-      if (view.getUint32(at + 8) !== 0) return;
+      if (view.getUint32(at + 8) !== 0) throw new MalformedBox();
       size = view.getUint32(at + 12);
       header = 16;
     } else if (size === 0) {
       size = to - at;
     }
-    if (size < header || at + size > to) return;
+    if (size < header || at + size > to) throw new MalformedBox();
     if (fourcc(view, at + 4) === type) yield { start: at + header, end: at + size };
     at += size;
   }

@@ -199,15 +199,16 @@ export async function listDriveFiles(
 
 /**
  * Driveからファイルのバイナリをダウンロードする。
+ * `timeoutMs` を渡すとその時間で打ち切る (cron が maxDuration を超えないように)。
  */
-export async function downloadFromDrive(fileId: string): Promise<Buffer | null> {
+export async function downloadFromDrive(fileId: string, opts: { timeoutMs?: number } = {}): Promise<Buffer | null> {
   const auth = getAuth();
   if (!auth) return null;
 
   const drive = google.drive({ version: "v3", auth: auth as Parameters<typeof google.drive>[0]["auth"] });
   const res = await drive.files.get(
     { fileId, alt: "media", supportsAllDrives: true },
-    { responseType: "arraybuffer" }
+    { responseType: "arraybuffer", ...(opts.timeoutMs ? { timeout: opts.timeoutMs } : {}) }
   );
   return Buffer.from(res.data as ArrayBuffer);
 }
