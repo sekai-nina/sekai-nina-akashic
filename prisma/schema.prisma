@@ -1251,6 +1251,7 @@ model Live {
 
   performances LivePerformance[]
   songs        LiveSong[]
+  setlistItems LiveSetlistItem[]
 
   @@index([classification])
   @@index([entityId])
@@ -1274,7 +1275,8 @@ model LivePerformance {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  songs LiveSong[]
+  songs   LiveSong[]
+  setlist LiveSetlistItem[]
 
   @@index([liveId])
   @@index([date])
@@ -1299,8 +1301,9 @@ model Song {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  liveSongs LiveSong[]
-  tracks    ReleaseTrack[]
+  liveSongs    LiveSong[]
+  setlistItems LiveSetlistItem[]
+  tracks       ReleaseTrack[]
 }
 
 enum SongParticipation {
@@ -1381,6 +1384,38 @@ model LiveSong {
 
   role      LiveSongRole @default(performed)
   sortOrder Int          @default(0)
+
+  @@index([liveId])
+  @@index([performanceId])
+  @@index([songId])
+}
+
+/// 公演のセットリスト 1 曲分 (坂井新奈が出ていない曲も含めた全曲を、披露した順に持つ)。
+///
+/// **入力の正はこちら、LiveSong はここから作り直す派生。** 公演にセトリが 1 曲でもあれば、
+/// 保存のたびに `deriveSongsFromSetlists` がライブの LiveSong (共通披露曲 / 追加曲 / センター曲) を
+/// 参加した曲だけで組み直す。記事の表・/songs の披露履歴・サイトは今まで通り LiveSong を読めばよい。
+/// セトリの無い公演は従来どおり LiveSong の手入力が正 (過去のライブを全部セトリにし直さなくてよい)。
+/// RLS は LiveSong と同じく親 Live の classification に従う (liveId で判定する)
+model LiveSetlistItem {
+  id     String @id @default(cuid())
+  liveId String
+  live   Live   @relation(fields: [liveId], references: [id], onDelete: Cascade)
+
+  performanceId String
+  performance   LivePerformance @relation(fields: [performanceId], references: [id], onDelete: Cascade)
+
+  songId String
+  song   Song   @relation(fields: [songId], references: [id], onDelete: Restrict)
+
+  /// 公演の中の順番 (0 始まり)。同じ曲を 2 回披露したら 2 行になる (ダブルアンコールの再披露など)
+  position     Int
+  /// 「アンコール」「Wアンコール」など。空は本編
+  section      String  @default("")
+  /// 坂井新奈がこの曲に出たか。センター曲なら必ず true
+  participated Boolean @default(true)
+  /// 坂井新奈がこの曲でセンターを務めたか
+  center       Boolean @default(false)
 
   @@index([liveId])
   @@index([performanceId])
