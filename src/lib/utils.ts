@@ -388,7 +388,14 @@ export const LLM_PROVIDER_LABELS: Record<LlmProvider, string> = {
   openai: "OpenAI",
   anthropic: "Anthropic",
   google: "Google (Gemini)",
+  groq: "Groq",
 };
+
+/**
+ * 後払い (月末にカードへ請求) のプロバイダ。前払いのクレジットが無いので、残高の記録・
+ * 残り日数の判定をしない (/status に「残高が未登録」と出続けないように)
+ */
+export const LLM_POSTPAID_PROVIDERS: ReadonlySet<LlmProvider> = new Set<LlmProvider>(["groq"]);
 
 /**
  * 残高を補充する画面。/costs の「補充する」から開く。
@@ -401,6 +408,7 @@ export const LLM_PROVIDER_BILLING_URLS: Record<LlmProvider, string> = {
   openai: "https://platform.openai.com/settings/organization/billing/overview",
   anthropic: "https://platform.claude.com/settings/billing",
   google: "https://aistudio.google.com/",
+  groq: "https://console.groq.com/settings/billing",
 };
 
 /** LLM の利用量の出どころ */

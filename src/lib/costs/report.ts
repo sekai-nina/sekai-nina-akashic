@@ -1,7 +1,7 @@
 import { isCurrency, type Currency } from "./currency";
 import { LlmProvider, type LlmUsageSource } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { addDaysToDateString, toJstDateOnly } from "@/lib/utils";
+import { LLM_POSTPAID_PROVIDERS, addDaysToDateString, toJstDateOnly } from "@/lib/utils";
 import { findPricing } from "./pricing";
 import {
   SNAPSHOT_STALE_DAYS,
@@ -24,7 +24,7 @@ export const HISTORY_DAYS = 30;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export const ALL_PROVIDERS: LlmProvider[] = [LlmProvider.openai, LlmProvider.anthropic, LlmProvider.google];
+export const ALL_PROVIDERS: LlmProvider[] = [LlmProvider.openai, LlmProvider.anthropic, LlmProvider.google, LlmProvider.groq];
 
 function columnDateToJstDateOnly(d: Date): string {
   // DATE 列は「YYYY-MM-DD の UTC 00:00」で入っているので UTC で切るのが正しい
@@ -184,7 +184,9 @@ export async function getProviderSummaries(now: Date = new Date()): Promise<Prov
         : null,
       snapshotAgeDays,
       days,
-      judgement: judgeCredit({ balanceUsd, burnPerDay, snapshotAgeDays, days }),
+      judgement: LLM_POSTPAID_PROVIDERS.has(provider)
+        ? { status: "ok" as const, summary: "後払い (残高の管理は不要)" }
+        : judgeCredit({ balanceUsd, burnPerDay, snapshotAgeDays, days }),
       unpricedModels: unpriced.get(provider) ?? [],
     };
   });

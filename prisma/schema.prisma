@@ -244,6 +244,12 @@ model Asset {
   /// 確認して坂井新奈が出ていなかった (#261)。出ている = 坂井新奈の AssetEntity があること。
   /// どちらも無ければ未確認。両立させないよう `setNinaAppearance` (src/lib/domain/nina-appearance.ts) で付け外しする
   ninaAbsent         Boolean         @default(false)
+  /// 音声の文字起こし (#282) を終えた時刻。成功 (喋っていなくて本文が空だったものも含む) と、
+  /// やり直しても直らない失敗 (25 MB 超・Groq が受け付けない形式) で立てる。null なら cron の対象。
+  /// 一時的な失敗 (Drive・Groq の 5xx / 429) では立てないので、次の回に拾い直す
+  transcribedAt      DateTime?
+  /// 文字起こしできなかった理由。成功したら null に戻す
+  transcribeError    String?
 
   // Discord metadata
   discordGuildId    String?
@@ -1480,6 +1486,8 @@ enum LlmProvider {
   openai
   anthropic
   google
+  /// 音声の文字起こし (#282)。トークンではなく音声の秒数で課金する (src/lib/costs/pricing.ts)
+  groq
 }
 
 /// 金額の出どころ。provider が権威で、reported は内訳のための推定値
