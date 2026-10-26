@@ -3,6 +3,7 @@ import { TestimonialCategory, TestimonialStatus } from "@prisma/client";
 import { searchMentions, MentionResult } from "./mentions";
 import { recordUsage } from "@/lib/costs/usage";
 import { normalizeTrait, splitTraits } from "./testimonial-traits";
+import { isMemberBlogUrl } from "./testimonial-source";
 
 /**
  * 口コミ抽出のモデル。
@@ -147,15 +148,6 @@ function parseSpeakerFromLinkedEntities(linkedEntities: string): string {
   // Fallback: first entity name
   const firstEntity = linkedEntities.split(",")[0]?.trim();
   return firstEntity || "不明";
-}
-
-/**
- * 口コミはメンバー本人のブログ (/diary/detail/<id>) からだけ拾う。
- * 運営のひなたぼっこ日記 (/diary/manager/...) など他の web 資料は著者が公式アカウントで、
- * 語った人がグループ名になってしまうので対象外
- */
-export function isMemberBlogUrl(url: string | null | undefined): boolean {
-  return /hinatazaka46\.com\/s\/official\/diary\/detail\/\d+/.test(url ?? "");
 }
 
 function parseSourceUrl(sourceInfo: string): string | null {

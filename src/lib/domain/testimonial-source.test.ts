@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isMemberBlogUrl } from "./testimonials";
+import { isMemberBlogUrl } from "./testimonial-source";
 
 describe("isMemberBlogUrl", () => {
   it("メンバー本人のブログだけ通す", () => {
