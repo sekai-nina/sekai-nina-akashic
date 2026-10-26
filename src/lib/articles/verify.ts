@@ -5,6 +5,7 @@ import {
   renderArticleMarkdown,
   toArticleColumns,
   type ArticleColumns,
+  type ArticlePlaceRow,
   type ArticleSourceRow,
 } from "./frontmatter";
 
@@ -52,6 +53,14 @@ function lossyParseNotes(raw: ReturnType<typeof parseArticle>, cols: ReturnType<
   }
   if (fm.tags != null && !Array.isArray(fm.tags)) notes.push("tags: 配列でないので push で消える");
   if (fm.source != null && !Array.isArray(fm.source)) notes.push("source: 配列でないので push で消える");
+  // 聖地 (place_id) の要素は ArticlePlace に入り、name / place_id 以外は書き出されない
+  if (Array.isArray(fm.locations)) {
+    fm.locations.forEach((loc, i) => {
+      if (!loc || typeof loc !== "object" || !(loc as Record<string, unknown>).place_id) return;
+      const lost = Object.keys(loc).filter((k) => k !== "name" && k !== "place_id");
+      if (lost.length) notes.push(`locations[${i}]: 聖地の要素の ${lost.join(", ")} は push で消える`);
+    });
+  }
   return notes;
 }
 
@@ -130,13 +139,16 @@ export interface ImportDirtyDecision {
  *
  * `rows` は取り込みが書く行 (`toArticleSourceRow`) なので全て public / 非 pending。
  * push (`renderArticlesForPush`) が public クリアランスで読む行と同じ集合になる。
+ * `places` は取り込み後の ArticlePlace のうち push が読む行 (Place が public / internal)。
+ * name は聖地の正式名 (push と同じ)
  */
 export function dirtyAfterImport(
   fileRaw: string,
-  cols: Omit<ArticleColumns, "sources">,
+  cols: Omit<ArticleColumns, "sources" | "places">,
   rows: ArticleSourceRow[],
+  places: ArticlePlaceRow[],
 ): ImportDirtyDecision {
-  const { markdown, blocked } = renderArticleMarkdown({ ...cols, sources: rows });
+  const { markdown, blocked } = renderArticleMarkdown({ ...cols, sources: rows, places });
   if (blocked.length) {
     // 取り込みの行は public 固定なのでここには来ないはず。来たら取り込み側の規則が壊れている
     // (黙って dirty=false にすると、push 時に blocked で止まる記事を「同期済み」と表示してしまう)

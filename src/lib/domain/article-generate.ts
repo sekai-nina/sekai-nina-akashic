@@ -26,7 +26,7 @@ import { Prisma } from "@prisma/client";
 import { prisma, withClearance, withSession, type TransactionClient } from "@/lib/db";
 import { EXCLUSION_KIND_LABELS, todayJst } from "@/lib/utils";
 import { canEditDossier } from "@/lib/auth/dossier-permissions";
-import { parseFrontmatterDate } from "@/lib/articles/frontmatter";
+import { parseFrontmatterDate, splitLocations } from "@/lib/articles/frontmatter";
 import { jsonStringArray, MAX_ARTICLE_CLEARANCE } from "@/lib/meetgreet/config";
 import { exclusionKey, planAppend, isPureAppend, type AppendLayout } from "@/lib/meetgreet/append";
 import { checkMerge, finalizeMerge, mergePrompt, renumberMaterials, unwrapFence } from "@/lib/article-workflow/merge";
@@ -619,11 +619,16 @@ function refreshedExtra(template: ArticleTemplateDef, extra: Record<string, unkn
   return out;
 }
 
-/** frontmatter の dossier / meetgreet 等を入れ直す (push でそのまま復元される) */
+/**
+ * frontmatter の dossier / meetgreet 等を入れ直す (push でそのまま復元される)。
+ * `locations` の聖地 (`place_id`) の要素は入れない。記事↔聖地の正は ArticlePlace (#283) で、
+ * 新規作成の保存が `linkArticlePlaces` で別に書く
+ */
 async function saveFrontmatterExtra(
   articleId: string,
-  extra: Record<string, unknown>
+  rawExtra: Record<string, unknown>
 ): Promise<void> {
+  const { extra } = splitLocations(rawExtra);
   const current = await prisma.article.findUnique({
     where: { id: articleId },
     select: { frontmatterExtra: true },
@@ -646,6 +651,23 @@ async function saveFrontmatterExtra(
       dirty: true,
       editedAt: new Date(),
     },
+  });
+}
+
+/**
+ * 新規作成した記事に聖地を紐づける (ArticlePlace、訪問順)。非公開の聖地も付ける (#283)。
+ * 見えない聖地は RLS で数が合わなくなるので付けずに飛ばす (読んだときと同じ操作者なので通常は起きない)
+ */
+async function linkArticlePlaces(articleId: string, placeIds: string[], clearance: string): Promise<void> {
+  if (placeIds.length === 0) return;
+  await withClearance(clearance, async (tx) => {
+    const visible = new Set(
+      (await tx.place.findMany({ where: { id: { in: placeIds } }, select: { id: true } })).map((p) => p.id)
+    );
+    const rows = placeIds
+      .filter((id) => visible.has(id))
+      .map((placeId, sortOrder) => ({ articleId, placeId, sortOrder }));
+    if (rows.length) await tx.articlePlace.createMany({ data: rows, skipDuplicates: true });
   });
 }
 
@@ -763,6 +785,11 @@ export async function saveArticle(
     }
 
     await saveFrontmatterExtra(articleId, rendered.frontmatterExtra);
+    await linkArticlePlaces(
+      articleId,
+      rendered.placeIds ?? splitLocations(rendered.frontmatterExtra).places.map((p) => p.placeId),
+      user.clearance
+    );
 
     await logAudit({
       actorId: user.id,

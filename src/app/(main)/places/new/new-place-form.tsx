@@ -4,11 +4,18 @@ import { useEffect, useState } from "react";
 import { createPlaceAction } from "@/lib/actions";
 import { SubmitButton } from "@/components/submit-button";
 import { PlaceLookup } from "@/components/place-lookup";
-import { PLACE_KIND_LABELS } from "@/lib/utils";
-import type { PlaceKind } from "@prisma/client";
+import { PLACE_CLASSIFICATION_LABELS, PLACE_KIND_LABELS } from "@/lib/utils";
+import type { ClearanceLevel, PlaceKind } from "@prisma/client";
 import { nearestArea, type AreaHint } from "@/lib/places/area-hints";
 
-export function NewPlaceForm({ areaHints }: { areaHints: AreaHint[] }) {
+export function NewPlaceForm({
+  areaHints,
+  classifications,
+}: {
+  areaHints: AreaHint[];
+  /** 選べるクリアランス (操作者のクリアランス以下) */
+  classifications: ClearanceLevel[];
+}) {
   const [name, setName] = useState("");
   const [latitude, setLatitude] = useState("");
   const [longitude, setLongitude] = useState("");
@@ -156,6 +163,20 @@ export function NewPlaceForm({ areaHints }: { areaHints: AreaHint[] }) {
           ))}
         </select>
         <p className="text-xs text-slate-400 mt-1">公開サイトの聖地マップでピンのアイコンと絞り込みに使う</p>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-1">クリアランス</label>
+        <select name="classification" defaultValue="internal" className={`${fieldClass} bg-white`}>
+          {classifications.map((c) => (
+            <option key={c} value={c}>
+              {PLACE_CLASSIFICATION_LABELS[c]}
+            </option>
+          ))}
+        </select>
+        <p className="text-xs text-slate-400 mt-1">
+          生活圏など公開サイトに出したくない場所は「限定」以上に。記事・アセットには紐づけられます
+        </p>
       </div>
 
       <div>

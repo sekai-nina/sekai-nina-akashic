@@ -4,6 +4,7 @@ import {
   parseArticle,
   renderArticleMarkdown,
   toArticleColumns,
+  toArticlePlaceRows,
   toArticleSourceRow,
   type ArticleSourceEntry,
   type ArticleSourceRow,
@@ -32,6 +33,7 @@ export function resolveOffline(entries: ArticleSourceEntry[]): ArticleSourceRow[
  * Markdown 1 本を **取り込みと同じ経路で** 往復させる。
  *
  *   ファイル → parseArticle → toArticleColumns (DB カラム) → toArticleSourceRow (ArticleSource 行)
+ *                                                        → toArticlePlaceRows (ArticlePlace 行)
  *          → renderArticleMarkdown (buildFrontmatter + serializeArticle)
  *
  * push (#46) が通るのと同じ変換をそのまま並べたもの。テストがここを通ることで、
@@ -39,5 +41,9 @@ export function resolveOffline(entries: ArticleSourceEntry[]): ArticleSourceRow[
  */
 export function roundtrip(raw: string, path = "test.md"): string {
   const cols = toArticleColumns(parseArticle(raw), path);
-  return renderArticleMarkdown({ ...cols, sources: resolveOffline(cols.sources) }).markdown;
+  return renderArticleMarkdown({
+    ...cols,
+    sources: resolveOffline(cols.sources),
+    places: toArticlePlaceRows(cols.places),
+  }).markdown;
 }

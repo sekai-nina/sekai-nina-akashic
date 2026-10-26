@@ -8,8 +8,11 @@ import {
   parseFrontmatterDate,
   serializeArticle,
   splitFrontmatter,
+  splitLocations,
+  toArticleColumns,
   toArticleSourceRow,
   type ArticleFrontmatterInput,
+  type ArticlePlaceRow,
   type ArticleSourceRow,
 } from "./frontmatter";
 import { resolveOffline, roundtrip } from "./roundtrip";
@@ -459,5 +462,80 @@ describe("値レベルの往復", () => {
     const raw = "---\nshort_id: abc1234\n---\n\nA\n\n---\n\nB\n";
     const { body } = expectStable(raw);
     expect(body).toBe("A\n\n---\n\nB\n");
+  });
+});
+
+describe("locations の聖地 (ArticlePlace) — #283", () => {
+  const base: ArticleFrontmatterInput = { shortId: "abc1234" };
+  const place = (placeId: string, classification: ClearanceLevel, sortOrder: number): ArticlePlaceRow => ({
+    placeId,
+    name: `店${placeId}`,
+    classification,
+    sortOrder,
+  });
+
+  it("confidential 以上の聖地は locations に書き出さない", () => {
+    const fm = buildFrontmatter({
+      ...base,
+      places: [
+        place("a", ClearanceLevel.internal, 0),
+        place("b", ClearanceLevel.confidential, 1),
+        place("c", ClearanceLevel.restricted, 2),
+        place("d", ClearanceLevel.public, 3),
+      ],
+    });
+    expect(fm.locations).toEqual([
+      { name: "店a", place_id: "a" },
+      { name: "店d", place_id: "d" },
+    ]);
+  });
+
+  it("非公開の聖地しか無ければ locations キーごと出さない", () => {
+    const fm = buildFrontmatter({ ...base, places: [place("b", ClearanceLevel.confidential, 0)] });
+    expect(fm).not.toHaveProperty("locations");
+  });
+
+  it("聖地は sortOrder 順、座標直書きの要素はその後ろ", () => {
+    const fm = buildFrontmatter({
+      ...base,
+      places: [place("b", ClearanceLevel.internal, 1), place("a", ClearanceLevel.internal, 0)],
+      frontmatterExtra: { locations: [{ name: "直書き", lat: 1, lng: 2 }] },
+    });
+    expect(fm.locations).toEqual([
+      { name: "店a", place_id: "a" },
+      { name: "店b", place_id: "b" },
+      { name: "直書き", lat: 1, lng: 2 },
+    ]);
+  });
+
+  it("extra に locations が無くても jsonb のキー順の位置に差し込む", () => {
+    // jsonb は (長さ, バイト順): dossier(7) < featured(8) < locations(9) < featured_quotes(15)
+    const fm = buildFrontmatter({
+      ...base,
+      places: [place("a", ClearanceLevel.internal, 0)],
+      frontmatterExtra: { dossier: {}, featured: true, featured_quotes: [] },
+    });
+    expect(Object.keys(fm)).toEqual(["short_id", "dossier", "featured", "locations", "featured_quotes"]);
+  });
+
+  it("取り込みは place_id の要素を places に分け、直書きは extra に残す", () => {
+    const { places, extra } = splitLocations({
+      featured: true,
+      locations: [
+        { name: "店A", place_id: "a" },
+        { name: "直書き", lat: 1, lng: 2 },
+        { name: "店A (重複)", place_id: "a" },
+      ],
+    });
+    expect(places).toEqual([{ placeId: "a", name: "店A" }]);
+    expect(extra).toEqual({ featured: true, locations: [{ name: "直書き", lat: 1, lng: 2 }] });
+  });
+
+  it("聖地だけの locations は extra からキーごと消える", () => {
+    const raw = ["---", "short_id: abc1234", "locations:", "  - name: 店A", "    place_id: a", "---", "", "本文", ""].join("\n");
+    const cols = toArticleColumns(parseArticle(raw), "x.md");
+    expect(cols.places).toEqual([{ placeId: "a", name: "店A" }]);
+    expect(cols.frontmatterExtra).not.toHaveProperty("locations");
+    expect(roundtrip(raw, "x.md")).toBe(raw);
   });
 });

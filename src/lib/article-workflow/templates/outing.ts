@@ -10,6 +10,7 @@
  * - `## 関連メディア` (機械): 画像・動画のトークとブログ画像をリンクで、TikTok を埋め込みで、1 つの箇条書きに (flat)。
  *   文章のトークは出典にだけ使う
  * - `locations` (機械): 場所候補。聖地に昇格済みなら `place_id`、未昇格なら座標をインライン
+ *   (`place_id` の要素は保存時に ArticlePlace に移る。非公開の聖地は `placeIds` で紐づけだけ付く。#283)
  * - `date` / `date_display` / tags は AI の提案 (同行者 + カテゴリ)
  *
  * 見本は既存記事 2 本 (理想形の江ノ島デートと、短いひとりパフェ)。
@@ -233,6 +234,7 @@ export function renderOutingArticle(input: DossierRenderInput, draft?: AiDraft |
   ];
   const tags = hasDraft ? normalizeAiTags(draft.tags) : [];
   const locations = outingLocations(input.places);
+  const placeIds = input.linkedPlaceIds ?? input.places.flatMap((p) => (p.placeId ? [p.placeId] : []));
 
   return {
     title: input.dossier.title,
@@ -251,6 +253,7 @@ export function renderOutingArticle(input: DossierRenderInput, draft?: AiDraft |
       dossier: dossierSnapshot(input.dossier, input.today),
       ...(locations.length > 0 ? { locations } : {}),
     },
+    ...(placeIds.length > 0 ? { placeIds } : {}),
   };
 }
 

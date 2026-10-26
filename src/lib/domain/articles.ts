@@ -18,7 +18,7 @@ import {
   type ArticleEditValues,
 } from "@/lib/articles/edit";
 import { mergeArticleEditPatch, type ArticleEditPatch } from "@/lib/articles/patch";
-import { parseFrontmatterDate, renderArticleMarkdown } from "@/lib/articles/frontmatter";
+import { parseFrontmatterDate, renderArticleMarkdown, type ArticlePlaceRow } from "@/lib/articles/frontmatter";
 import { buildCommitMessage, planPush, type PushPlan, type RenderedArticle } from "@/lib/articles/push";
 import { gitBlobSha } from "@/lib/github/blob";
 import { todayJst } from "@/lib/utils";
@@ -1166,6 +1166,14 @@ export async function countArticlesLinkingTo(title: string, excludeShortId: stri
  */
 export const PUSH_CLEARANCE = ClearanceLevel.public;
 
+/**
+ * 聖地 (`ArticlePlace`) を push 用に読むクリアランス。公開サイトに出す聖地の上限と同じ
+ * (`isPublishablePlace`)。出典と違って internal なのは、サイトの聖地マップが internal の
+ * キーで `GET /places` を読み、internal の聖地を公開しているため
+ */
+const PLACE_PUSH_CLEARANCE = ClearanceLevel.internal;
+const PUBLISHABLE_PLACE_CLEARANCES = [ClearanceLevel.public, ClearanceLevel.internal] as const;
+
 export type { RenderedArticle } from "@/lib/articles/push";
 
 /**
@@ -1188,8 +1196,13 @@ export type { RenderedArticle } from "@/lib/articles/push";
  * (`pushDirtyArticles` は commit 直前にこの関数を呼び直す)。
  *
  * 記事数ぶんトランザクションを張らない (334 本を `Promise.all` で投げると
- * pooler の接続を記事数ぶん占有する)。条件に合う記事を 2 トランザクションで引いて
+ * pooler の接続を記事数ぶん占有する)。条件に合う記事を 3 トランザクションで引いて
  * メモリ上で組み立てる。
+ *
+ * 聖地 (`ArticlePlace` → `locations`) だけは `PLACE_PUSH_CLEARANCE` (internal) で読む。
+ * 公開サイトの聖地マップは internal の聖地まで出すので、public で読むと既存の
+ * locations が全部消える。confidential 以上は RLS と明示の classification 条件の
+ * 二重で落とし、`buildFrontmatter` の `isPublishablePlace` でもう一度絞る。
  */
 export async function renderArticlesForPush(where: Prisma.ArticleWhereInput): Promise<RenderedArticle[]> {
   const articles = await withClearance(PUSH_CLEARANCE, (tx) =>
@@ -1217,6 +1230,30 @@ export async function renderArticlesForPush(where: Prisma.ArticleWhereInput): Pr
   if (!articles.length) return [];
 
   const ids = articles.map((a) => a.id);
+  const placeRows = await withClearance(PLACE_PUSH_CLEARANCE, (tx) =>
+    tx.articlePlace.findMany({
+      where: { articleId: { in: ids }, place: { classification: { in: [...PUBLISHABLE_PLACE_CLEARANCES] } } },
+      select: {
+        articleId: true,
+        placeId: true,
+        sortOrder: true,
+        place: { select: { classification: true, entity: { select: { canonicalName: true } } } },
+      },
+    }),
+  );
+  const placesByArticle = new Map<string, ArticlePlaceRow[]>();
+  for (const row of placeRows) {
+    const item: ArticlePlaceRow = {
+      placeId: row.placeId,
+      name: row.place.entity.canonicalName,
+      classification: row.place.classification,
+      sortOrder: row.sortOrder,
+    };
+    const list = placesByArticle.get(row.articleId);
+    if (list) list.push(item);
+    else placesByArticle.set(row.articleId, [item]);
+  }
+
   const [blockedRows, totals] = await withClearance(ClearanceLevel.restricted, (tx) =>
     Promise.all([
       tx.articleSource.findMany({
@@ -1266,7 +1303,10 @@ export async function renderArticlesForPush(where: Prisma.ArticleWhereInput): Pr
     }
     if (blockedSourceNos.length) return { ...base, ok: false as const, blockedSourceNos };
 
-    const { markdown, blocked } = renderArticleMarkdown(article);
+    const { markdown, blocked } = renderArticleMarkdown({
+      ...article,
+      places: placesByArticle.get(article.id) ?? [],
+    });
     // PUSH_CLEARANCE が public なら RLS が先に落とすので、ここに非 public 行が
     // 残っているのは RLS が効いていない証拠。上と同じくバッチ全体を止める
     if (blocked.length) {

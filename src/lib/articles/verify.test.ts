@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseArticle, toArticleColumns, toArticleSourceRow } from "./frontmatter";
+import { parseArticle, toArticleColumns, toArticlePlaceRows, toArticleSourceRow } from "./frontmatter";
 import { resolveOffline, roundtrip } from "./roundtrip";
 import { compareArticle, dirtyAfterImport, lineDiff } from "./verify";
 
@@ -117,8 +117,8 @@ describe("lineDiff", () => {
 describe("dirtyAfterImport", () => {
   const decide = (raw: string) => {
     const cols = toArticleColumns(parseArticle(raw), "x.md");
-    const { sources, ...rest } = cols;
-    return dirtyAfterImport(raw, rest, resolveOffline(sources));
+    const { sources, places, ...rest } = cols;
+    return dirtyAfterImport(raw, rest, resolveOffline(sources), toArticlePlaceRows(places));
   };
 
   it("DB の出力がファイルと一致するなら dirty にしない", () => {
@@ -137,18 +137,18 @@ describe("dirtyAfterImport", () => {
     // ref 無しの行は resolveOffline では unresolved になるので、applied を直接与える
     const raw = article(["title: t", "short_id: abc1234", "source:", "  - id: 1", "    label: x"]);
     const cols = toArticleColumns(parseArticle(raw), "x.md");
-    const { sources, ...rest } = cols;
+    const { sources, places, ...rest } = cols;
     const rows = sources.map((e, i) => toArticleSourceRow(e, { assetId: "cuid9", status: "applied" }, i));
-    const r = dirtyAfterImport(raw, rest, rows);
+    const r = dirtyAfterImport(raw, rest, rows, toArticlePlaceRows(places));
     expect(r).toEqual({ dirty: true, verdict: "ref_added", notes: ["ref を 1 件補完"] });
   });
 
   it("取り込みの行に非 public が混ざっていたら throw する (取り込み側の規則違反)", () => {
     const raw = article(["title: t", "short_id: abc1234", "source:", "  - id: 1", "    label: x"]);
     const cols = toArticleColumns(parseArticle(raw), "x.md");
-    const { sources, ...rest } = cols;
+    const { sources, places, ...rest } = cols;
     const rows = resolveOffline(sources).map((r) => ({ ...r, classification: "internal" as const }));
-    expect(() => dirtyAfterImport(raw, rest, rows)).toThrow(/非 public/);
+    expect(() => dirtyAfterImport(raw, rest, rows, toArticlePlaceRows(places))).toThrow(/非 public/);
   });
 
   it("値の差分 (取りこぼし) は dirty にせず notes で知らせる", () => {
