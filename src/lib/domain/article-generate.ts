@@ -503,7 +503,7 @@ async function loadArticleSources(user: ActingUser, articleId: string) {
   return withClearance(user.clearance, (tx) =>
     tx.articleSource.findMany({
       where: { articleId },
-      select: { sourceNo: true, assetId: true, url: true },
+      select: { id: true, status: true, sourceNo: true, assetId: true, url: true },
     })
   );
 }
@@ -531,6 +531,18 @@ async function applySources(
   let stamp = expectedUpdatedAt;
   const failed: string[] = [];
   for (const s of sources) {
+    if (s.existingId) {
+      // 記事に番号無しで載っている出典 (手書きの古い記事)。作り直さずに番号だけ振る
+      const numbered = await withClearance(user.clearance, (tx) =>
+        tx.articleSource.updateMany({
+          where: { id: s.existingId, articleId, sourceNo: null },
+          data: { sourceNo: s.sourceNo },
+        })
+      );
+      if (numbered.count === 1) applied++;
+      else failed.push(`${s.label} (番号を振れなかった)`);
+      continue;
+    }
     if (!s.assetId) {
       failed.push(`${s.label} (紐づけ先のアセットが無い)`);
       continue;
@@ -1043,8 +1055,9 @@ export async function proposeMerge(
     plan.changedLines.flatMap((i) => [...(planLines[i] ?? "").matchAll(/\^\[(\d+)\]/g)].map((m) => Number(m[1])))
   );
   const textAssets = new Set(input.assets.filter((a) => a.kind === "text" && !a.supplement).map((a) => a.id));
+  // 番号無しで記事に載っている出典 (`existingId`) は、行が参照するから番号を振るだけで本文には書かせない
   const writeSources = plan.newSources.filter(
-    (s) => !mechanicalNos.has(s.sourceNo) || (s.assetId != null && textAssets.has(s.assetId))
+    (s) => !s.existingId && (!mechanicalNos.has(s.sourceNo) || (s.assetId != null && textAssets.has(s.assetId)))
   );
   const newNos = new Set(writeSources.map((s) => s.sourceNo));
   // 中身を渡すのは新しい素材だけ (組み立ての番号で指定する)
@@ -1062,7 +1075,11 @@ export async function proposeMerge(
       label: s.label,
       material:
         materialByNo.get(s.sourceNo) ??
-        (newNos.has(s.sourceNo) ? "" : `^[${s.sourceNo}] ${s.label}\n（画像・動画だけのクリップ。黄色の行として足します）`),
+        (newNos.has(s.sourceNo)
+          ? ""
+          : s.existingId
+            ? `^[${s.sourceNo}] ${s.label}\n（記事にもう載っている出典。黄色の行から参照するので番号を振ります）`
+            : `^[${s.sourceNo}] ${s.label}\n（画像・動画だけのクリップ。黄色の行として足します）`),
     })),
     ai,
     mechanicalOnly: writeSources.length === 0,

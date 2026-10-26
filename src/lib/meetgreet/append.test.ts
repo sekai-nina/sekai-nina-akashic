@@ -144,6 +144,25 @@ describe("planAppend", () => {
     expect(p.newSources[0].sourceNo).toBe(4);
   });
 
+  it("番号無しで載っている出典 (手書きの古い記事) は作り直さず、行が参照するときだけ既存の行に番号を振る", () => {
+    const p = planAppend({
+      existingBody: "本文（[上村ひなのブログ](https://example.com/65500)）\n",
+      parts: { ...EMPTY_PARTS, blogImages: [{ assetId: "img", line: "- 【ブログ・画像】上村ひなのブログ「題」 (1/2)^[2]" }] },
+      sources: [
+        { sourceNo: 1, label: "動画", url: "https://youtube.com/watch?v=x", date: null, assetId: "video" },
+        { sourceNo: 2, label: "上村ひなのブログ「題」", url: "https://example.com/65500", date: null, assetId: "blog" },
+      ],
+      existingSources: [
+        { id: "s1", status: "applied", sourceNo: null, assetId: "video", url: "https://youtube.com/watch?v=x" },
+        { id: "s2", status: "applied", sourceNo: null, assetId: "blog", url: "https://example.com/65500" },
+      ],
+    });
+    // 行が参照しない動画は何もしない。ブログは既存の行 (s2) に 1 番を振る
+    expect(p.newSources).toEqual([{ sourceNo: 1, label: "上村ひなのブログ「題」", url: "https://example.com/65500", date: null, assetId: "blog", existingId: "s2" }]);
+    expect(p.body).toContain("- 【ブログ・画像】上村ひなのブログ「題」 (1/2)^[1]");
+    expect(p.additions.map((a) => a.kind)).toEqual(["blogImage"]);
+  });
+
   it("同じレポが 2 表記で入っていても 1 本しか足さない", () => {
     const p = planAppend({
       existingBody: BODY,
