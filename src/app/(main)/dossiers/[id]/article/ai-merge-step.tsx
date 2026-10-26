@@ -15,7 +15,16 @@ import { proposeMergeAction, restoreDossierExclusionsAction, saveMergeAction } f
  * 保存すると、本文で `^[n]` を使った出典だけが入り、使わなかったものは「今後足さない」になる。
  * 本文で参照しない出典は記事に置かない (出典だけを足す口は作らない)。
  */
-export function AiMergeStep({ dossierId, articleId }: { dossierId: string; articleId: string | null }) {
+export function AiMergeStep({
+  dossierId,
+  articleId,
+  currentBody,
+}: {
+  dossierId: string;
+  articleId: string | null;
+  /** いまの記事の本文。案が出るまで、書き足す先として見せておく */
+  currentBody: string;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
@@ -23,17 +32,21 @@ export function AiMergeStep({ dossierId, articleId }: { dossierId: string; artic
   const [body, setBody] = useState("");
   const [editing, setEditing] = useState(false);
   const [savedShortId, setSavedShortId] = useState<string | null>(null);
+  /** 保存した本文と、保存前の本文 (保存後も消さずに見せ、足した行に色を付ける) */
+  const [saved, setSaved] = useState<{ body: string; before: string } | null>(null);
   /** 「今後足さない」にしているもの。案が無いとき (足せる素材が無い) も戻せるように別に持つ */
   const [excluded, setExcluded] = useState<{ key: string; label: string }[]>([]);
 
   /** いまの本文で使われている新しい出典の番号 */
   const used = useMemo(() => new Set([...body.matchAll(/\^\[(\d+)\]/g)].map((m) => Number(m[1]))), [body]);
   const changed = new Set(proposal?.changedLines ?? []);
+  const beforeLines = useMemo(() => new Set(saved?.before.split("\n") ?? []), [saved]);
   const mechanical = new Set(proposal?.mechanicalLines ?? []);
 
   function propose(manual: boolean) {
     setMsg(manual ? "読み込んでいます…" : "AI が組み込んでいます…（1〜2 分かかります）");
     setSavedShortId(null);
+    setSaved(null);
     startTransition(async () => {
       const res = await proposeMergeAction(dossierId, articleId, manual).catch((e: unknown) => ({
         ok: false as const,
@@ -93,6 +106,7 @@ export function AiMergeStep({ dossierId, articleId }: { dossierId: string; artic
       const failed = res.failed.length > 0 ? ` / 反映できなかった出典: ${res.failed.join("、")}` : "";
       setMsg(`保存しました（出典 +${res.sources}）${dropped}${failed}`);
       setSavedShortId(res.shortId);
+      setSaved({ body: res.body, before: currentBody });
       setProposal(null);
       router.refresh();
     });
@@ -148,6 +162,32 @@ export function AiMergeStep({ dossierId, articleId }: { dossierId: string; artic
           既存の本文と新しい素材を AI が読み、新しい行の差し込みと既存の行への出典番号の追加だけを行います（既存の文は変えません）。
           押すたびに費用がかかります（1 回数十円）。
         </p>
+      )}
+
+      {!proposal && (saved || currentBody.trim()) && (
+        <div>
+          <div className="text-xs font-medium text-slate-600 mb-1.5">
+            {saved ? "保存した本文（緑が今回足した行）" : "いまの本文（ここに書き足します）"}
+          </div>
+          <div
+            role="region"
+            tabIndex={0}
+            aria-label={saved ? "保存した本文" : "いまの本文"}
+            className="max-h-64 sm:max-h-96 overflow-auto rounded-md border border-slate-200 bg-white py-2 font-mono text-[11px] leading-relaxed"
+          >
+            {(saved?.body ?? currentBody).split("\n").map((line, i) => (
+              <div
+                key={i}
+                className={
+                  "px-3 whitespace-pre-wrap break-all " +
+                  (saved && line.trim() && !beforeLines.has(line) ? "bg-emerald-50 text-emerald-900" : "text-slate-700")
+                }
+              >
+                {line || " "}
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {excluded.length > 0 && (

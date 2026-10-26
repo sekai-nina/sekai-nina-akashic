@@ -1078,7 +1078,7 @@ export async function proposeMerge(
 }
 
 export type SaveMergeResult =
-  | { ok: true; shortId: string; sources: number; excluded: number; failed: string[] }
+  | { ok: true; shortId: string; sources: number; excluded: number; failed: string[]; /** 保存した本文 (番号を詰めたあと) */ body: string }
   | { ok: false; error: string };
 
 /**
@@ -1167,5 +1167,5 @@ export async function saveMerge(
       excluded: unusedKeys,
     },
   });
-  return { ok: true, shortId: article.shortId, sources: applied.applied, excluded: unusedKeys.length, failed: applied.failed };
+  return { ok: true, shortId: article.shortId, sources: applied.applied, excluded: unusedKeys.length, failed: applied.failed, body: unchanged ? article.body : final.body };
 }
