@@ -38,8 +38,20 @@ const MAX_CLIPS_PER_BATCH = 200;
 /** 一覧に載せる上限。プールはここまで溜まる前に振り分ける前提。超えたら `hasMore` で知らせる */
 export const MAX_CLIPS_LISTED = 1000;
 
+/**
+ * クリップを外部 (Discord bot。#286) から作れるキー。write とは別に持たせ、
+ * `clip` だけのキーでは他の API を叩けないようにする
+ */
+export const CLIP_PERMISSION = "clip";
+
 /** 入力起因の失敗。画面にそのまま出してよい文言 */
 export class ClipInputError extends Error {}
+
+/** アセットが無いか見えない。API は 404 で返す (画面では `ClipInputError` として扱う) */
+export class ClipAssetNotFoundError extends ClipInputError {}
+
+/** プールが見えない・編集できない。API は 403 で返す */
+export class ClipForbiddenError extends ClipInputError {}
 
 const POOL_SELECT = {
   id: true,
@@ -68,7 +80,7 @@ export async function findClipPool(user: ActingUser) {
  */
 async function ensureClipPool(user: ActingUser) {
   if (isAboveClearance(CLIP_POOL_CLASSIFICATION, user.clearance)) {
-    throw new ClipInputError("クリップのプールはあなたのクリアランスでは見えません");
+    throw new ClipForbiddenError("クリップのプールはあなたのクリアランスでは見えません");
   }
   const existing = await findClipPool(user);
   if (existing) return existing;
@@ -109,6 +121,8 @@ export interface CreateClipInput {
   excerptType?: TextType;
   excerptStart?: number;
   excerptEnd?: number;
+  /** 監査ログに足す情報 (API 経由で、返信した人の Discord 名など) */
+  auditMetadata?: Record<string, string>;
 }
 
 /**
@@ -129,7 +143,7 @@ export async function createClip(user: ActingUser, input: CreateClipInput) {
   if (!note && !quote) throw new ClipInputError("メモか引用のどちらかを入れてください");
 
   const pool = await ensureClipPool(user);
-  if (!canEditDossier(user, pool)) throw new ClipInputError("クリップを作る権限がありません");
+  if (!canEditDossier(user, pool)) throw new ClipForbiddenError("クリップを作る権限がありません");
 
   const item = await withSession(user, async (tx) => {
     // RLS 下で引くので、見えないアセットは null (= 存在確認を兼ねる)。
@@ -144,7 +158,7 @@ export async function createClip(user: ActingUser, input: CreateClipInput) {
           : false,
       },
     });
-    if (!asset) throw new ClipInputError("アセットが見つかりません");
+    if (!asset) throw new ClipAssetNotFoundError("アセットが見つかりません");
     if (isAboveClearance(asset.classification, pool.classification)) {
       throw new ClipInputError("このアセットの機密レベルはクリップのプールより上なので入れられません");
     }
@@ -174,7 +188,7 @@ export async function createClip(user: ActingUser, input: CreateClipInput) {
     action: "clip.create",
     targetType: "DossierItem",
     targetId: item.id,
-    metadata: { assetId: input.assetId, located: item.excerptStart != null },
+    metadata: { ...input.auditMetadata, assetId: input.assetId, located: item.excerptStart != null },
   });
   return item;
 }

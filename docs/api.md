@@ -28,6 +28,7 @@ APIキーは `pnpm cli:keygen <user-email> <key-name> [permissions]` で発行�
 - `write`: POST / PUT / PATCH / ファイルアップロード
 - `insta_worker`: iPad の story ワーカー専用（`/insta/jobs/:id/start` 等の報告と、自分のジョブの参照だけ）。`pnpm cli:keygen <email> "ipad-insta-worker" insta_worker` で **read / write を持たないキー**を作って iPad に置く。permission はルートを絞るだけで RLS の範囲は持ち主のクリアランスのままなので、**clearance が internal の専用ユーザー**に発行する。なお `GET /insta/targets` `/insta/account` `/ai-status` は「キーが有効なら誰でも読める」設計なので、このキーからも読める
 - `article_push`: 記事 1 本を公開リポジトリに push する（`POST /articles/:shortId/push`）。`write` とは別に持たせる。Discord bot のキーにだけ付ける（#209）
+- `clip`: クリップを 1 件作る（`POST /clips`）だけを通す。Discord の返信からクリップする bot 用（#286）。**clearance が internal の bot 専用ユーザー**に発行する（/clips の作成者はキーの持ち主になる）
 
 ### エラーレスポンス
 
@@ -112,6 +113,7 @@ APIキーは `pnpm cli:keygen <user-email> <key-name> [permissions]` で発行�
 | POST | `/meetgreets/:id/article` | write | 記事を生成（既存があれば増えた分だけ追記） |
 | GET | `/dossiers/:id/article` | read | ドシエの記事テンプレートと紐づく記事 |
 | POST | `/dossiers/:id/article` | write | 器を持たないドシエから記事を生成（テンプレート指定つき） |
+| POST | `/clips` | clip or write | アセットのクリップを 1 件作る（メモ・引用） |
 | GET | `/lives` | read | ライブ（記事ワークフロー）一覧と進み具合 |
 | POST | `/lives` | write | ライブ作成（ドシエと X レポ収集を自動作成し、公演と曲を入れ、素材候補を返す） |
 | GET | `/lives/:id` | read | ライブ詳細 + 素材候補 |
@@ -1267,6 +1269,44 @@ body は省略可（`subject` を省くと既定のコミットメッセージ�
 | `quote_situational` | `quote` | **AI が書く**: 状況の地の文 → `>` 発言 → 反応 1 文 | **タイトルは AI が実際の発言の表記に整えてよい**（ドシエのタイトルは目安。`yes, me now?` → `Yes, me now?`。path もそのタイトルで決まる。同名の記事があれば 409）。`date` / `date_display` は発言の時期（分からなければ素材の投稿日 + 「頃」）、tags は関係するメンバー。関連メディアは出さない。`draft: true`。追記は本文に足すものが無い |
 
 （`meetgreet` / `live` は器側で組む: `POST /meetgreets/:id/article` / `POST /lives/:id/article`）
+
+## クリップ (Clips)
+
+### POST /clips
+
+アセットのクリップ（#41）を 1 件作る（#286）。画面の「クリップ」と同じ処理で、プール（`kind = clips` のドシエ）に入る。Discord bot が、トークの投稿への返信から叩く。`clip` か `write` を持つキーだけ。
+
+**リクエストボディ (JSON):**
+
+```json
+{
+  "assetId": "cm_talk",
+  "note": "ここ記事にしたい",
+  "excerpt": "揺れても、根を張る",
+  "requestedBy": "discord-user"
+}
+```
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `assetId` | string | ✓ | クリップするアセット |
+| `note` | string | | メモ（10,000 字まで） |
+| `excerpt` | string | | 引用（10,000 字まで）。本文から位置を探し、見つかればハイライトの範囲も保存する（空白・改行の違いは吸収）。見つからなければ文字列だけ保存する |
+| `requestedBy` | string | | 頼んだ人（返信した人の Discord 名など）。監査ログ `clip.create` の metadata に残すだけ |
+
+`note` と `excerpt` のどちらかは必須。
+
+**レスポンス (201):**
+
+```json
+{ "id": "cm_item", "assetId": "cm_talk", "located": true }
+```
+
+- `located` は引用の位置が本文に見つかったか（メモだけなら `false`）
+- アセットが無い・キーの持ち主に見えないときは 404。メモも引用も空なら 400
+- プールより上の機密（`internal` を超える）のアセットは 400（抜粋がプールの機密レベルで見えてしまうため）
+- キーの持ち主のクリアランスが `internal` 未満、または role が viewer なら 403
+- 作成者はキーの持ち主（bot 専用ユーザー）。/clips とアセット詳細のクリップ欄に出る
 
 ## ミーグリ記事ワークフロー (MeetGreets)
 

@@ -15,14 +15,16 @@ import { PrismaClient } from "@prisma/client";
 import { createHash, randomBytes } from "crypto";
 import { WORKER_PERMISSION } from "@/lib/insta/jobs";
 import { ARTICLE_PUSH_PERMISSION } from "@/lib/articles/append";
+import { CLIP_PERMISSION } from "@/lib/domain/clips";
 
 const prisma = new PrismaClient();
 
 /**
  * アプリが見る permission。`insta_worker` は /api/v1/insta/jobs の iPad 側だけを通す。
- * `article_push` は記事を公開リポジトリに push する (Discord bot 用。#209)
+ * `article_push` は記事を公開リポジトリに push する (Discord bot 用。#209)。
+ * `clip` は POST /api/v1/clips だけを通す (Discord の返信からクリップ。#286)
  */
-const KNOWN_PERMISSIONS = ["read", "write", WORKER_PERMISSION, ARTICLE_PUSH_PERMISSION];
+const KNOWN_PERMISSIONS = ["read", "write", WORKER_PERMISSION, ARTICLE_PUSH_PERMISSION, CLIP_PERMISSION];
 
 async function main() {
   const [, , email, name, permissionsArg] = process.argv;
