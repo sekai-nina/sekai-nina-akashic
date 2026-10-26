@@ -13,6 +13,7 @@ import { isAnthropicAdminConfigured, isOpenAiAdminConfigured } from "@/lib/costs
 import { CREDIT_WARN_DAYS, fillMissingDays } from "@/lib/costs/summary";
 import { describeRate, formatMoney } from "@/lib/costs/currency";
 import {
+  LLM_POSTPAID_PROVIDERS,
   LLM_PROVIDER_BILLING_URLS,
   LLM_PROVIDER_LABELS,
   LLM_USAGE_SOURCE_LABELS,
@@ -57,7 +58,7 @@ export default async function CostsPage() {
     getFeatureBreakdown(now),
   ]);
   const maxFeatureUsd = Math.max(0.000001, ...totals.map((t) => t.costUsd ?? 0));
-  // グラフの横軸を 3 プロバイダで揃える (記録の無い日は 0 で埋める)
+  // グラフの横軸をプロバイダ間で揃える (記録の無い日は 0 で埋める)
   const today = toJstDateOnly(now)!;
   const chartFrom = addDaysToDateString(today, -HISTORY_DAYS + 1);
   const charts = new Map(summaries.map((s) => [s.provider, fillMissingDays(s.daily, chartFrom, today)]));
@@ -88,7 +89,7 @@ export default async function CostsPage() {
         </div>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-3 mb-6">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 mb-6">
         {summaries.map((s) => (
           <div key={s.provider} className="bg-white border border-slate-200 rounded-lg p-4">
             <div className="flex items-baseline justify-between gap-2 mb-2">
@@ -118,7 +119,9 @@ export default async function CostsPage() {
               </div>
             </dl>
             <p className="text-[11px] text-slate-400 mt-2">
-              {s.snapshotAt ? (
+              {LLM_POSTPAID_PROVIDERS.has(s.provider) ? (
+                "後払い（月末にカードへ請求）"
+              ) : s.snapshotAt ? (
                 <>
                   残高の記録: {formatDate(s.snapshotAt, true)}（{formatRelative(s.snapshotAt, now)}）
                   {/* 円で記録したものを USD で見せているので、元の額と使ったレートを添える */}
@@ -145,7 +148,7 @@ export default async function CostsPage() {
                   : "border border-slate-300 text-slate-700 hover:bg-slate-50"
               }`}
             >
-              補充する
+              {LLM_POSTPAID_PROVIDERS.has(s.provider) ? "請求を見る" : "補充する"}
               <ExternalLink size={12} />
             </a>
           </div>
@@ -247,7 +250,11 @@ export default async function CostsPage() {
                     <td className="px-4 py-1.5 font-mono text-xs text-slate-500">{r.model}</td>
                     <td className="px-4 py-1.5 text-xs text-slate-400">{LLM_USAGE_SOURCE_LABELS[r.source]}</td>
                     <td className="px-4 py-1.5 text-right text-slate-500">{r.requests.toLocaleString("ja-JP")}</td>
-                    <td className="px-4 py-1.5 text-right text-slate-500">{r.inputTokens.toLocaleString("ja-JP")}</td>
+                    <td className="px-4 py-1.5 text-right text-slate-500">
+                      {r.inputTokens.toLocaleString("ja-JP")}
+                      {/* Groq の文字起こしはトークンではなく音声の課金秒数を入れている */}
+                      {r.provider === LlmProvider.groq && " 秒"}
+                    </td>
                     <td className="px-4 py-1.5 text-right text-slate-500">{r.outputTokens.toLocaleString("ja-JP")}</td>
                     <td className="px-4 py-1.5 text-right font-medium">
                       {r.costUsd == null ? <span className="text-amber-700 text-xs">価格未登録</span> : usd(r.costUsd, 4)}
@@ -268,7 +275,7 @@ export default async function CostsPage() {
         </div>
       )}
 
-      <SnapshotForm providers={ALL_PROVIDERS} />
+      <SnapshotForm providers={ALL_PROVIDERS.filter((p) => !LLM_POSTPAID_PROVIDERS.has(p))} />
     </div>
   );
 }

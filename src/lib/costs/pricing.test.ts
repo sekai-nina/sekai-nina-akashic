@@ -22,6 +22,12 @@ describe("findPricing", () => {
 });
 
 describe("computeCostUsd", () => {
+  it("Groq の文字起こしは inputTokens を課金秒数として 1 時間 $0.111 で計算する", () => {
+    expect(computeCostUsd("groq", "whisper-large-v3", { inputTokens: 3600, outputTokens: 0 })).toBe(0.111);
+    // 最低課金の 10 秒
+    expect(computeCostUsd("groq", "whisper-large-v3", { inputTokens: 10, outputTokens: 0 })).toBe(0.000308);
+  });
+
   it("入力・出力を 100 万トークン単価で計算する", () => {
     // gpt-4o: $2.50 / $10.00
     expect(computeCostUsd("openai", "gpt-4o", { inputTokens: 1_000_000, outputTokens: 0 })).toBe(2.5);

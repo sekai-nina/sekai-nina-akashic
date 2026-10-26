@@ -8,6 +8,7 @@ import type { LlmProvider } from "@prisma/client";
  *   - OpenAI:    https://developers.openai.com/api/docs/pricing (2026-09-19)
  *   - Anthropic: claude-api スキルの単価表 (2026-06-24 時点のキャッシュ)
  *   - Google:    https://ai.google.dev/gemini-api/docs/pricing (2026-09-19)
+ *   - Groq:      https://groq.com/pricing (2026-10-27)
  *
  * **表に無いモデルは金額を出さない** (null)。勝手に近いモデルの値を当てると、
  * 「安く出ているから大丈夫」と誤読する。未登録は /costs に警告として出す。
@@ -79,6 +80,12 @@ export const PRICING: Record<LlmProvider, Record<string, ModelPricing>> = {
     "gemini-2.5-flash-lite": { input: 0.1, output: 0.4 },
     // 埋め込みは入力のみ課金 (テキスト)
     "gemini-embedding-2": { input: 0.2, output: 0 },
+  },
+  groq: {
+    // **音声の文字起こしは秒数で課金する**ので、inputTokens に課金秒数 (1 回あたり最低 10 秒) を入れる。
+    // $0.111 / 時間 = $0.111 / 3600 秒 → 100 万秒あたり $30.833
+    "whisper-large-v3": { input: 0.111 / 3600 * 1_000_000, output: 0 },
+    "whisper-large-v3-turbo": { input: 0.04 / 3600 * 1_000_000, output: 0 },
   },
 };
 

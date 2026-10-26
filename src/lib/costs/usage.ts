@@ -25,7 +25,7 @@ const tokenCount = z.number().int().min(0).max(TOKEN_MAX);
 
 export const UsageReportSchema = z
   .object({
-    provider: z.enum(["openai", "anthropic", "google"]),
+    provider: z.enum(["openai", "anthropic", "google", "groq"]),
     model: z.string().trim().min(1).max(100),
     feature: z.string().regex(FEATURE_PATTERN, "feature must match ^[a-z0-9][a-z0-9_.:-]{0,63}$"),
     inputTokens: tokenCount.optional(),

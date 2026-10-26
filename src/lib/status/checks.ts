@@ -7,7 +7,7 @@ import { getBranchHead, getTreeBlobs, isGithubConfigured } from "@/lib/github/cl
 import { ALL_PROVIDERS, getProviderSummaries } from "@/lib/costs/report";
 import { isR2Configured } from "@/lib/r2";
 import { thumbnailPendingWhere } from "@/lib/thumbnails";
-import { CHECK_GROUPS, LLM_PROVIDER_LABELS } from "@/lib/utils";
+import { CHECK_GROUPS, LLM_POSTPAID_PROVIDERS, LLM_PROVIDER_LABELS } from "@/lib/utils";
 import { judgeFreshness, judgeHeartbeat } from "./judge";
 import {
   ARTICLE_DIRTY_MAX_AGE_DAYS,
@@ -296,7 +296,8 @@ function creditChecks(): CheckDefinition[] {
   let cache: Promise<Awaited<ReturnType<typeof getProviderSummaries>>> | null = null;
   const load = () => (cache ??= getProviderSummaries());
 
-  return ALL_PROVIDERS.map((provider) => ({
+  // 後払いのプロバイダには残高が無いので見ない
+  return ALL_PROVIDERS.filter((p) => !LLM_POSTPAID_PROVIDERS.has(p)).map((provider) => ({
     key: `costs.${provider}`,
     group: "costs" as const,
     name: `${LLM_PROVIDER_LABELS[provider]} の残クレジット`,
