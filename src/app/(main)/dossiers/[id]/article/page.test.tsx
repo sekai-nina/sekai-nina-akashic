@@ -91,3 +91,16 @@ it("反映待ちが無ければ案内を出さない", async () => {
   const html = renderToStaticMarkup(await Page(props));
   expect(html).not.toContain("反映待ちの企画");
 });
+
+it("本文を AI / 人が書く記事の追記は組み込みだけを出し、出典だけを足す差分の追記は出さない (#275)", async () => {
+  mocks.workflow.mockResolvedValue(workflow({ article: { id: "a1", shortId: "short1", title: "記事", draft: false } }));
+  const html = renderToStaticMarkup(await Page(props));
+  expect(html).toContain("AI組み込み");
+  expect(html).not.toContain("生成操作");
+});
+
+it("まだ記事が無ければ新規作成の操作を出す", async () => {
+  const html = renderToStaticMarkup(await Page(props));
+  expect(html).toContain("生成操作");
+  expect(html).not.toContain("AI組み込み");
+});

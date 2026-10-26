@@ -124,12 +124,15 @@ export async function saveDossierArticleAction(
   }
 }
 
-/** AI に、新しい素材を既存の本文へ組み込んだ案を作らせる (#275)。記事には書かない (費用はかかる) */
-export async function proposeMergeAction(dossierId: string, articleId: string | null) {
+/**
+ * AI に、新しい素材を既存の本文へ組み込んだ案を作らせる (#275)。記事には書かない (費用はかかる)。
+ * `manual` は AI を呼ばず、足す前の本文をそのまま返す (人が書く)
+ */
+export async function proposeMergeAction(dossierId: string, articleId: string | null, manual = false) {
   const user = await requireMember();
   try {
     const workflow = await requireDossierArticleWorkflow(user, dossierId, articleId);
-    return await proposeMerge(user, workflow.target);
+    return await proposeMerge(user, workflow.target, { manual: manual === true });
   } catch (e) {
     return { ok: false as const, error: errorMessage(e) };
   }
