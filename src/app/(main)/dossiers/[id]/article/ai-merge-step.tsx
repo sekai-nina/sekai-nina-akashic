@@ -3,15 +3,17 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
-import { Sparkles } from "lucide-react";
+import { PenLine, Sparkles } from "lucide-react";
 import type { MergeProposal } from "@/lib/domain/article-generate";
-import { proposeMergeAction, saveMergeAction } from "./actions";
+import { proposeMergeAction, restoreDossierExclusionsAction, saveMergeAction } from "./actions";
 
 /**
  * 新しい素材を AI に既存の本文へ組み込ませ、人が直して保存する (#275)。
  *
  * 左に AI の案 (緑が AI の足した行。「手で直す」で編集)、右に新しい素材の中身。
+ * 「AI を使わずに手で書く」は、足す前の本文をそのまま編集欄に入れる (AI が失敗したとき・自分で書きたいとき)。
  * 保存すると、本文で `^[n]` を使った出典だけが入り、使わなかったものは「今後足さない」になる。
+ * 本文で参照しない出典は記事に置かない (出典だけを足す口は作らない)。
  */
 export function AiMergeStep({ dossierId, articleId }: { dossierId: string; articleId: string | null }) {
   const router = useRouter();
@@ -21,17 +23,46 @@ export function AiMergeStep({ dossierId, articleId }: { dossierId: string; artic
   const [body, setBody] = useState("");
   const [editing, setEditing] = useState(false);
   const [savedShortId, setSavedShortId] = useState<string | null>(null);
+  /** 「今後足さない」にしているもの。案が無いとき (足せる素材が無い) も戻せるように別に持つ */
+  const [excluded, setExcluded] = useState<{ key: string; label: string }[]>([]);
 
   /** いまの本文で使われている新しい出典の番号 */
   const used = useMemo(() => new Set([...body.matchAll(/\^\[(\d+)\]/g)].map((m) => Number(m[1]))), [body]);
   const changed = new Set(proposal?.changedLines ?? []);
   const mechanical = new Set(proposal?.mechanicalLines ?? []);
 
-  function propose() {
-    setMsg("AI が組み込んでいます…（1〜2 分かかります）");
+  function propose(manual: boolean) {
+    setMsg(manual ? "読み込んでいます…" : "AI が組み込んでいます…（1〜2 分かかります）");
     setSavedShortId(null);
     startTransition(async () => {
-      const res = await proposeMergeAction(dossierId, articleId).catch((e: unknown) => ({
+      const res = await proposeMergeAction(dossierId, articleId, manual).catch((e: unknown) => ({
+        ok: false as const,
+        error: e instanceof Error ? e.message : "通信に失敗しました",
+        excluded: undefined,
+      }));
+      if (!res.ok) {
+        setMsg(`エラー: ${res.error}${manual ? "" : "（「AI を使わずに手で書く」でも続けられます）"}`);
+        if (res.excluded) setExcluded(res.excluded);
+        return;
+      }
+      setProposal(res.proposal);
+      setExcluded(res.proposal.excluded);
+      setBody(res.proposal.body);
+      setEditing(manual);
+      setMsg(
+        manual
+          ? "右の素材を見ながら本文を書き足し、使う素材の番号を ^[n] で付けてください"
+          : res.proposal.changedLines.length === 0
+            ? "AI は本文に足すことが無いと判断しました。手で書き足すか、そのまま保存すると素材はすべて今後足さないになります"
+            : `AI が ${res.proposal.changedLines.length} 行を足しました。素材と見比べて、必要なら手で直してから保存してください`
+      );
+    });
+  }
+
+  function restore(key: string) {
+    setMsg("戻しています…");
+    startTransition(async () => {
+      const res = await restoreDossierExclusionsAction(dossierId, articleId, [key]).catch((e: unknown) => ({
         ok: false as const,
         error: e instanceof Error ? e.message : "通信に失敗しました",
       }));
@@ -39,14 +70,10 @@ export function AiMergeStep({ dossierId, articleId }: { dossierId: string; artic
         setMsg(`エラー: ${res.error}`);
         return;
       }
-      setProposal(res.proposal);
-      setBody(res.proposal.body);
-      setEditing(false);
-      setMsg(
-        res.proposal.changedLines.length === 0
-          ? "AI は本文に足すことが無いと判断しました。手で足すか、出典だけ足す場合は下の差分を使ってください"
-          : `AI が ${res.proposal.changedLines.length} 行を足しました。素材と見比べて、必要なら手で直してから保存してください`
-      );
+      setExcluded((list) => list.filter((e) => e.key !== key));
+      setProposal(null);
+      setMsg("戻しました。もう一度 AI に組み込ませるか手で書くと、候補に入ります");
+      router.refresh();
     });
   }
 
@@ -76,12 +103,22 @@ export function AiMergeStep({ dossierId, articleId }: { dossierId: string; artic
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
-          onClick={propose}
+          onClick={() => propose(false)}
           disabled={pending}
           className="inline-flex items-center gap-1 h-8 px-3 rounded-md bg-indigo-600 text-white text-xs hover:bg-indigo-700 disabled:opacity-50"
         >
-          <Sparkles size={12} /> {proposal ? "もう一度 AI に組み込ませる" : "AI に組み込ませる"}
+          <Sparkles size={12} /> {proposal?.ai ? "もう一度 AI に組み込ませる" : "AI に組み込ませる"}
         </button>
+        {!proposal && (
+          <button
+            type="button"
+            onClick={() => propose(true)}
+            disabled={pending}
+            className="inline-flex items-center gap-1 h-8 px-3 rounded-md border border-slate-200 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            <PenLine size={12} /> AI を使わずに手で書く
+          </button>
+        )}
         {proposal && (
           <button
             type="button"
@@ -113,13 +150,37 @@ export function AiMergeStep({ dossierId, articleId }: { dossierId: string; artic
         </p>
       )}
 
+      {excluded.length > 0 && (
+        <div>
+          <div className="text-xs font-medium text-slate-600 mb-1.5">今後足さないもの（{excluded.length} 件）</div>
+          <ul className="rounded-md border border-slate-200 divide-y divide-slate-100">
+            {excluded.map((e) => (
+              <li key={e.key} className="flex items-start gap-2 px-3 py-2">
+                <span className="text-xs text-slate-500 break-all flex-1 line-through">{e.label}</span>
+                <button
+                  type="button"
+                  onClick={() => restore(e.key)}
+                  disabled={pending}
+                  aria-label={`${e.label} を戻す`}
+                  className="shrink-0 h-6 px-2 rounded border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  戻す
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {proposal && (
         <>
-          <p className="text-[11px] rounded-md px-3 py-2 border text-slate-600 bg-slate-50 border-slate-200">
-            AI ({proposal.ai.model}) の案です
-            {proposal.ai.costUsd != null ? `（約 $${proposal.ai.costUsd.toFixed(3)}）` : ""}。
-            事実の取り違え・他メンバーの感想・推測が無いか、右の素材と見比べてください。
-          </p>
+          {proposal.ai && (
+            <p className="text-[11px] rounded-md px-3 py-2 border text-slate-600 bg-slate-50 border-slate-200">
+              AI ({proposal.ai.model}) の案です
+              {proposal.ai.costUsd != null ? `（約 $${proposal.ai.costUsd.toFixed(3)}）` : ""}。
+              事実の取り違え・他メンバーの感想・推測が無いか、右の素材と見比べてください。
+            </p>
+          )}
           <div className="grid gap-3 lg:grid-cols-2">
             <div>
               <div className="flex items-baseline justify-between mb-1.5">
@@ -177,7 +238,7 @@ export function AiMergeStep({ dossierId, articleId }: { dossierId: string; artic
               </ul>
               <p className="mt-1 text-[11px] text-slate-400">
                 使わない出典があると、保存時に番号を詰めて振り直します（本文の ^[n] も合わせて書き換えます）。
-                {mechanical.size > 0 && " 黄色の行を消しても、その素材は反映待ちに残ります（載せないなら下の差分で外してください）。"}
+                {mechanical.size > 0 && " 黄色の行を消して保存すると、その画像・トークは今後足さないになります。"}
               </p>
             </div>
             <div>

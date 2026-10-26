@@ -594,9 +594,7 @@ export const ARTICLE_WORKFLOW_LABELS = {
   pendingClipsHelp: "企画に入っているのに、まだ記事に載っていないクリップです。記事に反映すると載り、ここから消えます。載せないものは、反映するときに使わない（チェックを外す）と今後足さないものとして消えます。",
   nextPending: "次の反映待ちへ", pendingQueue: (n: number) => `反映待ちの企画 ${n} 本`, noMorePending: "反映待ちの企画はこれで最後です。",
   backToPendingList: "反映待ちの一覧へ",
-  aiMerge: "AI に組み込ませる（本文に書き足す）",
-  sourcesOnly: "本文は手で書くので出典だけ足したいときや、クリップを「今後足さない」にしたいときは、下のボタンを使ってください（本文は変わりません）。",
-  sourcesOnlyButton: "出典だけ足す・外す",
+  aiMerge: "新しいクリップを本文に書き足す",
 } as const;
 
 /** 企画一覧 (`/dossiers`) のタブとカード */

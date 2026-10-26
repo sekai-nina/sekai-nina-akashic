@@ -101,18 +101,17 @@ export default async function DossierArticlePage({ params, searchParams }: Props
         {!editable ? <p className="text-xs text-slate-500">{L.readOnly}</p>
           : !current ? <p className="text-xs text-slate-500">{L.chooseTemplate}</p>
             : needsChoice ? <p className="text-xs text-slate-500">{L.chooseTarget}</p>
-              : supported && <>
-                {canAiMerge && <div className="mb-4 border-b border-slate-100 pb-4">
-                  <h3 className="mb-2 text-xs font-semibold text-slate-600">{L.aiMerge}</h3>
-                  <AiMergeStep key={JSON.stringify([dossier.id, articleId])} dossierId={dossier.id} articleId={articleId} />
-                  <p className="mt-3 text-[11px] text-slate-500">{L.sourcesOnly}</p>
-                </div>}
-                <ArticleStep previewLabel={canAiMerge ? L.sourcesOnlyButton : undefined} key={JSON.stringify([dossier.id, current, articleId])} hasArticle={!!target} hasDossier
-                onPreview={previewDossierArticleAction.bind(null, dossier.id, articleId)}
-                onSave={saveDossierArticleAction.bind(null, dossier.id, articleId)}
-                onRestore={restoreDossierExclusionsAction.bind(null, dossier.id, articleId)}
-              />
-              </>}
+              // 本文を AI / 人が書く記事の追記は「組み込む」だけ。差分の追記 (#268) は本文で参照しない
+              // 出典だけを足すので出さない (本文で参照しない出典は記事に置かない)
+              : canAiMerge ? <div>
+                <h3 className="mb-2 text-xs font-semibold text-slate-600">{L.aiMerge}</h3>
+                <AiMergeStep key={JSON.stringify([dossier.id, articleId])} dossierId={dossier.id} articleId={articleId} />
+              </div>
+                : supported && <ArticleStep key={JSON.stringify([dossier.id, current, articleId])} hasArticle={!!target} hasDossier
+                  onPreview={previewDossierArticleAction.bind(null, dossier.id, articleId)}
+                  onSave={saveDossierArticleAction.bind(null, dossier.id, articleId)}
+                  onRestore={restoreDossierExclusionsAction.bind(null, dossier.id, articleId)}
+                />}
       </section>
 
       {unreflected.length > 0 && <section className="mt-4 rounded-lg border border-amber-200 bg-white p-4">

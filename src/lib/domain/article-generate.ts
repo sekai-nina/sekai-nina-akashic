@@ -948,10 +948,15 @@ export interface MergeProposal {
   mechanicalLines: string[];
   /** 今回足せる出典 (番号は記事での番号) と、その素材の中身 (画面の右側に出す) */
   newSources: { sourceNo: number; label: string; material: string }[];
-  ai: ArticleAiStatus;
+  /** AI を使わずに手で書く (`manual`) ときは null */
+  ai: ArticleAiStatus | null;
+  /** 「今後足さない」にしているもの (戻せるように見せる) */
+  excluded: { key: string; label: string }[];
 }
 
-export type MergeProposalResult = { ok: true; proposal: MergeProposal } | { ok: false; error: string };
+export type MergeProposalResult =
+  | { ok: true; proposal: MergeProposal }
+  | { ok: false; error: string; excluded?: { key: string; label: string }[] };
 
 /** 組み込みの下準備: 素材・追記の計画・既存の出典。案と保存で同じものを使う (指紋を揃える) */
 async function prepareMerge(user: ActingUser, target: ArticleTarget) {
@@ -990,25 +995,41 @@ async function prepareMerge(user: ActingUser, target: ArticleTarget) {
   });
   if (!article) throw resolved.inputError("紐づいている記事が見つかりません");
   const existingSources = await loadArticleSources(user, resolved.articleId);
-  const plan = planOrThrow(resolved, {
+  const planArgs = {
     existingBody: article.body,
     parts: rendered.parts,
     sources: rendered.sources,
     existingSources,
-    excluded: resolved.storedExclusions,
     layout: resolved.layout,
-  });
-  return { resolved, dossierId: target.dossier.id, input, rendered, article, articleId: resolved.articleId, existingSources, plan };
+  };
+  const plan = planOrThrow(resolved, { ...planArgs, excluded: resolved.storedExclusions });
+  const excluded = describeExclusions(resolved.storedExclusions, planArgs);
+  return {
+    resolved,
+    dossierId: target.dossier.id,
+    input,
+    rendered,
+    article,
+    articleId: resolved.articleId,
+    existingSources,
+    plan,
+    excluded,
+  };
 }
 
 /**
  * AI に、新しい素材を既存の本文へ組み込んだ案を作らせる (DB の記事には書かない。費用はかかる)。
- * AI が既存の行を書き換えた案は使わずにエラーで返す
+ * AI が既存の行を書き換えた案は使わずにエラーで返す。
+ * `manual` は AI を呼ばず、足す前の本文をそのまま案にする (人が書く。AI が失敗したとき・自分で書きたいとき)
  */
-export async function proposeMerge(user: ActingUser, target: ArticleTarget): Promise<MergeProposalResult> {
-  const { resolved, dossierId, input, article, plan } = await prepareMerge(user, target);
+export async function proposeMerge(
+  user: ActingUser,
+  target: ArticleTarget,
+  options: { manual?: boolean } = {}
+): Promise<MergeProposalResult> {
+  const { resolved, dossierId, input, article, plan, excluded } = await prepareMerge(user, target);
   if (plan.newSources.length === 0) {
-    return { ok: false, error: "記事に足せる新しい素材がありません" };
+    return { ok: false, error: "記事に足せる新しい素材がありません", excluded };
   }
   const template = resolved.template as ArticleTemplateDef & { needsAi: true };
   const newNos = new Set(plan.newSources.map((s) => s.sourceNo));
@@ -1016,6 +1037,22 @@ export async function proposeMerge(user: ActingUser, target: ArticleTarget): Pro
   const focus = new Set([...plan.renumber].filter(([, to]) => newNos.has(to)).map(([from]) => from));
   const materials = buildMaterialsText(input, focus);
   const renumbered = renumberMaterials(materials.text, plan.renumber, newNos);
+  const materialByNo = new Map(renumbered.sections.map((s) => [s.no, s.text]));
+  const proposal = (body: string, changedLines: number[], ai: ArticleAiStatus | null): MergeProposal => ({
+    body,
+    digest: appendDigest(plan),
+    changedLines,
+    mechanicalLines: plan.changedLines.map((i) => plan.body.split("\n")[i]).filter((l) => l && l.trim()),
+    newSources: plan.newSources.map((s) => ({
+      sourceNo: s.sourceNo,
+      label: s.label,
+      material: materialByNo.get(s.sourceNo) ?? "",
+    })),
+    ai,
+    excluded,
+  });
+  if (options.manual) return { ok: true, proposal: proposal(plan.body, [], null) };
+
   const prompt = mergePrompt({
     system: await mergeSystemPrompt(template, input),
     title: article.title,
@@ -1037,23 +1074,7 @@ export async function proposeMerge(user: ActingUser, target: ArticleTarget): Pro
   const body = normalizeAiBody(unwrapFence(generated.body), maxNo);
   const check = checkMerge(plan.body, body);
   if (!check.ok) return { ok: false, error: check.reason };
-
-  const materialByNo = new Map(renumbered.sections.map((s) => [s.no, s.text]));
-  return {
-    ok: true,
-    proposal: {
-      body,
-      digest: appendDigest(plan),
-      changedLines: check.changedLines,
-      mechanicalLines: plan.changedLines.map((i) => plan.body.split("\n")[i]).filter((l) => l && l.trim()),
-      newSources: plan.newSources.map((s) => ({
-        sourceNo: s.sourceNo,
-        label: s.label,
-        material: materialByNo.get(s.sourceNo) ?? "",
-      })),
-      ai: generated.ai,
-    },
-  };
+  return { ok: true, proposal: proposal(body, check.changedLines, generated.ai) };
 }
 
 export type SaveMergeResult =
@@ -1085,12 +1106,17 @@ export async function saveMerge(
     return { ok: false, error: "この記事には閲覧できない出典があり、番号がぶつかるため保存できません。クリアランスの高い人が保存してください" };
   }
   const final = finalizeMerge(body, plan.newSources, new Set([...sourceNos, ...bodyNos]));
-  // 使わなかった出典のうち、差分で「足すもの」に出ていたもの (出典だけの提示) を除外にする。
-  // 本文の行 (画像・トーク) に付く出典は行と一緒に決まるので、ここでは触らない
+  // 使わなかった出典のうち、差分で「足すもの」に出ていたもの (出典だけの提示) を除外にする
   const offered = new Set(plan.additions.map((a) => a.key));
-  const unusedKeys = final.unused
-    .flatMap((s) => (s.assetId ? [exclusionKey("source", s.assetId)] : []))
-    .filter((k) => offered.has(k));
+  // 機械で足した行 (画像・トーク) を人が消したものも除外にする (消しても反映待ちに残り続けないように)
+  const finalLines = new Set(final.body.split("\n").map((l) => l.replace(/\^\[\d+\]\s*$/, "").trim()));
+  const removedLines = plan.additions
+    .filter((a) => (a.kind === "talk" || a.kind === "blogImage") && !finalLines.has(a.label))
+    .map((a) => a.key);
+  const unusedKeys = [
+    ...final.unused.flatMap((s) => (s.assetId ? [exclusionKey("source", s.assetId)] : [])).filter((k) => offered.has(k)),
+    ...removedLines,
+  ];
 
   // **出典が先。** 本文を先に書くと ^[n] の最大値の続きから番号が振られてリンク切れになる
   const applied = await applySources(article.shortId, articleId, final.sources, user, actor, article.updatedAt);
