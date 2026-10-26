@@ -95,11 +95,17 @@ export async function getDashboardStats(): Promise<DashboardStats> {
         ) AS talk_audios,
         (SELECT COUNT(*) FROM "Asset") AS total_assets,
         (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" JOIN "Asset" a ON a.id = ae."assetId" WHERE e.type = 'tag' AND e."normalizedName" = '今日の発見' AND a.kind = 'text') AS discovery,
-        (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '日向坂で会いましょう') AS hinaai,
-        (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = 'まだまだ!日向坂で会いましょう') AS madamada,
-        (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '日向坂になりましょう') AS hinanari,
-        (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '日向坂ちゃんねる') AS hinach,
-        (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '日向坂46公式チャンネル') AS official,
+        -- 番組タグは出ていない回にも付くので、坂井新奈が付いた回 (= 出演回) だけを数える
+        (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '日向坂で会いましょう'
+          AND EXISTS (SELECT 1 FROM "AssetEntity" n WHERE n."assetId" = ae."assetId" AND n."entityId" = ${NINA_ENTITY_ID})) AS hinaai,
+        (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = 'まだまだ!日向坂で会いましょう'
+          AND EXISTS (SELECT 1 FROM "AssetEntity" n WHERE n."assetId" = ae."assetId" AND n."entityId" = ${NINA_ENTITY_ID})) AS madamada,
+        (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '日向坂になりましょう'
+          AND EXISTS (SELECT 1 FROM "AssetEntity" n WHERE n."assetId" = ae."assetId" AND n."entityId" = ${NINA_ENTITY_ID})) AS hinanari,
+        (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '日向坂ちゃんねる'
+          AND EXISTS (SELECT 1 FROM "AssetEntity" n WHERE n."assetId" = ae."assetId" AND n."entityId" = ${NINA_ENTITY_ID})) AS hinach,
+        (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '日向坂46公式チャンネル'
+          AND EXISTS (SELECT 1 FROM "AssetEntity" n WHERE n."assetId" = ae."assetId" AND n."entityId" = ${NINA_ENTITY_ID})) AS official,
         (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '雑誌') AS magazine,
         (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = 'ラジオ') AS radio,
         (SELECT COUNT(*) FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId" WHERE e.type = 'tag' AND e."normalizedName" = '外番組') AS tv,
