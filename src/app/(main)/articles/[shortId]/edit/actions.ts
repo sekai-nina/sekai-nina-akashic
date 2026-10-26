@@ -5,6 +5,7 @@ import { redirect, RedirectType } from "next/navigation";
 import { requireRole } from "@/lib/auth/require-role";
 import { withClearance } from "@/lib/db";
 import { getArticleTitleIndex, updateArticle } from "@/lib/domain/articles";
+import { saveArticlePlaces } from "@/lib/domain/article-places";
 import { BODY_MAX_LENGTH, normalizeBody, parseArticleEditForm, type ArticleEditField } from "@/lib/articles/edit";
 import { auditFootnotes, type FootnoteAudit } from "@/lib/articles/footnotes";
 import { renderArticleBody } from "@/lib/articles/render";
@@ -24,6 +25,9 @@ export type UpdateArticleState = {
  * 成功したら詳細へ redirect する (ここでは何も返さない)。失敗は throw せず state で返す
  * (楽観ロックの衝突で入力を消したくない)。タイトルを変えたときは `?renamedFrom=` を付けて
  * 飛び、詳細側で `[[旧タイトル]]` の参照元を数えて警告する (ブロックはしない)。
+ *
+ * 聖地 (`placeIds`) は本文・frontmatter の保存の後に、返ってきた `updatedAt` で続けて保存する
+ * (同じ楽観ロックに乗せる)。聖地だけ失敗したら、本文側は保存済みであることを添えて返す。
  */
 export async function updateArticleAction(
   shortId: string,
@@ -66,9 +70,29 @@ export async function updateArticleAction(
     };
   }
 
+  let placesChanged = false;
+  if (formData.get("placesField") === "1") {
+    const placeIds = formData.getAll("placeIds").filter((v): v is string => typeof v === "string" && v !== "");
+    const saved = await saveArticlePlaces(shortId, result.updatedAt, placeIds, { id: user.id }, user.clearance);
+    if (!saved.ok) {
+      if (result.changed.length) revalidatePath("/articles", "layout");
+      const why =
+        saved.reason === "conflict"
+          ? "別の保存か取り込みが先に入りました"
+          : saved.reason === "invalid_place"
+            ? "選べない聖地が含まれています"
+            : "記事が見つかりません";
+      return {
+        error: `聖地を保存できませんでした (${why})。${result.changed.length ? "本文などは保存済みです。" : ""}再読み込みしてください`,
+      };
+    }
+    placesChanged = saved.changed;
+  }
+
   // 監査ログ (article.update) は domain が書く。一覧・詳細・push 画面の「未 push」表示を
   // まとめて更新する (配下を丸ごと)
-  if (result.changed.length) revalidatePath("/articles", "layout");
+  if (result.changed.length || placesChanged) revalidatePath("/articles", "layout");
+  if (placesChanged) revalidatePath("/places", "layout");
 
   const renamed = result.changed.includes("title") ? `?renamedFrom=${encodeURIComponent(result.previousTitle)}` : "";
   redirect(`/articles/${shortId}${renamed}`, RedirectType.replace);

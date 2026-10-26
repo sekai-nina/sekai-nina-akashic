@@ -125,6 +125,11 @@ export interface RenderedArticle<Extra extends Record<string, unknown> = Record<
   draft: boolean;
   /** frontmatterExtra に入れる dossier とテンプレート固有のブロック (meetgreet / live / locations …) */
   frontmatterExtra: { dossier: DossierSnapshot } & Extra;
+  /**
+   * 新規作成で記事に紐づける聖地 (ArticlePlace、訪問順)。非公開の聖地も含む (#283)。
+   * frontmatter の `locations` に載るのは push 時に public / internal のものだけ
+   */
+  placeIds?: string[];
 }
 
 /**

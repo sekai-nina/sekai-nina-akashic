@@ -220,6 +220,12 @@ export interface DossierMaterials {
   dossierThumb: string | null;
   /** 場所候補 (おでかけ記事の `locations`) */
   places: DossierPlace[];
+  /**
+   * 聖地に昇格済みの場所候補の Place ID (ドシエの並び順・重複なし)。**非公開の聖地も含む。**
+   * 記事の ArticlePlace になる (#283)。frontmatter に出すかは push が Place の classification で決める。
+   * 名前・座標は持たない (AI にも本文にも渡さない)
+   */
+  linkedPlaceIds: string[];
   /** 機密レベルで落としたアセットの数 */
   droppedByClearance: number;
 }
@@ -332,6 +338,10 @@ export function shapeDossierMaterials(dossier: DossierForMaterials): DossierMate
         },
       ];
     }),
+    // 見えない (RLS で place が null) 聖地は紐づけられない
+    linkedPlaceIds: [
+      ...new Set(dossier.placeCandidates.flatMap((p) => (p.placeId && p.place ? [p.placeId] : []))),
+    ],
     droppedByClearance: dropped.size,
   };
 }

@@ -622,8 +622,20 @@ export async function deleteInvitationAction(id: string) {
 
 // ========== Places ==========
 
+/**
+ * フォームの聖地のクリアランス。自分より上は RLS でも書けないが、生の 500 にせずここで止める。
+ * 未指定は undefined (作成は既定の internal、更新は変更なし)
+ */
+function placeClassification(formData: FormData, userClearance: string): ClearanceLevel | undefined {
+  const raw = (formData.get("classification") as string | null) || undefined;
+  if (raw === undefined) return undefined;
+  assertClearance(userClearance, raw);
+  return raw as ClearanceLevel;
+}
+
 export async function createPlaceAction(formData: FormData) {
   const user = await requireRole(["admin", "member"]);
+  const classification = placeClassification(formData, user.clearance);
 
   const { createPlace } = await import("@/lib/domain/places");
   const place = await createPlace(
@@ -636,18 +648,21 @@ export async function createPlaceAction(formData: FormData) {
       description: (formData.get("description") as string) || undefined,
       kind: (formData.get("kind") as PlaceKind) || null,
       area: (formData.get("area") as string) || null,
-      classification: (formData.get("classification") as ClearanceLevel) || undefined,
+      classification,
     },
     user.clearance
   );
 
   invalidatePlaces();
+  // place エンティティの一覧・検索は Place のクリアランスで絞っている (entityClearanceWhere)
+  invalidateEntities();
   revalidatePath("/places");
   redirect(`/places/${place.id}`);
 }
 
 export async function updatePlaceAction(id: string, formData: FormData) {
   const user = await requireRole(["admin", "member"]);
+  const classification = placeClassification(formData, user.clearance);
 
   const { updatePlace } = await import("@/lib/domain/places");
   await updatePlace(
@@ -662,12 +677,14 @@ export async function updatePlaceAction(id: string, formData: FormData) {
       // 空の選択は「未設定」に戻す (undefined = 変更なし と区別する)
       kind: formData.has("kind") ? ((formData.get("kind") as PlaceKind) || null) : undefined,
       area: formData.has("area") ? ((formData.get("area") as string) || null) : undefined,
-      classification: (formData.get("classification") as ClearanceLevel) || undefined,
+      classification,
     },
     user.clearance
   );
 
   invalidatePlaces();
+  // クリアランスを変えたら place エンティティの一覧・検索の見え方も変わる (entityClearanceWhere)
+  invalidateEntities();
   revalidatePath("/places");
   revalidatePath(`/places/${id}`);
 }

@@ -1,5 +1,6 @@
-import { ClearanceLevel, type PlaceKind } from "@prisma/client";
+import { ClearanceLevel, type PlaceKind, type Prisma } from "@prisma/client";
 import { withClearance } from "@/lib/db";
+import { isPublishablePlace } from "@/lib/articles/frontmatter";
 import { normalizeText } from "@/lib/utils";
 import { logAudit } from "./audit";
 
@@ -33,6 +34,24 @@ export function normalizeArea(area: string | null | undefined): string | null | 
   if (area === undefined) return undefined;
   const t = (area ?? "").trim();
   return t ? t : null;
+}
+
+/**
+ * 聖地が記事の push 出力 (`locations` の name / 有無) を変えたときに、紐づく記事を push 待ちにする (#283)。
+ * `editedAt` も立てる: 立てないと push 前の再取り込みが「ファイルと値が違う」を取りこぼし扱いにして
+ * dirty を落とす (取り込みの preserved ガードは editedAt を見る)
+ */
+async function markArticlesForPlace(tx: Prisma.TransactionClient, placeId: string) {
+  await tx.article.updateMany({
+    where: {
+      OR: [
+        { places: { some: { placeId } } },
+        // backfill 前・backfill が移せなかった記事は frontmatterExtra.locations に place_id が残っている
+        { frontmatterExtra: { path: ["locations"], array_contains: [{ place_id: placeId }] } },
+      ],
+    },
+    data: { dirty: true, editedAt: new Date() },
+  });
 }
 
 export type PlaceWithEntity = Awaited<ReturnType<typeof getPlaceById>> & {};
@@ -95,6 +114,13 @@ export async function updatePlace(id: string, data: UpdatePlaceData, clearance: 
     });
     if (!existing) throw new Error("Place not found");
 
+    // 記事の locations は聖地の正式名で書き出し、公開範囲 (public / internal) の聖地だけ載せる
+    const renamed = !!data.canonicalName && data.canonicalName !== existing.entity.canonicalName;
+    const publishabilityChanged =
+      data.classification !== undefined &&
+      isPublishablePlace(existing) !== isPublishablePlace({ classification: data.classification });
+    if (renamed || publishabilityChanged) await markArticlesForPlace(tx, id);
+
     if (data.canonicalName || data.description !== undefined) {
       await tx.entity.update({
         where: { id: existing.entityId },
@@ -146,6 +172,9 @@ export async function deletePlace(id: string, clearance: string) {
       include: { entity: true },
     });
     if (!found) throw new Error("Place not found");
+
+    // ArticlePlace も消えるので、locations に載っていた記事は push で消す必要がある
+    if (isPublishablePlace(found)) await markArticlesForPlace(tx, id);
 
     // Deleting the entity cascades to the place
     await tx.entity.delete({ where: { id: found.entityId } });

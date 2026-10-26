@@ -278,6 +278,7 @@ export async function loadRenderInput(
     tiktoks,
     thumbnailUrl: materials.dossierThumb,
     places: materials.places,
+    linkedPlaceIds: materials.linkedPlaceIds,
     today: options.today ?? todayJst(),
   };
   return { input, droppedByClearance: materials.droppedByClearance };
