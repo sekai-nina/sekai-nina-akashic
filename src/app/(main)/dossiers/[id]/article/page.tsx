@@ -14,6 +14,7 @@ import { TemplatePicker } from "./template-picker";
 import { PendingClips } from "./pending-clips";
 import { AiMergeStep } from "./ai-merge-step";
 import { listPendingDossiers } from "@/lib/domain/dossier-sync-queue";
+import { prisma } from "@/lib/db";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -49,6 +50,10 @@ export default async function DossierArticlePage({ params, searchParams }: Props
   // 本文を AI / 人が書くテンプレートの追記は、新しい素材を AI に組み込ませられる (#275)
   // 反映待ちが無くても出しておく (保存して反映待ちが消えた直後に、結果の表示ごと消えないように)
   const canAiMerge = !preparation && editable && !needsChoice && !!target && !!current && !!getTemplate(current)?.needsAi;
+  // 押す前から、書き足す先の本文を見せておく (何に手を入れるのかが分かってから押せるように)
+  const currentBody = canAiMerge && articleId
+    ? (await prisma.article.findUnique({ where: { id: articleId }, select: { body: true } }))?.body ?? ""
+    : "";
   // 反映待ちを 1 本ずつ進める。並びは一覧の「反映待ち」タブと同じ (新しい順) で、いまの企画の次。
   // いまの企画が片付いて列から消えていたら先頭へ
   const here = queue.findIndex((p) => p.dossierId === dossier.id);
@@ -105,7 +110,7 @@ export default async function DossierArticlePage({ params, searchParams }: Props
               // 出典だけを足すので出さない (本文で参照しない出典は記事に置かない)
               : canAiMerge ? <div>
                 <h3 className="mb-2 text-xs font-semibold text-slate-600">{L.aiMerge}</h3>
-                <AiMergeStep key={JSON.stringify([dossier.id, articleId])} dossierId={dossier.id} articleId={articleId} />
+                <AiMergeStep key={JSON.stringify([dossier.id, articleId])} dossierId={dossier.id} articleId={articleId} currentBody={currentBody} />
               </div>
                 : supported && <ArticleStep key={JSON.stringify([dossier.id, current, articleId])} hasArticle={!!target} hasDossier
                   onPreview={previewDossierArticleAction.bind(null, dossier.id, articleId)}
