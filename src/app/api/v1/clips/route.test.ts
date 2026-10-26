@@ -1,13 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextResponse } from "next/server";
-import { ClipAssetNotFoundError, ClipForbiddenError, ClipInputError } from "@/lib/domain/clips";
+import { ClipAssetNotFoundError, ClipForbiddenError, ClipInputError } from "@/lib/clips/errors";
 
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), create: vi.fn() }));
 vi.mock("@/lib/api-auth", () => ({ requireApiAuth: mocks.auth }));
-vi.mock("@/lib/domain/clips", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/domain/clips")>()),
-  createClip: mocks.create,
-}));
+vi.mock("@/lib/domain/clips", () => ({ createClip: mocks.create }));
 vi.mock("@/lib/cache", () => ({ invalidateDossiers: vi.fn() }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 import { POST } from "./route";
@@ -43,6 +40,12 @@ describe("POST /api/v1/clips", () => {
 
   it("認証に失敗したらそのまま返す", async () => {
     mocks.auth.mockResolvedValue(NextResponse.json({ error: "x" }, { status: 403 }));
+    expect((await post(JSON.stringify({ assetId: "a1", note: "メモ" }))).status).toBe(403);
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it("viewer のキーは 403 で何も書かない", async () => {
+    mocks.auth.mockResolvedValue({ id: "v", role: "viewer", clearance: "internal", apiKeyId: "key" });
     expect((await post(JSON.stringify({ assetId: "a1", note: "メモ" }))).status).toBe(403);
     expect(mocks.create).not.toHaveBeenCalled();
   });

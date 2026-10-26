@@ -15,7 +15,7 @@ import { PrismaClient } from "@prisma/client";
 import { createHash, randomBytes } from "crypto";
 import { WORKER_PERMISSION } from "@/lib/insta/jobs";
 import { ARTICLE_PUSH_PERMISSION } from "@/lib/articles/append";
-import { CLIP_PERMISSION } from "@/lib/domain/clips";
+import { CLIP_PERMISSION } from "@/lib/clips/errors";
 
 const prisma = new PrismaClient();
 

@@ -28,7 +28,7 @@ APIキーは `pnpm cli:keygen <user-email> <key-name> [permissions]` で発行�
 - `write`: POST / PUT / PATCH / ファイルアップロード
 - `insta_worker`: iPad の story ワーカー専用（`/insta/jobs/:id/start` 等の報告と、自分のジョブの参照だけ）。`pnpm cli:keygen <email> "ipad-insta-worker" insta_worker` で **read / write を持たないキー**を作って iPad に置く。permission はルートを絞るだけで RLS の範囲は持ち主のクリアランスのままなので、**clearance が internal の専用ユーザー**に発行する。なお `GET /insta/targets` `/insta/account` `/ai-status` は「キーが有効なら誰でも読める」設計なので、このキーからも読める
 - `article_push`: 記事 1 本を公開リポジトリに push する（`POST /articles/:shortId/push`）。`write` とは別に持たせる。Discord bot のキーにだけ付ける（#209）
-- `clip`: クリップを 1 件作る（`POST /clips`）だけを通す。Discord の返信からクリップする bot 用（#286）。**clearance が internal の bot 専用ユーザー**に発行する（/clips の作成者はキーの持ち主になる）
+- `clip`: クリップを 1 件作る（`POST /clips`）だけを通す。Discord の返信からクリップする bot 用（#286）。**clearance が internal の bot 専用ユーザー**に発行する（/clips の作成者はキーの持ち主になる）。`insta_worker` と同じく、「キーが有効なら誰でも読める」`GET /insta/targets` `/insta/account` `/tiktok/targets` `/ai-status` はこのキーからも読める
 
 ### エラーレスポンス
 
@@ -1289,10 +1289,10 @@ body は省略可（`subject` を省くと既定のコミットメッセージ�
 
 | フィールド | 型 | 必須 | 説明 |
 |---|---|---|---|
-| `assetId` | string | ✓ | クリップするアセット |
+| `assetId` | string | ✓ | クリップするアセット（100 字まで） |
 | `note` | string | | メモ（10,000 字まで） |
 | `excerpt` | string | | 引用（10,000 字まで）。本文から位置を探し、見つかればハイライトの範囲も保存する（空白・改行の違いは吸収）。見つからなければ文字列だけ保存する |
-| `requestedBy` | string | | 頼んだ人（返信した人の Discord 名など）。監査ログ `clip.create` の metadata に残すだけ |
+| `requestedBy` | string | | 頼んだ人（返信した人の Discord 名など。200 字まで）。監査ログ `clip.create` の metadata に残すだけ |
 
 `note` と `excerpt` のどちらかは必須。
 
@@ -1307,6 +1307,7 @@ body は省略可（`subject` を省くと既定のコミットメッセージ�
 - プールより上の機密（`internal` を超える）のアセットは 400（抜粋がプールの機密レベルで見えてしまうため）
 - キーの持ち主のクリアランスが `internal` 未満、または role が viewer なら 403
 - 作成者はキーの持ち主（bot 専用ユーザー）。/clips とアセット詳細のクリップ欄に出る
+- **冪等ではない。** 同じ内容を 2 回送ると 2 件できる。クリップを保存したあと監査ログの書き込みで落ちると 500 になるので、5xx を自動で再送しない（bot は失敗を返信で知らせ、人が確かめる）
 
 ## ミーグリ記事ワークフロー (MeetGreets)
 

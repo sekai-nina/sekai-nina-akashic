@@ -3,13 +3,17 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireApiAuth } from "@/lib/api-auth";
 import { invalidateDossiers } from "@/lib/cache";
-import { CLIP_PERMISSION, ClipAssetNotFoundError, ClipForbiddenError, ClipInputError, createClip } from "@/lib/domain/clips";
+import { CLIP_PERMISSION, ClipAssetNotFoundError, ClipForbiddenError, ClipInputError } from "@/lib/clips/errors";
+import { createClip } from "@/lib/domain/clips";
 import { formatZodError } from "@/lib/zod-error";
+
+/** メモ・引用の上限 (docs/api.md の「10,000 字まで」) */
+const MAX_TEXT_LENGTH = 10000;
 
 const CreateClipRequestSchema = z.object({
   assetId: z.string().min(1).max(100),
-  note: z.string().max(10000).optional(),
-  excerpt: z.string().max(10000).optional(),
+  note: z.string().max(MAX_TEXT_LENGTH).optional(),
+  excerpt: z.string().max(MAX_TEXT_LENGTH).optional(),
   /** 返信した人の Discord 名など。監査ログに残すだけ */
   requestedBy: z.string().max(200).optional(),
 });
@@ -25,6 +29,11 @@ const CreateClipRequestSchema = z.object({
 export async function POST(request: Request) {
   const auth = await requireApiAuth(request, [CLIP_PERMISSION, "write"]);
   if (auth instanceof NextResponse) return auth;
+  // 画面の createClipAction と同じく viewer を弾く。プールの所有者は canEditDossier が
+  // role を見ずに通すので、プールを最初に作ったキーが viewer だと素通りになる
+  if (auth.role !== "admin" && auth.role !== "member") {
+    return NextResponse.json({ error: "クリップを作る権限がありません" }, { status: 403 });
+  }
 
   let raw: unknown;
   try {
@@ -49,10 +58,13 @@ export async function POST(request: Request) {
       },
     });
     invalidateDossiers();
+    // 画面の createClipAction (clips/actions.ts の revalidateClips) と同じ範囲を捨てる
     revalidatePath("/clips");
+    revalidatePath("/dossiers");
     revalidatePath(`/assets/${assetId}`);
     return NextResponse.json({ id: item.id, assetId, located: item.excerptStart != null }, { status: 201 });
   } catch (e) {
+    // 派生 (NotFound / Forbidden) を親の ClipInputError より先に見る
     if (e instanceof ClipAssetNotFoundError) {
       return NextResponse.json({ error: e.message }, { status: 404 });
     }
