@@ -189,6 +189,7 @@ src/
 | Google Drive | 画像ソース | OAuth2（個人）/ サービスアカウント（共有ドライブ）の 2 方式 |
 | X (Twitter) | recent search | 有料プラン必須 |
 | OpenAI | 口コミ抽出（Structured Outputs） | 利用量は `/costs` に自己申告する |
+| Groq | 音声・動画の文字起こし（whisper-large-v3） | `internal` 以下だけ送る。利用量は課金秒数で `/costs` に自己申告 |
 
 環境変数は `.env.example` 参照。必須は `DATABASE_URL` / `DIRECT_URL` / `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` / `SUPABASE_SECRET_KEY`。
 
@@ -198,7 +199,7 @@ src/
 
 - **Web: Vercel**。`vercel.json` で **region `hnd1` 固定**（Supabase ap-northeast-1 とのコロケーション。既定の iad1 だとページ読み込みが 5-8 秒かかった）
 - **CI**: `.github/workflows/ci.yml` が push to `main` で `pnpm typecheck` を回すだけ（Discord bot は撤去済み）
-- **Vercel Cron**: `vercel.json` の `*/15 * * * *` が `GET /api/cron/status`、`*/10 * * * *` が `GET /api/cron/insta-jobs`（story ジョブの失効回収と再送）、`*/15 * * * *` が `GET /api/cron/nina-mentions`（本文が新奈に言及しているアセットに `Asset.mentionsNina` を付け外し）、`0 3 * * *`（UTC = 12:00 JST）が `GET /api/cron/costs`、`0 0 * * *`（09:00 JST）が `GET /api/cron/mentions` を呼ぶ（すべて `CRON_SECRET` 必須。未設定なら 503 で何もしない。認証は `src/lib/cron/auth.ts`）
+- **Vercel Cron**: `vercel.json` の `*/15 * * * *` が `GET /api/cron/status`、`*/10 * * * *` が `GET /api/cron/insta-jobs`（story ジョブの失効回収と再送）、`*/15 * * * *` が `GET /api/cron/nina-mentions`（本文が新奈に言及しているアセットに `Asset.mentionsNina` を付け外し）、`*/15 * * * *` が `GET /api/cron/transcribe`（坂井新奈のトークを Groq で文字起こし。`docs/transcribe-design.md`）、`0 3 * * *`（UTC = 12:00 JST）が `GET /api/cron/costs`、`0 0 * * *`（09:00 JST）が `GET /api/cron/mentions` を呼ぶ（すべて `CRON_SECRET` 必須。未設定なら 503 で何もしない。認証は `src/lib/cron/auth.ts`）
 - `instrumentation.ts` が起動時に Prisma を事前接続（pooler の ~800ms コールドコネクト回避）
 
 ## ドキュメント
@@ -212,6 +213,7 @@ src/
 | `docs/status-design.md` | パイプライン監視（`/status`・ハートビート API・Cron 評価・Discord 通知）設計書 |
 | `docs/mentions-design.md` | X 言及監視（`/mentions`・日次 cron・除外ユーザー・Discord 通知）設計書 |
 | `docs/ipad-instagram-worker.md` | Instagram story を iPad（Pushcut + Shortcuts）で取る仕組みと、ラッパー Shortcut の作り方 |
+| `docs/transcribe-design.md` | 音声・動画の文字起こし（Groq・15 分 cron・アセット詳細のボタン・機密は送らない）設計書 |
 | `docs/tiktok-design.md` | TikTok 監視（`/admin/tiktok`・tiktok-watch bot・台帳 API・Discord 通知）設計書 |
 | `docs/costs-design.md` | LLM コスト管理（`/costs`・利用量の自己申告・プロバイダ取り込み・残クレジット判定）設計書 |
 | `docs/security.md` / `docs/security-admin.md` | 非エンジニア / 管理者向け |
