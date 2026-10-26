@@ -149,6 +149,15 @@ function parseSpeakerFromLinkedEntities(linkedEntities: string): string {
   return firstEntity || "不明";
 }
 
+/**
+ * 口コミはメンバー本人のブログ (/diary/detail/<id>) からだけ拾う。
+ * 運営のひなたぼっこ日記 (/diary/manager/...) など他の web 資料は著者が公式アカウントで、
+ * 語った人がグループ名になってしまうので対象外
+ */
+export function isMemberBlogUrl(url: string | null | undefined): boolean {
+  return /hinatazaka46\.com\/s\/official\/diary\/detail\/\d+/.test(url ?? "");
+}
+
 function parseSourceUrl(sourceInfo: string): string | null {
   const urlMatch = sourceInfo.match(/url:\s*(https?:\/\/[^\s[\]]+)/);
   return urlMatch ? urlMatch[1] : null;
@@ -369,6 +378,9 @@ export async function extractTestimonials(options: ExtractOptions): Promise<{
     const sourceInfo = asset.sourceRecords
       .map((sr) => `${sr.sourceKind}${sr.url ? `: ${sr.url}` : ""}${sr.publisher ? ` [${sr.publisher}]` : ""}`)
       .join("; ");
+    if (!asset.sourceRecords.some((sr) => isMemberBlogUrl(sr.url))) {
+      return { processed: 0, extracted: 0, skipped: 0 };
+    }
     const speaker = parseSpeakerFromLinkedEntities(linkedEntities);
     if (speaker === entityName) {
       return { processed: 0, extracted: 0, skipped: 0 };
@@ -406,6 +418,7 @@ export async function extractTestimonials(options: ExtractOptions): Promise<{
     });
     filtered = mentions.filter((m) => {
       if (m.assetSourceType !== "web" || m.textType !== "body") return false;
+      if (!isMemberBlogUrl(m.sourceInfo)) return false;
       const speaker = parseSpeakerFromLinkedEntities(m.linkedEntities);
       return speaker !== entityName;
     });
