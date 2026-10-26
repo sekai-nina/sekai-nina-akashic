@@ -118,6 +118,7 @@ APIキーは `pnpm cli:keygen <user-email> <key-name> [permissions]` で発行�
 | PATCH | `/lives/:id` | write | ライブ名・補足・X レポのハッシュタグ・スケッチ追加指示の更新 |
 | DELETE | `/lives/:id` | write | ライブの行を消す（ドシエ・収集・エンティティは残る） |
 | PUT | `/lives/:id/setlist` | write | 公演と披露曲を丸ごと入れ替える |
+| PUT | `/lives/:id/performances/:performanceId/setlist` | write | 1 公演のセトリ（全曲・参加・センター）を入れ替え、披露曲を組み直す |
 | POST | `/lives/:id/materials` | write | 素材候補のチェック結果をドシエに反映 |
 | POST | `/lives/:id/reports` | write | X レポの (再) 収集 |
 | POST | `/lives/:id/sketch` | write | 衣装スケッチの候補を生成（作り直しも） |
@@ -1594,8 +1595,8 @@ X レポ・スケッチはミーグリと同じ仕組み（#150）。記事生�
       "lastDate": "2025-11-21",
       "commonSongs": ["NO WAR in the future 2020", "キツネ", "空飛ぶ車"],
       "performances": [
-        {"id": "…", "date": "2025-09-20", "venue": "セキスイハイムスーパーアリーナ（宮城）", "label": "", "note": "", "songs": [], "centerSongs": []},
-        {"id": "…", "date": "2025-09-28", "venue": "広島サンプラザホール", "label": "", "note": "", "songs": ["One choice"], "centerSongs": []}
+        {"id": "…", "date": "2025-09-20", "venue": "セキスイハイムスーパーアリーナ（宮城）", "label": "", "note": "", "songs": [], "centerSongs": [], "setlist": []},
+        {"id": "…", "date": "2025-09-28", "venue": "広島サンプラザホール", "label": "", "note": "", "songs": ["One choice"], "centerSongs": [], "setlist": []}
       ],
       "dossier": {"id": "…", "title": "日向坂46 ARENA TOUR 2025「MONSTER GROOVE」", "itemCount": 0, "updatedAt": "…"},
       "dossierId": "…",
@@ -1614,6 +1615,7 @@ X レポ・スケッチはミーグリと同じ仕組み（#150）。記事生�
 - `firstDate` / `lastDate` は公演の初日 / 最終日（JST の暦日）。公演が無ければ `null`
 - `entity` は **`null` になりうる**（`confidential` 以上で作ったライブは同名のエンティティを作らない。エンティティが消されたときも `SetNull`）
 - `commonSongs` は全公演で披露した曲、`performances[].songs` はその公演だけの追加曲、`performances[].centerSongs` はセンター曲。順番は入力順
+- `performances[].setlist` はその公演のセトリ（坂井新奈が出ていない曲も含めた全曲、順番どおり）。各要素は `{"title", "section", "participated", "center"}`（`section` は `""` = 本編 / `"アンコール"` / `"Wアンコール"`）。入っていない公演は `[]`。セトリのある公演の `songs` / `centerSongs` と `commonSongs` はセトリから組み直したもの（参加した曲だけ）
 - `performances` は `sortOrder` 順（= 入力順。日付順とは限らない）
 - `dossier` / `repoCollection` が `null` になりうるのはミーグリと同じ（`GET /meetgreets` 参照）
 
@@ -1689,6 +1691,28 @@ X レポ・スケッチはミーグリと同じ仕組み（#150）。記事生�
 - `performances[].id` を付けた行は残して更新する（公演の ID が変わらない）。付けない行は新しく作る。**本文に無い既存の公演は消える**
 - 同じ `id` を 2 回渡すと 400（既存のものでも未知のものでも）。他のライブの公演の `id` は「無いもの」として扱われ、新しい行が作られる
 - 曲は毎回 `LiveSong` を作り直す。`Song` は増えるだけで消えない
+
+**レスポンス:** 更新後の行（`GET /lives` の 1 行と同じ形）。
+
+### PUT /lives/:id/performances/:performanceId/setlist
+
+1 公演のセトリ（全曲）を**丸ごと入れ替える**。
+
+```json
+{"items": [
+  {"title": "円周率"},
+  {"title": "ホントの時間", "participated": false},
+  {"title": "月と星が踊るMidnight", "center": true},
+  {"title": "ママのドレス", "section": "アンコール"}
+]}
+```
+
+- 順番は配列の順。同じ曲を 2 回入れてよい（再披露）。最大 80 曲、曲名 ≤100 文字
+- `participated` の既定は `true`。`center: true` の曲は `participated` に関係なく参加扱い
+- 保存のあと、ライブの `commonSongs` / 各公演の `songs` / `centerSongs` を**参加した曲だけで組み直す**（全公演の共通部分が `commonSongs`、残りが `songs`）。セトリの無い公演は今の `commonSongs` + `songs` をその公演の曲とみなすので、一部の公演だけ入れても他の公演の曲は消えない
+- 以後 `PUT /lives/:id/setlist` で送った曲は、セトリのある公演については組み直しで上書きされる
+- `{"items": []}` でその公演のセトリを消す（披露曲は直前の組み直しのまま残る）
+- 公演がこのライブのものでなければ 400
 
 **レスポンス:** 更新後の行（`GET /lives` の 1 行と同じ形）。
 

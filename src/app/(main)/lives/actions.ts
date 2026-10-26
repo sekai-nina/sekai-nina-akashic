@@ -10,14 +10,16 @@ import {
   getLive,
   liveExcerptTarget,
   refetchReports,
+  replacePerformanceSetlist,
   replaceSetlist,
   updateLive,
   type SetlistInput,
+  type SetlistItemInput,
 } from "@/lib/domain/lives";
 import { previewArticle, restoreExclusions, saveArticle } from "@/lib/domain/article-generate";
 import { applyExcerpts, proposeExcerptsForDossier } from "@/lib/domain/excerpts";
 import { generateSketch, saveSketchCrops, selectSketch } from "@/lib/domain/live-sketch";
-import { CreateLiveSchema, SetlistSchema, UpdateLiveSchema } from "@/lib/live/api";
+import { CreateLiveSchema, PerformanceSetlistSchema, SetlistSchema, UpdateLiveSchema } from "@/lib/live/api";
 import {
   ApplyExcerptsSchema,
   ExclusionKeysSchema,
@@ -90,6 +92,23 @@ export async function replaceSetlistAction(id: string, input: SetlistInput) {
     const result = await replaceSetlist(user, live, parsed.data);
     revalidatePath(`/lives/${id}`);
     revalidatePath("/lives");
+    return { ok: true as const, ...result };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+export async function replacePerformanceSetlistAction(id: string, performanceId: string, items: SetlistItemInput[]) {
+  const user = await requireMember();
+  const parsed = PerformanceSetlistSchema.safeParse({ items });
+  if (!parsed.success) return { ok: false as const, error: formatZodError(parsed.error) };
+  try {
+    const live = await getLive(user, id);
+    if (!live) throw new Error("見つかりません");
+    const result = await replacePerformanceSetlist(user, live, performanceId, parsed.data.items);
+    revalidatePath(`/lives/${id}`);
+    revalidatePath("/lives");
+    revalidatePath("/songs");
     return { ok: true as const, ...result };
   } catch (e) {
     return { ok: false as const, error: errorMessage(e) };

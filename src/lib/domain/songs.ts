@@ -274,6 +274,8 @@ export async function mergeSongs(user: ActingUser, sourceId: string, targetId: s
     }
 
     const moved = await tx.liveSong.updateMany({ where: { songId: source.id }, data: { songId: target.id } });
+    // セトリ (全曲) も付け替える。同じ曲が 2 行あるのは正常 (再披露) なので重複は消さない
+    await tx.liveSetlistItem.updateMany({ where: { songId: source.id }, data: { songId: target.id } });
     // 付け替えで同じ (ライブ, 公演, 曲, 役割) の行が 2 つになったら古いほうを消す
     const deduped = await tx.$executeRaw`
       DELETE FROM "LiveSong" a USING "LiveSong" b
@@ -305,6 +307,18 @@ export async function mergeSongs(user: ActingUser, sourceId: string, targetId: s
 export async function listSongKeys(): Promise<string[]> {
   const rows = await prisma.song.findMany({ select: { normalizedTitle: true } });
   return rows.map((r) => r.normalizedTitle);
+}
+
+/**
+ * 曲ごとの「坂井新奈の参加楽曲か」(名寄せキー → participation)。セトリを貼ったときの参加の初期値に使う
+ * (参加していない曲 = none だけ外す。unknown は参加にしておき、人が外す)
+ */
+export async function listSongParticipation(): Promise<Record<string, SongParticipation>> {
+  const rows = await prisma.song.findMany({
+    where: { participation: { not: "unknown" } },
+    select: { normalizedTitle: true, participation: true },
+  });
+  return Object.fromEntries(rows.map((r) => [r.normalizedTitle, r.participation]));
 }
 
 /** 統合先の候補 (id と題だけ。非保護なので素の prisma) */

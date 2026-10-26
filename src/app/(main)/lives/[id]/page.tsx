@@ -3,7 +3,7 @@ import { ArrowLeft, ExternalLink } from "lucide-react";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getLive, listMaterialCandidates, livePeriodLabel } from "@/lib/domain/lives";
-import { listSongKeys } from "@/lib/domain/songs";
+import { listSongKeys, listSongParticipation } from "@/lib/domain/songs";
 import { listMeetGreetKeeps } from "@/lib/domain/meetgreet-reports";
 import { listSketchSources } from "@/lib/domain/live-sketch";
 import { getSketchSetting } from "@/lib/domain/sketch-setting";
@@ -28,6 +28,7 @@ import {
 } from "../actions";
 import { MetaForm } from "./meta-form";
 import { ReportTagsForm } from "./report-tags-form";
+import { PerformanceSetlistForm } from "./performance-setlist-form";
 import { SetlistForm } from "./setlist-form";
 
 interface Props {
@@ -49,9 +50,10 @@ export default async function LiveDetailPage({ params }: Props) {
   const live = await getLive(session.user, id);
   if (!live) notFound();
 
-  const [candidates, songKeys, keeps, sketchSources, sketchSetting] = await Promise.all([
+  const [candidates, songKeys, songParticipation, keeps, sketchSources, sketchSetting] = await Promise.all([
     listMaterialCandidates(session.user, live),
     listSongKeys(),
+    listSongParticipation(),
     listMeetGreetKeeps(session.user, live, live.reports?.keep ?? 0),
     listSketchSources(session.user, live),
     getSketchSetting(),
@@ -97,6 +99,22 @@ export default async function LiveDetailPage({ params }: Props) {
           曲名は保存時に曲マスタ (<Link href="/songs" className="underline">曲</Link>) へ登録されます。マスタに無い曲は入力の下に出るので、誤字はその場で直してください。
         </p>
         <SetlistForm liveId={live.id} commonSongs={live.commonSongs} performances={live.performances} knownKeys={songKeys} />
+
+        <h3 className="mt-6 mb-1 text-sm font-semibold text-slate-900">セトリ (全曲)</h3>
+        <p className="text-xs text-slate-500 mb-2">
+          公演ごとのセットリストを、坂井新奈が出ていない曲も含めて順番どおりに入れます。貼り付けて「読み込む」と曲の行になり、
+          曲マスタで参加していない曲は「参加」が外れた状態で並びます。保存すると上の共通披露曲・追加曲・センター曲がセトリから組み直されます (参加した曲だけ)。
+        </p>
+        {live.performances.length > 0 ? (
+          <PerformanceSetlistForm
+            liveId={live.id}
+            performances={live.performances}
+            participation={songParticipation}
+            knownKeys={songKeys}
+          />
+        ) : (
+          <p className="text-xs text-slate-500">先に公演を保存してください</p>
+        )}
       </StepCard>
 
       {/* 2. 素材 */}
