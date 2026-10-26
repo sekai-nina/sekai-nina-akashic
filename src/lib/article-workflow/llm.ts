@@ -22,6 +22,12 @@ import { AiDraftSchema, clampAiDraft, type AiDraft, type AiPrompt, type AiUsage 
  */
 export const ARTICLE_AI_MODEL = "claude-opus-5";
 
+/**
+ * 既存の記事に新しい素材を組み込むモデル (#275)。行の差し込みと `^[n]` の追加だけで、
+ * 書き換えは `checkMerge` が弾き、人が素材と見比べてから保存するので、新規作成より安いモデルにする
+ */
+export const ARTICLE_MERGE_AI_MODEL = "claude-sonnet-5";
+
 /** `/costs` の内訳に出る機能名 */
 export const ARTICLE_AI_FEATURE = "akashic.article_body";
 
@@ -50,7 +56,7 @@ export interface GeneratedDraft {
  * 下書きを 1 回生成する。失敗は `ArticleAiError` (文言は画面に出してよいものだけ。
  * API の生のエラーはキーの一部を含むことがあるのでログにだけ残す)
  */
-export async function generateArticleDraft(prompt: AiPrompt): Promise<GeneratedDraft> {
+export async function generateArticleDraft(prompt: AiPrompt, model: string = ARTICLE_AI_MODEL): Promise<GeneratedDraft> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new ArticleAiError("ANTHROPIC_API_KEY が未設定です");
 
@@ -58,7 +64,7 @@ export async function generateArticleDraft(prompt: AiPrompt): Promise<GeneratedD
   let response;
   try {
     response = await client.messages.parse({
-      model: ARTICLE_AI_MODEL,
+      model,
       max_tokens: MAX_OUTPUT_TOKENS,
       system: prompt.system.map((text) => ({
         type: "text" as const,
