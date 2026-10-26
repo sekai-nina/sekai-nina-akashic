@@ -3,6 +3,7 @@ import { TestimonialCategory, TestimonialStatus } from "@prisma/client";
 import { searchMentions, MentionResult } from "./mentions";
 import { recordUsage } from "@/lib/costs/usage";
 import { normalizeTrait, splitTraits } from "./testimonial-traits";
+import { isMemberBlogUrl } from "./testimonial-source";
 
 /**
  * 口コミ抽出のモデル。
@@ -369,6 +370,9 @@ export async function extractTestimonials(options: ExtractOptions): Promise<{
     const sourceInfo = asset.sourceRecords
       .map((sr) => `${sr.sourceKind}${sr.url ? `: ${sr.url}` : ""}${sr.publisher ? ` [${sr.publisher}]` : ""}`)
       .join("; ");
+    if (!asset.sourceRecords.some((sr) => isMemberBlogUrl(sr.url))) {
+      return { processed: 0, extracted: 0, skipped: 0 };
+    }
     const speaker = parseSpeakerFromLinkedEntities(linkedEntities);
     if (speaker === entityName) {
       return { processed: 0, extracted: 0, skipped: 0 };
@@ -406,6 +410,7 @@ export async function extractTestimonials(options: ExtractOptions): Promise<{
     });
     filtered = mentions.filter((m) => {
       if (m.assetSourceType !== "web" || m.textType !== "body") return false;
+      if (!isMemberBlogUrl(m.sourceInfo)) return false;
       const speaker = parseSpeakerFromLinkedEntities(m.linkedEntities);
       return speaker !== entityName;
     });
