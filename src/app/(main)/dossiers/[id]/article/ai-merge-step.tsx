@@ -63,7 +63,9 @@ export function AiMergeStep({
       setBody(res.proposal.body);
       setEditing(manual);
       setMsg(
-        manual
+        res.proposal.mechanicalOnly && !manual
+          ? "新しいクリップは画像・動画だけなので、黄色の行を機械で足しました（AI は使っていません）。確認して保存してください"
+          : manual
           ? "右の素材を見ながら本文を書き足し、使う素材の番号を ^[n] で付けてください"
           : res.proposal.changedLines.length === 0
             ? "AI は本文に足すことが無いと判断しました。手で書き足すか、そのまま保存すると素材はすべて今後足さないになります"

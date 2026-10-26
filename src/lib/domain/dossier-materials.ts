@@ -305,7 +305,7 @@ export function shapeDossierMaterials(dossier: DossierForMaterials): DossierMate
   // 人が入れたアイテムではないので、落としても `droppedByClearance` には数えない
   for (const a of dossier.extraTextAssets ?? []) {
     if (assets.has(a.id) || !allowed(a)) continue;
-    assets.set(a.id, toAssetInput(a, {}));
+    assets.set(a.id, { ...toAssetInput(a, {}), supplement: true });
   }
 
   return {

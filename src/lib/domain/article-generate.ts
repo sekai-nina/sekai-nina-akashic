@@ -950,6 +950,8 @@ export interface MergeProposal {
   newSources: { sourceNo: number; label: string; material: string }[];
   /** AI を使わずに手で書く (`manual`) ときは null */
   ai: ArticleAiStatus | null;
+  /** 新しいクリップが画像・動画だけで、機械で足した行だけの案 (AI は呼んでいない) */
+  mechanicalOnly: boolean;
   /** 「今後足さない」にしているもの (戻せるように見せる) */
   excluded: { key: string; label: string }[];
 }
@@ -1032,7 +1034,19 @@ export async function proposeMerge(
     return { ok: false, error: "記事に足せる新しい素材がありません", excluded };
   }
   const template = resolved.template as ArticleTemplateDef & { needsAi: true };
-  const newNos = new Set(plan.newSources.map((s) => s.sourceNo));
+  // 画像・動画だけのクリップ (ブログ画像・画像のトーク) は、機械で関連メディアの行を足して終わり。
+  // AI には渡さない (渡すとブログ全文から本文に余計な行を書き足す)。
+  // 文章のアセット (ブログ本文・文章のトーク) を企画に入れた出典だけ、AI に本文へ組み込ませる
+  // (画像に合わせて補ったブログ本文 `supplement` は数えない)
+  const planLines = plan.body.split("\n");
+  const mechanicalNos = new Set(
+    plan.changedLines.flatMap((i) => [...(planLines[i] ?? "").matchAll(/\^\[(\d+)\]/g)].map((m) => Number(m[1])))
+  );
+  const textAssets = new Set(input.assets.filter((a) => a.kind === "text" && !a.supplement).map((a) => a.id));
+  const writeSources = plan.newSources.filter(
+    (s) => !mechanicalNos.has(s.sourceNo) || (s.assetId != null && textAssets.has(s.assetId))
+  );
+  const newNos = new Set(writeSources.map((s) => s.sourceNo));
   // 中身を渡すのは新しい素材だけ (組み立ての番号で指定する)
   const focus = new Set([...plan.renumber].filter(([, to]) => newNos.has(to)).map(([from]) => from));
   const materials = buildMaterialsText(input, focus);
@@ -1046,19 +1060,23 @@ export async function proposeMerge(
     newSources: plan.newSources.map((s) => ({
       sourceNo: s.sourceNo,
       label: s.label,
-      material: materialByNo.get(s.sourceNo) ?? "",
+      material:
+        materialByNo.get(s.sourceNo) ??
+        (newNos.has(s.sourceNo) ? "" : `^[${s.sourceNo}] ${s.label}\n（画像・動画だけのクリップ。黄色の行として足します）`),
     })),
     ai,
+    mechanicalOnly: writeSources.length === 0,
     excluded,
   });
-  if (options.manual) return { ok: true, proposal: proposal(plan.body, [], null) };
+  // 本文に書き足す素材が無ければ AI を呼ばない (費用をかけない)
+  if (options.manual || writeSources.length === 0) return { ok: true, proposal: proposal(plan.body, [], null) };
 
   const prompt = mergePrompt({
     system: await mergeSystemPrompt(template, input),
     title: article.title,
     existingBody: plan.body,
     materials: renumbered.text,
-    newSources: plan.newSources,
+    newSources: writeSources,
     included: materials.included,
     truncated: materials.truncated,
   });

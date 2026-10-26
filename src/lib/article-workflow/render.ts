@@ -49,6 +49,11 @@ export interface ArticleAssetInput {
    */
   notes?: string[];
   people?: string[];
+  /**
+   * ドシエのアイテムではなく、画像しか入っていないブログの本文を補ったもの (AI のときだけ)。
+   * 既存の記事への組み込みでは、画像だけのクリップを AI に回さない判定に使う
+   */
+  supplement?: boolean;
 }
 
 export interface RenderedSource {

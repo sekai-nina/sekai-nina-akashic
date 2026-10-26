@@ -23,6 +23,7 @@ import { isQuoteBlogTitle } from "@/lib/article-workflow/templates/quote-blog";
 import { TemplateInputError } from "@/lib/article-workflow/errors";
 import {
   ARTICLE_AI_FEATURE,
+  ARTICLE_MERGE_AI_MODEL,
   ArticleAiError,
   generateArticleDraft,
   isArticleAiConfigured,
@@ -392,7 +393,7 @@ export async function generateMergeDraft(
 ): Promise<{ body: string; ai: ArticleAiStatus }> {
   const counts = { included: prompt.included, truncated: prompt.truncated };
   if (!isArticleAiConfigured()) throw new ArticleAiError("ANTHROPIC_API_KEY が未設定です");
-  const generated = await generateArticleDraft(prompt);
+  const generated = await generateArticleDraft(prompt, ARTICLE_MERGE_AI_MODEL);
   let costUsd: number | null = null;
   try {
     const recorded = await recordUsage({
