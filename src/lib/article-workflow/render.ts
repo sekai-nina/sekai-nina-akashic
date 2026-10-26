@@ -64,6 +64,8 @@ export interface RenderedSource {
   date: string | null;
   /** 出典が指すアセット */
   assetId: string | null;
+  /** 記事に番号無しで載っている出典 (`ArticleSource.id`)。作らずにこの行へ番号を振る */
+  existingId?: string;
 }
 
 /**

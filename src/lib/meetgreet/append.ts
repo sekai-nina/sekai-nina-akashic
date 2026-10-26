@@ -161,6 +161,9 @@ export interface ExistingSource {
   sourceNo: number | null;
   assetId: string | null;
   url: string | null;
+  /** 番号の無い反映済みの出典 (手書きの古い記事) に番号を振るときに使う */
+  id?: string;
+  status?: string;
 }
 
 /** 追記で足される 1 項目 (画面がチェックボックスを出すのに使う) */
@@ -361,8 +364,17 @@ export function planAppend(input: {
   const byAsset = new Map<string, number>();
   const byUrl = new Map<string, number>();
   let maxNo = 0;
+  // 番号の無い反映済みの出典。手で書いた古い記事は本文でリンクを直接書き、frontmatter の出典に番号が無い。
+  // 新しい出典として作り直すと同じ出典が 2 行になるので、行が参照するときだけ既存の行に番号を振る
+  const legacyByAsset = new Map<string, string>();
+  const legacyByUrl = new Map<string, string>();
   for (const e of input.existingSources) {
-    if (e.sourceNo == null) continue;
+    if (e.sourceNo == null) {
+      if (e.status !== "applied" || !e.id) continue;
+      if (e.assetId) legacyByAsset.set(e.assetId, e.id);
+      if (e.url) legacyByUrl.set(normalizeSourceUrl(e.url), e.id);
+      continue;
+    }
     maxNo = Math.max(maxNo, e.sourceNo);
     if (e.assetId) byAsset.set(e.assetId, e.sourceNo);
     if (e.url) byUrl.set(normalizeSourceUrl(e.url), e.sourceNo);
@@ -375,6 +387,17 @@ export function planAppend(input: {
       (s.url ? byUrl.get(normalizeSourceUrl(s.url)) : undefined);
     if (hit !== undefined) {
       renumberMap.set(s.sourceNo, hit);
+      continue;
+    }
+    const existingId =
+      (s.assetId ? legacyByAsset.get(s.assetId) : undefined) ??
+      (s.url ? legacyByUrl.get(normalizeSourceUrl(s.url)) : undefined);
+    if (existingId !== undefined) {
+      // 記事にもう載っている。行が参照しないなら何もしない (出典だけの提示にも出さない)
+      if (!neededSourceNos.has(s.sourceNo)) continue;
+      maxNo += 1;
+      renumberMap.set(s.sourceNo, maxNo);
+      newSources.push({ ...s, sourceNo: maxNo, existingId });
       continue;
     }
     // 足すものが無い出典は作らない。ただし本文を人が書くテンプレートは、どの行にも付かない
