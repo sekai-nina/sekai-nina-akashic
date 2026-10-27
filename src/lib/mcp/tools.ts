@@ -41,6 +41,8 @@ const DEFAULT_PER_PAGE = 20;
 const MAX_SEARCH_PER_PAGE = 50;
 /** エンティティは 1 件が小さいので多めに返せる */
 const MAX_ENTITY_PER_PAGE = 100;
+/** クリップのメモ・引用の上限 (POST /api/v1/clips と同じ) */
+const MAX_CLIP_TEXT_LENGTH = 10000;
 
 /**
  * 機密レベルの引き下げを拒否する。問題なければ null。
@@ -343,10 +345,11 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
   server.registerTool(
     "akashic_import_discord_memo",
     {
-      title: "承諾済みDiscordメモの登録",
+      title: "Discordメモの投稿の登録",
       description:
-        "人間から明示的に承諾された「新奈メモ」または「フィールドワーク」の投稿を、" +
-        "Akashic の inbox アセットとして登録する。承諾前の候補には使わない。" +
+        "「新奈メモ」または「フィールドワーク」の投稿そのものを、人に頼まれたときだけ" +
+        "Akashic の inbox アセットとして登録する。発言は akashic_create_clip、場所は akashic_create_place で残すのが基本で、" +
+        "投稿自体を記録として残したいときだけ使う。" +
         "添付ファイルは扱わず、本文・投稿者・投稿時刻・元メッセージURLだけを保存する。" +
         "同じDiscordメッセージは重複登録せず、既存のアセットを返す。",
       inputSchema: DiscordMemoInputSchema,
@@ -605,11 +608,12 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
         "アセットの一節 (発言の引用など) をクリップとして残す。画面の「クリップ」と同じもの。" +
         "excerpt は本文からの引用 (原文ママ)、note はその背景や補足のメモ。どちらか一方は必須。" +
         "引用の位置は本文から探し、見つからなければ文字列だけ保存する (located: false。動画など本文の無いアセットはこちらになる)。" +
-        "同じアセットに何度でも作れるので、作る前に重複していないか確かめる。",
+        "同じアセットに何度でも作れるので、作る前に重複していないか確かめる。" +
+        "クリップは internal のプールに入るので、excerpt・note に internal より上のアセットの内容を書かない。",
       inputSchema: z.object({
-        assetId: z.string().describe("アセット ID"),
-        excerpt: z.string().max(10000).optional().describe("本文からの引用 (原文ママ)"),
-        note: z.string().max(10000).optional().describe("背景・補足のメモ"),
+        assetId: z.string().min(1).max(100).describe("アセット ID"),
+        excerpt: z.string().max(MAX_CLIP_TEXT_LENGTH).optional().describe("本文からの引用 (原文ママ)"),
+        note: z.string().max(MAX_CLIP_TEXT_LENGTH).optional().describe("背景・補足のメモ"),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
     },

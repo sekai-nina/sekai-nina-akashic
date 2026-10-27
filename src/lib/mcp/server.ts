@@ -18,6 +18,8 @@ const INSTRUCTIONS = [
   "- エンティティは名前で指定する。一致しなかった名前は紐づかず unresolvedEntities として返るので、",
   "  正式名称を調べ直すか、新規で問題ないと確認できたときだけ createMissingEntities: true を付ける。",
   "- akashic_create_asset で作ったアセットは必ず status=inbox に入る。人間が仕分けする前提の下書きとして扱う。",
+  "- 「新奈メモ」「フィールドワーク」は人に頼まれたときだけ登録する。場所は akashic_create_place、発言は次のクリップで残し、",
+  "  投稿そのものを残したいときだけ akashic_import_discord_memo を使う (添付は渡さない)。",
   "- 発言の引用は akashic_create_clip でアセットのクリップとして残す (引用元のアセットを先に akashic_search で探す)。",
   "- 画像・動画などのファイル本体は akashic_begin_upload → 手元で curl -X PUT → akashic_complete_upload の順で登録する。",
   "  ファイルパスやバイト列をツール引数で渡すことはできない。",
