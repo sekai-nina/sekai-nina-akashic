@@ -127,16 +127,22 @@ async function SearchResults({
 
   const hasFilters = !!(effectiveKinds.length > 0 || effectiveSourceType || params.dateFrom || params.dateTo || effectiveEntityIds.length > 0 || selectedAuthorIds.length > 0 || ninaAppearance);
 
-  if (!q.trim() && !hasFilters) {
+  // ギャラリーは画像・動画だけを並べる。件数とページ送りが合うよう、表示側ではなく検索条件で絞る
+  const isGallery = effectiveView === "gallery";
+
+  // 条件が空でも、ギャラリーなら画像・動画の新しい順の一覧として意味があるので検索する
+  if (!q.trim() && !hasFilters && !isGallery) {
     return (
       <div className="text-center py-16 text-slate-400">
         <p>キーワードを入力するか、種別を選択して検索してください</p>
+        <Link scroll={false} href={buildUrl({ view: "gallery", page: "1" })}
+          className="inline-block mt-3 text-sm text-blue-500 hover:underline">
+          画像・動画を一覧する
+        </Link>
       </div>
     );
   }
 
-  // ギャラリーは画像・動画だけを並べる。件数とページ送りが合うよう、表示側ではなく検索条件で絞る
-  const isGallery = effectiveView === "gallery";
   const searchKinds = isGallery
     ? (effectiveKinds.length > 0 ? effectiveKinds.filter((k) => VISUAL_KINDS.includes(k)) : VISUAL_KINDS)
     : effectiveKinds;
