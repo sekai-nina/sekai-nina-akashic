@@ -15,6 +15,7 @@ import {
   updateLive,
   type SetlistInput,
   type SetlistItemInput,
+  type SetlistSource,
 } from "@/lib/domain/lives";
 import { previewArticle, restoreExclusions, saveArticle } from "@/lib/domain/article-generate";
 import { applyExcerpts, proposeExcerptsForDossier } from "@/lib/domain/excerpts";
@@ -98,16 +99,21 @@ export async function replaceSetlistAction(id: string, input: SetlistInput) {
   }
 }
 
-export async function replacePerformanceSetlistAction(id: string, performanceId: string, items: SetlistItemInput[]) {
+export async function replacePerformanceSetlistAction(
+  id: string,
+  performanceId: string,
+  items: SetlistItemInput[],
+  source: SetlistSource
+) {
   const user = await requireMember();
   // Server Action も公開された口なので公演 ID も型を確かめる (文字列以外は Prisma の生のエラーになる)
   if (typeof performanceId !== "string" || !performanceId) return { ok: false as const, error: "公演が指定されていません" };
-  const parsed = PerformanceSetlistSchema.safeParse({ items });
+  const parsed = PerformanceSetlistSchema.safeParse({ items, source });
   if (!parsed.success) return { ok: false as const, error: formatZodError(parsed.error) };
   try {
     const live = await getLive(user, id);
     if (!live) throw new Error("見つかりません");
-    const result = await replacePerformanceSetlist(user, live, performanceId, parsed.data.items);
+    const result = await replacePerformanceSetlist(user, live, performanceId, parsed.data.items, parsed.data.source);
     revalidatePath(`/lives/${id}`);
     revalidatePath("/lives");
     revalidatePath("/songs");

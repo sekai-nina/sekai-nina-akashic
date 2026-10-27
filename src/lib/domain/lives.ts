@@ -496,6 +496,8 @@ const listInclude = {
       label: true,
       note: true,
       sortOrder: true,
+      setlistSourceLabel: true,
+      setlistSourceUrl: true,
       setlist: {
         orderBy: { position: "asc" },
         select: { section: true, participated: true, center: true, song: { select: { title: true } } },
@@ -523,6 +525,15 @@ export interface LivePerformanceView {
   centerSongs: string[];
   /** セトリ (出ていない曲も含めた全曲、順番どおり)。入っていなければ空 */
   setlist: LiveSetlistItemView[];
+  /** セトリの出典。セトリが無ければ空文字 */
+  setlistSource: SetlistSource;
+}
+
+export interface SetlistSource {
+  /** 「Sakamichi Universe」「公式ブログ」等 */
+  label: string;
+  /** 任意 */
+  url: string;
 }
 
 export interface LiveSetlistItemView {
@@ -548,8 +559,9 @@ function shapeSetlist(row: LiveRow): { performances: LivePerformanceView[]; comm
   }
   return {
     commonSongs: common,
-    performances: row.performances.map((p) => ({
+    performances: row.performances.map(({ setlistSourceLabel, setlistSourceUrl, ...p }) => ({
       ...p,
+      setlistSource: { label: setlistSourceLabel, url: setlistSourceUrl },
       songs: byPerf.get(p.id)?.songs ?? [],
       centerSongs: byPerf.get(p.id)?.centerSongs ?? [],
       setlist: p.setlist.map((s) => ({
@@ -738,17 +750,47 @@ export interface SetlistItemInput {
   center?: boolean;
 }
 
+const MAX_SETLIST_SOURCE_LABEL = 100;
+const MAX_SETLIST_SOURCE_URL = 1000;
+
+/** セトリの出典を検証する。セトリがあればラベル必須、URL は任意で http(s) のみ */
+function cleanSetlistSource(source: Partial<SetlistSource> | undefined, hasItems: boolean): SetlistSource {
+  // セトリを消すときは出典も消す
+  if (!hasItems) return { label: "", url: "" };
+  const label = (source?.label ?? "").replace(/\s+/g, " ").trim();
+  const url = (source?.url ?? "").trim();
+  if (!label) throw new LiveInputError("セトリの出典を入れてください (どこから写したか)");
+  if ([...label].length > MAX_SETLIST_SOURCE_LABEL) {
+    throw new LiveInputError(`出典の名前が長すぎます (${MAX_SETLIST_SOURCE_LABEL} 文字まで)`);
+  }
+  if (url) {
+    if (url.length > MAX_SETLIST_SOURCE_URL) throw new LiveInputError("出典の URL が長すぎます");
+    let parsed: URL | null = null;
+    try {
+      parsed = new URL(url);
+    } catch {
+      // 下で弾く
+    }
+    if (!parsed || (parsed.protocol !== "https:" && parsed.protocol !== "http:")) {
+      throw new LiveInputError("出典の URL は http(s):// で始めてください");
+    }
+  }
+  return { label, url };
+}
+
 /**
  * 1 公演のセトリ (全曲) を丸ごと入れ替え、ライブの LiveSong (共通披露曲 / 追加曲 / センター曲) を
- * 組み直す。空で保存するとその公演のセトリを消す (LiveSong は直前の派生のまま残る)。
- * センター曲は参加扱いにする
+ * 組み直す。空で保存するとその公演のセトリと出典を消す (LiveSong は直前の派生のまま残る)。
+ * センター曲は参加扱いにする。セトリがあれば出典 (どこから写したか) が必須
  */
 export async function replacePerformanceSetlist(
   user: ActingUser,
   live: { id: string },
   performanceId: string,
-  items: SetlistItemInput[]
+  items: SetlistItemInput[],
+  source?: Partial<SetlistSource>
 ) {
+  const cleanSource = cleanSetlistSource(source, items.length > 0);
   if (items.length > MAX_SETLIST_ITEMS) {
     throw new LiveInputError(`セトリが長すぎます (${MAX_SETLIST_ITEMS} 曲まで)`);
   }
@@ -776,6 +818,10 @@ export async function replacePerformanceSetlist(
       tx,
       clean.map((c) => c.title)
     );
+    await tx.livePerformance.update({
+      where: { id: performanceId },
+      data: { setlistSourceLabel: cleanSource.label, setlistSourceUrl: cleanSource.url },
+    });
     await tx.liveSetlistItem.deleteMany({ where: { liveId: live.id, performanceId } });
     if (clean.length > 0) {
       await tx.liveSetlistItem.createMany({
@@ -803,7 +849,7 @@ export async function replacePerformanceSetlist(
     action: "live.setlist.performance",
     targetType: "Live",
     targetId: live.id,
-    metadata: { performanceId, ...result },
+    metadata: { performanceId, ...result, source: cleanSource.label },
   });
   return result;
 }

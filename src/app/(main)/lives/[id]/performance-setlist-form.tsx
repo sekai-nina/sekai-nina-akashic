@@ -12,7 +12,8 @@ import { replacePerformanceSetlistAction } from "../actions";
  * 公演ごとのセトリ (出ていない曲も含めた全曲)。
  *
  * 作業の流れ: 公式やファンの投稿のセトリを貼る → 「読み込む」で曲の行になる → 坂井新奈が出ていない曲の
- * 「参加」を外し、センター曲に印を付ける → 保存。2 公演目からは「ほかの公演からコピー」して差分だけ直す。
+ * 「参加」を外し、センター曲に印を付ける → どこから写したか (出典) を書く → 保存。
+ * 2 公演目からは「ほかの公演からコピー」して差分だけ直す (出典も写る)。
  * 保存すると、上の表の共通披露曲 / 追加曲 / センター曲がセトリから組み直される (参加した曲だけ)。
  */
 export function PerformanceSetlistForm({
@@ -97,6 +98,8 @@ function PerformanceEditor({
   const [pending, startTransition] = useTransition();
   const [rows, setRows] = useState<Row[]>(() => toRows(performance.setlist));
   const [paste, setPaste] = useState("");
+  const [sourceLabel, setSourceLabel] = useState(performance.setlistSource.label);
+  const [sourceUrl, setSourceUrl] = useState(performance.setlistSource.url);
   const [dirty, setDirty] = useState(false);
   const dirtyRef = useRef(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -105,13 +108,21 @@ function PerformanceEditor({
   // 保存後の refresh で返る行 (曲名は曲マスタの表記に寄っている) に、編集中でない限り追随する。
   // 「編集中か」は ref で持つ (SetlistForm と同じ。state だと保存直後に古い行へ一瞬戻る)
   useEffect(() => {
-    if (!dirtyRef.current) setRows(toRows(performance.setlist));
-  }, [performance.setlist]);
+    if (!dirtyRef.current) {
+      setRows(toRows(performance.setlist));
+      setSourceLabel(performance.setlistSource.label);
+      setSourceUrl(performance.setlistSource.url);
+    }
+  }, [performance.setlist, performance.setlistSource]);
+
+  function markDirty() {
+    dirtyRef.current = true;
+    setDirty(true);
+  }
 
   function change(next: Row[]) {
     setRows(next);
-    dirtyRef.current = true;
-    setDirty(true);
+    markDirty();
   }
   function patch(i: number, p: Partial<Row>) {
     change(rows.map((r, j) => (j === i ? { ...r, ...p } : r)));
@@ -148,7 +159,10 @@ function PerformanceEditor({
   }
   function copyFrom(id: string) {
     const src = others.find((o) => o.id === id);
-    if (src) change(toRows(src.setlist));
+    if (!src) return;
+    change(toRows(src.setlist));
+    setSourceLabel(src.setlistSource.label);
+    setSourceUrl(src.setlistSource.url);
   }
   function save() {
     setMsg("保存中…");
@@ -156,7 +170,8 @@ function PerformanceEditor({
       const res = await replacePerformanceSetlistAction(
         liveId,
         performance.id,
-        rows.map(({ title, section, participated, center }) => ({ title, section, participated, center }))
+        rows.map(({ title, section, participated, center }) => ({ title, section, participated, center })),
+        { label: sourceLabel, url: sourceUrl }
       );
       if (!res.ok) {
         setMsg(`エラー: ${res.error}`);
@@ -285,6 +300,43 @@ function PerformanceEditor({
         </table>
       )}
 
+      {rows.length > 0 && (
+        <div className="mt-3 grid gap-2 sm:grid-cols-[14rem_1fr]">
+          <label className="text-xs text-slate-600">
+            セトリの出典 (必須)
+            <input
+              className={`${inputCls} mt-0.5`}
+              value={sourceLabel}
+              onChange={(e) => {
+                setSourceLabel(e.target.value);
+                markDirty();
+              }}
+              placeholder="Sakamichi Universe / 公式ブログ 等"
+              maxLength={100}
+              disabled={pending}
+            />
+          </label>
+          <label className="text-xs text-slate-600">
+            出典の URL (任意)
+            <input
+              className={`${inputCls} mt-0.5`}
+              value={sourceUrl}
+              onChange={(e) => {
+                setSourceUrl(e.target.value);
+                markDirty();
+              }}
+              placeholder="https://…"
+              inputMode="url"
+              maxLength={1000}
+              disabled={pending}
+            />
+          </label>
+          <p className="sm:col-span-2 text-[11px] text-slate-500">
+            どこから写したかを残します。公開サイトではセトリの下に「セトリ出典」として出ます
+          </p>
+        </div>
+      )}
+
       <div className="mt-2 flex flex-wrap items-center gap-3">
         <button
           type="button"
@@ -297,7 +349,7 @@ function PerformanceEditor({
         <button
           type="button"
           onClick={save}
-          disabled={pending || !dirty || rows.some((r) => !r.title.trim())}
+          disabled={pending || !dirty || rows.some((r) => !r.title.trim()) || (rows.length > 0 && !sourceLabel.trim())}
           className="h-8 px-4 rounded-md bg-slate-900 text-white text-xs hover:bg-slate-800 disabled:opacity-50"
         >
           セトリを保存
@@ -305,7 +357,12 @@ function PerformanceEditor({
         {rows.length === 0 && performance.setlist.length > 0 && dirty && (
           <span className="text-xs text-amber-700">空で保存するとこの公演のセトリを消します</span>
         )}
-        {dirty && !pending && rows.length > 0 && <span className="text-xs text-amber-700">未保存の変更があります</span>}
+        {dirty && !pending && rows.length > 0 && !sourceLabel.trim() && (
+          <span className="text-xs text-amber-700">出典を入れると保存できます</span>
+        )}
+        {dirty && !pending && rows.length > 0 && sourceLabel.trim() && (
+          <span className="text-xs text-amber-700">未保存の変更があります</span>
+        )}
         {msg && (
           <span role="status" className="text-xs text-slate-500">
             {msg}

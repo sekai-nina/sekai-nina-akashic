@@ -44,7 +44,10 @@ export const SetlistSchema = z
   })
   .strict();
 
-/** 1 公演のセトリ (全曲)。順番は配列の順。空配列でその公演のセトリを消す */
+/**
+ * 1 公演のセトリ (全曲)。順番は配列の順。空配列でその公演のセトリ (と出典) を消す。
+ * 曲があれば `source.label` (どこから写したか) が必須 (domain で検証)
+ */
 export const PerformanceSetlistSchema = z
   .object({
     items: z
@@ -59,6 +62,10 @@ export const PerformanceSetlistSchema = z
           .strict()
       )
       .max(MAX_SETLIST_ITEMS),
+    source: z
+      .object({ label: z.string().max(100), url: z.string().max(1000).optional() })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -110,6 +117,8 @@ export function projectLive(live: LiveSummary | LiveDetail) {
       centerSongs: p.centerSongs,
       /** セトリ (出ていない曲も含めた全曲、順番どおり)。入っていない公演は空 */
       setlist: p.setlist,
+      /** セトリの出典 ({ label, url })。セトリが無ければ空文字 */
+      setlistSource: p.setlistSource,
     })),
     // ドシエが所有者に private へ戻された / 機密を上げられたときは null (RLS で見えない)
     dossier: live.dossier

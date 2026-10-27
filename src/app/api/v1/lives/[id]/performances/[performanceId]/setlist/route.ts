@@ -9,7 +9,7 @@ type Params = { params: Promise<{ id: string; performanceId: string }> };
 /**
  * 1 公演のセトリ (出ていない曲も含めた全曲) を丸ごと入れ替える。
  * ライブの共通披露曲 / 追加曲 / センター曲はセトリから組み直される (参加した曲だけ)。
- * `items: []` でその公演のセトリを消す。
+ * 曲があれば `source: { label, url? }` (どこから写したか) が必須。`items: []` でその公演のセトリと出典を消す。
  */
 export async function PUT(request: Request, { params }: Params) {
   const auth = await requireApiAuth(request, "write");
@@ -31,7 +31,7 @@ export async function PUT(request: Request, { params }: Params) {
   if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   try {
-    await replacePerformanceSetlist(auth, existing, performanceId, parsed.data.items);
+    await replacePerformanceSetlist(auth, existing, performanceId, parsed.data.items, parsed.data.source);
   } catch (e) {
     if (e instanceof LiveInputError) {
       return NextResponse.json({ error: e.message }, { status: 400 });

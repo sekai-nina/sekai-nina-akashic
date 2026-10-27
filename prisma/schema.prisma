@@ -1270,6 +1270,10 @@ model LivePerformance {
   label String @default("")
   /// 備考 (「アンコールに JOYFUL LOVE を追加」等)。記事の表の備考列に出る
   note  String @default("")
+  /// セトリ (LiveSetlistItem) をどこから写したか (「Sakamichi Universe」「公式ブログ」等)。セトリがあれば必須
+  setlistSourceLabel String @default("")
+  /// 出典の URL (任意)。公開サイトのセトリの下にリンクで出す
+  setlistSourceUrl   String @default("")
 
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())
