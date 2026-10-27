@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { search, splitQueryTerms } from "@/lib/search";
+import { search, splitQueryTerms, type SearchResult } from "@/lib/search";
 import { auth } from "@/lib/auth";
 import { getCachedEntityList } from "@/lib/cache";
 import { listEditableDossiers } from "@/lib/domain/dossiers";
@@ -16,6 +16,8 @@ interface EditableDossier { id: string; title: string }
 
 /** Kinds that are best browsed as a grid — selecting only these defaults to gallery view. */
 const VISUAL_KINDS: AssetKind[] = ["image", "video"];
+
+const PER_PAGE = 20;
 
 function parseKinds(raw: string | undefined): AssetKind[] {
   if (!raw) return [];
@@ -134,23 +136,25 @@ async function SearchResults({
   }
 
   // ギャラリーは画像・動画だけを並べる。件数とページ送りが合うよう、表示側ではなく検索条件で絞る
-  const searchKinds = effectiveView === "gallery"
+  const isGallery = effectiveView === "gallery";
+  const searchKinds = isGallery
     ? (effectiveKinds.length > 0 ? effectiveKinds.filter((k) => VISUAL_KINDS.includes(k)) : VISUAL_KINDS)
     : effectiveKinds;
+  const noVisualKinds = isGallery && searchKinds.length === 0;
 
-  const results = effectiveView === "gallery" && searchKinds.length === 0
-    ? { items: [], total: 0, perPage: 20 }
+  const results: SearchResult = noVisualKinds
+    ? { items: [], total: 0, page, perPage: PER_PAGE }
     : await search({
-    q, target: effectiveTarget, sourceType: effectiveSourceType,
-    kinds: searchKinds.length > 0 ? searchKinds : undefined,
-    entityIds: effectiveEntityIds.length > 0 ? effectiveEntityIds : undefined,
-    entityMatch: effectiveEntityMatch,
-    authorIds: selectedAuthorIds.length > 0 ? selectedAuthorIds : undefined,
-    dateFrom: params.dateFrom ? new Date(params.dateFrom) : undefined,
-    dateTo: params.dateTo ? new Date(params.dateTo) : undefined,
-    ninaAppearance,
-    page, perPage: 20,
-  }, clearance);
+        q, target: effectiveTarget, sourceType: effectiveSourceType,
+        kinds: searchKinds.length > 0 ? searchKinds : undefined,
+        entityIds: effectiveEntityIds.length > 0 ? effectiveEntityIds : undefined,
+        entityMatch: effectiveEntityMatch,
+        authorIds: selectedAuthorIds.length > 0 ? selectedAuthorIds : undefined,
+        dateFrom: params.dateFrom ? new Date(params.dateFrom) : undefined,
+        dateTo: params.dateTo ? new Date(params.dateTo) : undefined,
+        ninaAppearance,
+        page, perPage: PER_PAGE,
+      }, clearance);
 
   // 件数が正確になったので、最終ページで「次へ」が空振りしないよう total で判定する
   const hasNextPage = page * results.perPage < results.total;
@@ -177,6 +181,7 @@ async function SearchResults({
             const totalMatches = results.items.reduce((sum, item) => sum + item.matchCount, 0);
             return totalMatches > results.total ? ` (${totalMatches} 箇所)` : "";
           })()}
+          {isGallery && <span className="ml-2 text-xs text-slate-400">ギャラリーには画像と動画だけを表示します</span>}
         </span>
         <div className="flex gap-1">
           <Link scroll={false} href={buildUrl({ view: "list", page: "1" })}
@@ -192,10 +197,14 @@ async function SearchResults({
 
       {results.items.length === 0 ? (
         <div className="text-center py-16 text-slate-400">
-          {effectiveView === "gallery" && searchKinds.length === 0 ? (
-            <p>ギャラリーには画像と動画だけを表示します。種別に画像か動画を含めるか、リスト表示に切り替えてください</p>
+          {noVisualKinds ? (
+            <p>
+              選んだ種別に画像・動画が無いため、ギャラリーには何も出ません。
+              <Link scroll={false} href={buildUrl({ view: "list", page: "1" })} className="text-blue-500 hover:underline">リスト表示</Link>
+              に切り替えてください
+            </p>
           ) : (
-          <p>{q ? `「${q}」に一致するアセットが見つかりませんでした` : "条件に一致するアセットが見つかりませんでした"}</p>
+            <p>{q ? `「${q}」に一致するアセットが見つかりませんでした` : "条件に一致するアセットが見つかりませんでした"}</p>
           )}
         </div>
       ) : effectiveView === "gallery" ? (
