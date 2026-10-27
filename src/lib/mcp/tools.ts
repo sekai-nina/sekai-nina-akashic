@@ -4,11 +4,13 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import type { ApiKeyUser } from "@/lib/api-auth";
 import { withClearance } from "@/lib/db";
 import { isClassificationDowngrade } from "@/lib/classification";
-import { invalidateAssets, invalidatePlaces } from "@/lib/cache";
+import { invalidateAssets, invalidateDossiers, invalidatePlaces } from "@/lib/cache";
 import { parseDateOnly } from "@/lib/domain/coverage";
 import { getAsset, getAssetClassification, updateAsset } from "@/lib/domain/assets";
 import { intakeAsset } from "@/lib/domain/asset-intake";
 import { NinaAuthorConflictError, setNinaAppearance } from "@/lib/domain/nina-appearance";
+import { createClip } from "@/lib/domain/clips";
+import { ClipAssetNotFoundError, ClipInputError } from "@/lib/clips/errors";
 import { NINA_APPEARANCES } from "@/lib/nina";
 import { listEntities, searchEntities } from "@/lib/domain/entities";
 import { createPlace, getPlaceById, listPlaces, updatePlace } from "@/lib/domain/places";
@@ -591,6 +593,42 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
       } catch (err) {
         if (err instanceof NinaAuthorConflictError) return fail(err.message, { id });
         return toToolError(err, "出演の記録に失敗しました。");
+      }
+    }
+  );
+
+  server.registerTool(
+    "akashic_create_clip",
+    {
+      title: "クリップの作成",
+      description:
+        "アセットの一節 (発言の引用など) をクリップとして残す。画面の「クリップ」と同じもの。" +
+        "excerpt は本文からの引用 (原文ママ)、note はその背景や補足のメモ。どちらか一方は必須。" +
+        "引用の位置は本文から探し、見つからなければ文字列だけ保存する (located: false。動画など本文の無いアセットはこちらになる)。" +
+        "同じアセットに何度でも作れるので、作る前に重複していないか確かめる。",
+      inputSchema: z.object({
+        assetId: z.string().describe("アセット ID"),
+        excerpt: z.string().max(10000).optional().describe("本文からの引用 (原文ママ)"),
+        note: z.string().max(10000).optional().describe("背景・補足のメモ"),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    },
+    async ({ assetId, excerpt, note }) => {
+      // 画面と REST (/api/v1/clips) と同じく viewer は弾く
+      if (user.role !== "admin" && user.role !== "member") {
+        return fail("クリップを作る権限がありません。");
+      }
+      try {
+        const item = await createClip(user, { assetId, excerpt, note, auditMetadata: { apiKeyId: user.apiKeyId, via: "mcp" } });
+        invalidateDossiers();
+        await logMcpToolCall({ user, tool: "create_clip", targetType: "DossierItem", targetId: item.id, args: { assetId } });
+        return ok({ id: item.id, assetId, located: item.excerptStart != null, url: assetUrl(baseUrl, assetId) });
+      } catch (err) {
+        if (err instanceof ClipAssetNotFoundError) {
+          return fail("アセットが見つかりません。ID が誤っているか、クリアランスが足りず参照できません。", { assetId });
+        }
+        if (err instanceof ClipInputError) return fail(err.message, { assetId });
+        return toToolError(err, "クリップの作成に失敗しました。");
       }
     }
   );
