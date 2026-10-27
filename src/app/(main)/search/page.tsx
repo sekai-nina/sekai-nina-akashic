@@ -133,9 +133,16 @@ async function SearchResults({
     );
   }
 
-  const results = await search({
+  // ギャラリーは画像・動画だけを並べる。件数とページ送りが合うよう、表示側ではなく検索条件で絞る
+  const searchKinds = effectiveView === "gallery"
+    ? (effectiveKinds.length > 0 ? effectiveKinds.filter((k) => VISUAL_KINDS.includes(k)) : VISUAL_KINDS)
+    : effectiveKinds;
+
+  const results = effectiveView === "gallery" && searchKinds.length === 0
+    ? { items: [], total: 0, perPage: 20 }
+    : await search({
     q, target: effectiveTarget, sourceType: effectiveSourceType,
-    kinds: effectiveKinds.length > 0 ? effectiveKinds : undefined,
+    kinds: searchKinds.length > 0 ? searchKinds : undefined,
     entityIds: effectiveEntityIds.length > 0 ? effectiveEntityIds : undefined,
     entityMatch: effectiveEntityMatch,
     authorIds: selectedAuthorIds.length > 0 ? selectedAuthorIds : undefined,
@@ -185,7 +192,11 @@ async function SearchResults({
 
       {results.items.length === 0 ? (
         <div className="text-center py-16 text-slate-400">
+          {effectiveView === "gallery" && searchKinds.length === 0 ? (
+            <p>ギャラリーには画像と動画だけを表示します。種別に画像か動画を含めるか、リスト表示に切り替えてください</p>
+          ) : (
           <p>{q ? `「${q}」に一致するアセットが見つかりませんでした` : "条件に一致するアセットが見つかりませんでした"}</p>
+          )}
         </div>
       ) : effectiveView === "gallery" ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
