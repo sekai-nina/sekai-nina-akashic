@@ -40,6 +40,7 @@ import {
   MAX_SONGS_PER_LIST,
 } from "@/lib/live/config";
 import { normalizeSongTitle } from "@/lib/songs/normalize";
+import { deriveLiveSongs, MAX_SETLIST_ITEMS, SETLIST_SECTIONS } from "@/lib/live/setlist";
 import { logAudit } from "./audit";
 import {
   applyMaterialsToDossier,
@@ -153,24 +154,14 @@ function cleanSetlist(input: SetlistInput): { performances: CleanPerformance[]; 
 }
 
 /**
- * 曲を find-or-create して、ライブの LiveSong を丸ごと入れ替える。
+ * 曲名を曲マスタの ID にする (無ければ作る)。
  * `Song` は非保護テーブルだが、同じトランザクションの中で触ってよい (RLS が無いだけ)。
  */
-async function writeSetlist(
-  tx: TransactionClient,
-  liveId: string,
-  performances: { id: string; songs: string[]; centerSongs: string[] }[],
-  commonSongs: string[]
-): Promise<void> {
-  const titles = new Set<string>(commonSongs);
-  for (const p of performances) {
-    for (const t of p.songs) titles.add(t);
-    for (const t of p.centerSongs) titles.add(t);
-  }
+async function resolveSongIds(tx: TransactionClient, titles: Iterable<string>): Promise<Map<string, string>> {
   // 曲は 1 曲ずつ upsert しない (Prisma の upsert は 1 曲 3 クエリで、20 曲で 60 往復になる)。
   // **名寄せキー (normalizedTitle) で既存に寄せる** (#167: 「HEY!OHISAMA!」と「HEY！OHISAMA！」を
   // 別の曲にしない)。無いものだけまとめて作り (同時に同じ曲を作る競合は skipDuplicates が吸う)、引き直す
-  const list = [...titles];
+  const list = [...new Set(titles)];
   const songIds = new Map<string, string>();
   if (list.length > 0) {
     const keyOf = new Map(list.map((t) => [t, normalizeSongTitle(t)] as const));
@@ -204,13 +195,47 @@ async function writeSetlist(
       songIds.set(t, id);
     }
   }
+  return songIds;
+}
 
+/** 曲を find-or-create して、ライブの LiveSong を丸ごと入れ替える */
+async function writeSetlist(
+  tx: TransactionClient,
+  liveId: string,
+  performances: { id: string; songs: string[]; centerSongs: string[] }[],
+  commonSongs: string[]
+): Promise<void> {
+  const titles = new Set<string>(commonSongs);
+  for (const p of performances) {
+    for (const t of p.songs) titles.add(t);
+    for (const t of p.centerSongs) titles.add(t);
+  }
+  const songIds = await resolveSongIds(tx, titles);
+  await writeLiveSongIds(
+    tx,
+    liveId,
+    commonSongs.map((t) => songIds.get(t)!),
+    performances.map((p) => ({
+      id: p.id,
+      songs: p.songs.map((t) => songIds.get(t)!),
+      centerSongs: p.centerSongs.map((t) => songIds.get(t)!),
+    }))
+  );
+}
+
+/** ライブの LiveSong を (曲 ID で) 丸ごと入れ替える */
+async function writeLiveSongIds(
+  tx: TransactionClient,
+  liveId: string,
+  commonSongs: string[],
+  performances: { id: string; songs: string[]; centerSongs: string[] }[]
+): Promise<void> {
   await tx.liveSong.deleteMany({ where: { liveId } });
 
   const rows: Prisma.LiveSongCreateManyInput[] = [];
   const push = (performanceId: string | null, list: string[], role: LiveSongRole) => {
-    list.forEach((title, i) => {
-      rows.push({ liveId, performanceId, songId: songIds.get(title)!, role, sortOrder: i });
+    list.forEach((songId, i) => {
+      rows.push({ liveId, performanceId, songId, role, sortOrder: i });
     });
   };
   push(null, commonSongs, "performed");
@@ -219,6 +244,39 @@ async function writeSetlist(
     push(p.id, p.centerSongs, "center");
   }
   if (rows.length > 0) await tx.liveSong.createMany({ data: rows });
+}
+
+/**
+ * 公演のセトリ (LiveSetlistItem) から LiveSong を組み直す。**セトリのある公演が 1 つも無ければ何もしない**
+ * (従来の手入力がそのまま正)。セトリの無い公演は今の LiveSong (共通 + 追加) をその公演の曲とみなすので、
+ * 一部の公演だけセトリを入れても他の公演の曲は消えない (`deriveLiveSongs`)
+ */
+async function deriveSongsFromSetlists(tx: TransactionClient, liveId: string): Promise<boolean> {
+  const performances = await tx.livePerformance.findMany({
+    where: { liveId },
+    orderBy: [{ sortOrder: "asc" }, { date: "asc" }],
+    select: {
+      id: true,
+      setlist: { orderBy: { position: "asc" }, select: { songId: true, participated: true, center: true } },
+    },
+  });
+  if (!performances.some((p) => p.setlist.length > 0)) return false;
+  const current = await tx.liveSong.findMany({
+    where: { liveId },
+    orderBy: [{ sortOrder: "asc" }],
+    select: { performanceId: true, role: true, songId: true },
+  });
+  const derived = deriveLiveSongs(
+    performances.map((p) => ({
+      id: p.id,
+      setlist: p.setlist.length > 0 ? p.setlist : null,
+      legacySongs: current.filter((s) => s.performanceId === p.id && s.role === "performed").map((s) => s.songId),
+      legacyCenter: current.filter((s) => s.performanceId === p.id && s.role === "center").map((s) => s.songId),
+    })),
+    current.filter((s) => !s.performanceId && s.role === "performed").map((s) => s.songId)
+  );
+  await writeLiveSongIds(tx, liveId, derived.common, derived.performances);
+  return true;
 }
 
 /** 公演の初日と最終日 (収集の期間に使う) */
@@ -431,7 +489,20 @@ const listInclude = {
   article: { select: { id: true, shortId: true, title: true, draft: true, dirty: true, lastPushedAt: true } },
   createdBy: { select: { id: true, name: true } },
   performances: {
-    select: { id: true, date: true, venue: true, label: true, note: true, sortOrder: true },
+    select: {
+      id: true,
+      date: true,
+      venue: true,
+      label: true,
+      note: true,
+      sortOrder: true,
+      setlistSourceLabel: true,
+      setlistSourceUrl: true,
+      setlist: {
+        orderBy: { position: "asc" },
+        select: { section: true, participated: true, center: true, song: { select: { title: true } } },
+      },
+    },
     orderBy: [{ sortOrder: "asc" }, { date: "asc" }],
   },
   songs: {
@@ -452,6 +523,25 @@ export interface LivePerformanceView {
   /** 公演限定の追加曲 */
   songs: string[];
   centerSongs: string[];
+  /** セトリ (出ていない曲も含めた全曲、順番どおり)。入っていなければ空 */
+  setlist: LiveSetlistItemView[];
+  /** セトリの出典。セトリが無ければ空文字 */
+  setlistSource: SetlistSource;
+}
+
+export interface SetlistSource {
+  /** 「Sakamichi Universe」「公式ブログ」等 */
+  label: string;
+  /** 任意 */
+  url: string;
+}
+
+export interface LiveSetlistItemView {
+  title: string;
+  /** 「アンコール」「Wアンコール」。本編は空 */
+  section: string;
+  participated: boolean;
+  center: boolean;
 }
 
 /** LiveSong の行を公演ごと / 共通に振り分ける */
@@ -469,10 +559,17 @@ function shapeSetlist(row: LiveRow): { performances: LivePerformanceView[]; comm
   }
   return {
     commonSongs: common,
-    performances: row.performances.map((p) => ({
+    performances: row.performances.map(({ setlistSourceLabel, setlistSourceUrl, ...p }) => ({
       ...p,
+      setlistSource: { label: setlistSourceLabel, url: setlistSourceUrl },
       songs: byPerf.get(p.id)?.songs ?? [],
       centerSongs: byPerf.get(p.id)?.centerSongs ?? [],
+      setlist: p.setlist.map((s) => ({
+        title: s.song.title,
+        section: s.section,
+        participated: s.participated,
+        center: s.center,
+      })),
     })),
   };
 }
@@ -629,6 +726,8 @@ export async function replaceSetlist(user: ActingUser, live: { id: string }, inp
       written.push({ id: row.id, songs: p.songs, centerSongs: p.centerSongs });
     }
     await writeSetlist(tx, live.id, written, setlist.commonSongs);
+    // セトリのある公演は手入力より セトリが正 (手入力の欄は画面で読み取り専用にしてある)
+    await deriveSongsFromSetlists(tx, live.id);
     // 初日 / 最終日が動くので収集の期間も追随させる
     await syncReportCollection(tx, live.id);
     return { performances: written.length, removed: existing.size - keep.length };
@@ -640,6 +739,117 @@ export async function replaceSetlist(user: ActingUser, live: { id: string }, inp
     targetType: "Live",
     targetId: live.id,
     metadata: { ...result, commonSongs: setlist.commonSongs.length },
+  });
+  return result;
+}
+
+export interface SetlistItemInput {
+  title: string;
+  section?: string;
+  participated?: boolean;
+  center?: boolean;
+}
+
+const MAX_SETLIST_SOURCE_LABEL = 100;
+const MAX_SETLIST_SOURCE_URL = 1000;
+
+/** セトリの出典を検証する。セトリがあればラベル必須、URL は任意で http(s) のみ */
+function cleanSetlistSource(source: Partial<SetlistSource> | undefined, hasItems: boolean): SetlistSource {
+  // セトリを消すときは出典も消す
+  if (!hasItems) return { label: "", url: "" };
+  const label = (source?.label ?? "").replace(/\s+/g, " ").trim();
+  const url = (source?.url ?? "").trim();
+  if (!label) throw new LiveInputError("セトリの出典を入れてください (どこから写したか)");
+  if ([...label].length > MAX_SETLIST_SOURCE_LABEL) {
+    throw new LiveInputError(`出典の名前が長すぎます (${MAX_SETLIST_SOURCE_LABEL} 文字まで)`);
+  }
+  if (url) {
+    if (url.length > MAX_SETLIST_SOURCE_URL) throw new LiveInputError("出典の URL が長すぎます");
+    let parsed: URL | null = null;
+    try {
+      parsed = new URL(url);
+    } catch {
+      // 下で弾く
+    }
+    if (!parsed || (parsed.protocol !== "https:" && parsed.protocol !== "http:")) {
+      throw new LiveInputError("出典の URL は http(s):// で始めてください");
+    }
+  }
+  return { label, url };
+}
+
+/**
+ * 1 公演のセトリ (全曲) を丸ごと入れ替え、ライブの LiveSong (共通披露曲 / 追加曲 / センター曲) を
+ * 組み直す。空で保存するとその公演のセトリと出典を消す (LiveSong は直前の派生のまま残る)。
+ * センター曲は参加扱いにする。セトリがあれば出典 (どこから写したか) が必須
+ */
+export async function replacePerformanceSetlist(
+  user: ActingUser,
+  live: { id: string },
+  performanceId: string,
+  items: SetlistItemInput[],
+  source?: Partial<SetlistSource>
+) {
+  const cleanSource = cleanSetlistSource(source, items.length > 0);
+  if (items.length > MAX_SETLIST_ITEMS) {
+    throw new LiveInputError(`セトリが長すぎます (${MAX_SETLIST_ITEMS} 曲まで)`);
+  }
+  const clean = items.map((it, i) => {
+    const title = it.title.replace(/\s+/g, " ").trim();
+    if (!title) throw new LiveInputError(`${i + 1} 曲目の曲名が空です`);
+    if ([...title].length > MAX_SONG_TITLE) {
+      throw new LiveInputError(`${i + 1} 曲目の曲名が長すぎます (${MAX_SONG_TITLE} 文字まで)`);
+    }
+    const section = (it.section ?? "").trim();
+    if (!(SETLIST_SECTIONS as readonly string[]).includes(section)) {
+      throw new LiveInputError(`${i + 1} 曲目の区切りが不正です: ${section}`);
+    }
+    const center = it.center ?? false;
+    return { title, section, center, participated: center || (it.participated ?? true) };
+  });
+
+  const result = await withSession(user, async (tx) => {
+    const perf = await tx.livePerformance.findFirst({
+      where: { id: performanceId, liveId: live.id },
+      select: { id: true },
+    });
+    if (!perf) throw new LiveInputError("公演が見つかりません");
+    const songIds = await resolveSongIds(
+      tx,
+      clean.map((c) => c.title)
+    );
+    await tx.livePerformance.update({
+      where: { id: performanceId },
+      data: { setlistSourceLabel: cleanSource.label, setlistSourceUrl: cleanSource.url },
+    });
+    await tx.liveSetlistItem.deleteMany({ where: { liveId: live.id, performanceId } });
+    if (clean.length > 0) {
+      await tx.liveSetlistItem.createMany({
+        data: clean.map((c, position) => ({
+          liveId: live.id,
+          performanceId,
+          songId: songIds.get(c.title)!,
+          position,
+          section: c.section,
+          participated: c.participated,
+          center: c.center,
+        })),
+      });
+    }
+    await deriveSongsFromSetlists(tx, live.id);
+    return {
+      songs: clean.length,
+      participated: clean.filter((c) => c.participated).length,
+      center: clean.filter((c) => c.center).length,
+    };
+  });
+
+  await logAudit({
+    actorId: user.id,
+    action: "live.setlist.performance",
+    targetType: "Live",
+    targetId: live.id,
+    metadata: { performanceId, ...result, source: cleanSource.label },
   });
   return result;
 }

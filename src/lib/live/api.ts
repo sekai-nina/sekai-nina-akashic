@@ -20,6 +20,7 @@ import {
   MAX_SONGS_PER_LIST,
   MAX_VENUE,
 } from "./config";
+import { MAX_SETLIST_ITEMS, SETLIST_SECTIONS } from "./setlist";
 
 const SongList = z.array(z.string().max(MAX_SONG_TITLE)).max(MAX_SONGS_PER_LIST);
 
@@ -40,6 +41,31 @@ export const SetlistSchema = z
   .object({
     performances: z.array(PerformanceSchema).min(1).max(MAX_PERFORMANCES),
     commonSongs: SongList.optional(),
+  })
+  .strict();
+
+/**
+ * 1 公演のセトリ (全曲)。順番は配列の順。空配列でその公演のセトリ (と出典) を消す。
+ * 曲があれば `source.label` (どこから写したか) が必須 (domain で検証)
+ */
+export const PerformanceSetlistSchema = z
+  .object({
+    items: z
+      .array(
+        z
+          .object({
+            title: z.string().trim().min(1).max(MAX_SONG_TITLE),
+            section: z.enum(SETLIST_SECTIONS).optional(),
+            participated: z.boolean().optional(),
+            center: z.boolean().optional(),
+          })
+          .strict()
+      )
+      .max(MAX_SETLIST_ITEMS),
+    source: z
+      .object({ label: z.string().max(100), url: z.string().max(1000).optional() })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -89,6 +115,10 @@ export function projectLive(live: LiveSummary | LiveDetail) {
       note: p.note,
       songs: p.songs,
       centerSongs: p.centerSongs,
+      /** セトリ (出ていない曲も含めた全曲、順番どおり)。入っていない公演は空 */
+      setlist: p.setlist,
+      /** セトリの出典 ({ label, url })。セトリが無ければ空文字 */
+      setlistSource: p.setlistSource,
     })),
     // ドシエが所有者に private へ戻された / 機密を上げられたときは null (RLS で見えない)
     dossier: live.dossier

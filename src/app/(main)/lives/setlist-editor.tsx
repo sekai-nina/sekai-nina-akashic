@@ -97,10 +97,17 @@ export function SetlistEditor({
   onChange,
   disabled,
   knownKeys,
+  derivedIds,
 }: {
   value: SetlistDraft;
   onChange: (next: SetlistDraft) => void;
   disabled?: boolean;
+  /**
+   * セトリ (全曲) が入っている公演の ID。この公演の追加曲・センター曲はセトリから組み直されるので
+   * 読み取り専用にする。共通披露曲は **全公演にセトリがあるときだけ** 読み取り専用 (セトリの無い公演の
+   * 曲は共通披露曲 + 追加曲なので、そこから曲を外すには共通披露曲を直すしかない)
+   */
+  derivedIds?: string[];
   /**
    * 曲マスタにある曲の名寄せキー (#167)。入力中の曲でマスタに無いものを行の下に出す
    * (誤字に気づけるように)。保存は止めない (ライブ限定アレンジなど未収録の曲もある)
@@ -109,6 +116,10 @@ export function SetlistEditor({
 }) {
   const rows = value.performances;
   const known = useMemo(() => new Set(knownKeys ?? []), [knownKeys]);
+  const derived = useMemo(() => new Set(derivedIds ?? []), [derivedIds]);
+  const fromSetlist = (r: PerformanceRow) => !!r.id && derived.has(r.id);
+  const commonDerived = rows.length > 0 && rows.every(fromSetlist);
+  const derivedNote = <span className="text-slate-400"> (セトリから自動)</span>;
   /** マスタに無い曲 (knownKeys が無ければ判定しない) */
   const unknownIn = (text: string): string[] =>
     known.size === 0 ? [] : splitSongs(text).filter((t) => !known.has(normalizeSongTitle(t)));
@@ -136,7 +147,7 @@ export function SetlistEditor({
   return (
     <div>
       <label className={labelCls} htmlFor="live-common-songs">
-        共通披露曲 (全公演で披露した曲。「A / B / C」のようにスラッシュ区切り)
+        共通披露曲 (全公演で披露した曲。「A / B / C」のようにスラッシュ区切り){commonDerived && derivedNote}
       </label>
       <input
         id="live-common-songs"
@@ -145,6 +156,7 @@ export function SetlistEditor({
         onChange={(e) => onChange({ ...value, commonSongs: e.target.value })}
         placeholder="NO WAR in the future 2020 / キツネ / 空飛ぶ車"
         disabled={disabled}
+        readOnly={commonDerived}
       />
       <UnknownSongs titles={unknownIn(value.commonSongs)} />
 
@@ -191,7 +203,7 @@ export function SetlistEditor({
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
               <div>
-                <label className={labelCls} htmlFor={`${r.key}-songs`}>追加曲 (この公演だけ)</label>
+                <label className={labelCls} htmlFor={`${r.key}-songs`}>追加曲 (この公演だけ){fromSetlist(r) && derivedNote}</label>
                 <input
                   id={`${r.key}-songs`}
                   className={inputCls}
@@ -199,11 +211,12 @@ export function SetlistEditor({
                   onChange={(e) => patch(i, { songs: e.target.value })}
                   placeholder="One choice"
                   disabled={disabled}
+                  readOnly={fromSetlist(r)}
                 />
                 <UnknownSongs titles={unknownIn(r.songs)} />
               </div>
               <div>
-                <label className={labelCls} htmlFor={`${r.key}-center`}>センター曲</label>
+                <label className={labelCls} htmlFor={`${r.key}-center`}>センター曲{fromSetlist(r) && derivedNote}</label>
                 <input
                   id={`${r.key}-center`}
                   className={inputCls}
@@ -211,6 +224,7 @@ export function SetlistEditor({
                   onChange={(e) => patch(i, { centerSongs: e.target.value })}
                   placeholder="ソンナコトナイヨ"
                   disabled={disabled}
+                  readOnly={fromSetlist(r)}
                 />
                 <UnknownSongs titles={unknownIn(r.centerSongs)} />
               </div>

@@ -29,6 +29,7 @@ export function SetlistForm({
   const [pending, startTransition] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
   const initial = useMemo(() => toDraft({ commonSongs, performances }), [commonSongs, performances]);
+  const derivedIds = useMemo(() => performances.filter((p) => p.setlist.length > 0).map((p) => p.id), [performances]);
   const [draft, setDraft] = useState<SetlistDraft>(initial);
   const [dirty, setDirty] = useState(false);
   const dirtyRef = useRef(false);
@@ -65,7 +66,7 @@ export function SetlistForm({
 
   return (
     <div>
-      <SetlistEditor value={draft} onChange={change} disabled={pending} knownKeys={knownKeys} />
+      <SetlistEditor value={draft} onChange={change} disabled={pending} knownKeys={knownKeys} derivedIds={derivedIds} />
       <div className="mt-3 flex items-center gap-3">
         <button
           type="button"
