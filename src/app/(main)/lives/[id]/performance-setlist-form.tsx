@@ -6,12 +6,13 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { LivePerformanceView, LiveSetlistItemView } from "@/lib/domain/lives";
 import { MAX_SETLIST_ITEMS, parseSetlistText, SETLIST_SECTIONS } from "@/lib/live/setlist";
 import { normalizeSongTitle } from "@/lib/songs/normalize";
-import { replacePerformanceSetlistAction } from "../actions";
+import { loadSuSetlistAction, replacePerformanceSetlistAction } from "../actions";
 
 /**
  * 公演ごとのセトリ (出ていない曲も含めた全曲)。
  *
- * 作業の流れ: 公式やファンの投稿のセトリを貼る → 「読み込む」で曲の行になる → 坂井新奈が出ていない曲の
+ * 作業の流れ: 「Sakamichi Universe から読み込む」(参加・センターは備考から推した初期値が付く。
+ * 各行の下に備考と根拠が出る) か、公式やファンの投稿のセトリを貼って「読み込む」で曲の行になる → 坂井新奈が出ていない曲の
  * 「参加」を外し、センター曲に印を付ける → どこから写したか (出典) を書く → 保存。
  * 2 公演目からは「ほかの公演からコピー」して差分だけ直す (出典も写る)。
  * 保存すると、上の表の共通披露曲 / 追加曲 / センター曲がセトリから組み直される (参加した曲だけ)。
@@ -71,6 +72,8 @@ function summary(setlist: LiveSetlistItemView[]): string {
 
 interface Row extends LiveSetlistItemView {
   key: string;
+  /** Sakamichi Universe から読んだときの備考と参加の根拠 (確かめる用。保存しない) */
+  hint?: string;
 }
 
 let seq = 0;
@@ -103,6 +106,8 @@ function PerformanceEditor({
   const [dirty, setDirty] = useState(false);
   const dirtyRef = useRef(false);
   const [msg, setMsg] = useState<string | null>(null);
+  /** Sakamichi Universe で同じ日のライブが複数あったときの候補 */
+  const [suCandidates, setSuCandidates] = useState<{ starttime: string; title: string }[]>([]);
   const known = useMemo(() => new Set(knownKeys), [knownKeys]);
 
   // 保存後の refresh で返る行 (曲名は曲マスタの表記に寄っている) に、編集中でない限り追随する。
@@ -157,6 +162,28 @@ function PerformanceEditor({
       `${parsed.length - dropped} 曲を読み込みました${dropped > 0 ? ` (上限 ${MAX_SETLIST_ITEMS} 曲を超えた ${dropped} 曲は落としました)` : ""}。参加とセンターを確かめて保存してください`
     );
   }
+  /** Sakamichi Universe からセトリを読む。出典はそのライブのページになる */
+  function loadSu(starttime?: string) {
+    setMsg("Sakamichi Universe から読んでいます…");
+    startTransition(async () => {
+      const res = await loadSuSetlistAction(liveId, performance.id, starttime);
+      if (!res.ok) {
+        setSuCandidates("candidates" in res && res.candidates ? res.candidates : []);
+        setMsg(res.error);
+        return;
+      }
+      setSuCandidates([]);
+      change(
+        toRows(res.rows).map((r, i) => ({
+          ...r,
+          hint: [res.rows[i].remark && `SU 備考: ${res.rows[i].remark}`, res.rows[i].reason].filter(Boolean).join(" · "),
+        }))
+      );
+      setSourceLabel(res.source.label);
+      setSourceUrl(res.source.url);
+      setMsg(`「${res.liveTitle}」の ${res.rows.length} 曲を読み込みました。参加とセンターを確かめて保存してください`);
+    });
+  }
   function copyFrom(id: string) {
     const src = others.find((o) => o.id === id);
     if (!src) return;
@@ -195,6 +222,30 @@ function PerformanceEditor({
           disabled={pending}
         />
         <div className="flex flex-col gap-2">
+          <button
+            type="button"
+            onClick={() => loadSu()}
+            disabled={pending}
+            className="h-8 px-3 rounded-md border border-slate-300 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            Sakamichi Universe から読み込む
+          </button>
+          {suCandidates.length > 0 && (
+            <select
+              className="h-8 px-2 rounded-md border border-slate-300 text-xs text-slate-700 bg-white"
+              value=""
+              onChange={(e) => e.target.value && loadSu(e.target.value)}
+              disabled={pending}
+              aria-label="Sakamichi Universe のライブを選ぶ"
+            >
+              <option value="">どの公演か選ぶ…</option>
+              {suCandidates.map((c) => (
+                <option key={c.starttime} value={c.starttime}>
+                  {c.starttime.slice(0, 5)} {c.title}
+                </option>
+              ))}
+            </select>
+          )}
           <button
             type="button"
             onClick={load}
@@ -249,6 +300,7 @@ function PerformanceEditor({
                   {r.title.trim() && !known.has(normalizeSongTitle(r.title)) && (
                     <span className="text-[11px] text-amber-700">曲マスタに無い曲です (誤字なら直してください)</span>
                   )}
+                  {r.hint && <span className="block text-[11px] text-slate-500">{r.hint}</span>}
                 </td>
                 <td className="pr-2">
                   <select

@@ -20,6 +20,8 @@ import {
 import { previewArticle, restoreExclusions, saveArticle } from "@/lib/domain/article-generate";
 import { applyExcerpts, proposeExcerptsForDossier } from "@/lib/domain/excerpts";
 import { generateSketch, saveSketchCrops, selectSketch } from "@/lib/domain/live-sketch";
+import { previewSuSetlist } from "@/lib/domain/live-su";
+import { listSongParticipation } from "@/lib/domain/songs";
 import { CreateLiveSchema, PerformanceSetlistSchema, SetlistSchema, UpdateLiveSchema } from "@/lib/live/api";
 import {
   ApplyExcerptsSchema,
@@ -118,6 +120,38 @@ export async function replacePerformanceSetlistAction(
     revalidatePath("/lives");
     revalidatePath("/songs");
     return { ok: true as const, ...result };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+/**
+ * 公演のセトリを Sakamichi Universe から組んで返す (保存はしない。画面で確かめてから保存する)。
+ * 同じ日に複数あって選べなければ候補を返すので、starttime を付けて呼び直す
+ */
+export async function loadSuSetlistAction(id: string, performanceId: string, starttime?: string) {
+  const user = await requireMember();
+  if (typeof performanceId !== "string" || !performanceId) return { ok: false as const, error: "公演が指定されていません" };
+  if (starttime !== undefined && (typeof starttime !== "string" || !/^\d{2}:\d{2}:\d{2}$/.test(starttime))) {
+    return { ok: false as const, error: "開演時刻が不正です" };
+  }
+  try {
+    const live = await getLive(user, id);
+    if (!live) throw new Error("見つかりません");
+    const perf = live.performances.find((p) => p.id === performanceId);
+    if (!perf) throw new Error("公演が見つかりません");
+    const res = await previewSuSetlist(
+      { ...perf, current: { songs: [...live.commonSongs, ...perf.songs], centerSongs: perf.centerSongs } },
+      await listSongParticipation(),
+      { starttime }
+    );
+    if (!res.ok) {
+      const candidates = res.candidates.map((c) => ({ starttime: c.starttime, title: c.title }));
+      if (res.reason === "ambiguous") return { ok: false as const, error: "同じ日のライブが複数あります。選んでください", candidates };
+      if (res.reason === "empty") return { ok: false as const, error: "Sakamichi Universe にまだセトリがありません" };
+      return { ok: false as const, error: `Sakamichi Universe に ${perf.date} のライブが見つかりません` };
+    }
+    return { ok: true as const, liveTitle: res.live.title, rows: res.rows, source: res.source };
   } catch (e) {
     return { ok: false as const, error: errorMessage(e) };
   }

@@ -1759,6 +1759,15 @@ X レポ・スケッチはミーグリと同じ仕組み（#150）。記事生�
 - `{"items": []}` でその公演のセトリと出典を消す（披露曲は直前の組み直しのまま残る）
 - 公演がこのライブのものでなければ 400
 
+#### Sakamichi Universe からの取り込み (API ではない)
+
+セトリは [Sakamichi Universe](https://meaning-of-goodbye.com/sakamichi-search/)（個人運営の坂道シリーズのデータベース。About で「データベースはオープンデータととらえて差し支えない」）の公開 REST（`wp-json/sakamichi-universe/v1`）から組める。出典は必ず `Sakamichi Universe` とそのライブのページになる。
+
+- 画面: `/lives/[id]` の「セトリ (全曲)」で公演を開き「Sakamichi Universe から読み込む」。保存はしない（行の下に備考と参加の根拠が出るので、確かめてから保存）
+- まとめて: `pnpm cli:import-setlists-su [--out report.md] [--live <id>] [--overwrite] [--apply] [--as <email>]`。既定は dry-run で、公演ごとのセトリと「今の披露曲との差」をレポートに書く。`--apply` で画面と同じ経路（`replacePerformanceSetlist`）で保存。既にセトリのある公演は飛ばす
+- 公演との突き合わせは日付（昼夜・午前午後は公演の呼び分け `label` で選ぶ）
+- 参加: ① 備考（「C坂井」= センター、坂井の名前・「全員」・5 期生を含む期 = 参加、坂井の無い名前の並び・ソロ・5 期生を含まない期・オリメン = 不参加）→ ② 公演に今入っている披露曲 / センター曲 → ③ 5 期生のライブ・ひなた坂46 LIVE なら参加 → ④ 坂井新奈の参加楽曲（Sakamichi Universe）か曲マスタの「参加楽曲」。ロジックは `src/lib/live/sakamichi-universe.ts` / `src/lib/domain/live-su.ts`
+
 **レスポンス:** 更新後の行（`GET /lives` の 1 行と同じ形）。
 
 ### POST /lives/:id/materials
