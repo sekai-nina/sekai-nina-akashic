@@ -132,28 +132,31 @@ async function loadEpisodes(user: ActingUser, showKey: ShowKey, only?: number): 
 
 export async function listShowProgress(user: ActingUser, showKey: ShowKey): Promise<ShowEpisodeRow[]> {
   const show = SHOWS[showKey];
+  // 一覧記事と進捗は回の一覧に依存しないので、回を組み立てるのと並べて引く
+  const listsPromise = prisma.article.findMany({
+    where: { title: { endsWith: show.listTitleSuffix } },
+    select: { shortId: true, title: true, body: true },
+  });
+  const progressPromise = withClearance(user.clearance, (tx) =>
+    tx.articleProgress.findMany({
+      where: { materialKind: showKey },
+      select: { materialKey: true, target: true, status: true, note: true },
+    })
+  );
   const episodes = await loadEpisodes(user, showKey);
   const all = [...episodes.values()];
   const epByAsset = new Map(all.flatMap((e) => e.assetIds.map((id) => [id, e.episode] as const)));
   const epByUrl = new Map(all.flatMap((e) => e.urls.map((u) => [u, e.episode] as const)));
 
   const [lists, sources, progress] = await Promise.all([
-    prisma.article.findMany({
-      where: { title: { endsWith: show.listTitleSuffix } },
-      select: { shortId: true, title: true, body: true },
-    }),
+    listsPromise,
     withClearance(user.clearance, (tx) =>
       tx.articleSource.findMany({
         where: { OR: [{ assetId: { in: [...epByAsset.keys()] } }, { url: { in: [...epByUrl.keys()] } }] },
         select: { assetId: true, url: true, article: { select: { shortId: true, title: true, type: true } } },
       })
     ),
-    withClearance(user.clearance, (tx) =>
-      tx.articleProgress.findMany({
-        where: { materialKind: showKey },
-        select: { materialKey: true, target: true, status: true, note: true },
-      })
-    ),
+    progressPromise,
   ]);
 
   const listByEpisode = new Map<number, { shortId: string; title: string }>();

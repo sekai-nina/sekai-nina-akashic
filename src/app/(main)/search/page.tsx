@@ -345,8 +345,10 @@ export default async function SearchPage({
   // ガードしないと未認証リクエストのたびにサーバー側で例外になる
   if (!session?.user) notFound();
   const userClearance = session.user.clearance as ClearanceLevel;
-  const entities = await getCachedEntityList(userClearance);
-  const editableDossiers = (await listEditableDossiers(session.user)).map((d) => ({ id: d.id, title: d.title }));
+  const [entities, editableDossiers] = await Promise.all([
+    getCachedEntityList(userClearance),
+    listEditableDossiers(session.user).then((ds) => ds.map((d) => ({ id: d.id, title: d.title }))),
+  ]);
 
   const params = await searchParams;
   const q = params.q ?? "";
