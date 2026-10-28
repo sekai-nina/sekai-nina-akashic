@@ -370,10 +370,11 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
   if (query.ninaAppearance) {
     const linked = Prisma.sql`EXISTS (SELECT 1 FROM "AssetEntity" ae WHERE ae."assetId" = a."id" AND ae."entityId" = ${NINA_ENTITY_ID})`;
     assetWhereConditions.push(
+      // ninaAbsent を優先する (`ninaAppearanceOf` と同じ。本人の投稿でも写っていなければ立つ)
       query.ninaAppearance === "appears"
-        ? linked
+        ? Prisma.sql`NOT a."ninaAbsent" AND ${linked}`
         : query.ninaAppearance === "absent"
-          ? Prisma.sql`a."ninaAbsent" AND NOT ${linked}`
+          ? Prisma.sql`a."ninaAbsent"`
           : Prisma.sql`NOT a."ninaAbsent" AND NOT ${linked}`
     );
   }

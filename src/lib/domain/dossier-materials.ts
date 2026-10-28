@@ -51,6 +51,7 @@ export interface DossierForMaterials {
       entities?: { entity: { canonicalName: string } }[];
       /** 坂井新奈の AssetEntity の数 (1 なら #261 の「出ている」)。おでかけ記事の関連メディアを分ける */
       _count?: { entities: number };
+      ninaAbsent?: boolean;
     } | null;
   }[];
   /** 場所候補 (ドシエの並び順)。おでかけ記事の `locations` になる */
@@ -85,6 +86,7 @@ const ASSET_SELECT = {
     take: 1,
   },
   _count: { select: { entities: { where: { entityId: NINA_ENTITY_ID } } } },
+  ninaAbsent: true,
 } satisfies Prisma.AssetSelect;
 
 /**
@@ -251,7 +253,7 @@ function toAssetInput(a: LoadedAsset, item: { excerpt?: string; caption?: string
       ? { kind: src.sourceKind, title: src.title, url: src.url, publishedAt: toJstDateOnly(src.publishedAt) }
       : null,
     excerpts: item.excerpt ? [item.excerpt] : [],
-    ...((a._count?.entities ?? 0) > 0 ? { ninaAppears: true } : {}),
+    ...((a._count?.entities ?? 0) > 0 && !a.ninaAbsent ? { ninaAppears: true } : {}),
     ...(a.texts !== undefined
       ? {
           text: pickText(a.texts),

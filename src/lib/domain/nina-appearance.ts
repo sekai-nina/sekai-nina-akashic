@@ -11,10 +11,10 @@ import { backupAssetToDrive } from "@/lib/drive";
 import { NINA_ENTITY_ID, ninaAppearanceOf, type NinaAppearance } from "@/lib/nina";
 import { logAudit } from "./audit";
 
-/** 本人が著者のアセット (ブログ・本人の投稿) は「出ている」以外にできない */
+/** 本人が著者のアセット (ブログ・本人の投稿) は「未確認」にできない (著者の紐づきは外さない) */
 export class NinaAuthorConflictError extends Error {
   constructor() {
-    super("坂井新奈が著者 (author) のアセットは「出ていない」「未確認」にできません");
+    super("坂井新奈が著者 (author) のアセットは「未確認」にできません。写っていなければ「出ていない」にしてください");
   }
 }
 
@@ -55,8 +55,12 @@ export async function setNinaAppearance(
         });
       }
     } else if (link) {
-      if (link.roleLabel === "author") throw new NinaAuthorConflictError();
-      await tx.assetEntity.deleteMany({ where: { assetId, entityId: NINA_ENTITY_ID } });
+      // 本人の投稿は著者の紐づきを残したまま「出ていない」にする (写っていない写真もある)
+      if (link.roleLabel === "author") {
+        if (status === "unchecked") throw new NinaAuthorConflictError();
+      } else {
+        await tx.assetEntity.deleteMany({ where: { assetId, entityId: NINA_ENTITY_ID } });
+      }
     }
     const ninaAbsent = status === "absent";
     if (asset.ninaAbsent !== ninaAbsent) {

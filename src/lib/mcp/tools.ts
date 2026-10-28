@@ -574,7 +574,7 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
       description:
         "アセット (番組・動画など) に坂井新奈が出ているかを記録する。" +
         "appears = 出ている (坂井新奈「出演」を紐づける) / absent = 見て確認したが出ていない / unchecked = 未確認に戻す。" +
-        "実際に確認した結果だけを記録し、推測で absent にしない。坂井新奈が著者 (author) のアセットは appears 以外にできない。",
+        "実際に確認した結果だけを記録し、推測で absent にしない。坂井新奈が著者 (author) のアセットは unchecked にできない (写っていなければ absent にできる)。",
       inputSchema: z.object({
         id: z.string().describe("アセット ID"),
         status: z.enum(NINA_APPEARANCES),
