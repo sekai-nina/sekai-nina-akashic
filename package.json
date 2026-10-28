@@ -35,6 +35,7 @@
     "cli:backfill-article-dossiers": "tsx src/cli/backfill-article-dossiers.ts",
     "cli:backfill-article-places": "tsx src/cli/backfill-article-places.ts",
     "cli:import-songs": "tsx src/cli/import-songs.ts",
+    "cli:import-setlists-su": "tsx src/cli/import-setlists-su.ts",
     "cli:fix-insta-dash": "tsx src/cli/fix-insta-story-dash.ts",
     "cli:fix-youtube-publisher": "tsx src/cli/fix-youtube-publisher.ts",
     "cli:import-meetgreet-upcoming": "tsx src/cli/import-meetgreet-upcoming.ts",
