@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { planAppend } from "@/lib/meetgreet/append";
+import { isPureAppend, planAppend } from "@/lib/meetgreet/append";
 import type { ArticleAssetInput } from "../render";
 import { OUTING_BODY_PLACEHOLDER, OUTING_TEMPLATE, outingLocations, outingPrompt, renderOutingArticle } from "./outing";
 import type { AiDraft, DossierPlace, DossierRenderInput } from "./types";
@@ -88,8 +88,6 @@ describe("renderOutingArticle", () => {
         "",
         "## 関連メディア",
         "",
-        "坂井新奈が写っている、このおでかけに関する記録。",
-        "",
         "- 【トーク・画像】坂井新奈トーク 2025.8.18 20:31^[2]",
         "- 【ブログ・画像】蔵盛妃那乃ブログ「布団の中で眠りに就く頃には『蔵盛妃那乃』」 (1/2)^[1]",
         "",
@@ -118,7 +116,7 @@ describe("renderOutingArticle", () => {
   it("AI が書いてしまった `## 関連メディア` は落として機械の章に置き換える", () => {
     const r = renderOutingArticle(input([talk, blog]), { ...draft, body: "冒頭^[1]。\n\n## 関連メディア\n\n- 勝手に書いた" });
     expect(r.body).toBe(
-      "冒頭^[1]。\n\n## 関連メディア\n\n坂井新奈が写っている、このおでかけに関する記録。\n\n- 【トーク・画像】坂井新奈トーク 2025.8.18 20:31^[2]\n"
+      "冒頭^[1]。\n\n## 関連メディア\n\n- 【トーク・画像】坂井新奈トーク 2025.8.18 20:31^[2]\n"
     );
   });
 
@@ -196,7 +194,7 @@ describe("outing の追記 (関連メディアは flat)", () => {
     expect(p.body).toContain("- 【トーク・画像】坂井新奈トーク 2025.8.18 20:31^[2]\n- 【ブログ・画像】蔵盛妃那乃ブログ「布団の中で眠りに就く頃には『蔵盛妃那乃』」 (1/2)^[1]\n");
   });
 
-  it("関連メディアの章が無い記事には章と導入文ごと足す", () => {
+  it("関連メディアの章が無い記事には章ごと足す (導入文は書かない)", () => {
     const r = renderOutingArticle(input([talk, blog]), draft);
     const p = planAppend({
       existingBody: "本文だけ。\n",
@@ -205,6 +203,66 @@ describe("outing の追記 (関連メディアは flat)", () => {
       existingSources: [{ sourceNo: 1, assetId: "blog", url: BLOG_URL }],
       layout: OUTING_TEMPLATE.appendLayout,
     });
-    expect(p.body).toBe("本文だけ。\n\n## 関連メディア\n\n坂井新奈が写っている、このおでかけに関する記録。\n\n- 【トーク・画像】坂井新奈トーク 2025.8.18 20:31^[2]\n");
+    expect(p.body).toBe("本文だけ。\n\n## 関連メディア\n\n- 【トーク・画像】坂井新奈トーク 2025.8.18 20:31^[2]\n");
+  });
+
+  it("坂井新奈が出ているものがあれば、新しい章を小見出しで分ける", () => {
+    const r = renderOutingArticle(input([{ ...talk, ninaAppears: true }, blog]), draft);
+    const p = planAppend({
+      existingBody: "本文だけ。\n",
+      parts: { ...r.parts, blogImages: [{ assetId: "img", line: "- 【ブログ・画像】別の写真^[1]" }] },
+      sources: r.sources,
+      existingSources: [{ sourceNo: 1, assetId: "blog", url: BLOG_URL }],
+      layout: OUTING_TEMPLATE.appendLayout,
+    });
+    expect(p.body).toBe(
+      "本文だけ。\n\n## 関連メディア\n\n### 坂井新奈が写っているもの\n\n- 【トーク・画像】坂井新奈トーク 2025.8.18 20:31^[2]\n\n### そのほか\n\n- 【ブログ・画像】別の写真^[1]\n"
+    );
+  });
+
+  it("小見出しの無い既存の章に出ているものを足すときは、末尾に小見出しを作る (既存の行は動かさない)", () => {
+    const existing = "本文。\n\n## 関連メディア\n\n- 【ブログ・画像】前からある^[1]\n";
+    const p = planAppend({
+      existingBody: existing,
+      parts: {
+        quotes: [],
+        reports: [],
+        tiktoks: [],
+        talks: [],
+        blogImages: [
+          { assetId: "a", line: "- 【ブログ・画像】写っている^[1]", ninaAppears: true },
+          { assetId: "b", line: "- 【ブログ・画像】写っていない^[1]" },
+        ],
+      },
+      sources: [],
+      existingSources: [{ sourceNo: 1, assetId: "blog", url: BLOG_URL }],
+      layout: OUTING_TEMPLATE.appendLayout,
+    });
+    expect(p.body).toBe(
+      existing +
+        "\n### 坂井新奈が写っているもの\n\n- 【ブログ・画像】写っている^[1]\n\n### そのほか\n\n- 【ブログ・画像】写っていない^[1]\n"
+    );
+    expect(isPureAppend(existing, p.body)).toBe(true);
+  });
+});
+
+describe("renderOutingArticle (坂井新奈が出ているもの)", () => {
+  it("出ているものがあれば関連メディアを 2 つの小見出しに分け、導入文は書かない", () => {
+    const r = renderOutingArticle(input([{ ...talk, ninaAppears: true }, blogImage, blog]), draft);
+    expect(r.body).toContain(
+      [
+        "## 関連メディア",
+        "",
+        "### 坂井新奈が写っているもの",
+        "",
+        "- 【トーク・画像】坂井新奈トーク 2025.8.18 20:31^[2]",
+        "",
+        "### そのほか",
+        "",
+        "- 【ブログ・画像】蔵盛妃那乃ブログ「布団の中で眠りに就く頃には『蔵盛妃那乃』」 (1/2)^[1]",
+        "",
+      ].join("\n")
+    );
+    expect(r.body).not.toContain("このおでかけに関する記録");
   });
 });

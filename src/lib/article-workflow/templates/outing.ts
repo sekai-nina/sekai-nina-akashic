@@ -34,9 +34,7 @@ import type { AiContext, AiDraft, AiPrompt, ArticleTemplateDef, DossierPlace, Do
 export const OUTING_BODY_PLACEHOLDER =
   "<!-- 本文: AI が使えなかったので、素材を読んで書いてください。冒頭 1〜2 文 + 場所 / 行動ごとの ## と事実の箇条書き、各事実に ^[n] で出典。引用はしない -->";
 
-/** 関連メディアの導入文 (`outing_brief.py` と同じ) */
-export const OUTING_MEDIA_LEAD = "坂井新奈が写っている、このおでかけに関する記録。";
-const OUTING_MEDIA_STYLE: RelatedMediaStyle = { kind: "flat", lead: OUTING_MEDIA_LEAD };
+const OUTING_MEDIA_STYLE: RelatedMediaStyle = { kind: "flat" };
 
 interface OutingSample {
   title: string;

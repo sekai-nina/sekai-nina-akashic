@@ -79,3 +79,39 @@ export async function setNinaAppearance(
   }
   return status;
 }
+
+export interface ClipMedia {
+  thumbnailUrl: string | null;
+  appearance: NinaAppearance;
+  /** 坂井新奈が著者 (本人のブログ・トーク)。「出ている」から変えられない */
+  author: boolean;
+}
+
+/**
+ * 企画のクリップ (画像・動画) の見た目と出演の状態。記事の関連メディアを
+ * 「坂井新奈が写っているもの / そのほか」に分ける印を、記事にする画面から付けるのに使う
+ */
+export async function getClipMedia(clearance: string, assetIds: string[]): Promise<Map<string, ClipMedia>> {
+  if (assetIds.length === 0) return new Map();
+  const rows = await withClearance(clearance, (tx) =>
+    tx.asset.findMany({
+      where: { id: { in: assetIds }, kind: { in: ["image", "video"] } },
+      select: {
+        id: true,
+        thumbnailUrl: true,
+        ninaAbsent: true,
+        entities: { where: { entityId: NINA_ENTITY_ID }, select: { entityId: true, roleLabel: true } },
+      },
+    })
+  );
+  return new Map(
+    rows.map((a) => [
+      a.id,
+      {
+        thumbnailUrl: a.thumbnailUrl,
+        appearance: ninaAppearanceOf(a),
+        author: a.entities.some((e) => e.roleLabel === "author"),
+      },
+    ])
+  );
+}

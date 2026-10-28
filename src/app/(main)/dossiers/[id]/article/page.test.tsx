@@ -12,6 +12,7 @@ vi.mock("./ai-merge-step", () => ({ AiMergeStep: () => <p>AI組み込み</p> }))
 vi.mock("@/components/workflow/article-step", () => ({ ArticleStep: () => <p>生成操作</p> }));
 vi.mock("@/lib/domain/dossier-sync-queue", () => ({ listPendingDossiers: mocks.queue }));
 vi.mock("@/lib/db", () => ({ prisma: { article: { findUnique: async () => ({ body: "いまの本文" }) } } }));
+vi.mock("@/lib/domain/nina-appearance", () => ({ getClipMedia: async () => new Map() }));
 vi.mock("./pending-clips", () => ({ PendingClips: () => <p>未反映の一覧</p> }));
 vi.mock("./template-picker", () => ({ TemplatePicker: () => <p>テンプレート選択</p> }));
 vi.mock("./actions", () => ({ previewDossierArticleAction: vi.fn(), saveDossierArticleAction: vi.fn(), restoreDossierExclusionsAction: vi.fn() }));

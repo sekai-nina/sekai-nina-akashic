@@ -54,6 +54,8 @@ export interface ArticleAssetInput {
    * 既存の記事への組み込みでは、画像だけのクリップを AI に回さない判定に使う
    */
   supplement?: boolean;
+  /** 坂井新奈が出ている (#261 の「出ている」)。おでかけ記事の関連メディアを分けるのに使う */
+  ninaAppears?: boolean;
 }
 
 export interface RenderedSource {
@@ -88,9 +90,9 @@ export interface ArticleParts {
   reports: string[];
   tiktoks: string[];
   /** 関連メディアのトーク */
-  talks: { assetId: string; line: string; sortAt: string | null }[];
+  talks: { assetId: string; line: string; sortAt: string | null; ninaAppears?: boolean }[];
   /** 関連メディアのブログ画像 */
-  blogImages: { assetId: string; line: string }[];
+  blogImages: { assetId: string; line: string; ninaAppears?: boolean }[];
   /** 毎回作り直す区間 (無いテンプレートは省略) */
   blocks?: MarkerBlock[];
 }
@@ -351,9 +353,16 @@ function blogImageLine(b: BlogGroup, a: ArticleAssetInput): string {
 /**
  * 関連メディアの章の形。
  * - `sections`: ミーグリ記事の形。`### TikTok` / `### トーク` / `### ブログ（画像）` に分ける
- * - `flat`: おでかけ記事の形。導入文 1 行のあと、トーク → ブログ画像を 1 つの箇条書きに並べる
+ * - `flat`: おでかけ記事の形。トーク → ブログ画像を 1 つの箇条書きに並べる。坂井新奈が出ているものが
+ *   あれば `### 坂井新奈が写っているもの` と `### そのほか` に分ける (導入文で「写っている」と書くと
+ *   写っていない画像のぶん嘘になるため)
  */
-export type RelatedMediaStyle = { kind: "sections" } | { kind: "flat"; lead: string };
+export type RelatedMediaStyle = { kind: "sections" } | { kind: "flat" };
+
+/** おでかけ記事の関連メディアで、坂井新奈が出ているものの小見出し */
+export const NINA_MEDIA_HEADING = "### 坂井新奈が写っているもの";
+/** おでかけ記事の関連メディアで、それ以外の小見出し (出ているものがあるときだけ作る) */
+export const OTHER_MEDIA_HEADING = "### そのほか";
 
 /** `## 関連メディア` の章 (トーク・ブログ画像はリンクのみ、TikTok は埋め込み)。何も無ければ空 */
 export function renderRelatedMediaSection(input: {
@@ -367,11 +376,17 @@ export function renderRelatedMediaSection(input: {
   if (input.talks.length === 0 && blogsWithImages.length === 0 && input.tiktoks.length === 0) return [];
   const style = input.style ?? { kind: "sections" };
   if (style.kind === "flat") {
-    const body: string[] = ["## 関連メディア", "", style.lead, ""];
-    body.push(...input.tiktoks.map((u) => `![](${u})`));
-    for (const a of input.talks) body.push(talkLine(a, input.talkSourceNo.get(a.id)));
-    for (const b of blogsWithImages) for (const a of b.images) body.push(blogImageLine(b, a));
-    body.push("");
+    const lines = (appears: boolean) => [
+      // TikTok は URL だけでアセットの印が無いので「そのほか」に置く
+      ...(appears ? [] : input.tiktoks.map((u) => `![](${u})`)),
+      ...input.talks.filter((a) => !!a.ninaAppears === appears).map((a) => talkLine(a, input.talkSourceNo.get(a.id))),
+      ...blogsWithImages.flatMap((b) => b.images.filter((a) => !!a.ninaAppears === appears).map((a) => blogImageLine(b, a))),
+    ];
+    const shown = lines(true);
+    const rest = lines(false);
+    if (shown.length === 0) return ["## 関連メディア", "", ...rest, ""];
+    const body = ["## 関連メディア", "", NINA_MEDIA_HEADING, "", ...shown, ""];
+    if (rest.length > 0) body.push(OTHER_MEDIA_HEADING, "", ...rest, "");
     return body;
   }
   const body: string[] = ["## 関連メディア", ""];
@@ -425,10 +440,11 @@ export function buildParts(input: {
       assetId: a.id,
       line: talkLine(a, input.talkSourceNo.get(a.id)),
       sortAt: a.sortAt,
+      ninaAppears: !!a.ninaAppears,
     })),
     blogImages: input.blogs
       .filter((b) => b.images.length > 0)
-      .flatMap((b) => b.images.map((a) => ({ assetId: a.id, line: blogImageLine(b, a) }))),
+      .flatMap((b) => b.images.map((a) => ({ assetId: a.id, line: blogImageLine(b, a), ninaAppears: !!a.ninaAppears }))),
   };
 }
 
