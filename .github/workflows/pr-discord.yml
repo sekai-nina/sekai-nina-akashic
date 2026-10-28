@@ -1,7 +1,8 @@
 name: PR を Discord に流す
 
-# PR を作った・下書きを外したときに #akashic へ中身付きで、マージしたときは 1 行だけ投稿する。
+# PR を作った・下書きを外したとき (2 行) とマージしたとき (1 行) に #akashic へ投稿する。
 # 開発の流れをそのまま見えるようにするためのもので、CI の結果は載せない。
+# 本文はリンク先で読めるので載せない (Discord には折りたたみが無く、載せると流れが追えなくなる)
 on:
   pull_request:
     types: [opened, ready_for_review, closed]
@@ -25,43 +26,24 @@ jobs:
           URL: ${{ github.event.pull_request.html_url }}
           AUTHOR: ${{ github.event.pull_request.user.login }}
           HEAD: ${{ github.event.pull_request.head.ref }}
-          BODY: ${{ github.event.pull_request.body }}
           ADDITIONS: ${{ github.event.pull_request.additions }}
           DELETIONS: ${{ github.event.pull_request.deletions }}
-          FILES: ${{ github.event.pull_request.changed_files }}
         run: |
           if [ -z "$DISCORD_WEBHOOK_URL" ]; then
             echo "DISCORD_WEBHOOK_URL が無いので送らない"
             exit 0
           fi
-          # マージは作成時の通知と中身が重なるので 1 行だけにする。
           # URL を <> で包むとリンクのプレビュー (= 埋め込み) が付かない
-          if [ "$ACTION" = "closed" ]; then
-            jq -n --arg title "$TITLE" --arg number "$NUMBER" --arg url "$URL" \
-              '{
-                username: "akashic PR",
-                content: ("🟣 マージ: [#" + $number + " " + ($title | gsub("\\]"; "\\]")) + "](<" + $url + ">)")
-              }' | curl -sf -H "Content-Type: application/json" -d @- "$DISCORD_WEBHOOK_URL"
-            exit 0
-          fi
           jq -n \
-            --arg title "#$NUMBER $TITLE" --arg url "$URL" --arg body "$BODY" \
+            --arg action "$ACTION" --arg title "$TITLE" --arg number "$NUMBER" --arg url "$URL" \
             --arg author "$AUTHOR" --arg head "$HEAD" \
-            --arg diff "+${ADDITIONS} / -${DELETIONS}（${FILES} ファイル）" \
-            '{
-              username: "akashic PR",
-              embeds: [{
-                author: { name: "🟢 PR 作成" },
-                title: ($title | .[0:256]),
-                url: $url,
-                # 本文は長いと読まれないので先頭だけ載せる (description の上限は 4096 字)。
-                # 空文字は Discord が 400 で弾くので null にする
-                description: (if $body == "" then null elif ($body | length) > 600 then $body[0:600] + "…" else $body end),
-                color: 2067276,
-                fields: [
-                  { name: "作成者", value: $author, inline: true },
-                  { name: "ブランチ", value: ("`" + $head + "`"), inline: true },
-                  { name: "差分", value: $diff, inline: true }
-                ]
-              }]
-            }' | curl -sf -H "Content-Type: application/json" -d @- "$DISCORD_WEBHOOK_URL"
+            --arg diff "+${ADDITIONS} / -${DELETIONS}" \
+            '("[#" + $number + " " + ($title | gsub("\\]"; "\\]")) + "](<" + $url + ">)") as $link
+            | {
+                username: "akashic PR",
+                content: (
+                  if $action == "closed" then "🟣 マージ: " + $link
+                  else "🟢 " + $link + "\n" + $author + " · `" + $head + "` · " + $diff
+                  end
+                )
+              }' | curl -sf -H "Content-Type: application/json" -d @- "$DISCORD_WEBHOOK_URL"
