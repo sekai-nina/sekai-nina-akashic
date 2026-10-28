@@ -76,7 +76,12 @@ export default async function DossierDetailPage({ params }: DossierDetailProps) 
           dossierId={dossier.id}
           candidates={dossier.placeCandidates}
           editable={editable}
-          classifications={accessibleClassifications(session.user.clearance as ClearanceLevel)}
+          classifications={
+            // 公開範囲を変えられるのは admin / member だけ (promotePlaceCandidate と同じ判定)
+            session.user.role === "admin" || session.user.role === "member"
+              ? accessibleClassifications(session.user.clearance as ClearanceLevel)
+              : []
+          }
         />
       </section>
 

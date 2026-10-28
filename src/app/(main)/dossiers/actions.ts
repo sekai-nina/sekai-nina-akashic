@@ -19,7 +19,7 @@ import {
   removePlaceCandidate as removePlaceCandidateDomain,
   promotePlaceCandidate as promotePlaceCandidateDomain,
 } from "@/lib/domain/dossiers";
-import { invalidateDossiers, invalidatePlaces } from "@/lib/cache";
+import { invalidateDossiers, invalidateEntities, invalidatePlaces } from "@/lib/cache";
 
 async function requireUser() {
   const session = await auth();
@@ -229,6 +229,8 @@ export async function promotePlaceCandidateAction(
   const user = await requireUser();
   const result = await promotePlaceCandidateDomain(user, candidateId, classification);
   invalidatePlaces();
+  // place エンティティの見え方は Place の公開範囲で決まる (entityClearanceWhere)
+  invalidateEntities();
   revalidatePath(`/dossiers/${dossierId}`);
   revalidatePath("/places");
   return result;

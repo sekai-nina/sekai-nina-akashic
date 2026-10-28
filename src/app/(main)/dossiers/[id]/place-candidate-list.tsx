@@ -34,7 +34,7 @@ interface PlaceCandidateListProps {
   dossierId: string;
   candidates: Candidate[];
   editable: boolean;
-  /** 確定時に選べる公開範囲 (自分のクリアランス以下) */
+  /** 確定時に選べる公開範囲 (自分のクリアランス以下)。空なら選ばせない (viewer) */
   classifications: ClearanceLevel[];
 }
 
@@ -91,14 +91,24 @@ export function PlaceCandidateList({
       alert("確定にするには緯度・経度が必要です");
       return;
     }
-    setPromoteClassification(c.place?.classification ?? "internal");
+    // 既定は「一般」。自分のクリアランスで選べない値なら、選べる中で一番低いものにする
+    const initial = c.place?.classification ?? "internal";
+    setPromoteClassification(classifications.includes(initial) ? initial : classifications[0]);
     setPromotingId(c.id);
   }
 
   function promote(c: Candidate) {
     startTransition(async () => {
-      await promotePlaceCandidateAction(c.id, dossierId, promoteClassification);
-      setPromotingId(null);
+      try {
+        await promotePlaceCandidateAction(
+          c.id,
+          dossierId,
+          classifications.length > 0 ? promoteClassification : undefined
+        );
+        setPromotingId(null);
+      } catch (e) {
+        alert(`確定できませんでした: ${e instanceof Error ? e.message : String(e)}`);
+      }
     });
   }
 
@@ -187,17 +197,19 @@ export function PlaceCandidateList({
                   <div className="mt-2 border-t border-slate-100 pt-2">
                     <p className="text-[11px] text-slate-600 mb-1">聖地として確定する</p>
                     <div className="flex items-center gap-2">
-                      <select
-                        value={promoteClassification}
-                        onChange={(e) => setPromoteClassification(e.target.value as ClearanceLevel)}
-                        className="flex-1 min-w-0 border border-slate-300 rounded px-2 py-1 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      >
-                        {classifications.map((level) => (
-                          <option key={level} value={level}>
-                            {PLACE_CLASSIFICATION_LABELS[level]}
-                          </option>
-                        ))}
-                      </select>
+                      {classifications.length > 0 && (
+                        <select
+                          value={promoteClassification}
+                          onChange={(e) => setPromoteClassification(e.target.value as ClearanceLevel)}
+                          className="flex-1 min-w-0 border border-slate-300 rounded px-2 py-1 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        >
+                          {classifications.map((level) => (
+                            <option key={level} value={level}>
+                              {PLACE_CLASSIFICATION_LABELS[level]}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                       <button
                         type="button"
                         onClick={() => promote(c)}
@@ -209,7 +221,8 @@ export function PlaceCandidateList({
                       <button
                         type="button"
                         onClick={() => setPromotingId(null)}
-                        className="text-slate-400 hover:text-slate-600"
+                        disabled={isPending}
+                        className="text-slate-400 hover:text-slate-600 disabled:opacity-40"
                         title="閉じる"
                       >
                         <X className="h-3.5 w-3.5" />
