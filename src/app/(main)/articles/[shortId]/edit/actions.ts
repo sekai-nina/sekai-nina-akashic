@@ -9,6 +9,7 @@ import { saveArticlePlaces } from "@/lib/domain/article-places";
 import { BODY_MAX_LENGTH, normalizeBody, parseArticleEditForm, type ArticleEditField } from "@/lib/articles/edit";
 import { auditFootnotes, type FootnoteAudit } from "@/lib/articles/footnotes";
 import { renderArticleBody } from "@/lib/articles/render";
+import { getArticleSourceContent, type ArticleSourceContent } from "@/lib/domain/article-source-content";
 
 /**
  * 記事編集 (`/articles/[shortId]/edit`) の Server Action。出典の操作は `../../actions.ts`。
@@ -131,4 +132,10 @@ export async function previewArticleAction(shortId: string, body: string): Promi
     new Set(titleIndex.keys()),
   );
   return { html, audit };
+}
+
+/** 編集しながら横で読む出典の中身。見つからなければ null */
+export async function getSourceContentAction(shortId: string, sourceId: string): Promise<ArticleSourceContent | null> {
+  const user = await requireRole(["admin", "member"]);
+  return getArticleSourceContent(user.clearance, shortId, sourceId);
 }
