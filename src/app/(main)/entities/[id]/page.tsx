@@ -48,28 +48,29 @@ export default async function EntityDetailPage({
   if (!session?.user) notFound();
   const userClearance = session.user.clearance as ClearanceLevel;
 
-  const entity = await getCachedEntityById(id, userClearance);
+  // 3 つは互いに依存しないので並べて引く。見えないエンティティなら結果を捨てて 404 にする
+  const [entity, linkedAssets, mentions] = await Promise.all([
+    getCachedEntityById(id, userClearance),
+    // Load linked assets (filtered by RLS)
+    withClearance(session.user.clearance, (tx) =>
+      tx.assetEntity.findMany({
+        where: { entityId: id },
+        include: {
+          asset: {
+            select: { id: true, title: true, kind: true, canonicalDate: true, createdAt: true },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 20,
+      })
+    ),
+    // Search mentions if requested (with classification filtering)
+    showMentions === "1" ? searchMentions(id, { excludeLinked: isExcludeLinked, clearance: userClearance }) : null,
+  ]);
 
   if (!entity) notFound();
 
   const aliases = (entity.aliases as string[]) || [];
-
-  // Load linked assets (filtered by RLS)
-  const linkedAssets = await withClearance(session.user.clearance, (tx) =>
-    tx.assetEntity.findMany({
-      where: { entityId: id },
-      include: {
-        asset: {
-          select: { id: true, title: true, kind: true, canonicalDate: true, createdAt: true },
-        },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 20,
-    })
-  );
-
-  // Search mentions if requested (with classification filtering)
-  const mentions = showMentions === "1" ? await searchMentions(id, { excludeLinked: isExcludeLinked, clearance: userClearance }) : null;
 
   const addAliasAction = addEntityAlias.bind(null, id);
   const color = typeColors[entity.type] ?? "bg-slate-100 text-slate-700";

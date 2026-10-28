@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation";
+import { unstable_cache } from "next/cache";
 import { withClearance } from "@/lib/db";
+import { CACHE_TAGS } from "@/lib/cache";
 import { auth } from "@/lib/auth";
 import { FullGraph } from "./full-graph";
 
@@ -74,13 +76,22 @@ async function getFullGraphData(clearance: string) {
   });
 }
 
+// 新奈の全アセット → リレーション → 両端のアセットと 3 段引くので毎回は重い。
+// 題とサムネイルを載せるので、アセットの区分を上げたあと下のクリアランスに見え続ける時間を
+// 短く抑える (API からの区分変更は assets タグを飛ばさない)。60 秒は他の一覧キャッシュと同じ
+const getCachedFullGraphData = (clearance: string) =>
+  unstable_cache(() => getFullGraphData(clearance), [`full-graph-${clearance}`], {
+    tags: [CACHE_TAGS.assets],
+    revalidate: 60,
+  })();
+
 export default async function GraphPage() {
   const session = await auth();
   // middleware がログインへ飛ばすが、レンダリングはそれと競合して走る。
   // ガードしないと未認証リクエストのたびにサーバー側で例外になる
   if (!session?.user) notFound();
   const userClearance = session.user.clearance;
-  const { nodes, edges } = await getFullGraphData(userClearance);
+  const { nodes, edges } = await getCachedFullGraphData(userClearance);
 
   return (
     <div className="max-w-6xl mx-auto py-6 space-y-4">

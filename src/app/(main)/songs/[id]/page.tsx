@@ -17,13 +17,14 @@ export default async function SongDetailPage({ params }: Props) {
   const session = await auth();
   if (!session?.user) notFound();
 
-  const song = await getSong(session.user, id);
-  if (!song) notFound();
-
   const canEdit = ["admin", "member"].includes(session.user.role);
   const isAdmin = session.user.role === "admin";
-  // 統合先の候補 (自分以外)。件数は高々数百
-  const others = isAdmin ? await listMergeTargets(song.id) : [];
+  // 統合先の候補 (自分以外)。件数は高々数百。曲本体と並べて引く
+  const [song, others] = await Promise.all([
+    getSong(session.user, id),
+    isAdmin ? listMergeTargets(id) : Promise.resolve([]),
+  ]);
+  if (!song) notFound();
   const editionTitle = (release: { editions: unknown }, code: string) => {
     const list = Array.isArray(release.editions) ? release.editions : [];
     const hit = list.find((e): e is { code: string; title: string } => !!e && typeof e === "object" && (e as { code?: unknown }).code === code);
