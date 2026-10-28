@@ -24,10 +24,6 @@ export function NinaAppearanceToggle({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  if (author) {
-    return <p className="text-[11px] text-slate-500">坂井新奈本人の投稿なので「{NINA_APPEARANCE_LABELS.appears}」扱い</p>;
-  }
-
   function change(to: NinaAppearance) {
     if (to === current) return;
     setError(null);
@@ -47,7 +43,8 @@ export function NinaAppearanceToggle({
     <div>
       <div role="group" aria-label="坂井新奈の出演" className="flex flex-wrap items-center gap-1">
         <span className="mr-1 text-[11px] text-slate-500">坂井新奈が</span>
-        {NINA_APPEARANCES.map((s) => (
+        {/* 本人の投稿は著者の紐づきを外せないので「未確認」は無い */}
+        {NINA_APPEARANCES.filter((s) => !author || s !== "unchecked").map((s) => (
           <button
             key={s}
             type="button"
@@ -67,6 +64,7 @@ export function NinaAppearanceToggle({
           </button>
         ))}
       </div>
+      {author && <p className="mt-0.5 text-[10px] text-slate-400">坂井新奈本人の投稿。写っていなければ「{NINA_APPEARANCE_LABELS.absent}」に</p>}
       {error && <p className="mt-1 text-[11px] text-red-600">{error}</p>}
     </div>
   );

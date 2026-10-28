@@ -5,8 +5,8 @@ describe("ninaAppearanceOf", () => {
   it("坂井新奈が紐づいていれば出ている", () => {
     expect(ninaAppearanceOf({ ninaAbsent: false, entities: [{ entityId: "x" }, { entityId: NINA_ENTITY_ID }] })).toBe("appears");
   });
-  it("紐づいていて ninaAbsent も立っていたら紐づきを優先する", () => {
-    expect(ninaAppearanceOf({ ninaAbsent: true, entities: [{ entityId: NINA_ENTITY_ID }] })).toBe("appears");
+  it("紐づいていても ninaAbsent が立っていれば出ていない (本人の投稿で写っていない画像)", () => {
+    expect(ninaAppearanceOf({ ninaAbsent: true, entities: [{ entityId: NINA_ENTITY_ID }] })).toBe("absent");
   });
   it("ninaAbsent だけなら出ていない", () => {
     expect(ninaAppearanceOf({ ninaAbsent: true, entities: [{ entityId: "x" }] })).toBe("absent");
