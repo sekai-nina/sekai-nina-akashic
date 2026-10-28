@@ -20,6 +20,8 @@ import {
   promotePlaceCandidate as promotePlaceCandidateDomain,
 } from "@/lib/domain/dossiers";
 import { invalidateDossiers, invalidateEntities, invalidatePlaces } from "@/lib/cache";
+import { assertClearance } from "@/lib/classification";
+import { updatePlace } from "@/lib/domain/places";
 
 async function requireUser() {
   const session = await auth();
@@ -219,6 +221,26 @@ export async function removePlaceCandidateAction(candidateId: string, dossierId:
   const user = await requireUser();
   await removePlaceCandidateDomain(user, candidateId);
   revalidatePath(`/dossiers/${dossierId}`);
+}
+
+/**
+ * 確定済みの聖地の公開範囲 (サイトに出すか) を企画の画面から変える。
+ * /places の編集と同じく admin / member だけ、自分のクリアランス以下だけ
+ */
+export async function updateCandidatePlaceClassificationAction(
+  placeId: string,
+  dossierId: string,
+  classification: ClearanceLevel
+) {
+  const user = await requireUser();
+  if (user.role !== "admin" && user.role !== "member") throw new Error("公開範囲を変えられるのは管理者とメンバーだけです");
+  assertClearance(user.clearance, classification);
+  await updatePlace(placeId, { classification }, user.clearance);
+  invalidatePlaces();
+  invalidateEntities();
+  revalidatePath(`/dossiers/${dossierId}`);
+  revalidatePath("/places");
+  revalidatePath(`/places/${placeId}`);
 }
 
 export async function promotePlaceCandidateAction(

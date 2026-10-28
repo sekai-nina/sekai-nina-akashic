@@ -11,6 +11,7 @@ import type { ClearanceLevel, PlaceKind } from "@prisma/client";
 import { accessibleClassifications } from "@/lib/classification";
 import { isPublishablePlace } from "@/lib/articles/frontmatter";
 import { listArticlesForPlace } from "@/lib/domain/article-places";
+import { listDossiersForPlace } from "@/lib/domain/dossiers";
 import { PlaceDetailMap } from "./place-detail-map";
 import { listAreaHints } from "@/lib/domain/places";
 
@@ -30,7 +31,7 @@ export default async function PlaceDetailPage({
   const published = isPublishablePlace(place);
 
   // 互いに依存しないので並べて引く (順に待つとページを開くのに 1 秒以上かかっていた)
-  const [linkedAssets, linkedArticles, areaHints] = await Promise.all([
+  const [linkedAssets, linkedArticles, linkedDossiers, areaHints] = await Promise.all([
     // Get linked assets via AssetEntity
     withClearance(session.user.clearance, (tx) =>
       tx.assetEntity.findMany({
@@ -41,6 +42,7 @@ export default async function PlaceDetailPage({
       })
     ) as Promise<Array<{ id: string; createdAt: Date; asset: { id: string; title: string; kind: string; canonicalDate: Date | null; thumbnailUrl: string | null } }>>,
     listArticlesForPlace(place.id, session.user.clearance),
+    listDossiersForPlace(session.user, place.id),
     canEdit ? listAreaHints(session.user.clearance) : Promise.resolve([]),
   ]);
 
@@ -143,6 +145,27 @@ export default async function PlaceDetailPage({
                 <span className="text-xs text-slate-400 shrink-0">
                   {a.dateDisplay ?? (a.date ? formatDate(a.date) : "")}
                 </span>
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Linked Dossiers (場所候補に入っている企画) */}
+      <div className="mb-8">
+        <h2 className="text-lg font-semibold text-slate-900 mb-3">紐付き企画 ({linkedDossiers.length})</h2>
+        {linkedDossiers.length === 0 ? (
+          <p className="text-sm text-slate-400">この聖地を場所候補に入れている企画はありません</p>
+        ) : (
+          <div className="bg-white border border-slate-200 rounded-lg divide-y divide-slate-100">
+            {linkedDossiers.map((d) => (
+              <Link
+                key={d.id}
+                href={`/dossiers/${d.id}`}
+                className="flex items-baseline gap-3 px-4 py-2.5 hover:bg-slate-50 transition-colors"
+              >
+                <span className="text-sm text-slate-900 truncate flex-1">{d.title || "(無題)"}</span>
+                <span className="text-xs text-slate-400 shrink-0">{formatDate(d.updatedAt)}</span>
               </Link>
             ))}
           </div>

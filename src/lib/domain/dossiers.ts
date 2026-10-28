@@ -107,6 +107,21 @@ export async function listDossiersContainingAsset(user: ActingUser, assetId: str
   return [...byId.values()].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
 }
 
+/**
+ * この聖地を場所候補に持つドシエ (聖地詳細の「紐付き企画」用)。
+ * 見えるかどうかは Dossier / DossierPlaceCandidate の RLS に任せる
+ */
+export async function listDossiersForPlace(user: ActingUser, placeId: string) {
+  const rows = await withSession(user, (tx) =>
+    tx.dossierPlaceCandidate.findMany({
+      where: { placeId, dossier: NOT_CLIP_POOL },
+      select: { dossier: { select: { id: true, title: true, updatedAt: true } } },
+    })
+  );
+  const byId = new Map(rows.map(({ dossier }) => [dossier.id, dossier]));
+  return [...byId.values()].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+}
+
 /** ドシエの種別だけ引く (詳細ページがプールを /clips へ逃がすとき、アイテム全件を読む前に見る) */
 export async function getDossierKind(user: ActingUser, id: string): Promise<DossierKind | null> {
   const row = await withSession(user, (tx) => tx.dossier.findUnique({ where: { id }, select: { kind: true } }));

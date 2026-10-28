@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { Plus, X, ExternalLink, Trash2, MapPin, BadgeCheck } from "lucide-react";
 import { DynamicMap } from "@/components/dynamic-map";
 import { PlaceLookup } from "@/components/place-lookup";
@@ -10,6 +11,7 @@ import {
   addPlaceCandidateAction,
   removePlaceCandidateAction,
   promotePlaceCandidateAction,
+  updateCandidatePlaceClassificationAction,
 } from "../actions";
 
 type Candidate = {
@@ -112,6 +114,18 @@ export function PlaceCandidateList({
     });
   }
 
+  function changeClassification(c: Candidate, level: ClearanceLevel) {
+    if (!c.place || level === c.place.classification) return;
+    const placeId = c.place.id;
+    startTransition(async () => {
+      try {
+        await updateCandidatePlaceClassificationAction(placeId, dossierId, level);
+      } catch (e) {
+        alert(`公開範囲を変えられませんでした: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    });
+  }
+
   const mapMarkers = candidates
     .filter((c) => c.latitude != null && c.longitude != null)
     .map((c) => ({
@@ -142,7 +156,13 @@ export function PlaceCandidateList({
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-slate-900 truncate flex items-center gap-1">
                       <MapPin className="h-3 w-3 text-slate-400 shrink-0" />
-                      {c.place?.entity.canonicalName ?? c.name ?? "(無題)"}
+                      {c.place ? (
+                        <Link href={`/places/${c.place.id}`} className="truncate hover:text-indigo-600 hover:underline">
+                          {c.place.entity.canonicalName}
+                        </Link>
+                      ) : (
+                        c.name || "(無題)"
+                      )}
                       {isConfirmed && (
                         <span className="inline-flex items-center gap-0.5 text-[10px] bg-emerald-100 text-emerald-700 px-1 rounded">
                           <BadgeCheck className="h-2.5 w-2.5" /> 確定
@@ -150,9 +170,25 @@ export function PlaceCandidateList({
                       )}
                     </p>
                     {isConfirmed && c.place && (
-                      <p className="text-[11px] text-slate-500">
-                        {PLACE_CLASSIFICATION_LABELS[c.place.classification]}
-                      </p>
+                      editable && classifications.includes(c.place.classification) ? (
+                        <select
+                          value={c.place.classification}
+                          onChange={(e) => changeClassification(c, e.target.value as ClearanceLevel)}
+                          disabled={isPending}
+                          title="公開サイトに出すか"
+                          className="mt-0.5 max-w-full border border-slate-200 rounded px-1 py-0.5 text-[11px] text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50"
+                        >
+                          {classifications.map((level) => (
+                            <option key={level} value={level}>
+                              {PLACE_CLASSIFICATION_LABELS[level]}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <p className="text-[11px] text-slate-500">
+                          {PLACE_CLASSIFICATION_LABELS[c.place.classification]}
+                        </p>
+                      )
                     )}
                     {c.address && <p className="text-[11px] text-slate-500 truncate">{c.address}</p>}
                     {c.note && <p className="text-[11px] text-slate-600 mt-1">{c.note}</p>}
