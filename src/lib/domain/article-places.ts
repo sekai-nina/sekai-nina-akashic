@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { withClearance } from "@/lib/db";
 import { isPublishablePlace } from "@/lib/articles/frontmatter";
 import { logAudit } from "@/lib/domain/audit";
@@ -135,4 +136,36 @@ export async function saveArticlePlaces(
     metadata: { ...(audit as { before: string[]; after: string[] }), ...(actor.apiKeyId ? { apiKeyId: actor.apiKeyId } : {}) },
   }).catch((e: unknown) => console.error("article.places.update の監査ログに失敗:", e));
   return { ok: true, changed: true };
+}
+
+/**
+ * 企画に付いた聖地を、その企画から作った記事の末尾に足す (企画で聖地を付けた / 昇格したとき)。
+ * 記事を作るときにしか紐づけていなかったので、あとから企画に足した聖地が記事に出なかった。
+ *
+ * 呼び出し側 (企画の操作) のトランザクションの中で使う。すでに付いている記事は飛ばし、外しはしない。
+ * 公開サイトに出る聖地なら dirty / editedAt を、出ないなら `updatedAt` だけを進める
+ * (編集画面で古い一覧のまま保存して消さないように。`saveArticlePlaces` と同じ)。
+ * 足した記事の shortId を返す
+ */
+export async function linkPlaceToDossierArticles(
+  tx: Prisma.TransactionClient,
+  dossierId: string,
+  placeId: string,
+): Promise<string[]> {
+  const place = await tx.place.findUnique({ where: { id: placeId }, select: { classification: true } });
+  if (!place) return [];
+  const articles = await tx.article.findMany({
+    where: { dossierId, places: { none: { placeId } } },
+    select: { id: true, shortId: true, places: { select: { sortOrder: true }, orderBy: { sortOrder: "desc" }, take: 1 } },
+  });
+  for (const a of articles) {
+    await tx.articlePlace.create({
+      data: { articleId: a.id, placeId, sortOrder: (a.places[0]?.sortOrder ?? -1) + 1 },
+    });
+    await tx.article.update({
+      where: { id: a.id },
+      data: isPublishablePlace(place) ? { dirty: true, editedAt: new Date() } : { updatedAt: new Date() },
+    });
+  }
+  return articles.map((a) => a.shortId);
 }

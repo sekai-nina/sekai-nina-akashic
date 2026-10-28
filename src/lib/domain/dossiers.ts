@@ -13,6 +13,7 @@ import { isPublishablePlace } from "@/lib/articles/frontmatter";
 import { logAudit } from "./audit";
 import { entityClearanceWhere } from "./entities";
 import { markArticlesForPlace } from "./places";
+import { linkPlaceToDossierArticles } from "./article-places";
 
 interface ActingUser {
   id: string;
@@ -658,13 +659,14 @@ export async function addPlaceCandidate(
 ) {
   await requireEditAccess(user, dossierId);
 
+  let linked: string[] = [];
   const candidate = await withSession(user, async (tx) => {
     const last = await tx.dossierPlaceCandidate.findFirst({
       where: { dossierId },
       orderBy: { sortOrder: "desc" },
       select: { sortOrder: true },
     });
-    return tx.dossierPlaceCandidate.create({
+    const created = await tx.dossierPlaceCandidate.create({
       data: {
         dossierId,
         placeId: input.placeId ?? null,
@@ -678,6 +680,8 @@ export async function addPlaceCandidate(
         sortOrder: (last?.sortOrder ?? -1) + 1,
       },
     });
+    if (created.placeId) linked = await linkPlaceToDossierArticles(tx, dossierId, created.placeId);
+    return created;
   });
   await logAudit({
     actorId: user.id,
@@ -686,6 +690,7 @@ export async function addPlaceCandidate(
     targetId: candidate.id,
     metadata: { dossierId },
   });
+  await auditLinkedArticles(user, dossierId, candidate.placeId, linked);
   return candidate;
 }
 
@@ -703,8 +708,9 @@ export async function updatePlaceCandidate(
   if (!existing) throw new Error("Place candidate not found");
   await requireEditAccess(user, existing.dossierId);
 
-  return withSession(user, (tx) =>
-    tx.dossierPlaceCandidate.update({
+  let linked: string[] = [];
+  const updated = await withSession(user, async (tx) => {
+    const row = await tx.dossierPlaceCandidate.update({
       where: { id: candidateId },
       data: {
         ...(input.placeId !== undefined ? { placeId: input.placeId } : {}),
@@ -716,8 +722,12 @@ export async function updatePlaceCandidate(
         ...(input.note !== undefined ? { note: input.note } : {}),
         ...(input.confidence !== undefined ? { confidence: input.confidence } : {}),
       },
-    })
-  );
+    });
+    if (input.placeId) linked = await linkPlaceToDossierArticles(tx, existing.dossierId, input.placeId);
+    return row;
+  });
+  await auditLinkedArticles(user, existing.dossierId, input.placeId ?? null, linked);
+  return updated;
 }
 
 export async function removePlaceCandidate(user: ActingUser, candidateId: string) {
@@ -768,12 +778,13 @@ export async function promotePlaceCandidate(
 
   // Path 1: existing Place — just confirm its status.
   if (candidate.placeId) {
-    await withSession(user, async (tx) => {
+    const linked = await withSession(user, async (tx) => {
       await markArticlesIfPublishabilityChanges(tx, candidate.place, classification);
       await tx.place.update({
         where: { id: candidate.placeId! },
         data: { status: "confirmed", ...(classification ? { classification } : {}) },
       });
+      return linkPlaceToDossierArticles(tx, candidate.dossierId, candidate.placeId!);
     });
     await logAudit({
       actorId: user.id,
@@ -782,6 +793,7 @@ export async function promotePlaceCandidate(
       targetId: candidate.placeId,
       metadata: { fromCandidate: candidateId, classification },
     });
+    await auditLinkedArticles(user, candidate.dossierId, candidate.placeId, linked);
     return { placeId: candidate.placeId };
   }
 
@@ -791,6 +803,7 @@ export async function promotePlaceCandidate(
   }
   const name = (candidate.name || "").trim() || `Unnamed (${candidate.dossierId.slice(0, 6)})`;
 
+  let linked: string[] = [];
   const place = await withSession(user, async (tx) => {
     const entity = await tx.entity.upsert({
       where: { type_canonicalName: { type: "place", canonicalName: name } },
@@ -814,6 +827,7 @@ export async function promotePlaceCandidate(
         where: { id: candidateId },
         data: { placeId: updated.id },
       });
+      linked = await linkPlaceToDossierArticles(tx, candidate.dossierId, updated.id);
       return updated;
     }
     const created = await tx.place.create({
@@ -831,6 +845,7 @@ export async function promotePlaceCandidate(
       where: { id: candidateId },
       data: { placeId: created.id },
     });
+    linked = await linkPlaceToDossierArticles(tx, candidate.dossierId, created.id);
     return created;
   });
 
@@ -841,8 +856,21 @@ export async function promotePlaceCandidate(
     targetId: place.id,
     metadata: { fromCandidate: candidateId, name, classification },
   });
+  await auditLinkedArticles(user, candidate.dossierId, place.id, linked);
 
   return { placeId: place.id };
+}
+
+/** 企画の聖地を既存の記事に足したことを残す (記事の編集画面での付け外しと同じく記事側の操作として) */
+async function auditLinkedArticles(user: ActingUser, dossierId: string, placeId: string | null, shortIds: string[]) {
+  if (!placeId || shortIds.length === 0) return;
+  await logAudit({
+    actorId: user.id,
+    action: "article.places.link",
+    targetType: "Place",
+    targetId: placeId,
+    metadata: { dossierId, articles: shortIds },
+  });
 }
 
 // 記事の locations に載るかどうかが変わるなら、紐づく記事を push 対象にする (places.ts の updatePlace と同じ)
