@@ -1,9 +1,11 @@
 import Link from "next/link";
+import type { ClearanceLevel } from "@prisma/client";
 import { ArrowLeft, FileText, MapPin } from "lucide-react";
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getDossier, getDossierKind } from "@/lib/domain/dossiers";
 import { canEditDossier, canManageDossier } from "@/lib/auth/dossier-permissions";
+import { accessibleClassifications } from "@/lib/classification";
 import { ARTICLE_WORKFLOW_LABELS as L, formatDate } from "@/lib/utils";
 import { getR2PublicUrl } from "@/lib/r2";
 import { DossierItemRow } from "./item-row";
@@ -74,6 +76,7 @@ export default async function DossierDetailPage({ params }: DossierDetailProps) 
           dossierId={dossier.id}
           candidates={dossier.placeCandidates}
           editable={editable}
+          classifications={accessibleClassifications(session.user.clearance as ClearanceLevel)}
         />
       </section>
 

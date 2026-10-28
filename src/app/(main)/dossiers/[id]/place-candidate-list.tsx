@@ -4,6 +4,8 @@ import { useState, useTransition } from "react";
 import { Plus, X, ExternalLink, Trash2, MapPin, BadgeCheck } from "lucide-react";
 import { DynamicMap } from "@/components/dynamic-map";
 import { PlaceLookup } from "@/components/place-lookup";
+import { PLACE_CLASSIFICATION_LABELS } from "@/lib/utils";
+import type { ClearanceLevel } from "@prisma/client";
 import {
   addPlaceCandidateAction,
   removePlaceCandidateAction,
@@ -23,6 +25,7 @@ type Candidate = {
   place: {
     id: string;
     status: string;
+    classification: ClearanceLevel;
     entity: { canonicalName: string };
   } | null;
 };
@@ -31,9 +34,16 @@ interface PlaceCandidateListProps {
   dossierId: string;
   candidates: Candidate[];
   editable: boolean;
+  /** 確定時に選べる公開範囲 (自分のクリアランス以下) */
+  classifications: ClearanceLevel[];
 }
 
-export function PlaceCandidateList({ dossierId, candidates, editable }: PlaceCandidateListProps) {
+export function PlaceCandidateList({
+  dossierId,
+  candidates,
+  editable,
+  classifications,
+}: PlaceCandidateListProps) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
@@ -43,6 +53,9 @@ export function PlaceCandidateList({ dossierId, candidates, editable }: PlaceCan
   const [note, setNote] = useState("");
   const [confidence, setConfidence] = useState("0");
   const [isPending, startTransition] = useTransition();
+  // 確定パネルを開いている候補と、そこで選んだ公開範囲
+  const [promotingId, setPromotingId] = useState<string | null>(null);
+  const [promoteClassification, setPromoteClassification] = useState<ClearanceLevel>("internal");
 
   function add() {
     if (!name && !address && !latitude) return;
@@ -72,16 +85,20 @@ export function PlaceCandidateList({ dossierId, candidates, editable }: PlaceCan
     startTransition(() => removePlaceCandidateAction(id, dossierId));
   }
 
-  function promote(c: Candidate) {
+  function openPromote(c: Candidate) {
     if (c.place && c.place.status === "confirmed") return;
     if (!c.place && (c.latitude == null || c.longitude == null)) {
       alert("確定にするには緯度・経度が必要です");
       return;
     }
-    const label = c.place?.entity.canonicalName ?? c.name ?? "(無題)";
-    if (!confirm(`「${label}」を聖地として確定しますか？`)) return;
+    setPromoteClassification(c.place?.classification ?? "internal");
+    setPromotingId(c.id);
+  }
+
+  function promote(c: Candidate) {
     startTransition(async () => {
-      await promotePlaceCandidateAction(c.id, dossierId);
+      await promotePlaceCandidateAction(c.id, dossierId, promoteClassification);
+      setPromotingId(null);
     });
   }
 
@@ -122,6 +139,11 @@ export function PlaceCandidateList({ dossierId, candidates, editable }: PlaceCan
                         </span>
                       )}
                     </p>
+                    {isConfirmed && c.place && (
+                      <p className="text-[11px] text-slate-500">
+                        {PLACE_CLASSIFICATION_LABELS[c.place.classification]}
+                      </p>
+                    )}
                     {c.address && <p className="text-[11px] text-slate-500 truncate">{c.address}</p>}
                     {c.note && <p className="text-[11px] text-slate-600 mt-1">{c.note}</p>}
                   </div>
@@ -141,7 +163,7 @@ export function PlaceCandidateList({ dossierId, candidates, editable }: PlaceCan
                     {editable && !isConfirmed && (
                       <button
                         type="button"
-                        onClick={() => promote(c)}
+                        onClick={() => openPromote(c)}
                         disabled={isPending}
                         className="text-emerald-500 hover:text-emerald-700 disabled:opacity-40"
                         title="聖地として確定"
@@ -161,6 +183,40 @@ export function PlaceCandidateList({ dossierId, candidates, editable }: PlaceCan
                     )}
                   </div>
                 </div>
+                {promotingId === c.id && (
+                  <div className="mt-2 border-t border-slate-100 pt-2">
+                    <p className="text-[11px] text-slate-600 mb-1">聖地として確定する</p>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={promoteClassification}
+                        onChange={(e) => setPromoteClassification(e.target.value as ClearanceLevel)}
+                        className="flex-1 min-w-0 border border-slate-300 rounded px-2 py-1 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      >
+                        {classifications.map((level) => (
+                          <option key={level} value={level}>
+                            {PLACE_CLASSIFICATION_LABELS[level]}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => promote(c)}
+                        disabled={isPending}
+                        className="bg-emerald-600 text-white px-2 py-1 rounded text-xs font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+                      >
+                        確定
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPromotingId(null)}
+                        className="text-slate-400 hover:text-slate-600"
+                        title="閉じる"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                )}
               </li>
             );
           })}

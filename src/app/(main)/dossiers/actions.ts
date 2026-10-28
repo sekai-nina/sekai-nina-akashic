@@ -221,9 +221,13 @@ export async function removePlaceCandidateAction(candidateId: string, dossierId:
   revalidatePath(`/dossiers/${dossierId}`);
 }
 
-export async function promotePlaceCandidateAction(candidateId: string, dossierId: string) {
+export async function promotePlaceCandidateAction(
+  candidateId: string,
+  dossierId: string,
+  classification?: ClearanceLevel
+) {
   const user = await requireUser();
-  const result = await promotePlaceCandidateDomain(user, candidateId);
+  const result = await promotePlaceCandidateDomain(user, candidateId, classification);
   invalidatePlaces();
   revalidatePath(`/dossiers/${dossierId}`);
   revalidatePath("/places");
