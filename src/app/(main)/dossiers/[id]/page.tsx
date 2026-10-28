@@ -8,6 +8,7 @@ import { canEditDossier, canManageDossier } from "@/lib/auth/dossier-permissions
 import { accessibleClassifications } from "@/lib/classification";
 import { ARTICLE_WORKFLOW_LABELS as L, formatDate } from "@/lib/utils";
 import { getR2PublicUrl } from "@/lib/r2";
+import { getClipMedia } from "@/lib/domain/nina-appearance";
 import { DossierItemRow } from "./item-row";
 import { DossierHeader } from "./dossier-header";
 import { ExternalLinkForm } from "./external-link-form";
@@ -34,6 +35,11 @@ export default async function DossierDetailPage({ params }: DossierDetailProps) 
   const manageable = canManageDossier(session.user, dossier);
   // 記事の入口は種類によらず共通。見えない器は記事画面側で拒否する。
   const canMakeArticle = dossier.kind === "general";
+  // 画像・動画に坂井新奈が出ているか (#261)。おでかけ記事の関連メディアを分ける印で、付け外しは admin / member
+  const canMarkNina = session.user.role === "admin" || session.user.role === "member";
+  const ninaMedia = canMarkNina
+    ? await getClipMedia(session.user.clearance, dossier.items.flatMap((i) => (i.asset ? [i.asset.id] : [])))
+    : new Map();
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6">
@@ -129,6 +135,7 @@ export default async function DossierDetailPage({ params }: DossierDetailProps) 
                   isLast={idx === dossier.items.length - 1}
                   orderedIds={dossier.items.map((i) => i.id)}
                   indexInList={idx}
+                  ninaAppearance={item.asset ? ninaMedia.get(item.asset.id) : undefined}
                 />
               </li>
             ))}

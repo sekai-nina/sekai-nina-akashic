@@ -20,6 +20,8 @@ import {
   removeItemAction,
   reorderItemsAction,
 } from "../actions";
+import type { NinaAppearance } from "@/lib/nina";
+import { NinaAppearanceToggle } from "./article/nina-appearance-toggle";
 
 type Item = {
   id: string;
@@ -58,6 +60,8 @@ interface ItemRowProps {
   isLast: boolean;
   orderedIds: string[];
   indexInList: number;
+  /** 画像・動画に坂井新奈が出ているか (#261)。付け外しできる人にだけ渡す */
+  ninaAppearance?: { appearance: NinaAppearance; author: boolean };
 }
 
 function parseLinks(value: string | null): string[] {
@@ -116,7 +120,7 @@ function driveUrl(asset: NonNullable<Item["asset"]>): string | null {
   return null;
 }
 
-export function DossierItemRow({ dossierId, item, editable, isFirst, isLast, orderedIds, indexInList }: ItemRowProps) {
+export function DossierItemRow({ dossierId, item, editable, isFirst, isLast, orderedIds, indexInList, ninaAppearance }: ItemRowProps) {
   const [caption, setCaption] = useState(item.caption);
   const [note, setNote] = useState(item.note);
   const [excerpt, setExcerpt] = useState(item.excerpt);
@@ -248,6 +252,10 @@ export function DossierItemRow({ dossierId, item, editable, isFirst, isLast, ord
               <p className="text-xs text-slate-700 whitespace-pre-wrap">{item.excerpt}</p>
             )}
           </div>
+        )}
+
+        {ninaAppearance && item.asset && (
+          <NinaAppearanceToggle assetId={item.asset.id} initial={ninaAppearance.appearance} author={ninaAppearance.author} />
         )}
 
         {/* Note */}
