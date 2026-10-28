@@ -41,7 +41,7 @@ export function normalizeArea(area: string | null | undefined): string | null | 
  * `editedAt` も立てる: 立てないと push 前の再取り込みが「ファイルと値が違う」を取りこぼし扱いにして
  * dirty を落とす (取り込みの preserved ガードは editedAt を見る)
  */
-async function markArticlesForPlace(tx: Prisma.TransactionClient, placeId: string) {
+export async function markArticlesForPlace(tx: Prisma.TransactionClient, placeId: string) {
   await tx.article.updateMany({
     where: {
       OR: [

@@ -270,10 +270,12 @@ export const getCachedPlaces = (clearance: ClearanceLevel) => {
               include: { _count: { select: { assets: true } } },
             },
           },
-          orderBy: { entity: { canonicalName: "asc" } },
+          // 新しく登録した聖地を上に
+          orderBy: { createdAt: "desc" },
         })
       ),
-    [`places-list-${clearance}`],
+    // 並び順を変えたので鍵を変える (Vercel のデータキャッシュはデプロイをまたいで残る)
+    [`places-list-v2-${clearance}`],
     { tags: [CACHE_TAGS.places], revalidate: 60 }
   )();
 };
