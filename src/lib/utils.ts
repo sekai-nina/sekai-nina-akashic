@@ -109,6 +109,18 @@ export const ASSET_KIND_LABELS: Record<string, string> = {
   other: "その他",
 };
 
+/** AssetText の種類 */
+export const TEXT_TYPE_LABELS: Record<string, string> = {
+  title: "タイトル",
+  body: "本文",
+  description: "説明",
+  message_body: "メッセージ本文",
+  ocr: "OCR",
+  transcript: "文字起こし",
+  note: "メモ",
+  extracted: "抽出テキスト",
+};
+
 export const ASSET_STATUS_LABELS: Record<string, string> = {
   inbox: "Inbox",
   triaging: "整理中",

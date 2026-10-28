@@ -18,6 +18,7 @@ import { previewArticleAction, updateArticleAction, type ArticlePreview, type Up
 import { FootnoteAuditWarnings } from "../footnote-audit-warnings";
 import { TagInput } from "./tag-input";
 import { PlacePicker, type PlaceOption } from "./place-picker";
+import { SourceViewer } from "./source-viewer";
 import { isListArticle } from "@/lib/articles/list-article";
 
 declare global {
@@ -83,6 +84,8 @@ export function ArticleEditor({
   );
 
   const [placeIds, setPlaceIds] = useState(initialPlaceIds);
+  /** 横で読んでいる出典。開いている間は右の欄を出典の中身に差し替える */
+  const [openSourceId, setOpenSourceId] = useState<string | null>(null);
 
   // 離脱時の警告。初期値との比較は雑でよい (JSON で足りる)
   const changed =
@@ -157,7 +160,13 @@ export function ArticleEditor({
   const fieldError = (key: keyof ArticleEditFormValues) => state?.fieldErrors?.[key];
 
   return (
-    <form action={formAction} className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
+    <form
+      action={formAction}
+      className={cn(
+        "grid grid-cols-1 gap-6 items-start",
+        openSourceId ? "lg:grid-cols-[1fr_440px]" : "lg:grid-cols-[1fr_320px]"
+      )}
+    >
       <input type="hidden" name="updatedAt" value={updatedAt} />
 
       {/* 本文 */}
@@ -217,6 +226,17 @@ export function ArticleEditor({
 
       {/* frontmatter */}
       <aside className="space-y-4 lg:sticky lg:top-4">
+        {openSourceId && (
+          <SourceViewer
+            shortId={shortId}
+            sources={sources}
+            openId={openSourceId}
+            onOpen={setOpenSourceId}
+            onClose={() => setOpenSourceId(null)}
+          />
+        )}
+        {/* 出典を読んでいる間は隠すだけ (外すと送信に入力が乗らない) */}
+        <div className={cn("space-y-4", openSourceId && "hidden")}>
         <div className="bg-white border border-slate-200 rounded-lg p-4 space-y-3">
           <div>
             <label htmlFor="title" className={LABEL}>
@@ -417,19 +437,29 @@ export function ArticleEditor({
           ) : (
             <ul className="space-y-1 text-xs text-slate-700">
               {sources.map((s) => (
-                <li key={s.id} className="flex items-baseline gap-1.5">
-                  <span className="font-mono text-slate-400 shrink-0 w-7">
-                    {s.sourceNo != null ? `[${s.sourceNo}]` : "—"}
-                  </span>
-                  <span className="truncate">{s.label || "(ラベルなし)"}</span>
-                  {s.status !== "applied" && (
-                    <span className="shrink-0 text-slate-400">({ARTICLE_SOURCE_STATUS_LABELS[s.status]})</span>
-                  )}
+                <li key={s.id}>
+                  <button
+                    type="button"
+                    onClick={() => setOpenSourceId(s.id)}
+                    title="中身を横に出す"
+                    className="w-full flex items-baseline gap-1.5 text-left rounded px-1 -mx-1 hover:bg-slate-50"
+                  >
+                    <span className="font-mono text-slate-400 shrink-0 w-7">
+                      {s.sourceNo != null ? `[${s.sourceNo}]` : "—"}
+                    </span>
+                    <span className="truncate hover:text-blue-700">{s.label || "(ラベルなし)"}</span>
+                    {s.status !== "applied" && (
+                      <span className="shrink-0 text-slate-400">({ARTICLE_SOURCE_STATUS_LABELS[s.status]})</span>
+                    )}
+                  </button>
                 </li>
               ))}
             </ul>
           )}
-          <p className="text-xs text-slate-400 mt-2">出典の追加・解除・反映は詳細ページから行います</p>
+          <p className="text-xs text-slate-400 mt-2">
+            押すと中身を横に出します。出典の追加・解除・反映は詳細ページから行います
+          </p>
+        </div>
         </div>
 
         {/* 保存 */}
