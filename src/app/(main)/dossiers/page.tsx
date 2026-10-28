@@ -4,15 +4,20 @@ import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { listDossiers } from "@/lib/domain/dossiers";
 import { listPendingDossiers } from "@/lib/domain/dossier-sync-queue";
-import { DossierGrid } from "./dossier-grid";
+import { DossierGrid, type PendingByDossier } from "./dossier-grid";
 
 export default async function DossiersPage({ searchParams }: { searchParams: Promise<{ filter?: string }> }) {
   const { filter } = await searchParams;
   const session = await auth();
   if (!session?.user) notFound();
 
-  const [dossiers, pending] = await Promise.all([listDossiers(session.user), listPendingDossiers(session.user)]);
-  const pendingById = new Map(pending.map((p) => [p.dossierId, p]));
+  // 反映待ちは重い (本番 1〜2 秒) ので待たずに渡し、一覧を先に出す
+  const pending: Promise<PendingByDossier> = listPendingDossiers(session.user).then((ps) =>
+    Object.fromEntries(ps.map((p) => [p.dossierId, { count: p.clips.length, at: p.latestAt.toISOString() }]))
+  );
+  // 一覧の取得が失敗して返らないときに、未処理の reject にならないように
+  pending.catch(() => {});
+  const dossiers = await listDossiers(session.user);
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6">
@@ -37,6 +42,7 @@ export default async function DossiersPage({ searchParams }: { searchParams: Pro
 
       <DossierGrid
         initialFilter={filter}
+        pending={pending}
         currentUserId={session.user.id}
         dossiers={dossiers.map((d) => ({
           id: d.id,
@@ -52,8 +58,6 @@ export default async function DossiersPage({ searchParams }: { searchParams: Pro
           updatedAt: d.updatedAt.toISOString(),
           articleCount: d._count.articles,
           articles: d.articles,
-          pendingCount: pendingById.get(d.id)?.clips.length ?? 0,
-          pendingAt: pendingById.get(d.id)?.latestAt.toISOString() ?? null,
         }))}
       />
     </div>

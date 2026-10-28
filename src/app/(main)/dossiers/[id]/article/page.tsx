@@ -30,6 +30,10 @@ export default async function DossierArticlePage({ params, searchParams }: Props
   const { article: chosen } = await searchParams;
   const session = await auth();
   if (!session?.user) notFound();
+  // 反映待ちは全企画を突き合わせるので重い (本番 1〜2 秒)。下の kind / ワークフローと並べて走らせておく。
+  // 途中で redirect / notFound したときに未処理の reject にならないよう catch だけ付けておく
+  const queuePromise = listPendingDossiers(session.user);
+  queuePromise.catch(() => {});
   if (await getDossierKind(session.user, id) === "clips") redirect("/clips");
 
   const workflow = await getDossierArticleWorkflow(session.user, id, chosen ?? null).catch((error: unknown) => {
@@ -45,7 +49,7 @@ export default async function DossierArticlePage({ params, searchParams }: Props
     </div>;
   }
   const { dossier, preparation, template: current, article: target, articleId, needsChoice, editable } = workflow;
-  const queue = await listPendingDossiers(session.user);
+  const queue = await queuePromise;
   const unreflected = queue.find((p) => p.dossierId === dossier.id)?.clips ?? [];
   // 本文を AI / 人が書くテンプレートの追記は、新しい素材を AI に組み込ませられる (#275)
   // 反映待ちが無くても出しておく (保存して反映待ちが消えた直後に、結果の表示ごと消えないように)

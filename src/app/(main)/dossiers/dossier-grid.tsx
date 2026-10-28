@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { FileText, FolderSearch, Lock, Eye, Pencil, Search, ArrowRight, Inbox } from "lucide-react";
 import { DOSSIER_LIST_LABELS as L, formatDate } from "@/lib/utils";
@@ -39,11 +39,10 @@ export interface DossierCardData {
   /** 記事の素材ドシエなら、その記事の総数 (バッジ用。`articles` は検索用に先頭数件だけ) */
   articleCount: number;
   articles: { shortId: string; title: string }[];
-  /** 記事に載っていないクリップの数 (`dossier-sync-queue.ts`)。記事の無い企画は 0 */
-  pendingCount: number;
-  /** 未反映のクリップを最後に入れた日時 (反映待ちの並び順) */
-  pendingAt: string | null;
 }
+
+/** 企画ごとの反映待ち (`dossier-sync-queue.ts`)。記事に載っていないクリップの数と、最後に入れた日時 */
+export type PendingByDossier = Record<string, { count: number; at: string }>;
 
 /**
  * 既定は未記事化。記事 0 本の企画 = まだ組み立て中のもの。
@@ -53,11 +52,17 @@ const FILTERS = ["draft", "pending", "written", "all"] as const;
 type Filter = (typeof FILTERS)[number];
 
 export function DossierGrid({
-  dossiers,
+  dossiers: baseDossiers,
+  pending: pendingPromise,
   currentUserId,
   initialFilter,
 }: {
   dossiers: DossierCardData[];
+  /**
+   * 反映待ちは全企画の記事と出典を突き合わせるので 1〜2 秒かかる。一覧を先に出し、届いたら埋める
+   * (待つあいだ反映待ちの件数は「…」)
+   */
+  pending: Promise<PendingByDossier>;
   currentUserId: string;
   /** `?filter=` (記事画面の「反映待ちの一覧へ」が `pending` で戻ってくる) */
   initialFilter?: string;
@@ -65,6 +70,29 @@ export function DossierGrid({
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>(
     FILTERS.find((f) => f === initialFilter) ?? "draft"
+  );
+  const [pending, setPending] = useState<PendingByDossier | null>(null);
+  useEffect(() => {
+    let alive = true;
+    pendingPromise.then(
+      (p) => alive && setPending(p),
+      (e: unknown) => {
+        console.error("反映待ちの取得に失敗:", e);
+        if (alive) setPending({});
+      }
+    );
+    return () => {
+      alive = false;
+    };
+  }, [pendingPromise]);
+  const dossiers = useMemo(
+    () =>
+      baseDossiers.map((d) => ({
+        ...d,
+        pendingCount: pending?.[d.id]?.count ?? 0,
+        pendingAt: pending?.[d.id]?.at ?? null,
+      })),
+    [baseDossiers, pending]
   );
 
   const writtenCount = useMemo(() => dossiers.filter((d) => d.articleCount > 0).length, [dossiers]);
@@ -114,7 +142,7 @@ export function DossierGrid({
                 filter === key ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
               }`}
             >
-              {L[key]} {counts[key]}
+              {L[key]} {key === "pending" && !pending ? "…" : counts[key]}
             </button>
           ))}
         </div>
@@ -124,7 +152,11 @@ export function DossierGrid({
         <div className="bg-white border border-slate-200 rounded-lg p-8 text-center">
           <FolderSearch className="h-10 w-10 mx-auto text-slate-300 mb-2" />
           <p className="text-sm text-slate-500">
-            {dossiers.length === 0 ? "まだ企画がありません。" : "条件に合う企画はありません。"}
+            {dossiers.length === 0
+              ? "まだ企画がありません。"
+              : filter === "pending" && !pending
+                ? "反映待ちを確かめています…"
+                : "条件に合う企画はありません。"}
           </p>
           {dossiers.length > 0 && filter !== "all" && (
             <button
