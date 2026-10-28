@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, MapPin } from "lucide-react";
 import { NewPlaceForm } from "./new-place-form";
-import { listAreaHints } from "@/lib/places/area-hints";
+import { listAreaHints } from "@/lib/domain/places";
 import { accessibleClassifications } from "@/lib/classification";
 import type { ClearanceLevel } from "@prisma/client";
 

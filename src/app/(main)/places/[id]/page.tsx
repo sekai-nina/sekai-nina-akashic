@@ -12,7 +12,7 @@ import { accessibleClassifications } from "@/lib/classification";
 import { isPublishablePlace } from "@/lib/articles/frontmatter";
 import { listArticlesForPlace } from "@/lib/domain/article-places";
 import { PlaceDetailMap } from "./place-detail-map";
-import { listAreaHints } from "@/lib/places/area-hints";
+import { listAreaHints } from "@/lib/domain/places";
 
 export default async function PlaceDetailPage({
   params,
@@ -26,21 +26,23 @@ export default async function PlaceDetailPage({
   const place = await getPlaceById(id, session.user.clearance);
   if (!place) notFound();
 
-  // Get linked assets via AssetEntity
-  const linkedAssets = await withClearance(session.user.clearance, (tx) =>
-    tx.assetEntity.findMany({
-      where: { entityId: place.entityId },
-      include: { asset: { select: { id: true, title: true, kind: true, canonicalDate: true, thumbnailUrl: true } } },
-      orderBy: { createdAt: "desc" },
-      take: 50,
-    })
-  ) as Array<{ id: string; createdAt: Date; asset: { id: string; title: string; kind: string; canonicalDate: Date | null; thumbnailUrl: string | null } }>;
-
-  const linkedArticles = await listArticlesForPlace(place.id, session.user.clearance);
-
   const canEdit = ["admin", "member"].includes(session.user.role);
   const published = isPublishablePlace(place);
-  const areaHints = canEdit ? await listAreaHints(session.user.clearance) : [];
+
+  // 互いに依存しないので並べて引く (順に待つとページを開くのに 1 秒以上かかっていた)
+  const [linkedAssets, linkedArticles, areaHints] = await Promise.all([
+    // Get linked assets via AssetEntity
+    withClearance(session.user.clearance, (tx) =>
+      tx.assetEntity.findMany({
+        where: { entityId: place.entityId },
+        include: { asset: { select: { id: true, title: true, kind: true, canonicalDate: true, thumbnailUrl: true } } },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+      })
+    ) as Promise<Array<{ id: string; createdAt: Date; asset: { id: string; title: string; kind: string; canonicalDate: Date | null; thumbnailUrl: string | null } }>>,
+    listArticlesForPlace(place.id, session.user.clearance),
+    canEdit ? listAreaHints(session.user.clearance) : Promise.resolve([]),
+  ]);
 
   return (
     <div className="max-w-4xl mx-auto">
