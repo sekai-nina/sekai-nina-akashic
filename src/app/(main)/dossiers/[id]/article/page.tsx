@@ -15,6 +15,7 @@ import { PendingClips } from "./pending-clips";
 import { AiMergeStep } from "./ai-merge-step";
 import { listPendingDossiers } from "@/lib/domain/dossier-sync-queue";
 import { prisma } from "@/lib/db";
+import { getClipMedia } from "@/lib/domain/nina-appearance";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -51,6 +52,7 @@ export default async function DossierArticlePage({ params, searchParams }: Props
   const { dossier, preparation, template: current, article: target, articleId, needsChoice, editable } = workflow;
   const queue = await queuePromise;
   const unreflected = queue.find((p) => p.dossierId === dossier.id)?.clips ?? [];
+  const clipMedia = Object.fromEntries(await getClipMedia(session.user.clearance, unreflected.map((c) => c.assetId)));
   // 本文を AI / 人が書くテンプレートの追記は、新しい素材を AI に組み込ませられる (#275)
   // 反映待ちが無くても出しておく (保存して反映待ちが消えた直後に、結果の表示ごと消えないように)
   const canAiMerge = !preparation && editable && !needsChoice && !!target && !!current && !!getTemplate(current)?.needsAi;
@@ -125,7 +127,7 @@ export default async function DossierArticlePage({ params, searchParams }: Props
 
       {unreflected.length > 0 && <section className="mt-4 rounded-lg border border-amber-200 bg-white p-4">
         <h2 className="text-xs font-semibold text-slate-500 mb-2">{L.pendingClips(unreflected.length)}</h2>
-        <PendingClips clips={unreflected} />
+        <PendingClips clips={unreflected} media={clipMedia} />
       </section>}
 
       {target && <section className="mt-4 rounded-lg border border-slate-200 bg-white p-4">

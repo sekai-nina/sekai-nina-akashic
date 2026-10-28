@@ -14,7 +14,13 @@ import {
   type ArticleParts,
   type RenderedSource,
 } from "./article";
-import { QUOTES_HEADING, type MarkerBlock, type RelatedMediaStyle } from "@/lib/article-workflow/render";
+import {
+  NINA_MEDIA_HEADING,
+  OTHER_MEDIA_HEADING,
+  QUOTES_HEADING,
+  type MarkerBlock,
+  type RelatedMediaStyle,
+} from "@/lib/article-workflow/render";
 import { TemplateInputError } from "@/lib/article-workflow/errors";
 import type { ExclusionKind } from "./types";
 
@@ -456,8 +462,12 @@ export function planAppend(input: {
    * トークを時系列の正しい位置に差し込む (脚注番号は飛んでよい。順序 > 番号の連続性)。
    * `fallback` は後ろに時刻の合う行が無いときの位置 (flat ではブログ画像の前、それ以外は末尾)
    */
-  const insertTalks = (sec: Section, fallback: () => number = () => appendIndex(sec.lines)) => {
-    for (const t of freshTalks) {
+  const insertTalks = (
+    sec: Section,
+    fallback: () => number = () => appendIndex(sec.lines),
+    talks: typeof freshTalks = freshTalks
+  ) => {
+    for (const t of talks) {
       const line = renumber(t.line, renumberMap);
       const key = talkSortKeyFromLine(t.line);
       let at = fallback();
@@ -476,25 +486,50 @@ export function planAppend(input: {
   };
 
   if (layout.media?.kind === "flat") {
-    // おでかけ記事: 小見出し無しで `## 関連メディア` の箇条書きに足す
+    // おでかけ記事: `## 関連メディア` の箇条書きに足す。坂井新奈が出ているものがあれば
+    // `### 坂井新奈が写っているもの` / `### そのほか` に分ける (フル生成と同じ)
     if (freshTiktoks.length > 0 || freshTalks.length > 0 || freshImages.length > 0) {
-      const sec = ensureSection(sections, H_MEDIA, []);
-      const tiktokLines = freshTiktoks.map((u) => `![](${u})`);
-      const imageLines = freshImages.map((b) => renumber(b.line, renumberMap));
-      if (sec.lines.every((l) => l.trim() === "")) {
-        // 章を作ったばかり: フル生成と同じ形 (導入文 → 空行 → 箇条書き)。`parts.talks` は時系列で来る
-        const talkLines = freshTalks.map((t) => renumber(t.line, renumberMap));
-        sec.lines = ["", layout.media.lead, "", ...tiktokLines, ...talkLines, ...imageLines, ""];
-        added.talks += freshTalks.length;
-      } else {
-        sec.lines.splice(appendIndex(sec.lines), 0, ...tiktokLines);
-        // トークはブログ画像より前 (フル生成の並び)。画像の行が無ければ末尾
+      ensureSection(sections, H_MEDIA, []);
+      const shownTalks = freshTalks.filter((t) => t.ninaAppears);
+      const shownImages = freshImages.filter((b) => b.ninaAppears);
+      const split = shownTalks.length > 0 || shownImages.length > 0 || !!findSection(sections, NINA_MEDIA_HEADING);
+      /** 箇条書きに足す。トークはブログ画像より前 (フル生成の並び)、画像の行が無ければ末尾 */
+      const fill = (sec: Section, tiktoks: string[], talks: typeof freshTalks, images: typeof freshImages) => {
+        if (tiktoks.length + talks.length + images.length === 0) return;
+        const imageLines = images.map((b) => renumber(b.line, renumberMap));
+        if (sec.lines.every((l) => l.trim() === "")) {
+          // 章を作ったばかり: フル生成と同じ形 (空行 → 箇条書き → 空行)。`parts.talks` は時系列で来る
+          const talkLines = talks.map((t) => renumber(t.line, renumberMap));
+          sec.lines = ["", ...tiktoks.map((u) => `![](${u})`), ...talkLines, ...imageLines, ""];
+          added.talks += talks.length;
+          return;
+        }
+        sec.lines.splice(appendIndex(sec.lines), 0, ...tiktoks.map((u) => `![](${u})`));
         const beforeImages = () => {
           const i = sec.lines.findIndex((l) => /^- 【[^】]*・(画像|動画|音声|メディア)】/.test(l) && !l.startsWith("- 【トーク"));
           return i >= 0 ? i : appendIndex(sec.lines);
         };
-        insertTalks(sec, beforeImages);
+        insertTalks(sec, beforeImages, talks);
         sec.lines.splice(appendIndex(sec.lines), 0, ...imageLines);
+      };
+      if (split) {
+        // 章を作ったばかりなら、見出しの直後の空行は 1 つ (小見出しが続く。フル生成と同じ形)
+        const media = findSection(sections, H_MEDIA)!;
+        if (media.lines.every((l) => l.trim() === "")) media.lines = [""];
+        fill(
+          ensureSection(sections, NINA_MEDIA_HEADING, [OTHER_MEDIA_HEADING]),
+          [],
+          shownTalks,
+          shownImages
+        );
+        fill(
+          ensureSection(sections, OTHER_MEDIA_HEADING, []),
+          freshTiktoks,
+          freshTalks.filter((t) => !t.ninaAppears),
+          freshImages.filter((b) => !b.ninaAppears)
+        );
+      } else {
+        fill(findSection(sections, H_MEDIA)!, freshTiktoks, freshTalks, freshImages);
       }
       added.tiktoks = freshTiktoks.length;
       added.blogImages = freshImages.length;

@@ -12,6 +12,7 @@
 import type { ClearanceLevel, Prisma, TextType } from "@prisma/client";
 import { withSession, type TransactionClient } from "@/lib/db";
 import { getR2PublicUrl } from "@/lib/r2";
+import { NINA_ENTITY_ID } from "@/lib/nina";
 import { toJstDateOnly } from "@/lib/utils";
 import { accessibleClassifications } from "@/lib/classification";
 import { MAX_ARTICLE_CLEARANCE, MAX_EXTERNAL_AI_CLEARANCE } from "@/lib/meetgreet/config";
@@ -48,6 +49,8 @@ export interface DossierForMaterials {
       /** `withTexts` のときだけ (AI に渡す本文と人物) */
       texts?: { textType: TextType; content: string }[];
       entities?: { entity: { canonicalName: string } }[];
+      /** 坂井新奈の AssetEntity の数 (1 なら #261 の「出ている」)。おでかけ記事の関連メディアを分ける */
+      _count?: { entities: number };
     } | null;
   }[];
   /** 場所候補 (ドシエの並び順)。おでかけ記事の `locations` になる */
@@ -81,6 +84,7 @@ const ASSET_SELECT = {
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     take: 1,
   },
+  _count: { select: { entities: { where: { entityId: NINA_ENTITY_ID } } } },
 } satisfies Prisma.AssetSelect;
 
 /**
@@ -247,6 +251,7 @@ function toAssetInput(a: LoadedAsset, item: { excerpt?: string; caption?: string
       ? { kind: src.sourceKind, title: src.title, url: src.url, publishedAt: toJstDateOnly(src.publishedAt) }
       : null,
     excerpts: item.excerpt ? [item.excerpt] : [],
+    ...((a._count?.entities ?? 0) > 0 ? { ninaAppears: true } : {}),
     ...(a.texts !== undefined
       ? {
           text: pickText(a.texts),
