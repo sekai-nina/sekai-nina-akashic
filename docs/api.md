@@ -314,7 +314,7 @@ API キーからは **引き上げしかできない。** `PATCH /assets/:id` / 
 }
 ```
 
-`ninaAppearance` は坂井新奈が出ているか（#261）。`appears` = 坂井新奈のエンティティが紐づいている（roleLabel は問わない） / `absent` = 確認して出ていない（`ninaAbsent: true`） / `unchecked` = どちらも無い（未確認）。書き換えは `PUT /assets/:id/nina-appearance` で行う。
+`ninaAppearance` は坂井新奈が出ているか（#261）。`absent` = 確認して出ていない（`ninaAbsent: true`。本人の投稿で author として紐づいていても、写っていなければこちら） / `appears` = 坂井新奈のエンティティが紐づいていて `ninaAbsent` が無い（roleLabel は問わない） / `unchecked` = どちらも無い（未確認）。書き換えは `PUT /assets/:id/nina-appearance` で行う。
 
 **エラー:**
 
@@ -379,7 +379,7 @@ API キーからは **引き上げしかできない。** `PATCH /assets/:id` / 
 | `status` | 結果 |
 |---|---|
 | `appears` | 坂井新奈を roleLabel「出演」で紐づけ、`ninaAbsent` を外す。既に紐づいていれば roleLabel はそのまま |
-| `absent` | 坂井新奈の紐づけを外し、`ninaAbsent` を立てる |
+| `absent` | 坂井新奈の紐づけを外し、`ninaAbsent` を立てる。著者 (author) の紐づけは外さずに `ninaAbsent` だけ立てる（本人の投稿で写っていない写真） |
 | `unchecked` | 両方外す（未確認に戻す） |
 
 同じ状態を何度置いても結果は変わらない（冪等）。
@@ -395,7 +395,7 @@ API キーからは **引き上げしかできない。** `PATCH /assets/:id` / 
 ```json
 { "error": "status must be one of: appears, absent, unchecked" }  // 400
 { "error": "Not found" }  // 404 (無い、またはクリアランス外)
-{ "error": "坂井新奈が著者 (author) のアセットは「出ていない」「未確認」にできません" }  // 409
+{ "error": "坂井新奈が著者 (author) のアセットは「未確認」にできません。写っていなければ「出ていない」にしてください" }  // 409
 ```
 
 ---

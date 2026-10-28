@@ -188,7 +188,7 @@ MCP のツール引数はもともと zod で検証されるが、REST の `POST
 
 アセットに坂井新奈が出ているかは `ninaAppearance` で読み、`akashic_set_nina_appearance` で置く。`appears` = 坂井新奈のエンティティが紐づいている / `absent` = 確認して出ていない（`Asset.ninaAbsent`） / `unchecked` = どちらも無い。「出ていない」を `AssetEntity` に混ぜると `entityNames: ["坂井新奈"]` の絞り込みが壊れるので、列を分けて持つ。
 
-出演一覧を更新するときは `akashic_search` に `kinds: ["video"]`・`entityNames`（チャンネル名など）・日付と `ninaAppearance: "unchecked"` を渡し、確認が要るものだけを出す。ツールの説明で「実際に確認した結果だけを記録し、推測で absent にしない」と AI に伝えている。坂井新奈が著者（author）のアセットは `appears` 以外にできない（ブログや本人の投稿から本人を外さない）。
+出演一覧を更新するときは `akashic_search` に `kinds: ["video"]`・`entityNames`（チャンネル名など）・日付と `ninaAppearance: "unchecked"` を渡し、確認が要るものだけを出す。ツールの説明で「実際に確認した結果だけを記録し、推測で absent にしない」と AI に伝えている。坂井新奈が著者（author）のアセットは `unchecked` にできない（著者の紐づけは外さない）。本人の投稿でも写っていなければ `absent` にできる。
 
 ### 聖地登録は Google Maps URL を受ける
 
