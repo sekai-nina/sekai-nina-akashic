@@ -15,7 +15,7 @@ export default async function GalleryPage() {
   // ガードしないと未認証リクエストのたびにサーバー側で例外になる
   if (!session?.user) notFound();
 
-  const [assets, entities] = await Promise.all([
+  const [assets, entities, editableDossiers] = await Promise.all([
     withClearance(session.user.clearance, (tx) =>
       tx.asset.findMany({
         where: {
@@ -41,6 +41,7 @@ export default async function GalleryPage() {
       })
     ),
     getCachedEntityList(session.user.clearance as ClearanceLevel),
+    listEditableDossiers(session.user).then((ds) => ds.map((d) => ({ id: d.id, title: d.title }))),
   ]);
 
   const blogEntity = entities.find(
@@ -57,11 +58,6 @@ export default async function GalleryPage() {
     createdAt: a.createdAt.toISOString(),
   }));
   const nextCursor = hasMore ? items[items.length - 1].id : null;
-
-  const editableDossiers = (await listEditableDossiers(session.user)).map((d) => ({
-    id: d.id,
-    title: d.title,
-  }));
 
   return (
     <div className="max-w-6xl mx-auto">

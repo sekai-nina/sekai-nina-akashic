@@ -3,7 +3,9 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, MapPin } from "lucide-react";
 import { NewPlaceForm } from "./new-place-form";
-import { listAreaHints } from "@/lib/places/area-hints";
+import { listAreaHints } from "@/lib/domain/places";
+import { accessibleClassifications } from "@/lib/classification";
+import type { ClearanceLevel } from "@prisma/client";
 
 export default async function NewPlacePage() {
   const session = await auth();
@@ -28,7 +30,10 @@ export default async function NewPlacePage() {
         </h1>
       </div>
 
-      <NewPlaceForm areaHints={areaHints} />
+      <NewPlaceForm
+        areaHints={areaHints}
+        classifications={accessibleClassifications(session.user.clearance as ClearanceLevel)}
+      />
     </div>
   );
 }

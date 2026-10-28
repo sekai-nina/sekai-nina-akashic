@@ -102,6 +102,16 @@ async function findOwnBlog(user: ActingUser, assetId: string): Promise<OwnBlog> 
 }
 
 export async function listBlogQuoteProgress(user: ActingUser): Promise<BlogQuoteRow[]> {
+  // 出典と進捗はブログの一覧に依存しないので、ブログを引くのと並べて走らせる
+  const sourcesPromise = withClearance(user.clearance, (tx) =>
+    tx.articleSource.findMany({
+      where: { article: { type: "quote", title: { startsWith: "ブログ「" } } },
+      select: { assetId: true, url: true, articleId: true },
+    })
+  );
+  const progressPromise = withClearance(user.clearance, (tx) =>
+    tx.articleProgress.findMany({ where: PROGRESS_KEY, select: { materialKey: true, status: true, note: true } })
+  );
   const assets = await withClearance(user.clearance, (tx) =>
     tx.asset.findMany({ where: OWN_BLOG_WHERE, select: OWN_BLOG_SELECT })
   );
@@ -109,15 +119,8 @@ export async function listBlogQuoteProgress(user: ActingUser): Promise<BlogQuote
   const ids = blogs.map((b) => b.id);
 
   const [sources, progress, items] = await Promise.all([
-    withClearance(user.clearance, (tx) =>
-      tx.articleSource.findMany({
-        where: { article: { type: "quote", title: { startsWith: "ブログ「" } } },
-        select: { assetId: true, url: true, articleId: true },
-      })
-    ),
-    withClearance(user.clearance, (tx) =>
-      tx.articleProgress.findMany({ where: PROGRESS_KEY, select: { materialKey: true, status: true, note: true } })
-    ),
+    sourcesPromise,
+    progressPromise,
     withSession(user, (tx) =>
       tx.dossierItem.findMany({
         where: { assetId: { in: ids }, dossier: { articleTemplate: "quote_blog" } },

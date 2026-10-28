@@ -1,6 +1,9 @@
-import { ClearanceLevel, type PlaceKind } from "@prisma/client";
+import { ClearanceLevel, type PlaceKind, type Prisma } from "@prisma/client";
 import { withClearance } from "@/lib/db";
+import { isPublishablePlace } from "@/lib/articles/frontmatter";
 import { normalizeText } from "@/lib/utils";
+import { getCachedEntityAssetCounts, withAssetCount } from "@/lib/cache";
+import type { AreaHint } from "@/lib/places/area-hints";
 import { logAudit } from "./audit";
 
 export interface CreatePlaceData {
@@ -33,6 +36,24 @@ export function normalizeArea(area: string | null | undefined): string | null | 
   if (area === undefined) return undefined;
   const t = (area ?? "").trim();
   return t ? t : null;
+}
+
+/**
+ * 聖地が記事の push 出力 (`locations` の name / 有無) を変えたときに、紐づく記事を push 待ちにする (#283)。
+ * `editedAt` も立てる: 立てないと push 前の再取り込みが「ファイルと値が違う」を取りこぼし扱いにして
+ * dirty を落とす (取り込みの preserved ガードは editedAt を見る)
+ */
+export async function markArticlesForPlace(tx: Prisma.TransactionClient, placeId: string) {
+  await tx.article.updateMany({
+    where: {
+      OR: [
+        { places: { some: { placeId } } },
+        // backfill 前・backfill が移せなかった記事は frontmatterExtra.locations に place_id が残っている
+        { frontmatterExtra: { path: ["locations"], array_contains: [{ place_id: placeId }] } },
+      ],
+    },
+    data: { dirty: true, editedAt: new Date() },
+  });
 }
 
 export type PlaceWithEntity = Awaited<ReturnType<typeof getPlaceById>> & {};
@@ -95,6 +116,13 @@ export async function updatePlace(id: string, data: UpdatePlaceData, clearance: 
     });
     if (!existing) throw new Error("Place not found");
 
+    // 記事の locations は聖地の正式名で書き出し、公開範囲 (public / internal) の聖地だけ載せる
+    const renamed = !!data.canonicalName && data.canonicalName !== existing.entity.canonicalName;
+    const publishabilityChanged =
+      data.classification !== undefined &&
+      isPublishablePlace(existing) !== isPublishablePlace({ classification: data.classification });
+    if (renamed || publishabilityChanged) await markArticlesForPlace(tx, id);
+
     if (data.canonicalName || data.description !== undefined) {
       await tx.entity.update({
         where: { id: existing.entityId },
@@ -147,6 +175,9 @@ export async function deletePlace(id: string, clearance: string) {
     });
     if (!found) throw new Error("Place not found");
 
+    // ArticlePlace も消えるので、locations に載っていた記事は push で消す必要がある
+    if (isPublishablePlace(found)) await markArticlesForPlace(tx, id);
+
     // Deleting the entity cascades to the place
     await tx.entity.delete({ where: { id: found.entityId } });
     return found;
@@ -165,19 +196,57 @@ export async function listPlaces(clearance: string) {
   const maxLevel = clearanceOrder.indexOf(clearance as ClearanceLevel);
   const allowedLevels = clearanceOrder.slice(0, maxLevel + 1);
 
+  // アセット数は RLS 越しの _count だと遅い (API で p75 11 秒) ので、まとめて数えたキャッシュから埋める
+  const [places, counts] = await Promise.all([
+    withClearance(clearance, (tx) =>
+      tx.place.findMany({
+        where: {
+          classification: { in: allowedLevels.length > 0 ? allowedLevels : ["public"] },
+        },
+        include: { entity: true },
+        orderBy: { entity: { canonicalName: "asc" } },
+      })
+    ),
+    getCachedEntityAssetCounts(clearance as ClearanceLevel),
+  ]);
+  return places.map((p) => ({ ...p, entity: withAssetCount(p.entity, counts) }));
+}
+
+/** エリアの入力候補用。listPlaces はエンティティとアセット数まで引いて重い (48 件で 0.7 秒) ので、座標とエリアだけ取る */
+export async function listPlaceAreas(clearance: string) {
+  const clearanceOrder: ClearanceLevel[] = ["public", "internal", "confidential", "restricted"];
+  const maxLevel = clearanceOrder.indexOf(clearance as ClearanceLevel);
+  const allowedLevels = clearanceOrder.slice(0, maxLevel + 1);
+
   return withClearance(clearance, (tx) =>
     tx.place.findMany({
       where: {
         classification: { in: allowedLevels.length > 0 ? allowedLevels : ["public"] },
+        area: { not: null },
       },
-      include: {
-        entity: {
-          include: { _count: { select: { assets: true } } },
-        },
-      },
-      orderBy: { entity: { canonicalName: "asc" } },
+      select: { area: true, latitude: true, longitude: true },
     })
   );
+}
+
+/**
+ * 既存のエリア名と、そのエリアに属する場所の重心。
+ * フォームの入力候補 (datalist) と、新規登録時の「近くの場所と同じエリア」の提案に使う。
+ */
+export async function listAreaHints(clearance: string): Promise<AreaHint[]> {
+  const places = await listPlaceAreas(clearance);
+  const acc = new Map<string, { count: number; lat: number; lng: number }>();
+  for (const p of places) {
+    if (!p.area) continue;
+    const a = acc.get(p.area) ?? { count: 0, lat: 0, lng: 0 };
+    a.count += 1;
+    a.lat += p.latitude;
+    a.lng += p.longitude;
+    acc.set(p.area, a);
+  }
+  return [...acc.entries()]
+    .map(([area, a]) => ({ area, count: a.count, lat: a.lat / a.count, lng: a.lng / a.count }))
+    .sort((x, y) => y.count - x.count || x.area.localeCompare(y.area, "ja"));
 }
 
 export async function getPlaceById(id: string, clearance: string) {

@@ -235,9 +235,49 @@ export default async function AssetDetailPage({
   // 素材ごとのクリップ済と、必要な場合だけ言及ハイライトを取得する。
   const isEditor = ["admin", "member"].includes(session.user.role);
   const canClip = isEditor;
-  const [ninaTerms, materialItems] = await Promise.all([
+  // 以下はアセット本体が引けてから、互いに依存せずに引ける。順に待つと往復が 6 段重なって
+  // 1 秒近くかかっていたので、まとめて並べる (別々のトランザクションなので本当に並列に走る)
+  // 編集できるドシエ (ピッカー) と、このアセットを含むドシエ (見えるもの全部)。
+  // ピッカーの「追加済み」は後者のうち編集できるもの
+  const editableDossiersPromise = listEditableDossiers(session.user);
+  // `?dossier=` は抜粋の追加先 (/progress/blog の「記事を作る」から来たとき, #206)。編集できるドシエだけ
+  const targetDossierPromise = editableDossiersPromise.then((ds) =>
+    sp.dossier ? (ds.find((d) => d.id === sp.dossier) ?? null) : null
+  );
+  const [
+    ninaTerms,
+    materialItems,
+    editableDossiers,
+    containingDossiers,
+    assetAnniversaries,
+    previewTargets,
+    targetDossier,
+    targetExcerptCount,
+    [pickerArticles, clips, articleRefs],
+  ] = await Promise.all([
     hlNina ? getNinaTerms(userClearance) : Promise.resolve([] as string[]),
     findMaterialClipProgressForAsset(id, userClearance),
+    editableDossiersPromise,
+    listDossiersContainingAsset(session.user, id),
+    // このアセットから作った記念日 (あれば「登録済み」として出す)
+    listAnniversariesForAsset(id, session.user.clearance),
+    // ブログ / トーク (text) なら、開催予定のミーグリへの予告コーデ入力を出す (#203)
+    asset.kind === "text" ? listPreviewTargets(session.user, id) : Promise.resolve(null),
+    targetDossierPromise,
+    targetDossierPromise.then((target) =>
+      target
+        ? withSession(session.user, (tx) =>
+            tx.dossierItem.count({ where: { dossierId: target.id, excerpt: { not: "" } } })
+          )
+        : 0
+    ),
+    // 記事の紐づけ先候補。Article は非保護なので withClearance を通さない。
+    // クリップ (#41) と「記事での参照」もここで引く
+    Promise.all([
+      listArticlesForPicker(),
+      listClipsForAsset(session.user, id),
+      listArticleReferencesForAsset(id, userClearance),
+    ]),
   ]);
   const highlightCount = hlNina
     ? countTermMatches(
@@ -245,34 +285,9 @@ export default async function AssetDetailPage({
         ninaTerms
       )
     : 0;
-
-  // 編集できるドシエ (ピッカー) と、このアセットを含むドシエ (見えるもの全部)。
-  // ピッカーの「追加済み」は後者のうち編集できるもの
-  const [editableDossiers, containingDossiers] = await Promise.all([
-    listEditableDossiers(session.user),
-    listDossiersContainingAsset(session.user, id),
-  ]);
-  // このアセットから作った記念日 (あれば「登録済み」として出す)
-  const assetAnniversaries = await listAnniversariesForAsset(id, session.user.clearance);
-  // ブログ / トーク (text) なら、開催予定のミーグリへの予告コーデ入力を出す (#203)
-  const previewTargets = asset.kind === "text" ? await listPreviewTargets(session.user, id) : null;
   const containingIds = new Set(containingDossiers.map((d) => d.id));
   const dossierIdsContaining = editableDossiers.filter((d) => containingIds.has(d.id)).map((d) => d.id);
-  // `?dossier=` は抜粋の追加先 (/progress/blog の「記事を作る」から来たとき, #206)。編集できるドシエだけ
-  const targetDossier = sp.dossier ? (editableDossiers.find((d) => d.id === sp.dossier) ?? null) : null;
-  const targetExcerptCount = targetDossier
-    ? await withSession(session.user, (tx) =>
-        tx.dossierItem.count({ where: { dossierId: targetDossier.id, excerpt: { not: "" } } })
-      )
-    : 0;
 
-  // 記事の紐づけ先候補。Article は非保護なので withClearance を通さない。
-  // クリップ (#41) と「記事での参照」もここで引く
-  const [pickerArticles, clips, articleRefs] = await Promise.all([
-    listArticlesForPicker(),
-    listClipsForAsset(session.user, id),
-    listArticleReferencesForAsset(id, userClearance),
-  ]);
   // クリップ済みの範囲を本文上に色付けする。DossierItem は textType しか持たないので、
   // 同じ type のテキストのうち抜粋と実際に一致するものに当てる (本文が編集されて
   // 一致しなくなったものは出さず、「位置未確定」扱いにする)

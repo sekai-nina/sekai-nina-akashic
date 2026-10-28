@@ -12,10 +12,12 @@ export default async function RepoCollectionPage({
   if (!session?.user) notFound();
 
   const { id } = await params;
-  const collection = await getCollection(id, session.user.clearance);
+  // ツイートは RLS で絞られるので、コレクションの有無を確かめる前に並べて引いてよい
+  const [collection, tweets] = await Promise.all([
+    getCollection(id, session.user.clearance),
+    listTweets(id, { sort: "newest" }, session.user.clearance),
+  ]);
   if (!collection) notFound();
-
-  const tweets = await listTweets(id, { sort: "newest" }, session.user.clearance);
 
   const serialized = tweets.map((t) => ({
     id: t.id,

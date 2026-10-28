@@ -17,6 +17,7 @@ import {
 import { previewArticleAction, updateArticleAction, type ArticlePreview, type UpdateArticleState } from "./actions";
 import { FootnoteAuditWarnings } from "../footnote-audit-warnings";
 import { TagInput } from "./tag-input";
+import { PlacePicker, type PlaceOption } from "./place-picker";
 import { isListArticle } from "@/lib/articles/list-article";
 
 declare global {
@@ -56,6 +57,8 @@ export function ArticleEditor({
   tagOptions,
   extraKeys,
   sources,
+  initialPlaceIds,
+  placeOptions,
 }: {
   shortId: string;
   /** 楽観ロック用。読み込んだ時点の Article.updatedAt (ISO) */
@@ -65,6 +68,10 @@ export function ArticleEditor({
   /** モデル外の frontmatter (触らせない。表示だけ) */
   extraKeys: string[];
   sources: SourceRef[];
+  /** 紐づく聖地 (操作者に見える分、記事内の並び順) */
+  initialPlaceIds: string[];
+  /** 追加できる聖地 (操作者に見える全件) */
+  placeOptions: PlaceOption[];
 }) {
   const [values, setValues] = useState(initial);
   const set = <K extends keyof ArticleEditFormValues>(key: K, v: ArticleEditFormValues[K]) =>
@@ -75,8 +82,11 @@ export function ArticleEditor({
     null,
   );
 
+  const [placeIds, setPlaceIds] = useState(initialPlaceIds);
+
   // 離脱時の警告。初期値との比較は雑でよい (JSON で足りる)
-  const changed = JSON.stringify(values) !== JSON.stringify(initial);
+  const changed =
+    JSON.stringify(values) !== JSON.stringify(initial) || JSON.stringify(placeIds) !== JSON.stringify(initialPlaceIds);
   useEffect(() => {
     if (!changed) return;
     const handler = (e: BeforeUnloadEvent) => {
@@ -391,6 +401,12 @@ export function ArticleEditor({
               モデル外の frontmatter: {extraKeys.join(", ")}（ここでは触れません。push 時に復元されます）
             </p>
           )}
+        </div>
+
+        {/* 聖地 (#283) */}
+        <div className="bg-white border border-slate-200 rounded-lg p-4">
+          <h2 className="text-sm font-medium text-slate-700 mb-2">聖地 {placeIds.length} 件（訪問順。push で locations になる）</h2>
+          <PlacePicker value={placeIds} onChange={setPlaceIds} options={placeOptions} disabled={isSaving} />
         </div>
 
         {/* 出典 (参照用) */}

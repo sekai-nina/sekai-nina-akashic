@@ -66,7 +66,7 @@ pnpm test                                                    # 合成ケース�
 ARTICLES_DIR=<sekai-nina-public のパス> pnpm test              # 実記事 332 件も検証
 ```
 
-記事の実体は別リポジトリなので、`ARTICLES_DIR` が未設定なら実記事のテストは skip される（CI はこの状態で回る）。**記事の push まわり（`src/lib/articles/`、`src/lib/domain/articles.ts`、`src/cli/import-articles.ts`）を触ったら `ARTICLES_DIR` 付きで緑にし、`pnpm cli:verify-article-push --dir <path>` で DB から生成した Markdown が実ファイルと食い違っていないことも確認する**（frontmatter に載るのは `pending` 以外かつ `public` の `ArticleSource` だけ。詳細は `docs/security-dev.md`）。
+記事の実体は別リポジトリなので、`ARTICLES_DIR` が未設定なら実記事のテストは skip される（CI はこの状態で回る）。**記事の push まわり（`src/lib/articles/`、`src/lib/domain/articles.ts`、`src/cli/import-articles.ts`）を触ったら `ARTICLES_DIR` 付きで緑にし、`pnpm cli:verify-article-push --dir <path>` で DB から生成した Markdown が実ファイルと食い違っていないことも確認する**（frontmatter に載るのは `pending` 以外かつ `public` の `ArticleSource` と、`Place` が `public` / `internal` の `ArticlePlace` だけ。詳細は `docs/security-dev.md`）。
 
 - **push の出力に影響する書き込みは `Article.dirty = true` を立てる。** `dirty` は「DB の出力 ≠ GitHub」の意味で、`/articles/push` はこれしか見ない
 - **`Article.githubSha` は取り込みが埋める git blob SHA。** push の衝突検出に使う。`pnpm cli:import-articles --apply` は checkout が origin/main と一致しないと止まる（pull し忘れで DB が巻き戻るのを防ぐ）
@@ -113,7 +113,7 @@ withSession({ id, clearance }, tx => …)    // 上記 + app.user_id — Dossier
 
 ### 保護テーブル
 
-`Asset`, `AssetText`, `AssetTextRevision`, `AssetEntity`, `AssetRelation`, `SourceRecord`, `Annotation`, `Testimonial`, `Dossier`, `DossierItem`, `DossierPlaceCandidate`, `Place`, `RepoCollection`, `RepoTweet`, `RepoTweetMedia`, `Lens`, `DataSource`, `Coverage`, `LensItemCheck`, `ArticleSource`, `MeetGreet`, `InstaWatchTarget`, `InstaAccount`, `InstaStoryJob`, `SketchSetting`, `Anniversary`, `XMentionWatch`, `XMentionSetting`, `XMentionHit`, `Live`, `LivePerformance`, `LiveSong`, `LiveSetlistItem`, `TiktokWatchTarget`, `TiktokVideo`, `ArticleProgress`, `MaterialClipStatus`
+`Asset`, `AssetText`, `AssetTextRevision`, `AssetEntity`, `AssetRelation`, `SourceRecord`, `Annotation`, `Testimonial`, `Dossier`, `DossierItem`, `DossierPlaceCandidate`, `Place`, `RepoCollection`, `RepoTweet`, `RepoTweetMedia`, `Lens`, `DataSource`, `Coverage`, `LensItemCheck`, `ArticleSource`, `ArticlePlace`, `MeetGreet`, `InstaWatchTarget`, `InstaAccount`, `InstaStoryJob`, `SketchSetting`, `Anniversary`, `XMentionWatch`, `XMentionSetting`, `XMentionHit`, `Live`, `LivePerformance`, `LiveSong`, `LiveSetlistItem`, `TiktokWatchTarget`, `TiktokVideo`, `ArticleProgress`, `MaterialClipStatus`
 
 RLS は `clearance_rank(classification::text) <= clearance_rank(current_setting('app.clearance', true))`。`clearance_rank()` は未知/未設定を `-1` にして **fail-closed**。全テーブル `ENABLE` + `FORCE ROW LEVEL SECURITY`。
 
@@ -199,6 +199,7 @@ src/
 
 - **Web: Vercel**。`vercel.json` で **region `hnd1` 固定**（Supabase ap-northeast-1 とのコロケーション。既定の iad1 だとページ読み込みが 5-8 秒かかった）
 - **CI**: `.github/workflows/ci.yml` が push to `main` で `pnpm typecheck` を回すだけ（Discord bot は撤去済み）
+- **PR の Discord 通知**: `.github/workflows/pr-discord.yml` が PR の作成・下書き解除・マージを #akashic に流す（secret `DISCORD_WEBHOOK_URL`、Webhook 名「Akashic PR」）
 - **Vercel Cron**: `vercel.json` の `*/15 * * * *` が `GET /api/cron/status`、`*/10 * * * *` が `GET /api/cron/insta-jobs`（story ジョブの失効回収と再送）、`*/15 * * * *` が `GET /api/cron/nina-mentions`（本文が新奈に言及しているアセットに `Asset.mentionsNina` を付け外し）、`*/15 * * * *` が `GET /api/cron/transcribe`（坂井新奈のトークを Groq で文字起こし。`docs/transcribe-design.md`）、`0 3 * * *`（UTC = 12:00 JST）が `GET /api/cron/costs`、`0 0 * * *`（09:00 JST）が `GET /api/cron/mentions` を呼ぶ（すべて `CRON_SECRET` 必須。未設定なら 503 で何もしない。認証は `src/lib/cron/auth.ts`）
 - `instrumentation.ts` が起動時に Prisma を事前接続（pooler の ~800ms コールドコネクト回避）
 

@@ -10,7 +10,7 @@ import type { ArticleColumns, ArticleSourceRow } from "./frontmatter";
  * (過去に走りっぱなしのスクリプトで egress 70GB 超過の事故がある)。
  *
  * **判定を誤って「変わっていない」と言うと変更が反映されない** ので、
- * 比較対象は Article のカラムと ArticleSource の全フィールドを網羅する。
+ * 比較対象は Article のカラムと ArticleSource の全フィールド、ArticlePlace の並びを網羅する。
  */
 
 
@@ -39,6 +39,11 @@ export interface ComparableArticle {
    * (型に増やしても `hasChanged` は列を手で列挙しているので自動では比較されない)
    */
   sources: ArticleSourceRow[];
+  /**
+   * frontmatter に書き出される ArticlePlace (Place が public / internal) だけを、sortOrder 順に渡す。
+   * confidential 以上の行はファイルに無いのが正しいので比べない (取り込みも触らない)
+   */
+  places: { placeId: string }[];
 }
 
 const time = (d: Date | null | undefined) => (d == null ? null : d.getTime());
@@ -93,6 +98,13 @@ export function hasChanged(
     // tags は配列で順序に意味があるので素の比較
     JSON.stringify(prev.tags) !== JSON.stringify(next.tags) ||
     !sameJson(prev.frontmatterExtra, next.frontmatterExtra)
+  ) {
+    return true;
+  }
+
+  if (
+    prev.places.length !== next.places.length ||
+    prev.places.some((p, i) => p.placeId !== next.places[i].placeId)
   ) {
     return true;
   }

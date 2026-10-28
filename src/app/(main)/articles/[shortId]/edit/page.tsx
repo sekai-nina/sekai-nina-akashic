@@ -2,6 +2,9 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getArticleByShortId, listArticleTags } from "@/lib/domain/articles";
+import { listArticlePlaces } from "@/lib/domain/article-places";
+import { listPlaces } from "@/lib/domain/places";
+import { isPublishablePlace } from "@/lib/articles/frontmatter";
 import { frontmatterExtraKeys, toArticleEditFormValues, toArticleEditValues } from "@/lib/articles/edit";
 import { UnpushedBadge } from "../unpushed-badge";
 import { ArticleEditor } from "./article-editor";
@@ -13,7 +16,10 @@ import "katex/dist/katex.min.css";
  * 日付系 / draft / unlisted / ongoing) を直せる。保存で `dirty` が立ち、`/articles/push`
  * から GitHub に書き出す (保存ごとに commit はしない)。
  *
- * `frontmatterExtra` (featured_quotes / locations / dossier 等) と出典 (ArticleSource) は
+ * 聖地 (ArticlePlace = locations の place_id) もここで付け外しする (#283)。非公開の聖地は
+ * akashic の中だけの紐づけになり、push の locations には出ない。
+ *
+ * `frontmatterExtra` (featured_quotes / 座標直書きの locations / dossier 等) と出典 (ArticleSource) は
  * ここでは触らせない。前者は push 時にそのまま復元され、後者は pending → applied の遷移と
  * 一緒に別の画面 (PR3) で扱う。
  *
@@ -29,11 +35,13 @@ export default async function ArticleEditPage({
   const { shortId } = await params;
   if (!["admin", "member"].includes(session.user.role)) redirect(`/articles/${shortId}`);
 
-  const [article, tagOptions] = await Promise.all([
+  const [article, tagOptions, places] = await Promise.all([
     getArticleByShortId(shortId, session.user.clearance),
     listArticleTags(),
+    listPlaces(session.user.clearance),
   ]);
   if (!article) notFound();
+  const articlePlaces = await listArticlePlaces(article.id, session.user.clearance);
 
   const extraKeys = frontmatterExtraKeys(article);
 
@@ -63,6 +71,13 @@ export default async function ArticleEditPage({
           sourceNo: s.sourceNo,
           status: s.status,
           label: s.asset?.title || s.label,
+        }))}
+        initialPlaceIds={articlePlaces.map((p) => p.id)}
+        placeOptions={places.map((p) => ({
+          id: p.id,
+          name: p.entity.canonicalName,
+          area: p.area,
+          published: isPublishablePlace(p),
         }))}
       />
     </div>

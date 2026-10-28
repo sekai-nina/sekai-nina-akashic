@@ -25,6 +25,11 @@ const RAW = [
   "lat: 35.6",
   "lng: 139.7",
   "featured: true",
+  "locations:",
+  "  - name: 店A",
+  "    place_id: place1",
+  "  - name: 店B",
+  "    place_id: place2",
   "source:",
   "  - id: 1",
   "    label: ラベル",
@@ -58,6 +63,7 @@ function baseline(): { prev: ComparableArticle; cols: ReturnType<typeof toArticl
     lng: cols.lng ?? null,
     frontmatterExtra: cols.frontmatterExtra,
     sources: sourcesOf(cols),
+    places: cols.places.map((p) => ({ placeId: p.placeId })),
   };
   return { prev, cols };
 }
@@ -154,6 +160,20 @@ describe("hasChanged", () => {
     prev.frontmatterExtra = { related: ["a", "b"] };
     const { sources: _s, ...next } = cols;
     next.frontmatterExtra = { related: ["b", "a"] };
+    expect(hasChanged(prev, next, sourcesOf(cols))).toBe(true);
+  });
+
+  it("聖地の並びが変わったら検出する", () => {
+    const { prev, cols } = baseline();
+    prev.places = [...prev.places].reverse();
+    const { sources: _s, ...next } = cols;
+    expect(hasChanged(prev, next, sourcesOf(cols))).toBe(true);
+  });
+
+  it("聖地が減ったら検出する", () => {
+    const { prev, cols } = baseline();
+    const { sources: _s, ...next } = cols;
+    next.places = next.places.slice(0, 1);
     expect(hasChanged(prev, next, sourcesOf(cols))).toBe(true);
   });
 

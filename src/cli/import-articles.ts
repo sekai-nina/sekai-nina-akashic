@@ -30,6 +30,9 @@
  *   - 出典の全置換では、既存行を assetId + sourceNo で突き合わせ (reconcileSources)、抜粋
  *     (excerpt / note) を新しい行に写す。akashic で applied にしたが上流に無い行 (未 push のまま
  *     上流が変わった) は削除せず pending に戻す (demotableSources)
+ *   - locations の聖地 (place_id) は ArticlePlace に入れる (#283)。置き換えるのは push が書き出す行
+ *     (Place が public / internal) だけで、confidential 以上の行はファイルに無いのが正しいので残す。
+ *     実在しない聖地は外部キーで入れられないので、push で消えないよう frontmatterExtra.locations に戻す
  *
  * 書き込みは DIRECT_URL (postgres ロール / RLS バイパス)。
  * 既定は dry-run。実際に書き込むには --apply が要る。
@@ -56,11 +59,13 @@ import {
 import "dotenv/config";
 
 import {
+  isPublishablePlace,
   parseArticle,
   parseFrontmatterDate,
   toArticleColumns,
   toArticleSourceRow,
   type ArticleColumns,
+  type ArticlePlaceRow,
   type ArticleSourceEntry,
 } from "@/lib/articles/frontmatter";
 import { hasChanged } from "@/lib/articles/changes";
@@ -206,6 +211,41 @@ async function main() {
   const titleMap = new Map<string, Candidate[]>();
   for (const a of assetsByTitle) addCandidate(titleMap, a.title, { id: a.id, date: a.canonicalDate });
 
+  // 聖地 (locations の place_id)。Place は数十件なので全件引く
+  const placeIndex = new Map(
+    (
+      await prisma.place.findMany({
+        select: { id: true, classification: true, entity: { select: { canonicalName: true } } },
+      })
+    ).map((pl) => [pl.id, pl]),
+  );
+  for (const p of parsed) {
+    const missing = p.places.filter((e) => !placeIndex.has(e.placeId));
+    if (missing.length) {
+      // ArticlePlace に入れられない (外部キー)。座標直書きと同じく frontmatterExtra に戻して push で消さない
+      p.places = p.places.filter((e) => placeIndex.has(e.placeId));
+      const inline = Array.isArray(p.frontmatterExtra.locations) ? p.frontmatterExtra.locations : [];
+      p.frontmatterExtra = {
+        ...p.frontmatterExtra,
+        locations: [...inline, ...missing.map((e) => ({ name: e.name, place_id: e.placeId }))],
+      };
+      for (const e of missing) warnings.push(`${p.path}: locations の聖地 ${e.placeId} (${e.name}) が akashic に無い`);
+    }
+    for (const e of p.places) {
+      if (!isPublishablePlace(placeIndex.get(e.placeId)!)) {
+        warnings.push(
+          `${p.path}: 非公開の聖地 ${e.name} が公開リポジトリの locations に書かれている (push 待ちにするので、push すると消える)`,
+        );
+      }
+    }
+  }
+  /** 取り込み後の ArticlePlace。name は聖地の正式名 (push が書く名前) */
+  const placeRowsOf = (file: ParsedFile): ArticlePlaceRow[] =>
+    file.places.map((e, i) => {
+      const pl = placeIndex.get(e.placeId)!;
+      return { placeId: e.placeId, name: pl.entity.canonicalName, classification: pl.classification, sortOrder: i };
+    });
+
   // --- 3. 解決する -----------------------------------------------------------
 
   const resolve = (e: ArticleSourceEntry): Resolution => {
@@ -256,6 +296,10 @@ async function main() {
       articleUpdatedAt: true, draft: true, unlisted: true, ongoing: true, lat: true, lng: true,
       frontmatterExtra: true,
       dirty: true, lastSyncedAt: true, githubSha: true, editedAt: true,
+      places: {
+        orderBy: { sortOrder: "asc" },
+        select: { placeId: true, place: { select: { classification: true } } },
+      },
       sources: {
         where: { status: { not: ArticleSourceStatus.pending } },
         orderBy: { sortOrder: "asc" },
@@ -318,9 +362,9 @@ async function main() {
    * 書き込む直前 (と dry-run の見積もり) で都度呼ぶ
    */
   const decideDirty = (file: ParsedFile, resolutions: Resolution[]) => {
-    const { sources: _sources, raw, blobSha: _sha, ...cols } = file;
+    const { sources: _sources, places: _places, raw, blobSha: _sha, ...cols } = file;
     const wanted = resolutions.map((r, i) => toArticleSourceRow(r.entry, r, i));
-    return { wanted, decision: dirtyAfterImport(raw, cols, wanted) };
+    return { wanted, decision: dirtyAfterImport(raw, cols, wanted, placeRowsOf(file)) };
   };
   const plan = parsed.map((p) => {
     const resolutions = p.sources.map(resolve);
@@ -519,7 +563,8 @@ async function main() {
       stats.created++;
     }
 
-    const { sources: _sources, raw: _raw, blobSha, ...cols } = file;
+    const { sources: _sources, raw: _raw, blobSha, places: _places, ...cols } = file;
+    const placeRows = placeRowsOf(file);
 
     // frontmatter 由来の出典。DB に入れる形に揃える (差分判定にも使う)。
     // 形は往復テストと共有する (取り込みだけ別の規則で動くのを防ぐ)
@@ -532,7 +577,13 @@ async function main() {
     // egress と接続時間を無駄に食う (過去に走りっぱなしのスクリプトで
     // 70GB 超過の事故がある)
     const prev = existingByShortId.get(file.shortId);
-    if (prev && !hasChanged(prev, cols, wanted)) {
+    // 聖地は push が書き出す行どうしで比べる (confidential 以上はファイルに無いのが正しい)
+    const comparable = prev && {
+      ...prev,
+      places: prev.places.filter((r) => isPublishablePlace(r.place)),
+    };
+    const nextPlaces = placeRows.filter(isPublishablePlace);
+    if (comparable && !hasChanged(comparable, { ...cols, places: nextPlaces }, wanted)) {
       // 内容は同じでも「取り込んだ」事実は残す。dirty / githubSha / lastSyncedAt は
       // frontmatter 由来ではないので hasChanged の比較対象に入っておらず、
       // ここで更新しないと push 済みの記事が dirty のまま残り、
@@ -630,6 +681,23 @@ async function main() {
         }),
       ),
       ...(replaced.length ? [prisma.articleSource.createMany({ data: replaced })] : []),
+      // 聖地は push が書き出す行 (public / internal) だけ置き換える。confidential 以上は
+      // akashic でだけ付けた紐づけなのでファイルに無くても消さない
+      prisma.articlePlace.deleteMany({
+        where: {
+          articleId: article.id,
+          place: { classification: { in: [ClearanceLevel.public, ClearanceLevel.internal] } },
+        },
+      }),
+      ...(placeRows.length
+        ? [
+            prisma.articlePlace.createMany({
+              data: placeRows.map((r) => ({ articleId: article.id, placeId: r.placeId, sortOrder: r.sortOrder })),
+              // ファイルに書かれた非公開の聖地は既に行があれば残す
+              skipDuplicates: true,
+            }),
+          ]
+        : []),
     ]);
     for (const d of demote) demoted.push(`${file.path}  [${d.sourceNo}] asset=${d.assetId}`);
 

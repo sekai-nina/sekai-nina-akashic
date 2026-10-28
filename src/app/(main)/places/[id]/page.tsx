@@ -6,10 +6,14 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, MapPin, ExternalLink, Trash2 } from "lucide-react";
 import { SubmitButton } from "@/components/submit-button";
-import { ASSET_KIND_LABELS, PLACE_KIND_LABELS, formatDate } from "@/lib/utils";
-import type { PlaceKind } from "@prisma/client";
+import { ASSET_KIND_LABELS, PLACE_CLASSIFICATION_LABELS, PLACE_KIND_LABELS, formatDate } from "@/lib/utils";
+import type { ClearanceLevel, PlaceKind } from "@prisma/client";
+import { accessibleClassifications } from "@/lib/classification";
+import { isPublishablePlace } from "@/lib/articles/frontmatter";
+import { listArticlesForPlace } from "@/lib/domain/article-places";
+import { listDossiersForPlace } from "@/lib/domain/dossiers";
 import { PlaceDetailMap } from "./place-detail-map";
-import { listAreaHints } from "@/lib/places/area-hints";
+import { listAreaHints } from "@/lib/domain/places";
 
 export default async function PlaceDetailPage({
   params,
@@ -23,18 +27,24 @@ export default async function PlaceDetailPage({
   const place = await getPlaceById(id, session.user.clearance);
   if (!place) notFound();
 
-  // Get linked assets via AssetEntity
-  const linkedAssets = await withClearance(session.user.clearance, (tx) =>
-    tx.assetEntity.findMany({
-      where: { entityId: place.entityId },
-      include: { asset: { select: { id: true, title: true, kind: true, canonicalDate: true, thumbnailUrl: true } } },
-      orderBy: { createdAt: "desc" },
-      take: 50,
-    })
-  ) as Array<{ id: string; createdAt: Date; asset: { id: string; title: string; kind: string; canonicalDate: Date | null; thumbnailUrl: string | null } }>;
-
   const canEdit = ["admin", "member"].includes(session.user.role);
-  const areaHints = canEdit ? await listAreaHints(session.user.clearance) : [];
+  const published = isPublishablePlace(place);
+
+  // 互いに依存しないので並べて引く (順に待つとページを開くのに 1 秒以上かかっていた)
+  const [linkedAssets, linkedArticles, linkedDossiers, areaHints] = await Promise.all([
+    // Get linked assets via AssetEntity
+    withClearance(session.user.clearance, (tx) =>
+      tx.assetEntity.findMany({
+        where: { entityId: place.entityId },
+        include: { asset: { select: { id: true, title: true, kind: true, canonicalDate: true, thumbnailUrl: true } } },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+      })
+    ) as Promise<Array<{ id: string; createdAt: Date; asset: { id: string; title: string; kind: string; canonicalDate: Date | null; thumbnailUrl: string | null } }>>,
+    listArticlesForPlace(place.id, session.user.clearance),
+    listDossiersForPlace(session.user, place.id),
+    canEdit ? listAreaHints(session.user.clearance) : Promise.resolve([]),
+  ]);
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -101,11 +111,65 @@ export default async function PlaceDetailPage({
           </p>
         </div>
         <div className="bg-white border border-slate-200 rounded-lg p-4">
+          <h3 className="text-xs font-medium text-slate-500 uppercase mb-2">クリアランス</h3>
+          <p className="text-sm text-slate-900">{PLACE_CLASSIFICATION_LABELS[place.classification]}</p>
+          {!published && (
+            <p className="text-xs text-amber-700 mt-1">
+              公開サイトの聖地マップにも、記事の locations にも出ません。紐づけは akashic の中だけに残ります
+            </p>
+          )}
+        </div>
+        <div className="bg-white border border-slate-200 rounded-lg p-4">
           <h3 className="text-xs font-medium text-slate-500 uppercase mb-2">種類</h3>
           <p className="text-sm text-slate-900">
             {place.kind ? PLACE_KIND_LABELS[place.kind] : <span className="text-slate-400">未設定</span>}
           </p>
         </div>
+      </div>
+
+      {/* Linked Articles (#283) */}
+      <div className="mb-8">
+        <h2 className="text-lg font-semibold text-slate-900 mb-3">紐付き記事 ({linkedArticles.length})</h2>
+        {linkedArticles.length === 0 ? (
+          <p className="text-sm text-slate-400">紐付き記事はまだありません（記事の編集画面で付けます）</p>
+        ) : (
+          <div className="bg-white border border-slate-200 rounded-lg divide-y divide-slate-100">
+            {linkedArticles.map((a) => (
+              <Link
+                key={a.shortId}
+                href={`/articles/${a.shortId}`}
+                className="flex items-baseline gap-3 px-4 py-2.5 hover:bg-slate-50 transition-colors"
+              >
+                <span className="text-sm text-slate-900 truncate flex-1">{a.title || "(無題)"}</span>
+                {a.draft && <span className="text-xs text-slate-400 shrink-0">下書き</span>}
+                <span className="text-xs text-slate-400 shrink-0">
+                  {a.dateDisplay ?? (a.date ? formatDate(a.date) : "")}
+                </span>
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Linked Dossiers (場所候補に入っている企画) */}
+      <div className="mb-8">
+        <h2 className="text-lg font-semibold text-slate-900 mb-3">紐付き企画 ({linkedDossiers.length})</h2>
+        {linkedDossiers.length === 0 ? (
+          <p className="text-sm text-slate-400">この聖地を場所候補に入れている企画はありません</p>
+        ) : (
+          <div className="bg-white border border-slate-200 rounded-lg divide-y divide-slate-100">
+            {linkedDossiers.map((d) => (
+              <Link
+                key={d.id}
+                href={`/dossiers/${d.id}`}
+                className="flex items-baseline gap-3 px-4 py-2.5 hover:bg-slate-50 transition-colors"
+              >
+                <span className="text-sm text-slate-900 truncate flex-1">{d.title || "(無題)"}</span>
+                <span className="text-xs text-slate-400 shrink-0">{formatDate(d.updatedAt)}</span>
+              </Link>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Linked Assets */}
@@ -231,6 +295,23 @@ export default async function PlaceDetailPage({
                 ))}
               </select>
               <p className="text-xs text-slate-400 mt-1">公開サイトの聖地マップでピンのアイコンと絞り込みに使う</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">クリアランス</label>
+              <select
+                name="classification"
+                defaultValue={place.classification}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
+              >
+                {accessibleClassifications(session.user.clearance as ClearanceLevel).map((c) => (
+                  <option key={c} value={c}>
+                    {PLACE_CLASSIFICATION_LABELS[c]}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-slate-400 mt-1">
+                生活圏など公開サイトに出したくない場所は「限定」以上に。記事・アセットとの紐づけは残ります
+              </p>
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">説明</label>

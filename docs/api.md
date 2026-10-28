@@ -28,6 +28,7 @@ APIキーは `pnpm cli:keygen <user-email> <key-name> [permissions]` で発行�
 - `write`: POST / PUT / PATCH / ファイルアップロード
 - `insta_worker`: iPad の story ワーカー専用（`/insta/jobs/:id/start` 等の報告と、自分のジョブの参照だけ）。`pnpm cli:keygen <email> "ipad-insta-worker" insta_worker` で **read / write を持たないキー**を作って iPad に置く。permission はルートを絞るだけで RLS の範囲は持ち主のクリアランスのままなので、**clearance が internal の専用ユーザー**に発行する。なお `GET /insta/targets` `/insta/account` `/ai-status` は「キーが有効なら誰でも読める」設計なので、このキーからも読める
 - `article_push`: 記事 1 本を公開リポジトリに push する（`POST /articles/:shortId/push`）。`write` とは別に持たせる。Discord bot のキーにだけ付ける（#209）
+- `clip`: クリップを 1 件作る（`POST /clips`）だけを通す。Discord の返信からクリップする bot 用（#286）。**clearance が internal の bot 専用ユーザー**に発行する（/clips の作成者はキーの持ち主になる）。`insta_worker` と同じく、「キーが有効なら誰でも読める」`GET /insta/targets` `/insta/account` `/tiktok/targets` `/ai-status` はこのキーからも読める
 
 ### エラーレスポンス
 
@@ -112,6 +113,7 @@ APIキーは `pnpm cli:keygen <user-email> <key-name> [permissions]` で発行�
 | POST | `/meetgreets/:id/article` | write | 記事を生成（既存があれば増えた分だけ追記） |
 | GET | `/dossiers/:id/article` | read | ドシエの記事テンプレートと紐づく記事 |
 | POST | `/dossiers/:id/article` | write | 器を持たないドシエから記事を生成（テンプレート指定つき） |
+| POST | `/clips` | clip or write | アセットのクリップを 1 件作る（メモ・引用） |
 | GET | `/lives` | read | ライブ（記事ワークフロー）一覧と進み具合 |
 | POST | `/lives` | write | ライブ作成（ドシエと X レポ収集を自動作成し、公演と曲を入れ、素材候補を返す） |
 | GET | `/lives/:id` | read | ライブ詳細 + 素材候補 |
@@ -633,6 +635,8 @@ API キーからは **引き上げしかできない。** `PATCH /assets/:id` / 
 `kind` は聖地の種類で、公開サイトの地図でピンのアイコンと絞り込みに使う。`food`（グルメ）/ `leisure`（レジャー）/ `scenery`（寺社・公園・景色）/ `venue`（会場・放送局）/ `shop`（店・施設）/ `null`（未設定。サイト側が名前・説明から推定する）。
 
 `area` は聖地マップのエリア名（`東京` / `横浜・川崎` / `名古屋` など、人が付ける自由文字列）。公開サイトの絞り込みと遠景でのまとまりに使う。`null` はサイト側で「その他」扱い。既存のエリア名と同じ表記を使うこと（画面の入力欄は既存の名前を候補に出す）。
+
+`classification` は `internal` までが公開サイトに出る（聖地マップも、記事 frontmatter の `locations` も）。生活圏など公開サイトに出したくない場所は `confidential` 以上にする。記事との紐づけ（`ArticlePlace`、記事の編集画面で付ける）とアセットとの紐づけは残り、akashic の中だけで「どの記事・アセットに出てくるか」を追える（#283）。
 
 ### POST /places
 
@@ -1264,10 +1268,49 @@ body は省略可（`subject` を省くと既定のコミットメッセージ�
 |---|---|---|---|
 | `quote_blog` | `quote` | 「坂井新奈ブログでの名言を紹介する。」+ ドシエの抜粋を `>` の引用ブロックで併記 | 本人ブログ **1 本**の抜粋だけを使う（抜粋のあるブログが 2 本以上なら 400、ひなたぼっこ日記は数えない）。タイトルは `坂井新奈ブログ「X」` → `ブログ「X」`。`date` / 関連メディアは持たない。追記は増えた抜粋を末尾に足す |
 | `attribute` | `attribute` | **AI（Claude）が書く**: リード 1 文 + 事実の箇条書き、各事実に `^[n]`（出典番号は素材と同じ採番: ブログ → トーク） | タイトル = ドシエのタイトル。`date` 無し。tags は既存タグから選ぶよう AI に指示する（保証はしない。他メンバー名可）。`[[…]]` は公開済み記事のタイトルにだけ張るよう指示する。**ドシエに画像しか入っていないブログは、同じ URL の本文アセットを素材に足して出典の宛先にする**（人はブログを読んで書くため。RLS と機密の上限は同じに効く。`outing` / `quote_situational` も同じ）。`draft: true` で保存。追記は本文に足すものが無い（新しい素材を反映するには記事の編集画面で手で書く。作り直しは後続） |
-| `outing` | `event` | **AI が書く**: 冒頭 1〜2 文 + 場所 / 行動ごとの `##` と事実の箇条書き `^[n]`（引用しない）。そのあとに機械で `## 関連メディア`（画像・動画のトークとブログ画像をリンクで、TikTok を埋め込みで、1 つの箇条書きに。文章のトークは出典にだけ。AI が書いてしまった同名の章は落とす） | タイトル = ドシエのタイトル。`date` / `date_display` は AI の提案（日が分からなければ月の 1 日 + 「YYYY年M月頃」）。tags = 同行者 + カテゴリ。**`locations` は場所候補から**（聖地に昇格済みなら `{ name, place_id }`、未昇格で座標があれば `{ name, lat, lng, google_maps_url? }`、座標も無ければ落とす。**昇格先の聖地が `internal` を超える / 見えない候補は記事にも AI にも出さない**）。場所候補の名前・住所・Google マップ URL も AI に渡す（編集メモは渡さない）。`draft: true`。追記は関連メディアだけ足す（`locations` は追記で更新しない。場所候補を足したら記事の編集画面で） |
+| `outing` | `event` | **AI が書く**: 冒頭 1〜2 文 + 場所 / 行動ごとの `##` と事実の箇条書き `^[n]`（引用しない）。そのあとに機械で `## 関連メディア`（画像・動画のトークとブログ画像をリンクで、TikTok を埋め込みで、1 つの箇条書きに。文章のトークは出典にだけ。AI が書いてしまった同名の章は落とす） | タイトル = ドシエのタイトル。`date` / `date_display` は AI の提案（日が分からなければ月の 1 日 + 「YYYY年M月頃」）。tags = 同行者 + カテゴリ。**`locations` は場所候補から**（聖地に昇格済みなら `{ name, place_id }`、未昇格で座標があれば `{ name, lat, lng, google_maps_url? }`、座標も無ければ落とす。**昇格先の聖地が `internal` を超える / 見えない候補は記事にも AI にも出さない**）。昇格済みの候補は**非公開の聖地も含めて**記事の `ArticlePlace` に紐づける（frontmatter に出るのは push 時に `internal` 以下のものだけ。#283）。場所候補の名前・住所・Google マップ URL も AI に渡す（編集メモは渡さない）。`draft: true`。追記は関連メディアだけ足す（`locations` は追記で更新しない。場所候補を足したら記事の編集画面で） |
 | `quote_situational` | `quote` | **AI が書く**: 状況の地の文 → `>` 発言 → 反応 1 文 | **タイトルは AI が実際の発言の表記に整えてよい**（ドシエのタイトルは目安。`yes, me now?` → `Yes, me now?`。path もそのタイトルで決まる。同名の記事があれば 409）。`date` / `date_display` は発言の時期（分からなければ素材の投稿日 + 「頃」）、tags は関係するメンバー。関連メディアは出さない。`draft: true`。追記は本文に足すものが無い |
 
 （`meetgreet` / `live` は器側で組む: `POST /meetgreets/:id/article` / `POST /lives/:id/article`）
+
+## クリップ (Clips)
+
+### POST /clips
+
+アセットのクリップ（#41）を 1 件作る（#286）。画面の「クリップ」と同じ処理で、プール（`kind = clips` のドシエ）に入る。Discord bot が、トークの投稿への返信から叩く。`clip` か `write` を持つキーだけ。
+
+**リクエストボディ (JSON):**
+
+```json
+{
+  "assetId": "cm_talk",
+  "note": "ここ記事にしたい",
+  "excerpt": "揺れても、根を張る",
+  "requestedBy": "discord-user"
+}
+```
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `assetId` | string | ✓ | クリップするアセット（100 字まで） |
+| `note` | string | | メモ（10,000 字まで） |
+| `excerpt` | string | | 引用（10,000 字まで）。本文から位置を探し、見つかればハイライトの範囲も保存する（空白・改行の違いは吸収）。見つからなければ文字列だけ保存する |
+| `requestedBy` | string | | 頼んだ人（返信した人の Discord 名など。200 字まで）。監査ログ `clip.create` の metadata に残すだけ |
+
+`note` と `excerpt` のどちらかは必須。
+
+**レスポンス (201):**
+
+```json
+{ "id": "cm_item", "assetId": "cm_talk", "located": true }
+```
+
+- `located` は引用の位置が本文に見つかったか（メモだけなら `false`）
+- アセットが無い・キーの持ち主に見えないときは 404。メモも引用も空なら 400
+- プールより上の機密（`internal` を超える）のアセットは 400（抜粋がプールの機密レベルで見えてしまうため）
+- キーの持ち主のクリアランスが `internal` 未満、または role が viewer なら 403
+- 作成者はキーの持ち主（bot 専用ユーザー）。/clips とアセット詳細のクリップ欄に出る
+- **冪等ではない。** 同じ内容を 2 回送ると 2 件できる。クリップを保存したあと監査ログの書き込みで落ちると 500 になるので、5xx を自動で再送しない（bot は失敗を返信で知らせ、人が確かめる）
 
 ## ミーグリ記事ワークフロー (MeetGreets)
 

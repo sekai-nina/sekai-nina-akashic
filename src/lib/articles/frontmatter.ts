@@ -53,6 +53,7 @@ export const INTENTIONAL_NORMALIZATIONS = [
   "キーの順序は KNOWN_FRONTMATTER_KEYS 順が先、frontmatterExtra 由来のキーが後 (extra 内の順序は jsonb なので保存されない)",
   "本文先頭の空行は 1 行に揃える (Markdown の描画には影響しない)",
   "文字列値は前後の空白を落とす",
+  "locations の聖地 (place_id) は ArticlePlace に入り、書き出しでは座標直書きの要素より前に並ぶ。name は聖地の正式名になる",
 ] as const;
 
 /** frontmatter の source[] の 1 要素 (ファイル側の形。`parseArticle` の出力) */
@@ -86,6 +87,58 @@ export interface ArticleSourceRow {
   /** 元ファイルに書かれていた ref (status に依らず保持)。akashic 側で付けた行は null */
   originalRef: string | null;
   sortOrder: number;
+}
+
+/**
+ * frontmatter の `locations` のうち聖地 (`place_id`) を指す要素 (ファイル側の形)。
+ * 取り込みは `ArticlePlace` の行にする。座標を直書きした要素はこの形にならず
+ * `frontmatterExtra.locations` に残る
+ */
+export interface ArticlePlaceEntry {
+  placeId: string;
+  name: string;
+}
+
+/**
+ * DB の ArticlePlace 行のうち、frontmatter の組み立てに要る列。
+ *
+ * `classification` は紐づく Place のもの。型で必須にしておくのは `ArticleSourceRow` と同じ理由
+ * (絞り込みを迂回する詰め替えをコンパイル時に防ぐ。絞り込みは `buildFrontmatter` がやる)。
+ * `name` は push 時点の聖地の正式名 (`Entity.canonicalName`)
+ */
+export interface ArticlePlaceRow {
+  placeId: string;
+  name: string;
+  classification: ClearanceLevel;
+  sortOrder: number;
+}
+
+/**
+ * frontmatter の `locations` に載せてよい聖地か。**public / internal だけ。**
+ *
+ * 公開サイトの聖地マップは `GET /places` (internal のキー) を読むので、internal までが
+ * サイトに出る範囲。confidential 以上は「公開サイトに出したくないが記事との関係は
+ * akashic で持ちたい」聖地 (#283) なので、紐づけは DB にだけ残して書き出さない
+ */
+export function isPublishablePlace(row: Pick<ArticlePlaceRow, "classification">): boolean {
+  return row.classification === ClearanceLevel.public || row.classification === ClearanceLevel.internal;
+}
+
+/**
+ * `locations` の聖地をそのまま DB の行の形にする (並び順 = ファイルの順)。
+ * `name` はファイルに書かれた名前、`classification` は呼び出し側が決める
+ * (取り込みは Place の実際の値、往復テストは internal = 書き出される側)
+ */
+export function toArticlePlaceRows(
+  entries: ArticlePlaceEntry[],
+  classificationOf: (placeId: string) => ClearanceLevel = () => ClearanceLevel.internal,
+): ArticlePlaceRow[] {
+  return entries.map((e, i) => ({
+    placeId: e.placeId,
+    name: e.name,
+    classification: classificationOf(e.placeId),
+    sortOrder: i,
+  }));
 }
 
 /** `toArticleSourceRow` に渡す照合結果。取り込み CLI の resolve が決める */
@@ -310,7 +363,7 @@ function toNum(v: unknown): number | null {
  * (`ArticleFrontmatterInput` 側は書き出し専用なので string も許している)。
  * `sources` はまだファイル側の形 (照合前)。DB の行にするのは `toArticleSourceRow`
  */
-export interface ArticleColumns extends Omit<ArticleFrontmatterInput, "sources"> {
+export interface ArticleColumns extends Omit<ArticleFrontmatterInput, "sources" | "places"> {
   path: string;
   slug: string | null;
   body: string;
@@ -319,6 +372,8 @@ export interface ArticleColumns extends Omit<ArticleFrontmatterInput, "sources">
   tags: unknown[];
   frontmatterExtra: Record<string, unknown>;
   sources: ArticleSourceEntry[];
+  /** `locations` の聖地 (ファイルの並び順)。DB の行にするのは取り込み CLI */
+  places: ArticlePlaceEntry[];
 }
 
 /**
@@ -329,7 +384,8 @@ export interface ArticleColumns extends Omit<ArticleFrontmatterInput, "sources">
  * 「テストは通るが本番の取り込みは別の規則で動く」状態になる。
  */
 export function toArticleColumns(parsed: ParsedArticle, path: string): ArticleColumns {
-  const { frontmatter: fm, extra, sources, body } = parsed;
+  const { frontmatter: fm, sources, body } = parsed;
+  const { places, extra } = splitLocations(parsed.extra);
   return {
     shortId: fm.short_id == null ? "" : String(fm.short_id).trim(),
     path,
@@ -352,7 +408,38 @@ export function toArticleColumns(parsed: ParsedArticle, path: string): ArticleCo
     lng: toNum(fm.lng),
     frontmatterExtra: extra,
     sources,
+    places,
   };
+}
+
+/**
+ * `locations` から聖地 (`place_id`) の要素を抜き出す。残り (座標直書き) は extra に残し、
+ * 残りが無ければキーごと消す。`place_id` の要素は name / place_id しか持たない前提
+ * (それ以外のキーは書き出しで消える。`verify.ts` の lossyParseNotes が知らせる)。
+ * 同じ聖地が 2 回出てきたら 1 回にする (`ArticlePlace` は記事×聖地で一意)
+ */
+export function splitLocations(extra: Record<string, unknown>): {
+  places: ArticlePlaceEntry[];
+  extra: Record<string, unknown>;
+} {
+  const locations = extra.locations;
+  if (!Array.isArray(locations)) return { places: [], extra };
+  const places: ArticlePlaceEntry[] = [];
+  const rest: unknown[] = [];
+  const seen = new Set<string>();
+  for (const loc of locations) {
+    const placeId = loc && typeof loc === "object" ? str((loc as Record<string, unknown>).place_id) : undefined;
+    if (!placeId) {
+      rest.push(loc);
+      continue;
+    }
+    if (seen.has(placeId)) continue;
+    seen.add(placeId);
+    places.push({ placeId, name: str((loc as Record<string, unknown>).name) ?? "" });
+  }
+  if (!places.length) return { places, extra };
+  const { locations: _locations, ...others } = extra;
+  return { places, extra: rest.length ? { ...others, locations: rest } : others };
 }
 
 /** `buildFrontmatter` の入力。Article の行と、それに紐づく出典 */
@@ -376,6 +463,15 @@ export interface ArticleFrontmatterInput {
   frontmatterExtra?: unknown;
   /** ArticleSource の行。絞り込みは `buildFrontmatter` が行うので全行渡してよい */
   sources?: ArticleSourceRow[];
+  /** ArticlePlace の行。絞り込み (public / internal だけ) は `buildFrontmatter` が行う */
+  places?: ArticlePlaceRow[];
+  /**
+   * 書き出してよい聖地の ID (Place が public / internal)。**push は必ず渡す。**
+   * `frontmatterExtra.locations` にまだ残っている `place_id` の要素 (backfill 前・backfill が
+   * 移せなかった記事・取り込み時に akashic に無かった聖地) は、ここに無ければ落とす (fail-closed)。
+   * 渡さない (往復テスト・取り込みの dirty 判定) ときは素通し
+   */
+  publishablePlaceIds?: ReadonlySet<string>;
 }
 
 /**
@@ -489,18 +585,72 @@ export function buildFrontmatter(input: ArticleFrontmatterInput): BuiltFrontmatt
   const sources = publishable.map(sourceToYaml).filter((s) => Object.keys(s).length > 0);
   if (sources.length) fm.source = sources;
 
+  // locations = 聖地 (ArticlePlace。public / internal だけ) + 座標直書き (frontmatterExtra)
+  // 同じ sortOrder は placeId で決める (見えない行は番号を振り直されないので同値がありうる。
+  // push のたびに順序が入れ替わらないように)
+  const placeLocations = (input.places ?? [])
+    .filter(isPublishablePlace)
+    .sort((a, b) => a.sortOrder - b.sortOrder || (a.placeId < b.placeId ? -1 : a.placeId > b.placeId ? 1 : 0))
+    .map((p) => ({ name: p.name, place_id: p.placeId }));
+  const linkedIds = new Set(placeLocations.map((l) => l.place_id));
+  /** extra に残った `place_id` の要素。ArticlePlace と重複するもの・書き出せない聖地は落とす */
+  const keepExtraLocation = (loc: unknown) => {
+    const placeId = loc && typeof loc === "object" ? str((loc as Record<string, unknown>).place_id) : undefined;
+    if (!placeId) return true;
+    if (linkedIds.has(placeId)) return false;
+    return input.publishablePlaceIds ? input.publishablePlaceIds.has(placeId) : true;
+  };
+
   // モデル化されていないキー (featured_quotes / locations / dossier 等) を復元する。
   // 専用カラムと衝突するキーはカラム側が正なので無視する
   const extra = input.frontmatterExtra;
-  if (extra && typeof extra === "object" && !Array.isArray(extra)) {
-    const known = new Set<string>(KNOWN_FRONTMATTER_KEYS);
-    for (const [k, v] of Object.entries(extra as Record<string, unknown>)) {
-      if (known.has(k) || v === undefined) continue;
-      fm[k] = v;
+  const entries =
+    extra && typeof extra === "object" && !Array.isArray(extra)
+      ? Object.entries(extra as Record<string, unknown>)
+      : [];
+  const known = new Set<string>(KNOWN_FRONTMATTER_KEYS);
+  let locationsDone = false;
+  const writeLocations = (inline: unknown) => {
+    locationsDone = true;
+    // 配列でない / 空配列の locations は今までどおりそのまま書く (聖地が無いときだけ)
+    if (!Array.isArray(inline)) {
+      if (placeLocations.length) fm.locations = placeLocations;
+      else if (inline !== undefined) fm.locations = inline;
+      return;
     }
+    const rest = inline.filter(keepExtraLocation);
+    if (!placeLocations.length && rest.length === inline.length) {
+      fm.locations = inline;
+      return;
+    }
+    const all = [...placeLocations, ...rest];
+    if (all.length) fm.locations = all;
+  };
+  for (const [k, v] of entries) {
+    if (known.has(k) || v === undefined) continue;
+    if (k === "locations") {
+      writeLocations(v);
+      continue;
+    }
+    // extra に locations が無い (聖地だけの記事) ときは、jsonb がキーを並べる順
+    // (長さ → バイト順) で locations が来る位置に差し込む。取り込み前は locations も
+    // jsonb に入っていたので、ArticlePlace に移しても書き出しのキー順が変わらない
+    if (!locationsDone && placeLocations.length && jsonbKeyBefore("locations", k)) writeLocations(undefined);
+    fm[k] = v;
   }
+  if (!locationsDone) writeLocations(undefined);
 
   return { frontmatter: fm, pending, blocked };
+}
+
+/** jsonb のキー順 (短い順、同じ長さならバイト順) で a が b より前か */
+function jsonbKeyBefore(a: string, b: string): boolean {
+  const enc = new TextEncoder();
+  const ab = enc.encode(a);
+  const bb = enc.encode(b);
+  if (ab.length !== bb.length) return ab.length < bb.length;
+  for (let i = 0; i < ab.length; i++) if (ab[i] !== bb[i]) return ab[i] < bb[i];
+  return false;
 }
 
 /**

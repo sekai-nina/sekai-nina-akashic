@@ -631,6 +631,7 @@ model Place {
   updatedAt      DateTime       @updatedAt
 
   dossierCandidates DossierPlaceCandidate[]
+  articles          ArticlePlace[]
 
   @@index([latitude, longitude])
   @@index([classification])
@@ -890,6 +891,7 @@ model Article {
   updatedAt DateTime @updatedAt
 
   sources       ArticleSource[]
+  places        ArticlePlace[]
   meetGreet     MeetGreet?
   live          Live?
   anniversaries Anniversary[]
@@ -948,6 +950,28 @@ model ArticleSource {
   @@index([assetId])
   @@index([status])
   @@index([classification])
+}
+
+/// 記事と聖地の紐づけ (#283)。記事 frontmatter の `locations` のうち `place_id` を持つ要素の正。
+/// **保護テーブル**。自前の classification は持たず、紐づく Place の classification に従う
+/// (RLS も Place の存在チェック。AssetEntity と同じ形)。
+/// **push で `locations` に載るのは Place が public / internal の行だけ**
+/// (src/lib/articles/frontmatter.ts の `isPublishablePlace`)。confidential 以上は
+/// 公開サイトに出さずに akashic の中だけで「どの記事に出てくるか」を持つための行。
+/// 座標を直書きした locations の要素はここに入らず、frontmatterExtra に残る
+model ArticlePlace {
+  id        String  @id @default(cuid())
+  articleId String
+  article   Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  placeId   String
+  place     Place   @relation(fields: [placeId], references: [id], onDelete: Cascade)
+  /// 記事内の訪問順 (frontmatter の locations の並び)
+  sortOrder Int     @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@unique([articleId, placeId])
+  @@index([placeId])
 }
 
 // ---------------------------------------------------------------------------

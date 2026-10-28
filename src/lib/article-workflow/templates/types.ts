@@ -27,6 +27,11 @@ export interface DossierRenderInput {
    * `placeId` があれば聖地に昇格済み (frontmatter は `place_id` だけ)、無ければ座標をインラインで持つ
    */
   places: DossierPlace[];
+  /**
+   * 聖地に昇格済みの場所候補の Place ID (非公開の聖地も含む)。記事の ArticlePlace になる (#283)。
+   * 非公開の聖地の名前・座標は `places` に入らないので、ここには ID しか無い
+   */
+  linkedPlaceIds?: string[];
   /** published_at / synced_at に入れる JST の今日 */
   today: string;
 }

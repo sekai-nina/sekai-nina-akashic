@@ -3,12 +3,16 @@ import {
   type ClearanceLevel,
   type DossierAccessMode,
   type DossierItemKind,
+  type Prisma,
   type TextType,
 } from "@prisma/client";
 import { withSession } from "@/lib/db";
 import { canEditDossier, canManageDossier } from "@/lib/auth/dossier-permissions";
+import { assertClearance } from "@/lib/classification";
+import { isPublishablePlace } from "@/lib/articles/frontmatter";
 import { logAudit } from "./audit";
 import { entityClearanceWhere } from "./entities";
+import { markArticlesForPlace } from "./places";
 
 interface ActingUser {
   id: string;
@@ -100,6 +104,21 @@ export async function listDossiersContainingAsset(user: ActingUser, assetId: str
     if (row) row.itemCount++;
     else byId.set(dossier.id, { ...dossier, itemCount: 1 });
   }
+  return [...byId.values()].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+}
+
+/**
+ * この聖地を場所候補に持つドシエ (聖地詳細の「紐付き企画」用)。
+ * 見えるかどうかは Dossier / DossierPlaceCandidate の RLS に任せる
+ */
+export async function listDossiersForPlace(user: ActingUser, placeId: string) {
+  const rows = await withSession(user, (tx) =>
+    tx.dossierPlaceCandidate.findMany({
+      where: { placeId, dossier: NOT_CLIP_POOL },
+      select: { dossier: { select: { id: true, title: true, updatedAt: true } } },
+    })
+  );
+  const byId = new Map(rows.map(({ dossier }) => [dossier.id, dossier]));
   return [...byId.values()].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
 }
 
@@ -368,7 +387,7 @@ export async function requireEditAccess(
 }
 
 export async function nextSortOrder(
-  tx: Parameters<Parameters<typeof withSession>[1]>[0],
+  tx: Prisma.TransactionClient,
   dossierId: string
 ): Promise<number> {
   const last = await tx.dossierItem.findFirst({
@@ -722,8 +741,22 @@ export async function removePlaceCandidate(user: ActingUser, candidateId: string
  *  - If `placeId` is set, the existing Place is bumped to status=confirmed
  *  - Otherwise, a new Entity(type=place) + Place is created from the
  *    candidate's inline fields. The new Place is linked back.
+ *
+ * `classification` を渡すと聖地の公開範囲もそれにする (公開サイトに出すかどうか)。
+ * 省略時は既存の聖地はそのまま、新規は既定の internal。
  */
-export async function promotePlaceCandidate(user: ActingUser, candidateId: string) {
+export async function promotePlaceCandidate(
+  user: ActingUser,
+  candidateId: string,
+  classification?: ClearanceLevel
+) {
+  if (classification !== undefined) {
+    // 公開範囲を変えるのは /places の編集と同じく admin / member だけ (viewer も自分の企画は編集できる)
+    if (user.role !== "admin" && user.role !== "member") {
+      throw new Error("聖地の公開範囲を変えられるのは admin / member だけです");
+    }
+    assertClearance(user.clearance, classification);
+  }
   const candidate = await withSession(user, (tx) =>
     tx.dossierPlaceCandidate.findUnique({
       where: { id: candidateId },
@@ -735,18 +768,19 @@ export async function promotePlaceCandidate(user: ActingUser, candidateId: strin
 
   // Path 1: existing Place — just confirm its status.
   if (candidate.placeId) {
-    await withSession(user, (tx) =>
-      tx.place.update({
+    await withSession(user, async (tx) => {
+      await markArticlesIfPublishabilityChanges(tx, candidate.place, classification);
+      await tx.place.update({
         where: { id: candidate.placeId! },
-        data: { status: "confirmed" },
-      })
-    );
+        data: { status: "confirmed", ...(classification ? { classification } : {}) },
+      });
+    });
     await logAudit({
       actorId: user.id,
       action: "place.confirm",
       targetType: "Place",
       targetId: candidate.placeId,
-      metadata: { fromCandidate: candidateId },
+      metadata: { fromCandidate: candidateId, classification },
     });
     return { placeId: candidate.placeId };
   }
@@ -771,9 +805,10 @@ export async function promotePlaceCandidate(user: ActingUser, candidateId: strin
     // The entity may already have a Place attached (1:1 unique on entityId)
     const existing = await tx.place.findUnique({ where: { entityId: entity.id } });
     if (existing) {
+      await markArticlesIfPublishabilityChanges(tx, existing, classification);
       const updated = await tx.place.update({
         where: { id: existing.id },
-        data: { status: "confirmed" },
+        data: { status: "confirmed", ...(classification ? { classification } : {}) },
       });
       await tx.dossierPlaceCandidate.update({
         where: { id: candidateId },
@@ -789,6 +824,7 @@ export async function promotePlaceCandidate(user: ActingUser, candidateId: strin
         address: candidate.address ?? null,
         googleMapsUrl: candidate.googleMapsUrl ?? null,
         status: "confirmed",
+        ...(classification ? { classification } : {}),
       },
     });
     await tx.dossierPlaceCandidate.update({
@@ -803,8 +839,19 @@ export async function promotePlaceCandidate(user: ActingUser, candidateId: strin
     action: "place.create",
     targetType: "Place",
     targetId: place.id,
-    metadata: { fromCandidate: candidateId, name },
+    metadata: { fromCandidate: candidateId, name, classification },
   });
 
   return { placeId: place.id };
+}
+
+// 記事の locations に載るかどうかが変わるなら、紐づく記事を push 対象にする (places.ts の updatePlace と同じ)
+async function markArticlesIfPublishabilityChanges(
+  tx: Prisma.TransactionClient,
+  place: { id: string; classification: ClearanceLevel } | null,
+  classification: ClearanceLevel | undefined
+) {
+  if (!place || classification === undefined) return;
+  if (isPublishablePlace(place) === isPublishablePlace({ classification })) return;
+  await markArticlesForPlace(tx, place.id);
 }

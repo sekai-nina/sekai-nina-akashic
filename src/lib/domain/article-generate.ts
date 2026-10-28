@@ -26,7 +26,7 @@ import { Prisma } from "@prisma/client";
 import { prisma, withClearance, withSession, type TransactionClient } from "@/lib/db";
 import { EXCLUSION_KIND_LABELS, todayJst } from "@/lib/utils";
 import { canEditDossier } from "@/lib/auth/dossier-permissions";
-import { parseFrontmatterDate } from "@/lib/articles/frontmatter";
+import { parseFrontmatterDate, splitLocations } from "@/lib/articles/frontmatter";
 import { jsonStringArray, MAX_ARTICLE_CLEARANCE } from "@/lib/meetgreet/config";
 import { exclusionKey, planAppend, isPureAppend, type AppendLayout } from "@/lib/meetgreet/append";
 import { checkMerge, finalizeMerge, mergePrompt, renumberMaterials, unwrapFence } from "@/lib/article-workflow/merge";
@@ -503,7 +503,7 @@ async function loadArticleSources(user: ActingUser, articleId: string) {
   return withClearance(user.clearance, (tx) =>
     tx.articleSource.findMany({
       where: { articleId },
-      select: { sourceNo: true, assetId: true, url: true },
+      select: { id: true, status: true, sourceNo: true, assetId: true, url: true },
     })
   );
 }
@@ -531,6 +531,18 @@ async function applySources(
   let stamp = expectedUpdatedAt;
   const failed: string[] = [];
   for (const s of sources) {
+    if (s.existingId) {
+      // 記事に番号無しで載っている出典 (手書きの古い記事)。作り直さずに番号だけ振る
+      const numbered = await withClearance(user.clearance, (tx) =>
+        tx.articleSource.updateMany({
+          where: { id: s.existingId, articleId, sourceNo: null },
+          data: { sourceNo: s.sourceNo },
+        })
+      );
+      if (numbered.count === 1) applied++;
+      else failed.push(`${s.label} (番号を振れなかった)`);
+      continue;
+    }
     if (!s.assetId) {
       failed.push(`${s.label} (紐づけ先のアセットが無い)`);
       continue;
@@ -619,11 +631,16 @@ function refreshedExtra(template: ArticleTemplateDef, extra: Record<string, unkn
   return out;
 }
 
-/** frontmatter の dossier / meetgreet 等を入れ直す (push でそのまま復元される) */
+/**
+ * frontmatter の dossier / meetgreet 等を入れ直す (push でそのまま復元される)。
+ * `locations` の聖地 (`place_id`) の要素は入れない。記事↔聖地の正は ArticlePlace (#283) で、
+ * 新規作成の保存が `linkArticlePlaces` で別に書く
+ */
 async function saveFrontmatterExtra(
   articleId: string,
-  extra: Record<string, unknown>
+  rawExtra: Record<string, unknown>
 ): Promise<void> {
+  const { extra } = splitLocations(rawExtra);
   const current = await prisma.article.findUnique({
     where: { id: articleId },
     select: { frontmatterExtra: true },
@@ -646,6 +663,23 @@ async function saveFrontmatterExtra(
       dirty: true,
       editedAt: new Date(),
     },
+  });
+}
+
+/**
+ * 新規作成した記事に聖地を紐づける (ArticlePlace、訪問順)。非公開の聖地も付ける (#283)。
+ * 見えない聖地は RLS で数が合わなくなるので付けずに飛ばす (読んだときと同じ操作者なので通常は起きない)
+ */
+async function linkArticlePlaces(articleId: string, placeIds: string[], clearance: string): Promise<void> {
+  if (placeIds.length === 0) return;
+  await withClearance(clearance, async (tx) => {
+    const visible = new Set(
+      (await tx.place.findMany({ where: { id: { in: placeIds } }, select: { id: true } })).map((p) => p.id)
+    );
+    const rows = placeIds
+      .filter((id) => visible.has(id))
+      .map((placeId, sortOrder) => ({ articleId, placeId, sortOrder }));
+    if (rows.length) await tx.articlePlace.createMany({ data: rows, skipDuplicates: true });
   });
 }
 
@@ -763,6 +797,11 @@ export async function saveArticle(
     }
 
     await saveFrontmatterExtra(articleId, rendered.frontmatterExtra);
+    await linkArticlePlaces(
+      articleId,
+      rendered.placeIds ?? splitLocations(rendered.frontmatterExtra).places.map((p) => p.placeId),
+      user.clearance
+    );
 
     await logAudit({
       actorId: user.id,
@@ -1043,8 +1082,9 @@ export async function proposeMerge(
     plan.changedLines.flatMap((i) => [...(planLines[i] ?? "").matchAll(/\^\[(\d+)\]/g)].map((m) => Number(m[1])))
   );
   const textAssets = new Set(input.assets.filter((a) => a.kind === "text" && !a.supplement).map((a) => a.id));
+  // 番号無しで記事に載っている出典 (`existingId`) は、行が参照するから番号を振るだけで本文には書かせない
   const writeSources = plan.newSources.filter(
-    (s) => !mechanicalNos.has(s.sourceNo) || (s.assetId != null && textAssets.has(s.assetId))
+    (s) => !s.existingId && (!mechanicalNos.has(s.sourceNo) || (s.assetId != null && textAssets.has(s.assetId)))
   );
   const newNos = new Set(writeSources.map((s) => s.sourceNo));
   // 中身を渡すのは新しい素材だけ (組み立ての番号で指定する)
@@ -1062,7 +1102,11 @@ export async function proposeMerge(
       label: s.label,
       material:
         materialByNo.get(s.sourceNo) ??
-        (newNos.has(s.sourceNo) ? "" : `^[${s.sourceNo}] ${s.label}\n（画像・動画だけのクリップ。黄色の行として足します）`),
+        (newNos.has(s.sourceNo)
+          ? ""
+          : s.existingId
+            ? `^[${s.sourceNo}] ${s.label}\n（記事にもう載っている出典。黄色の行から参照するので番号を振ります）`
+            : `^[${s.sourceNo}] ${s.label}\n（画像・動画だけのクリップ。黄色の行として足します）`),
     })),
     ai,
     mechanicalOnly: writeSources.length === 0,

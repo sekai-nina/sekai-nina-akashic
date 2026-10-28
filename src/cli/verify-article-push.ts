@@ -64,7 +64,7 @@ async function main() {
   // push 画面と同じ経路で全件を一度に組み立てる (記事ごとにトランザクションを張らない)
   const renderedByShortId = new Map((await renderArticlesForPush({})).map((r) => [r.shortId, r]));
 
-  const byVerdict: Record<Verdict, string[]> = { identical: [], normalized: [], ref_added: [], changed: [] };
+  const byVerdict: Record<Verdict, string[]> = { identical: [], normalized: [], ref_added: [], places: [], changed: [] };
   const missingFile: string[] = [];
   const blocked: string[] = [];
   const diffs: string[] = [];
@@ -93,7 +93,7 @@ async function main() {
   const notImported = [...inRepo].filter((p) => !inDb.has(p)).sort();
 
   console.log("\n=== 結果 ===");
-  for (const v of ["identical", "normalized", "ref_added", "changed"] as const) {
+  for (const v of ["identical", "normalized", "ref_added", "places", "changed"] as const) {
     console.log(`  ${VERDICT_LABELS[v].padEnd(10)} ${byVerdict[v].length}`);
   }
   console.log(`  ${"push 拒否".padEnd(10)} ${blocked.length}`);
@@ -109,6 +109,7 @@ async function main() {
   section("push 拒否 — 非 public の applied/unresolved がある", blocked);
   section("DB にあってリポジトリに無い — push すると削除済みファイルが復活する", missingFile);
   section("ref 追加", byVerdict.ref_added);
+  section("聖地の差分 (akashic が正。改名・非公開化・削除を push で反映する)", byVerdict.places);
   section("正規化のみ", byVerdict.normalized);
   section("リポジトリにあって DB に無い (未取り込み)", notImported);
 

@@ -4,11 +4,13 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import type { ApiKeyUser } from "@/lib/api-auth";
 import { withClearance } from "@/lib/db";
 import { isClassificationDowngrade } from "@/lib/classification";
-import { invalidateAssets, invalidatePlaces } from "@/lib/cache";
+import { invalidateAssets, invalidateDossiers, invalidatePlaces } from "@/lib/cache";
 import { parseDateOnly } from "@/lib/domain/coverage";
 import { getAsset, getAssetClassification, updateAsset } from "@/lib/domain/assets";
 import { intakeAsset } from "@/lib/domain/asset-intake";
 import { NinaAuthorConflictError, setNinaAppearance } from "@/lib/domain/nina-appearance";
+import { createClip } from "@/lib/domain/clips";
+import { ClipAssetNotFoundError, ClipInputError } from "@/lib/clips/errors";
 import { NINA_APPEARANCES } from "@/lib/nina";
 import { listEntities, searchEntities } from "@/lib/domain/entities";
 import { createPlace, getPlaceById, listPlaces, updatePlace } from "@/lib/domain/places";
@@ -39,6 +41,8 @@ const DEFAULT_PER_PAGE = 20;
 const MAX_SEARCH_PER_PAGE = 50;
 /** エンティティは 1 件が小さいので多めに返せる */
 const MAX_ENTITY_PER_PAGE = 100;
+/** クリップのメモ・引用の上限 (POST /api/v1/clips と同じ) */
+const MAX_CLIP_TEXT_LENGTH = 10000;
 
 /**
  * 機密レベルの引き下げを拒否する。問題なければ null。
@@ -341,10 +345,11 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
   server.registerTool(
     "akashic_import_discord_memo",
     {
-      title: "承諾済みDiscordメモの登録",
+      title: "Discordメモの投稿の登録",
       description:
-        "人間から明示的に承諾された「新奈メモ」または「フィールドワーク」の投稿を、" +
-        "Akashic の inbox アセットとして登録する。承諾前の候補には使わない。" +
+        "「新奈メモ」または「フィールドワーク」の投稿そのものを、人に頼まれたときだけ" +
+        "Akashic の inbox アセットとして登録する。発言は akashic_create_clip、場所は akashic_create_place で残すのが基本で、" +
+        "投稿自体を記録として残したいときだけ使う。" +
         "添付ファイルは扱わず、本文・投稿者・投稿時刻・元メッセージURLだけを保存する。" +
         "同じDiscordメッセージは重複登録せず、既存のアセットを返す。",
       inputSchema: DiscordMemoInputSchema,
@@ -591,6 +596,43 @@ function registerWriteTools(server: McpServer, { user, baseUrl }: ToolContext) {
       } catch (err) {
         if (err instanceof NinaAuthorConflictError) return fail(err.message, { id });
         return toToolError(err, "出演の記録に失敗しました。");
+      }
+    }
+  );
+
+  server.registerTool(
+    "akashic_create_clip",
+    {
+      title: "クリップの作成",
+      description:
+        "アセットの一節 (発言の引用など) をクリップとして残す。画面の「クリップ」と同じもの。" +
+        "excerpt は本文からの引用 (原文ママ)、note はその背景や補足のメモ。どちらか一方は必須。" +
+        "引用の位置は本文から探し、見つからなければ文字列だけ保存する (located: false。動画など本文の無いアセットはこちらになる)。" +
+        "同じアセットに何度でも作れるので、作る前に重複していないか確かめる。" +
+        "クリップは internal のプールに入るので、excerpt・note に internal より上のアセットの内容を書かない。",
+      inputSchema: z.object({
+        assetId: z.string().min(1).max(100).describe("アセット ID"),
+        excerpt: z.string().max(MAX_CLIP_TEXT_LENGTH).optional().describe("本文からの引用 (原文ママ)"),
+        note: z.string().max(MAX_CLIP_TEXT_LENGTH).optional().describe("背景・補足のメモ"),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    },
+    async ({ assetId, excerpt, note }) => {
+      // 画面と REST (/api/v1/clips) と同じく viewer は弾く
+      if (user.role !== "admin" && user.role !== "member") {
+        return fail("クリップを作る権限がありません。");
+      }
+      try {
+        const item = await createClip(user, { assetId, excerpt, note, auditMetadata: { apiKeyId: user.apiKeyId, via: "mcp" } });
+        invalidateDossiers();
+        await logMcpToolCall({ user, tool: "create_clip", targetType: "DossierItem", targetId: item.id, args: { assetId } });
+        return ok({ id: item.id, assetId, located: item.excerptStart != null, url: assetUrl(baseUrl, assetId) });
+      } catch (err) {
+        if (err instanceof ClipAssetNotFoundError) {
+          return fail("アセットが見つかりません。ID が誤っているか、クリアランスが足りず参照できません。", { assetId });
+        }
+        if (err instanceof ClipInputError) return fail(err.message, { assetId });
+        return toToolError(err, "クリップの作成に失敗しました。");
       }
     }
   );

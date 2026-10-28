@@ -8,6 +8,7 @@ import {
   type AnnouncementKind,
   type ArticleTemplate,
   type ArticleType,
+  type ClearanceLevel,
   type InstaStoryJobStatus,
   type InstaWatchTier,
   type JobRunStatus,
@@ -177,6 +178,17 @@ export const PLACE_KIND_LABELS: Record<PlaceKind, string> = {
   scenery: "寺社・公園・景色",
   venue: "会場・放送局",
   shop: "店・施設",
+};
+
+/**
+ * 聖地のクリアランス。公開サイトの聖地マップと記事の locations に出るのは internal まで (#283)。
+ * 生活圏など、記事には紐づけたいがサイトに出したくない場所は confidential 以上にする
+ */
+export const PLACE_CLASSIFICATION_LABELS: Record<ClearanceLevel, string> = {
+  public: "公開 (サイトに出す)",
+  internal: "一般 (サイトに出す)",
+  confidential: "限定 (サイトに出さない)",
+  restricted: "極秘 (サイトに出さない)",
 };
 
 /** TikTok 台帳の動画の状態 (#179) */

@@ -5,6 +5,7 @@ import {
   renderArticleMarkdown,
   toArticleColumns,
   type ArticleColumns,
+  type ArticlePlaceRow,
   type ArticleSourceRow,
 } from "./frontmatter";
 
@@ -15,12 +16,13 @@ import {
  * 「日付が {} に潰れて差分を見逃す」類のミスに気づけないので純粋関数として切り出す。
  */
 
-export type Verdict = "identical" | "normalized" | "ref_added" | "changed";
+export type Verdict = "identical" | "normalized" | "ref_added" | "places" | "changed";
 
 export const VERDICT_LABELS: Record<Verdict, string> = {
   identical: "一致",
   normalized: "正規化のみ",
   ref_added: "ref 追加",
+  places: "聖地の差分",
   changed: "値の差分",
 };
 
@@ -52,6 +54,14 @@ function lossyParseNotes(raw: ReturnType<typeof parseArticle>, cols: ReturnType<
   }
   if (fm.tags != null && !Array.isArray(fm.tags)) notes.push("tags: 配列でないので push で消える");
   if (fm.source != null && !Array.isArray(fm.source)) notes.push("source: 配列でないので push で消える");
+  // 聖地 (place_id) の要素は ArticlePlace に入り、name / place_id 以外は書き出されない
+  if (Array.isArray(fm.locations)) {
+    fm.locations.forEach((loc, i) => {
+      if (!loc || typeof loc !== "object" || !(loc as Record<string, unknown>).place_id) return;
+      const lost = Object.keys(loc).filter((k) => k !== "name" && k !== "place_id");
+      if (lost.length) notes.push(`locations[${i}]: 聖地の要素の ${lost.join(", ")} は push で消える`);
+    });
+  }
   return notes;
 }
 
@@ -62,6 +72,8 @@ function lossyParseNotes(raw: ReturnType<typeof parseArticle>, cols: ReturnType<
  * - カラム・本文・source が同じで、source の差が「ref が新たに生えた」だけなら ref_added
  *   (url / label で照合して applied になった行に ref が補完される。合意済み: #74)
  * - 値は同じでバイトが違うなら normalized (引用符・キー順・日付のゼロ埋め等)
+ * - 違いが locations の聖地 (`places`) だけなら places。聖地の正は ArticlePlace なので、
+ *   改名・非公開化・削除で DB 側が変わったのはファイルを直すべき差分 (#283。push してよい)
  * - それ以外は changed。**取りこぼしの疑いがあるので push してはいけない**
  */
 export function compareArticle(fileRaw: string, generated: string, path: string): Comparison {
@@ -72,8 +84,8 @@ export function compareArticle(fileRaw: string, generated: string, path: string)
   const b = toArticleColumns(parseArticle(generated), path);
   const notes = lossyParseNotes(rawA, a);
 
-  const { sources: aSources, ...aCols } = a;
-  const { sources: bSources, ...bCols } = b;
+  const { sources: aSources, places: aPlaces, ...aCols } = a;
+  const { sources: bSources, places: bPlaces, ...bCols } = b;
   for (const k of Object.keys(aCols) as (keyof typeof aCols)[]) {
     const av = key(aCols[k]);
     const bv = key(bCols[k]);
@@ -100,9 +112,12 @@ export function compareArticle(fileRaw: string, generated: string, path: string)
     });
   }
 
+  const placesNote = key(aPlaces) !== key(bPlaces) ? `places: ${key(aPlaces)} → ${key(bPlaces)}` : null;
+
   // ref の補完は changed のときも原因調査の材料になるので必ず載せる
   if (refsAdded) notes.push(`ref を ${refsAdded} 件補完`);
-  if (notes.length > (refsAdded ? 1 : 0)) return { verdict: "changed", notes };
+  if (notes.length > (refsAdded ? 1 : 0)) return { verdict: "changed", notes: placesNote ? [...notes, placesNote] : notes };
+  if (placesNote) return { verdict: "places", notes: [...notes, placesNote] };
   if (refsAdded) return { verdict: "ref_added", notes };
   return { verdict: "normalized", notes: [] };
 }
@@ -124,26 +139,30 @@ export interface ImportDirtyDecision {
  * 通常の push 画面から出せる。
  *
  * - identical → false
- * - normalized / ref_added → true (合意済みの差分。push してよい)
+ * - normalized / ref_added / places → true (合意済みの差分。push してよい。places は聖地を
+ *   非公開にした・改名したのをファイルに反映する差分で、ここで落とすと公開サイトに残り続ける)
  * - changed → **false**。取りこぼしの疑いがあり、push すると値が消えるので
  *   dirty にせず呼び出し側が警告する (#42 の浮動小数点のような既知の 1 件を含む)
  *
  * `rows` は取り込みが書く行 (`toArticleSourceRow`) なので全て public / 非 pending。
  * push (`renderArticlesForPush`) が public クリアランスで読む行と同じ集合になる。
+ * `places` は取り込み後の ArticlePlace のうち push が読む行 (Place が public / internal)。
+ * name は聖地の正式名 (push と同じ)
  */
 export function dirtyAfterImport(
   fileRaw: string,
-  cols: Omit<ArticleColumns, "sources">,
+  cols: Omit<ArticleColumns, "sources" | "places">,
   rows: ArticleSourceRow[],
+  places: ArticlePlaceRow[],
 ): ImportDirtyDecision {
-  const { markdown, blocked } = renderArticleMarkdown({ ...cols, sources: rows });
+  const { markdown, blocked } = renderArticleMarkdown({ ...cols, sources: rows, places });
   if (blocked.length) {
     // 取り込みの行は public 固定なのでここには来ないはず。来たら取り込み側の規則が壊れている
     // (黙って dirty=false にすると、push 時に blocked で止まる記事を「同期済み」と表示してしまう)
     throw new Error(`取り込みの行に非 public の出典があります (${cols.path})`);
   }
   const { verdict, notes } = compareArticle(fileRaw, markdown, cols.path);
-  return { dirty: verdict === "normalized" || verdict === "ref_added", verdict, notes };
+  return { dirty: verdict === "normalized" || verdict === "ref_added" || verdict === "places", verdict, notes };
 }
 
 /**

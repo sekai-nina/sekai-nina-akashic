@@ -147,6 +147,22 @@ describe("renderOutingArticle", () => {
     expect(r.dates.date).toBeNull();
   });
 
+  it("非公開の聖地も linkedPlaceIds から placeIds に入り、locations・AI には出ない (#283)", () => {
+    // 非公開の聖地 (place-secret) は places に入らず、ID だけ linkedPlaceIds で来る
+    const r = renderOutingArticle({ ...input([talk]), linkedPlaceIds: ["place-1", "place-secret"] }, draft);
+    expect(r.placeIds).toEqual(["place-1", "place-secret"]);
+    expect(JSON.stringify(r.frontmatterExtra)).not.toContain("place-secret");
+    const p = outingPrompt({ ...input([blog, talk]), linkedPlaceIds: ["place-1", "place-secret"] }, {
+      existingTitles: [],
+      tagVocabulary: [],
+    });
+    expect(p.user).not.toContain("place-secret");
+  });
+
+  it("linkedPlaceIds が無ければ昇格済みの場所候補から placeIds を作る", () => {
+    expect(renderOutingArticle(input([talk]), draft).placeIds).toEqual(["place-1"]);
+  });
+
   it("プロンプトに場所候補と素材が入り、system は 2 ブロック", () => {
     const p = outingPrompt(input([blog, talk]), { existingTitles: ["ひとりパフェ"], tagVocabulary: ["飲食店", "レジャー"] });
     expect(p.system).toHaveLength(2);
