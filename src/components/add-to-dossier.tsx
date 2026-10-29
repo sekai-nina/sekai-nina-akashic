@@ -2,16 +2,26 @@
 
 import { useState, useTransition, useRef, useEffect, useCallback, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
-import { Plus, Check, Loader2, FolderSearch, X } from "lucide-react";
+import Link from "next/link";
+import { Plus, Check, Loader2, FolderSearch, X, History } from "lucide-react";
 import {
   addAssetToDossierAction,
   createDossierWithAssetAction,
   removeAssetFromDossierAction,
 } from "@/app/(main)/dossiers/actions";
+import {
+  fetchContainingDossiers,
+  markContaining,
+  rememberCreatedDossier,
+  rememberDossier,
+  usePickerState,
+  withCreated,
+  type ContainingDossier,
+} from "@/components/dossier-picker-store";
 
 /** パネルの実寸。位置計算に使うので Tailwind のクラスと揃えること。 */
 const PANEL_WIDTH = 256; // w-64
-const PANEL_MAX_HEIGHT = 320;
+const PANEL_MAX_HEIGHT = 380; // 「入っている企画」と「前回の追加先」の分だけ高め
 const VIEWPORT_MARGIN = 8;
 
 interface EditableDossier {
@@ -68,6 +78,11 @@ export function AddToDossier({
   const anchorRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<{ top: number; left: number; maxHeight: number } | null>(null);
+  // このアセットが入っている企画。開くたびに引く (null = 確認中)
+  const [containing, setContaining] = useState<ContainingDossier[] | null>(null);
+  const { lastUsed, created } = usePickerState();
+  const list = withCreated(dossiers, created);
+  const isExcerpt = !!excerpt;
 
   // トリガーがビューポート端にあってもパネルが画面外に出ないよう、
   // 実際の位置を測って上下反転・左右クランプする。
@@ -96,6 +111,24 @@ export function AddToDossier({
 
   useEffect(() => {
     if (!open) return;
+    let cancelled = false;
+    setContaining(null);
+    fetchContainingDossiers(assetId, { fresh: true })
+      .then((rows) => {
+        if (cancelled) return;
+        setContaining(rows);
+        // 抜粋は入っている企画にも重ねて足せるので、押せなくはしない
+        if (!isExcerpt) setAddedIds((prev) => new Set([...prev, ...rows.map((r) => r.id)]));
+      })
+      // 引けなくても追加はできる。「入っている企画」の欄を出さないだけ
+      .catch(() => !cancelled && setContaining([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [open, assetId, isExcerpt]);
+
+  useEffect(() => {
+    if (!open) return;
     function handleDown(e: MouseEvent) {
       const target = e.target as Node;
       if (anchorRef.current?.contains(target)) return;
@@ -118,9 +151,22 @@ export function AddToDossier({
     };
   }, [open, updatePosition]);
 
+  function noteAdded(dossier: { id: string; title: string }) {
+    setAddedIds((prev) => new Set(prev).add(dossier.id));
+    setContaining((prev) => {
+      if (!prev) return prev;
+      const row = prev.find((r) => r.id === dossier.id);
+      if (!row) return [{ ...dossier, itemCount: 1 }, ...prev];
+      // 抜粋は同じ企画に重ねて入るので件数を進める
+      return isExcerpt ? prev.map((r) => (r === row ? { ...r, itemCount: r.itemCount + 1 } : r)) : prev;
+    });
+    markContaining(assetId, dossier, true);
+    rememberDossier(dossier);
+  }
+
   function addToExisting(dossierId: string) {
     if (addedIds.has(dossierId)) return;
-    const target = dossiers.find((d) => d.id === dossierId);
+    const target = list.find((d) => d.id === dossierId);
     setPendingId(dossierId);
     setError(null);
     startTransition(async () => {
@@ -132,7 +178,7 @@ export function AddToDossier({
           excerptStart: excerpt?.textStart,
           excerptEnd: excerpt?.textEnd,
         });
-        setAddedIds((prev) => new Set(prev).add(dossierId));
+        noteAdded({ id: dossierId, title: target?.title ?? "" });
         if (onAdded) {
           onAdded(dossierId, target?.title || "(無題)");
           setOpen(false);
@@ -147,7 +193,7 @@ export function AddToDossier({
   }
 
   function removeFrom(dossierId: string) {
-    const target = dossiers.find((d) => d.id === dossierId);
+    const target = list.find((d) => d.id === dossierId);
     if (!confirm(`「${target?.title || "(無題)"}」からこのアセットを外しますか？\n(抜粋として複数回入っている場合はすべて外れます)`)) return;
     setPendingId(dossierId);
     setError(null);
@@ -159,6 +205,8 @@ export function AddToDossier({
           next.delete(dossierId);
           return next;
         });
+        setContaining((prev) => prev?.filter((r) => r.id !== dossierId) ?? prev);
+        markContaining(assetId, { id: dossierId, title: target?.title ?? "" }, false);
       } catch (e) {
         setError(e instanceof Error ? e.message : "外せませんでした");
       } finally {
@@ -169,35 +217,80 @@ export function AddToDossier({
 
   function createAndAdd(title: string) {
     if (!title.trim()) return;
+    setError(null);
     startTransition(async () => {
-      const result = await createDossierWithAssetAction(title.trim(), assetId, {
-        caption: defaultCaption,
-        excerpt: excerpt?.text,
-        excerptType: excerpt?.textType as never,
-        excerptStart: excerpt?.textStart,
-        excerptEnd: excerpt?.textEnd,
-      });
-      setAddedIds((prev) => new Set(prev).add(result.dossierId));
-      setNewTitle("");
-      setQuery("");
-      setCreating(false);
-      if (onAdded) {
-        onAdded(result.dossierId, result.title);
-        setOpen(false);
+      try {
+        const result = await createDossierWithAssetAction(title.trim(), assetId, {
+          caption: defaultCaption,
+          excerpt: excerpt?.text,
+          excerptType: excerpt?.textType as never,
+          excerptStart: excerpt?.textStart,
+          excerptEnd: excerpt?.textEnd,
+        });
+        const dossier = { id: result.dossierId, title: result.title };
+        rememberCreatedDossier(dossier);
+        noteAdded(dossier);
+        setNewTitle("");
+        setQuery("");
+        setCreating(false);
+        if (onAdded) {
+          onAdded(result.dossierId, result.title);
+          setOpen(false);
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "作成できませんでした");
       }
     });
   }
 
   const trimmedQuery = query.trim();
+  // 前回の追加先は、検索していないときだけ一番上に固定する (続けて同じ企画に入れるため)
+  const pinned = !query && lastUsed ? (list.find((d) => d.id === lastUsed.id) ?? null) : null;
   const filtered = query
-    ? dossiers.filter((d) => d.title.toLowerCase().includes(query.toLowerCase()))
-    : dossiers;
+    ? list.filter((d) => d.title.toLowerCase().includes(query.toLowerCase()))
+    : list.filter((d) => d.id !== pinned?.id);
 
   // 検索欄に入れた名前が既存のドシエと一致しなければ、そのまま作れるようにする
-  const hasExactMatch = dossiers.some(
+  const hasExactMatch = list.some(
     (d) => d.title.trim().toLowerCase() === trimmedQuery.toLowerCase()
   );
   const canQuickCreate = trimmedQuery.length > 0 && !hasExactMatch;
+  // 入っている企画を確かめるまでは追加させない (入っている企画に足すとキャプションを上書きしてしまう)
+  const checking = containing === null && !isExcerpt;
+
+  function renderRow(d: { id: string; title: string }) {
+    const added = addedIds.has(d.id);
+    const removable = added && allowRemove;
+    return (
+      <li key={d.id}>
+        <button
+          type="button"
+          onClick={() => (removable ? removeFrom(d.id) : addToExisting(d.id))}
+          disabled={(added && !removable) || isPending || checking}
+          title={removable ? "押すとこの企画から外す" : undefined}
+          className={`group w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded text-xs ${
+            removable
+              ? "text-slate-500 hover:bg-red-50 hover:text-red-700"
+              : added
+                ? "text-slate-400 cursor-default"
+                : "text-slate-700 hover:bg-indigo-50"
+          }`}
+        >
+          <span className="truncate">{d.title || "(無題)"}</span>
+          {pendingId === d.id ? (
+            <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+          ) : removable ? (
+            <>
+              <Check className="h-3 w-3 text-emerald-500 shrink-0 group-hover:hidden" />
+              <X className="h-3 w-3 shrink-0 hidden group-hover:block" />
+            </>
+          ) : added ? (
+            <Check className="h-3 w-3 text-emerald-500 shrink-0" />
+          ) : null}
+        </button>
+      </li>
+    );
+  }
 
   const trigger =
     variant === "button" ? (
@@ -255,6 +348,12 @@ export function AddToDossier({
               // IME 変換確定の Enter で作成されないようにする。Safari は確定の Enter で
               // isComposing が false になるので keyCode 229 も見る
               if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+              // 空欄の Enter は前回の追加先へ
+              if (e.key === "Enter" && !query && pinned && !addedIds.has(pinned.id) && !isPending && !checking) {
+                e.preventDefault();
+                addToExisting(pinned.id);
+                return;
+              }
               // 一致するドシエが1つも無いなら、Enter でそのまま作成
               if (e.key === "Enter" && canQuickCreate && filtered.length === 0) {
                 e.preventDefault();
@@ -264,43 +363,46 @@ export function AddToDossier({
             placeholder="企画を検索 / 新規作成..."
             className="w-full text-xs border border-slate-300 rounded px-2 py-1 mb-2 focus:outline-none focus:ring-1 focus:ring-indigo-500"
           />
+          <div className="mb-2 shrink-0 rounded bg-slate-50 px-2 py-1.5 text-[11px]">
+            {containing === null ? (
+              <span className="inline-flex items-center gap-1 text-slate-400">
+                <Loader2 className="h-3 w-3 animate-spin" /> 入っている企画を確認中…
+              </span>
+            ) : containing.length === 0 ? (
+              <span className="text-slate-400">まだどの企画にも入っていません</span>
+            ) : (
+              <>
+                <p className="text-slate-500 mb-0.5">入っている企画</p>
+                <ul className="max-h-16 overflow-y-auto space-y-0.5">
+                  {containing.map((c) => (
+                    <li key={c.id} className="flex items-center gap-1 min-w-0">
+                      <Check className="h-3 w-3 text-emerald-500 shrink-0" />
+                      <Link
+                        href={`/dossiers/${c.id}`}
+                        className="truncate text-slate-700 hover:text-indigo-600 hover:underline"
+                      >
+                        {c.title || "(無題)"}
+                      </Link>
+                      {c.itemCount > 1 && <span className="shrink-0 text-slate-400">×{c.itemCount}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </div>
+          {pinned && (
+            <div className="mb-1 shrink-0 border-b border-slate-100 pb-1">
+              <p className="flex items-center gap-1 px-2 text-[10px] text-slate-400">
+                <History className="h-3 w-3" /> 前回の追加先{!addedIds.has(pinned.id) && "（Enter で追加）"}
+              </p>
+              <ul>{renderRow(pinned)}</ul>
+            </div>
+          )}
           <ul className="flex-1 min-h-0 overflow-y-auto space-y-0.5">
             {filtered.length === 0 && !canQuickCreate && (
               <li className="text-[11px] text-slate-400 px-2 py-1.5">該当なし</li>
             )}
-            {filtered.map((d) => {
-              const added = addedIds.has(d.id);
-              const removable = added && allowRemove;
-              return (
-                <li key={d.id}>
-                  <button
-                    type="button"
-                    onClick={() => (removable ? removeFrom(d.id) : addToExisting(d.id))}
-                    disabled={(added && !removable) || isPending}
-                    title={removable ? "押すとこの企画から外す" : undefined}
-                    className={`group w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded text-xs ${
-                      removable
-                        ? "text-slate-500 hover:bg-red-50 hover:text-red-700"
-                        : added
-                          ? "text-slate-400 cursor-default"
-                          : "text-slate-700 hover:bg-indigo-50"
-                    }`}
-                  >
-                    <span className="truncate">{d.title || "(無題)"}</span>
-                    {pendingId === d.id ? (
-                      <Loader2 className="h-3 w-3 animate-spin shrink-0" />
-                    ) : removable ? (
-                      <>
-                        <Check className="h-3 w-3 text-emerald-500 shrink-0 group-hover:hidden" />
-                        <X className="h-3 w-3 shrink-0 hidden group-hover:block" />
-                      </>
-                    ) : added ? (
-                      <Check className="h-3 w-3 text-emerald-500 shrink-0" />
-                    ) : null}
-                  </button>
-                </li>
-              );
-            })}
+            {filtered.map(renderRow)}
           </ul>
           {error && <p className="mt-1 shrink-0 text-[11px] text-red-600 px-2">{error}</p>}
           <div className="mt-2 shrink-0 border-t border-slate-100 pt-2">
@@ -379,5 +481,104 @@ export function AddToDossier({
       {trigger}
       {panel && createPortal(panel, document.body)}
     </div>
+  );
+}
+
+/**
+ * 前回の追加先へ 1 クリックで入れるボタン (ギャラリーの拡大表示用)。
+ * ← → で送りながら同じ企画に続けて入れられるようにする。前回が無い・編集できない企画なら出さない
+ */
+export function QuickAddToLastDossier({
+  assetId,
+  dossiers,
+  defaultCaption,
+}: {
+  assetId: string;
+  dossiers: EditableDossier[];
+  defaultCaption?: string;
+}) {
+  const { lastUsed, created, containingVersion } = usePickerState();
+  const target = lastUsed ? withCreated(dossiers, created).find((d) => d.id === lastUsed.id) : undefined;
+  const targetId = target?.id;
+  // null = 確認中 / "unknown" = 確かめられなかった (入っていたらキャプションを上書きするので押させない)
+  const [contained, setContained] = useState<boolean | "unknown" | null>(null);
+  const [error, setError] = useState(false);
+  const [isPending, startTransition] = useTransition();
+
+  // ← → で送るたびに引くと、サーバーアクションが直列に積まれて追加が待たされる。
+  // 止まってから引き直す (企画のページで外して戻ってきた場合もあるので fresh)
+  useEffect(() => {
+    if (!targetId) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      fetchContainingDossiers(assetId, { fresh: true })
+        .then((rows) => !cancelled && setContained(rows.some((r) => r.id === targetId)))
+        .catch(() => !cancelled && setContained("unknown"));
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [assetId, targetId]);
+
+  // ピッカー側で足し外ししたら手元のキャッシュから読み直す (通信しない)
+  useEffect(() => {
+    if (!targetId || containingVersion === 0) return;
+    let cancelled = false;
+    fetchContainingDossiers(assetId)
+      .then((rows) => !cancelled && setContained(rows.some((r) => r.id === targetId)))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [assetId, targetId, containingVersion]);
+
+  if (!target) return null;
+  const title = target.title || "(無題)";
+
+  function add() {
+    if (!target || contained !== false) return;
+    setError(false);
+    startTransition(async () => {
+      try {
+        await addAssetToDossierAction(target.id, assetId, { caption: defaultCaption });
+        setContained(true);
+        markContaining(assetId, target, true);
+        rememberDossier(target);
+      } catch {
+        setError(true);
+      }
+    });
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={add}
+      disabled={contained !== false || isPending}
+      title={
+        contained === "unknown"
+          ? "入っている企画を確かめられませんでした。＋から追加してください"
+          : contained
+            ? `「${title}」に入っています`
+            : `「${title}」に追加`
+      }
+      aria-live="polite"
+      className={`inline-flex min-w-0 items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+        contained === true
+          ? "bg-emerald-500/20 text-emerald-100"
+          : "bg-indigo-500/80 text-white hover:bg-indigo-500 active:bg-indigo-600 disabled:opacity-60"
+      }`}
+    >
+      {isPending || contained === null ? (
+        <Loader2 size={16} className="shrink-0 animate-spin" />
+      ) : contained === true ? (
+        <Check size={16} className="shrink-0" />
+      ) : (
+        <Plus size={16} className="shrink-0" />
+      )}
+      <span className="max-w-[10rem] truncate">{title}</span>
+      <span className="shrink-0">{error ? "に追加できませんでした" : contained === "unknown" ? "を確認できませんでした" : contained ? "に追加済み" : "に追加"}</span>
+    </button>
   );
 }

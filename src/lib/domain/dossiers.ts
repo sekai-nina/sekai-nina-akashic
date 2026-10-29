@@ -87,7 +87,8 @@ export async function listEditableDossiers(user: ActingUser, opts?: { withArticl
   const all = await withSession(user, (tx) =>
     tx.dossier.findMany({
       where: NOT_CLIP_POOL,
-      orderBy: { updatedAt: "desc" },
+      // ピッカーで新しく作った企画ほど上に出す (更新順だと、触った古い企画が上がってきて探しにくい)
+      orderBy: { createdAt: "desc" },
       select: {
         id: true,
         title: true,

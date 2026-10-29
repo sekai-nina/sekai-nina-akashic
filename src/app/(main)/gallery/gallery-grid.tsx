@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { useSwipeable } from "react-swipeable";
 import { Loader2, X, ChevronLeft, ChevronRight, Download, ExternalLink } from "lucide-react";
 import Link from "next/link";
-import { AddToDossier } from "@/components/add-to-dossier";
+import { AddToDossier, QuickAddToLastDossier } from "@/components/add-to-dossier";
 import { formatDate } from "@/lib/utils";
 
 interface GalleryItem {
@@ -150,6 +150,9 @@ export function GalleryGrid({
   useEffect(() => {
     if (lightbox === null) return;
     function handleKey(e: KeyboardEvent) {
+      // 企画ピッカーの検索欄で打っている矢印キーで画像を送らない
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
       if (e.key === "Escape") setLightbox(null);
       if (e.key === "ArrowRight") setLightbox((i) => i !== null && i < items.length - 1 ? i + 1 : i);
       if (e.key === "ArrowLeft") setLightbox((i) => i !== null && i > 0 ? i - 1 : i);
@@ -325,7 +328,7 @@ export function GalleryGrid({
             <p className="text-white/60 text-xs mt-0.5">
               {formatDate(items[lightbox].canonicalDate ?? items[lightbox].createdAt)}
             </p>
-            <div className="flex items-center gap-2 mt-3">
+            <div className="flex flex-wrap items-center gap-2 mt-3">
               <Link
                 href={`/assets/${items[lightbox].id}`}
                 className="inline-flex items-center gap-1.5 bg-white/10 hover:bg-white/20 active:bg-white/30 text-white text-sm font-medium rounded-full px-4 py-2 transition-colors"
@@ -345,12 +348,22 @@ export function GalleryGrid({
                 </a>
               )}
               {editableDossiers.length > 0 && (
-                <AddToDossier
-                  assetId={items[lightbox].id}
-                  dossiers={editableDossiers}
-                  defaultCaption={items[lightbox].title}
-                  size="md"
-                />
+                <>
+                  <QuickAddToLastDossier
+                    key={`quick-${items[lightbox].id}`}
+                    assetId={items[lightbox].id}
+                    dossiers={editableDossiers}
+                    defaultCaption={items[lightbox].title}
+                  />
+                  <AddToDossier
+                    // 画像を送ったら追加済みの表示を持ち越さない
+                    key={items[lightbox].id}
+                    assetId={items[lightbox].id}
+                    dossiers={editableDossiers}
+                    defaultCaption={items[lightbox].title}
+                    size="md"
+                  />
+                </>
               )}
             </div>
           </div>
