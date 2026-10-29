@@ -6,7 +6,7 @@ import {
   type Prisma,
   type TextType,
 } from "@prisma/client";
-import { withSession } from "@/lib/db";
+import { prisma, withSession } from "@/lib/db";
 import { canEditDossier, canManageDossier } from "@/lib/auth/dossier-permissions";
 import { assertClearance } from "@/lib/classification";
 import { isPublishablePlace } from "@/lib/articles/frontmatter";
@@ -60,6 +60,20 @@ export async function listDossiers(user: ActingUser) {
       },
     })
   );
+}
+
+/**
+ * サイトに出ている記事 (公開リポジトリに載っていて下書きでない) を持つ企画の ID。
+ * `githubSha` は取り込み・push が埋めるので、非 null ⇔ GitHub にファイルがある。
+ * `Article` は保護テーブルではないので素の prisma で引く (企画の可視性は呼び出し側の一覧で絞られる)
+ */
+export async function listPublishedDossierIds(): Promise<Set<string>> {
+  const rows = await prisma.article.findMany({
+    where: { dossierId: { not: null }, githubSha: { not: null }, draft: false },
+    select: { dossierId: true },
+    distinct: ["dossierId"],
+  });
+  return new Set(rows.flatMap((r) => (r.dossierId ? [r.dossierId] : [])));
 }
 
 /**

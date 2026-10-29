@@ -2,7 +2,7 @@ import Link from "next/link";
 import { FolderSearch, Plus } from "lucide-react";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { listDossiers } from "@/lib/domain/dossiers";
+import { listDossiers, listPublishedDossierIds } from "@/lib/domain/dossiers";
 import { listPendingDossiers } from "@/lib/domain/dossier-sync-queue";
 import { DossierGrid, type PendingByDossier } from "./dossier-grid";
 
@@ -17,7 +17,7 @@ export default async function DossiersPage({ searchParams }: { searchParams: Pro
   );
   // 一覧の取得が失敗して返らないときに、未処理の reject にならないように
   pending.catch(() => {});
-  const dossiers = await listDossiers(session.user);
+  const [dossiers, published] = await Promise.all([listDossiers(session.user), listPublishedDossierIds()]);
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6">
@@ -57,6 +57,7 @@ export default async function DossiersPage({ searchParams }: { searchParams: Pro
           placeCount: d._count.placeCandidates,
           createdAt: d.createdAt.toISOString(),
           articleCount: d._count.articles,
+          published: published.has(d.id),
           articles: d.articles,
         }))}
       />
