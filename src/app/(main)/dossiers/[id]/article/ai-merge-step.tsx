@@ -272,11 +272,17 @@ export function AiMergeStep({
                 </div>
               )}
               <ul className="mt-2 text-[11px] space-y-0.5">
-                {proposal.newSources.map((s) => (
-                  <li key={s.sourceNo} className={used.has(s.sourceNo) ? "text-emerald-700" : "text-slate-400"}>
-                    {used.has(s.sourceNo) ? "+ 出典" : "× 使わない（今後足さない）"} ^[{s.sourceNo}] {s.label}
-                  </li>
-                ))}
+                {proposal.newSources.map((s) =>
+                  s.existing ? (
+                    <li key={s.sourceNo} className="text-slate-500">
+                      載っている出典に足したメモ・抜粋 ^[{s.sourceNo}] {s.label}（使わなくても保存で取り込み済みになります）
+                    </li>
+                  ) : (
+                    <li key={s.sourceNo} className={used.has(s.sourceNo) ? "text-emerald-700" : "text-slate-400"}>
+                      {used.has(s.sourceNo) ? "+ 出典" : "× 使わない（今後足さない）"} ^[{s.sourceNo}] {s.label}
+                    </li>
+                  )
+                )}
               </ul>
               <p className="mt-1 text-[11px] text-slate-400">
                 使わない出典があると、保存時に番号を詰めて振り直します（本文の ^[n] も合わせて書き換えます）。

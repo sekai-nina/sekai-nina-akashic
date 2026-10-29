@@ -25,14 +25,19 @@
  * - 公開リポジトリに載せられない機密のアセット (`PUBLISHABLE` の外) は数えない (組み立てで落ちる)
  * - アセットが見えない (上位機密) アイテム、外部リンク・外部画像は数えない
  * - 紐づく記事が複数あれば、どれかに載っていれば反映済み
+ * - 本文を AI / 人が書くテンプレートでは、載っている出典へのクリップでも、記事に素材を取り込んだあと
+ *   (`Article.materialsSyncedAt`) に入れたメモ・抜粋つきのものは未反映 (`isFreshClip`。組み込みの
+ *   `loadFreshClips` と同じ)。組み込みを保存すると時刻が進んで消える
  *
  * 2026-10-25 に本番データで、テンプレートが決まっている企画は差分の候補と一致することを確かめた。
  */
-import type { Prisma } from "@prisma/client";
+import type { ArticleTemplate, Prisma } from "@prisma/client";
 import { withSession, type TransactionClient } from "@/lib/db";
 import { jsonStringArray } from "@/lib/meetgreet/config";
 import { exclusionKey, quoteHead } from "@/lib/meetgreet/append";
 import { isStaffBlog, isTalk, normalizeSourceUrl } from "@/lib/article-workflow/render";
+import { isFreshClip } from "@/lib/article-workflow/merge";
+import { getTemplate } from "@/lib/article-workflow/templates";
 import type { ActingUser } from "./article-workflow";
 import { NOT_CLIP_POOL } from "./dossiers";
 import { PUBLISHABLE } from "./dossier-materials";
@@ -80,7 +85,7 @@ export interface DossierRow {
   articleExclusions: unknown;
   meetGreet: { articleExclusions: unknown } | null;
   live: { articleExclusions: unknown } | null;
-  articles: { id: string }[];
+  articles: { id: string; materialsSyncedAt?: Date | null }[];
   items: ItemRow[];
 }
 
@@ -90,6 +95,8 @@ export interface ArticleState {
   /** `normalizeSourceUrl` 済み */
   citedUrls: Set<string>;
   bodies: string[];
+  /** 紐づく記事が素材を取り込んだ時刻のうち最も新しいもの (無ければ判定しない) */
+  materialsSyncedAt?: Date | null;
 }
 
 /** 引用を本文に足すテンプレート。器のドシエは `articleTemplate` に器の種類が入っている */
@@ -114,6 +121,22 @@ type Verdict = "pending" | "done" | "ignored";
 
 /** 1 アイテムの判定。純粋関数 */
 export function judgeItem(
+  item: ItemRow,
+  template: string | null,
+  excluded: Set<string>,
+  article: ArticleState,
+  cores: string[]
+): Verdict {
+  const verdict = judgeCitation(item, template, excluded, article, cores);
+  // 載っている出典へのクリップでも、取り込んだあとのメモ・抜粋は AI に組み込ませる新しい素材
+  if (verdict === "done" && !!template && getTemplate(template as ArticleTemplate)?.needsAi && isFreshClip(item, article.materialsSyncedAt)) {
+    return "pending";
+  }
+  return verdict;
+}
+
+/** 記事に載っているか (出典・本文の行・引用) だけで見た判定 */
+function judgeCitation(
   item: ItemRow,
   template: string | null,
   excluded: Set<string>,
@@ -193,7 +216,7 @@ const DOSSIER_SELECT = {
   articleExclusions: true,
   meetGreet: { select: { articleExclusions: true } },
   live: { select: { articleExclusions: true } },
-  articles: { select: { id: true } },
+  articles: { select: { id: true, materialsSyncedAt: true } },
   items: {
     where: { kind: "asset_ref" },
     select: {
@@ -220,6 +243,12 @@ const DOSSIER_SELECT = {
   },
 } satisfies Prisma.DossierSelect;
 
+/** 最も新しい時刻。どれも無ければ null */
+function latest(dates: (Date | null)[]): Date | null {
+  const ts = dates.flatMap((d) => (d ? [d.getTime()] : []));
+  return ts.length ? new Date(Math.max(...ts)) : null;
+}
+
 async function loadPending(tx: TransactionClient): Promise<PendingDossier[]> {
   const rows = await tx.dossier.findMany({
     where: { ...NOT_CLIP_POOL, articles: { some: {} } },
@@ -240,6 +269,7 @@ async function loadPending(tx: TransactionClient): Promise<PendingDossier[]> {
       citedAssets: new Set(mine.flatMap((s) => (s.assetId ? [s.assetId] : []))),
       citedUrls: new Set(mine.flatMap((s) => (s.url ? [normalizeSourceUrl(s.url)] : []))),
       bodies: r.articles.map((a) => bodyById.get(a.id) ?? ""),
+      materialsSyncedAt: latest(r.articles.map((a) => a.materialsSyncedAt ?? null)),
     };
   };
   // **本文は要る企画の分だけ引く。** 本文が無いと仮定して未反映が残る企画 (= 本文に行や抜粋が

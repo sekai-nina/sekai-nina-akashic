@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { isPureAppend, planAppend } from "@/lib/meetgreet/append";
+import { groupFreshBySource, isFreshClip } from "../merge";
+import { buildMaterialsText } from "../materials";
 import type { ArticleAssetInput } from "../render";
 import { OUTING_BODY_PLACEHOLDER, OUTING_TEMPLATE, outingLocations, outingPrompt, renderOutingArticle } from "./outing";
 import type { AiDraft, DossierPlace, DossierRenderInput } from "./types";
@@ -284,5 +286,41 @@ describe("renderOutingArticle (坂井新奈が出ているもの)", () => {
       ].join("\n")
     );
     expect(r.body).not.toContain("このおでかけに関する記録");
+  });
+});
+
+describe("出典済みの素材に後から足したメモ・抜粋", () => {
+  const assets = [blog, blogImage, talk];
+
+  it("isFreshClip: 取り込んだあとに入れたメモ・抜粋つきのクリップだけ", () => {
+    const synced = new Date("2026-10-29T17:58:00Z");
+    const after = new Date("2026-10-29T18:13:00Z");
+    expect(isFreshClip({ createdAt: after, note: "バタービールを飲んだ", excerpt: "" }, synced)).toBe(true);
+    expect(isFreshClip({ createdAt: after, note: "", excerpt: "海鮮丼を食べました。" }, synced)).toBe(true);
+    expect(isFreshClip({ createdAt: after, note: " ", excerpt: "" }, synced)).toBe(false);
+    expect(isFreshClip({ createdAt: new Date("2026-10-29T17:00:00Z"), note: "メモ", excerpt: "" }, synced)).toBe(false);
+    expect(isFreshClip({ createdAt: after, note: "メモ", excerpt: "" }, null)).toBe(false);
+  });
+
+  it("groupFreshBySource: ブログ画像はブログの番号に寄せ、素材に無いアセットは捨てる", () => {
+    const grouped = groupFreshBySource(assets, [
+      { id: "i1", assetId: "blog", note: "カチューシャをしている", excerpt: "" },
+      { id: "i2", assetId: "img-1", note: "杖を持っている", excerpt: "" },
+      { id: "i3", assetId: "talk-1", note: "マグネットを買った", excerpt: "" },
+      { id: "i4", assetId: "gone", note: "機密で落ちた", excerpt: "" },
+    ]);
+    expect([...grouped.entries()]).toEqual([
+      [1, { excerpts: [], notes: ["カチューシャをしている", "杖を持っている"], itemIds: ["i1", "i2"] }],
+      [2, { excerpts: [], notes: ["マグネットを買った"], itemIds: ["i3"] }],
+    ]);
+  });
+
+  it("buildMaterialsText: 既存の出典はメモだけを渡し、本文は渡さない", () => {
+    const fresh = groupFreshBySource(assets, [{ id: "i1", assetId: "blog", note: "バタービールを飲んだ", excerpt: "" }]);
+    const m = buildMaterialsText(input(assets), new Set(), fresh);
+    expect(m.text).toContain("バタービールを飲んだ");
+    expect(m.text).not.toContain("江ノ島でデートをしました");
+    expect(m.text).toContain("上のメモ・抜粋だけが新しい");
+    expect(m.included).toBe(1);
   });
 });

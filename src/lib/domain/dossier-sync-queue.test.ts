@@ -11,6 +11,7 @@ let seq = 0;
 
 interface ItemPatch {
   excerpt?: string;
+  note?: string;
   createdAt?: Date;
   kind?: string;
   title?: string;
@@ -22,7 +23,7 @@ const item = (assetId: string, p: ItemPatch = {}): ItemRow => ({
   id: `item${++seq}`,
   assetId,
   excerpt: p.excerpt ?? "",
-  note: "",
+  note: p.note ?? "",
   createdAt: p.createdAt ?? at(24),
   asset: {
     kind: p.kind ?? "text",
@@ -152,5 +153,27 @@ describe("computePending のブログ画像", () => {
   it("複数記事のどれかに載っていれば反映済み", () => {
     const r = row([img1], { articleTemplate: "meetgreet", articles: [{ id: "a1" }, { id: "a2" }] });
     expect(pendingIds(r, state({ bodies: ["", line] }))).toEqual([]);
+  });
+});
+
+describe("computePending (取り込んだあとに出典済みの素材へ足したメモ・抜粋)", () => {
+  const synced = state({ citedAssets: new Set(["x"]), materialsSyncedAt: at(20) });
+
+  it("おでかけでは、記事を作ったあとに入れたメモつきのクリップは出典済みでも未反映", () => {
+    const items = [item("x", { createdAt: at(1) }), item("x", { createdAt: at(21), note: "バタービールを飲んだ" })];
+    expect(pendingIds(row(items, { articleTemplate: "outing" }), synced)).toEqual(["x"]);
+  });
+
+  it("メモも抜粋も無いクリップ・取り込む前に入れたクリップは反映済み", () => {
+    const items = [item("x", { createdAt: at(21) }), item("x", { createdAt: at(19), note: "前から入っていたメモ" })];
+    expect(pendingIds(row(items, { articleTemplate: "outing" }), synced)).toEqual([]);
+  });
+
+  it("本文を機械で組むテンプレート・取り込んだ時刻の無い記事は見ない", () => {
+    const items = [item("x", { createdAt: at(21), note: "メモ" })];
+    expect(pendingIds(row(items, { articleTemplate: "meetgreet" }), synced)).toEqual([]);
+    expect(
+      pendingIds(row(items, { articleTemplate: "outing" }), state({ citedAssets: new Set(["x"]) }))
+    ).toEqual([]);
   });
 });
