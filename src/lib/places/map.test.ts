@@ -47,4 +47,17 @@ describe("buildPlaceMapData", () => {
     expect(d.areas).toEqual(["東京", "名古屋", "その他"]);
     expect(d.places[0]).toMatchObject({ area: "その他", areaUnset: true, kind: "unset" });
   });
+
+  it("公開・一般はサイトに出す、限定・極秘は出さない", () => {
+    const d = buildPlaceMapData(
+      (["public", "internal", "confidential", "restricted"] as const).map((c) => row(c, { classification: c })),
+      now,
+    );
+    expect(d.places.map((p) => [p.id, p.onSite])).toEqual([
+      ["public", true],
+      ["internal", true],
+      ["confidential", false],
+      ["restricted", false],
+    ]);
+  });
 });

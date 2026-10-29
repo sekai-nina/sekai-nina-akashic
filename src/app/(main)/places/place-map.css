@@ -133,6 +133,13 @@
   display: inline-flex; align-items: center; height: 17px; padding: 0 5px; margin-right: 6px; border-radius: 4px;
   background: var(--new); color: #fff; font-size: 10px; font-weight: 800; letter-spacing: 0.04em; vertical-align: 2px;
 }
+/* 限定・極秘 (サイトに出さない) の札 */
+.pmap-private {
+  display: inline-flex; align-items: center; gap: 2px; height: 17px; padding: 0 5px; margin-right: 6px; border-radius: 4px;
+  background: var(--text); color: #fff; font-size: 10px; font-weight: 700; vertical-align: 2px;
+}
+.pmap-private .ic { font-size: 10px; stroke-width: 2.5; }
+.pmap-tags .private { border-color: var(--text); background: var(--text); color: #fff; }
 .pmap-item-sub { display: block; color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pmap-item-sub .times { color: var(--text); font-weight: 600; }
 .pmap-item.is-selected .pmap-item-sub { display: none; }
@@ -196,6 +203,13 @@
   position: absolute; top: -12px; left: 50%; transform: translateX(-50%); height: 14px; padding: 0 4px; border-radius: 3px;
   background: var(--new); color: #fff; font-size: 9px; font-weight: 800; line-height: 14px; letter-spacing: 0.04em; z-index: 1;
 }
+/* 限定・極秘: 白い縁を濃い点線にし、右下に鍵。サイトに出る聖地と一目で分ける */
+.pmap-pin.is-private .disc { border: 2px dashed var(--text); }
+.pmap-pin .lock {
+  position: absolute; right: -6px; bottom: -5px; width: 16px; height: 16px; border-radius: 50%; background: var(--text); color: #fff;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 9px; border: 1.5px solid #fff; z-index: 1;
+}
+.pmap-pin .lock .ic { stroke-width: 3; }
 .pmap-pin .num {
   position: absolute; top: -7px; left: -7px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 999px; background: var(--accent);
   color: #fff; font-size: 11px; font-weight: 700; display: none; align-items: center; justify-content: center; border: 2px solid #fff;

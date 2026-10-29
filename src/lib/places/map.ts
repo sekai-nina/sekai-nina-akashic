@@ -40,6 +40,8 @@ export interface MapPlace {
   area: string;
   areaUnset: boolean;
   classification: ClearanceLevel;
+  /** 公開サイトの聖地マップ・記事に出るか (public / internal)。限定・極秘は出ない */
+  onSite: boolean;
   assetCount: number;
   /** ISO 文字列 */
   createdAt: string;
@@ -140,6 +142,8 @@ export function buildPlaceMapData(rows: PlaceRow[], now = new Date()): PlaceMapD
       area: p.area || OTHER_AREA,
       areaUnset: !p.area,
       classification: p.classification,
+      // src/lib/articles/frontmatter.ts の isPublishablePlace と同じ判定 (あちらは Prisma の enum を読むのでクライアントに持ち込まない)
+      onSite: p.classification === "public" || p.classification === "internal",
       assetCount: p.entity._count.assets,
       createdAt: createdAt.toISOString(),
       isNew: createdAt.getTime() >= newSince,
@@ -168,6 +172,9 @@ export const MAP_KIND_ICONS: Record<MapKind, string> = {
   shop: '<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/>',
   unset: '<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>',
 };
+
+/** サイトに出さない (限定・極秘) 聖地のピンに付ける鍵 */
+export const MAP_LOCK_ICON = '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>';
 
 /** ピンの塗り色 (サイトのブランド色に寄せる) */
 export const MAP_KIND_COLORS: Record<MapKind, string> = {

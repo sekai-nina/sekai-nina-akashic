@@ -24,13 +24,19 @@ import {
   MAP_KIND_COLORS,
   MAP_KIND_ICONS,
   MAP_KIND_ORDER,
+  MAP_LOCK_ICON,
   NEW_PLACE_DAYS,
   type MapArticle,
   type MapKind,
   type MapPlace,
   type PlaceMapData,
 } from "@/lib/places/map";
-import { jstDayString, MAP_PLACE_KIND_LABELS as KIND_LABELS, PLACE_CLASSIFICATION_LABELS } from "@/lib/utils";
+import {
+  jstDayString,
+  MAP_PLACE_KIND_LABELS as KIND_LABELS,
+  PLACE_CLASSIFICATION_LABELS,
+  PLACE_CLASSIFICATION_SHORT_LABELS,
+} from "@/lib/utils";
 
 type Sheet = "peek" | "half" | "full";
 type Sort = "new" | "near";
@@ -68,6 +74,19 @@ function KindIcon({ kind }: { kind: MapKind }) {
 const SearchIcon = () => (
   <svg className="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
 );
+const LockIcon = () => (
+  <svg className="ic" viewBox="0 0 24 24" aria-hidden="true" dangerouslySetInnerHTML={{ __html: MAP_LOCK_ICON }} />
+);
+/** 限定・極秘の聖地に添える札。サイトに出す (公開・一般) 聖地には付けない */
+function ScopeBadge({ place }: { place: MapPlace }) {
+  if (place.onSite) return null;
+  return (
+    <span className="pmap-private" title={PLACE_CLASSIFICATION_LABELS[place.classification]}>
+      <LockIcon />
+      {PLACE_CLASSIFICATION_SHORT_LABELS[place.classification]}
+    </span>
+  );
+}
 const PinIcon = () => (
   <svg className="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></svg>
 );
@@ -88,6 +107,7 @@ export function PlaceMap({ data }: { data: PlaceMapData }) {
   // ---------- 状態 ----------
   const [kinds, setKinds] = useState<Set<MapKind>>(new Set());
   const [onlyNew, setOnlyNew] = useState(false);
+  const [scope, setScope] = useState<"site" | "private" | null>(null); // 公開範囲の絞り込み
   const [sort, setSort] = useState<Sort>("new");
   const [route, setRouteState] = useState<MapArticle | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -122,6 +142,7 @@ export function PlaceMap({ data }: { data: PlaceMapData }) {
     if (route) return route.places.includes(p.id);
     if (kinds.size && !kinds.has(p.kind)) return false;
     if (onlyNew && !p.isNew) return false;
+    if (scope && p.onSite !== (scope === "site")) return false;
     return true;
   };
 
@@ -272,8 +293,9 @@ export function PlaceMap({ data }: { data: PlaceMapData }) {
 
     for (const p of places) {
       const html =
-        `<div class="pmap-pin${p.isNew ? " is-new" : ""}" style="color:${MAP_KIND_COLORS[p.kind]}">` +
+        `<div class="pmap-pin${p.isNew ? " is-new" : ""}${p.onSite ? "" : " is-private"}" style="color:${MAP_KIND_COLORS[p.kind]}">` +
         `<span class="num"></span>${p.isNew ? '<span class="new">NEW</span>' : ""}` +
+        (p.onSite ? "" : `<span class="lock"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${MAP_LOCK_ICON}</svg></span>`) +
         `<div class="disc">${svg(p.kind)}</div><span class="label">${esc(p.name)}</span></div>`;
       const m = L.marker([p.lat, p.lng], {
         icon: L.divIcon({ html, className: "", iconSize: [30, 30], iconAnchor: [15, 15] }),
@@ -364,7 +386,7 @@ export function PlaceMap({ data }: { data: PlaceMapData }) {
     }
     requestAnimationFrame(decoratePins);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kinds, onlyNew, route]);
+  }, [kinds, onlyNew, scope, route]);
 
   useEffect(() => { decoratePins(); }, [selected]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -480,6 +502,7 @@ export function PlaceMap({ data }: { data: PlaceMapData }) {
       if (route) setRoute(null);
       setKinds(new Set());
       setOnlyNew(false);
+      setScope(null);
     }
     select(id, { fly: true });
   }
@@ -614,10 +637,13 @@ export function PlaceMap({ data }: { data: PlaceMapData }) {
     const empty = items.length ? null : all.map((p) => ({ p, d: km(origin, p) })).sort((a, c) => a.d - c.d).slice(0, 4);
     return { title: "この範囲の聖地", items, sortLabel: user ? "現在地から" : qpin ? "検索地点から" : "地図の中心から", empty };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [places, kinds, onlyNew, route, sort, user, qpin, viewTick, byId]);
+  }, [places, kinds, onlyNew, scope, route, sort, user, qpin, viewTick, byId]);
 
   const showDist = !route && sort === "near" && (user || qpin);
-  const activeSum = [...kinds].map((k) => KIND_LABELS[k]).concat(onlyNew ? ["新着"] : []);
+  const activeSum = [...kinds]
+    .map((k) => KIND_LABELS[k])
+    .concat(onlyNew ? ["新着"] : [], scope ? [scope === "site" ? "サイトに出す" : "サイトに出さない"] : []);
+  const privateCount = places.filter((p) => !p.onSite).length;
 
   return (
     <div className="pmap" ref={rootRef}>
@@ -668,7 +694,7 @@ export function PlaceMap({ data }: { data: PlaceMapData }) {
                 {results.places.map((p) => (
                   <button key={p.id} type="button" onClick={() => pick(p.id)}>
                     <span className="pmap-kind-ic" style={{ color: MAP_KIND_COLORS[p.kind] }}><KindIcon kind={p.kind} /></span>
-                    <span className="r-name">{p.isNew && <span className="pmap-new">NEW</span>}{p.name}</span>
+                    <span className="r-name">{p.isNew && <span className="pmap-new">NEW</span>}<ScopeBadge place={p} />{p.name}</span>
                     <span className="r-sub">{p.area}</span>
                   </button>
                 ))}
@@ -726,6 +752,29 @@ export function PlaceMap({ data }: { data: PlaceMapData }) {
                     onClick={() => setOnlyNew((v) => !v)}
                   >
                     NEW（{NEW_PLACE_DAYS}日以内）<small>{newCount}</small>
+                  </button>
+                </div>
+              </div>
+              <div className="pmap-facet-row">
+                <span className="pmap-facet-label">公開範囲</span>
+                <div className="pmap-chips">
+                  <button
+                    className="pmap-chip"
+                    type="button"
+                    aria-pressed={scope === "site"}
+                    onClick={() => setScope((v) => (v === "site" ? null : "site"))}
+                  >
+                    サイトに出す <small>{places.length - privateCount}</small>
+                  </button>
+                  <button
+                    className="pmap-chip"
+                    type="button"
+                    aria-pressed={scope === "private"}
+                    disabled={!privateCount}
+                    onClick={() => setScope((v) => (v === "private" ? null : "private"))}
+                  >
+                    <LockIcon />
+                    出さない（限定・極秘） <small>{privateCount}</small>
                   </button>
                 </div>
               </div>
@@ -840,6 +889,7 @@ export function PlaceMap({ data }: { data: PlaceMapData }) {
                     <span className="pmap-item-name">
                       {route && <span className="n">{i + 1}</span>}
                       {p.isNew && <span className="pmap-new">NEW</span>}
+                      <ScopeBadge place={p} />
                       {p.name}
                     </span>
                     <span className="pmap-item-sub">{times}{sub}</span>
@@ -854,7 +904,7 @@ export function PlaceMap({ data }: { data: PlaceMapData }) {
                     {p.address && <p className="addr">{p.address}</p>}
                     <div className="pmap-tags">
                       <span>{fmtAdded(p.createdAt)} 追加</span>
-                      <span>{PLACE_CLASSIFICATION_LABELS[p.classification]}</span>
+                      <span className={p.onSite ? undefined : "private"}>{PLACE_CLASSIFICATION_LABELS[p.classification]}</span>
                       {p.kind === "unset" ? <span className="warn">種類が未設定</span> : <span>{KIND_LABELS[p.kind]}</span>}
                       {p.areaUnset ? <span className="warn">エリアが未設定</span> : <span>{p.area}</span>}
                       <span>アセット {p.assetCount}</span>
