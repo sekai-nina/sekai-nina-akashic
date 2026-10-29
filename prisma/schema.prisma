@@ -207,6 +207,7 @@ model User {
   aiSettings          AiSetting[]
   xMentionSettings    XMentionSetting[]
   sketchSettings      SketchSetting[]   @relation("SketchSettingUpdatedBy")
+  articlePromptSettings ArticlePromptSetting[] @relation("ArticlePromptSettingUpdatedBy")
   createdInvitations  Invitation[]      @relation("InvitationCreatedBy")
   meetGreets          MeetGreet[]       @relation("MeetGreetCreatedBy")
   lives               Live[]            @relation("LiveCreatedBy")
@@ -1913,6 +1914,23 @@ model SketchSetting {
   updatedAt   DateTime @updatedAt
   updatedById String?
   updatedBy   User?    @relation("SketchSettingUpdatedBy", fields: [updatedById], references: [id])
+
+  classification ClearanceLevel @default(internal)
+
+  @@index([classification])
+}
+
+/// 記事テンプレートの AI プロンプトの設定。**テンプレートごとに 1 行**。
+/// ルール文 (システムプロンプトの前半: 役割・本文の形・鉄則・出力・見本) を画面から直すためのもので、
+/// 行が無い / 空なら組み込みの既定 (`ArticleTemplateDef.defaultRules`) を使う
+model ArticlePromptSetting {
+  template ArticleTemplate @id
+  /// ルール文。空文字なら組み込みの既定
+  rules    String          @default("")
+
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+  updatedBy   User?    @relation("ArticlePromptSettingUpdatedBy", fields: [updatedById], references: [id])
 
   classification ClearanceLevel @default(internal)
 
