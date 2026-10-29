@@ -4,7 +4,7 @@ import { useSyncExternalStore } from "react";
 import { listAssetDossiersAction } from "@/app/(main)/dossiers/actions";
 
 /**
- * 企画ピッカー (`AddToDossier` / `QuickAddToDossier`) がページをまたいで共有する状態。
+ * 企画ピッカー (`AddToDossier` / `QuickAddToLastDossier`) がページをまたいで共有する状態。
  * - 前回の追加先: 同じ企画に続けて入れるための近道。localStorage に残す
  * - その場で作った企画: 検索・ギャラリーの企画一覧はサーバー描画なので、作ってもリロードまで出てこない
  * - アセットが入っている企画: ピッカーを開くたびに引く。追加・削除で手元の値を直す

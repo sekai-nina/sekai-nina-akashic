@@ -153,7 +153,13 @@ export function AddToDossier({
 
   function noteAdded(dossier: { id: string; title: string }) {
     setAddedIds((prev) => new Set(prev).add(dossier.id));
-    setContaining((prev) => (prev && !prev.some((r) => r.id === dossier.id) ? [{ ...dossier, itemCount: 1 }, ...prev] : prev));
+    setContaining((prev) => {
+      if (!prev) return prev;
+      const row = prev.find((r) => r.id === dossier.id);
+      if (!row) return [{ ...dossier, itemCount: 1 }, ...prev];
+      // 抜粋は同じ企画に重ねて入るので件数を進める
+      return isExcerpt ? prev.map((r) => (r === row ? { ...r, itemCount: r.itemCount + 1 } : r)) : prev;
+    });
     markContaining(assetId, dossier, true);
     rememberDossier(dossier);
   }
@@ -249,6 +255,8 @@ export function AddToDossier({
     (d) => d.title.trim().toLowerCase() === trimmedQuery.toLowerCase()
   );
   const canQuickCreate = trimmedQuery.length > 0 && !hasExactMatch;
+  // 入っている企画を確かめるまでは追加させない (入っている企画に足すとキャプションを上書きしてしまう)
+  const checking = containing === null && !isExcerpt;
 
   function renderRow(d: { id: string; title: string }) {
     const added = addedIds.has(d.id);
@@ -258,7 +266,7 @@ export function AddToDossier({
         <button
           type="button"
           onClick={() => (removable ? removeFrom(d.id) : addToExisting(d.id))}
-          disabled={(added && !removable) || isPending}
+          disabled={(added && !removable) || isPending || checking}
           title={removable ? "押すとこの企画から外す" : undefined}
           className={`group w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded text-xs ${
             removable
@@ -341,7 +349,7 @@ export function AddToDossier({
               // isComposing が false になるので keyCode 229 も見る
               if (e.nativeEvent.isComposing || e.keyCode === 229) return;
               // 空欄の Enter は前回の追加先へ
-              if (e.key === "Enter" && !query && pinned && !addedIds.has(pinned.id) && !isPending) {
+              if (e.key === "Enter" && !query && pinned && !addedIds.has(pinned.id) && !isPending && !checking) {
                 e.preventDefault();
                 addToExisting(pinned.id);
                 return;
@@ -492,19 +500,34 @@ export function QuickAddToLastDossier({
   const { lastUsed, created, containingVersion } = usePickerState();
   const target = lastUsed ? withCreated(dossiers, created).find((d) => d.id === lastUsed.id) : undefined;
   const targetId = target?.id;
-  // null = 確認中
-  const [contained, setContained] = useState<boolean | null>(null);
+  // null = 確認中 / "unknown" = 確かめられなかった (入っていたらキャプションを上書きするので押させない)
+  const [contained, setContained] = useState<boolean | "unknown" | null>(null);
   const [error, setError] = useState(false);
   const [isPending, startTransition] = useTransition();
 
+  // ← → で送るたびに引くと、サーバーアクションが直列に積まれて追加が待たされる。
+  // 止まってから引き直す (企画のページで外して戻ってきた場合もあるので fresh)
   useEffect(() => {
     if (!targetId) return;
     let cancelled = false;
-    setContained(null);
-    setError(false);
+    const timer = setTimeout(() => {
+      fetchContainingDossiers(assetId, { fresh: true })
+        .then((rows) => !cancelled && setContained(rows.some((r) => r.id === targetId)))
+        .catch(() => !cancelled && setContained("unknown"));
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [assetId, targetId]);
+
+  // ピッカー側で足し外ししたら手元のキャッシュから読み直す (通信しない)
+  useEffect(() => {
+    if (!targetId || containingVersion === 0) return;
+    let cancelled = false;
     fetchContainingDossiers(assetId)
       .then((rows) => !cancelled && setContained(rows.some((r) => r.id === targetId)))
-      .catch(() => !cancelled && setContained(false));
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -518,7 +541,6 @@ export function QuickAddToLastDossier({
     setError(false);
     startTransition(async () => {
       try {
-        // 抜粋なしの追加は冪等なので、確認と追加のすれ違いで二重にはならない
         await addAssetToDossierAction(target.id, assetId, { caption: defaultCaption });
         setContained(true);
         markContaining(assetId, target, true);
@@ -534,22 +556,29 @@ export function QuickAddToLastDossier({
       type="button"
       onClick={add}
       disabled={contained !== false || isPending}
-      title={contained ? `「${title}」に入っています` : `「${title}」に追加`}
+      title={
+        contained === "unknown"
+          ? "入っている企画を確かめられませんでした。＋から追加してください"
+          : contained
+            ? `「${title}」に入っています`
+            : `「${title}」に追加`
+      }
+      aria-live="polite"
       className={`inline-flex min-w-0 items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium transition-colors ${
-        contained
+        contained === true
           ? "bg-emerald-500/20 text-emerald-100"
           : "bg-indigo-500/80 text-white hover:bg-indigo-500 active:bg-indigo-600 disabled:opacity-60"
       }`}
     >
       {isPending || contained === null ? (
         <Loader2 size={16} className="shrink-0 animate-spin" />
-      ) : contained ? (
+      ) : contained === true ? (
         <Check size={16} className="shrink-0" />
       ) : (
         <Plus size={16} className="shrink-0" />
       )}
       <span className="max-w-[10rem] truncate">{title}</span>
-      <span className="shrink-0">{error ? "に追加できませんでした" : contained ? "に追加済み" : "に追加"}</span>
+      <span className="shrink-0">{error ? "に追加できませんでした" : contained === "unknown" ? "を確認できませんでした" : contained ? "に追加済み" : "に追加"}</span>
     </button>
   );
 }

@@ -350,6 +350,7 @@ export function GalleryGrid({
               {editableDossiers.length > 0 && (
                 <>
                   <QuickAddToLastDossier
+                    key={`quick-${items[lightbox].id}`}
                     assetId={items[lightbox].id}
                     dossiers={editableDossiers}
                     defaultCaption={items[lightbox].title}
