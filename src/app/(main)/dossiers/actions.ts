@@ -13,6 +13,7 @@ import {
   updateDossierItem as updateDossierItemDomain,
   removeDossierItem as removeDossierItemDomain,
   removeAssetFromDossier as removeAssetFromDossierDomain,
+  listDossiersContainingAsset,
   reorderDossierItems as reorderDossierItemsDomain,
   addPlaceCandidate as addPlaceCandidateDomain,
   updatePlaceCandidate as updatePlaceCandidateDomain,
@@ -105,6 +106,13 @@ export async function addAssetToDossierAction(
   revalidatePath(`/dossiers/${dossierId}`);
   // アセット詳細の「含まれているドシエ」を追従させる
   revalidatePath(`/assets/${assetId}`);
+}
+
+/** このアセットが入っている企画 (検索・ギャラリーのピッカーを開いたときに引く) */
+export async function listAssetDossiersAction(assetId: string) {
+  const user = await requireUser();
+  const rows = await listDossiersContainingAsset(user, assetId);
+  return rows.map((d) => ({ id: d.id, title: d.title, itemCount: d.itemCount }));
 }
 
 /** ドシエからアセットを外す (抜粋ごとの重複もまとめて)。アセット詳細のピッカー / パネルから呼ぶ */
