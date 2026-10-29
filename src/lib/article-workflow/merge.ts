@@ -112,6 +112,8 @@ export function mergePrompt(input: {
   newSources: { sourceNo: number; label: string }[];
   included: number;
   truncated: number;
+  /** 場所候補 (おでかけの `placesText`)。新しい素材で行った場所のカードを置けるように */
+  places?: string;
 }): AiPrompt {
   const user = [
     `記事のタイトル: ${input.title}`,
@@ -133,6 +135,12 @@ export function mergePrompt(input: {
       input.newSources.map((s) => `^[${s.sourceNo}] ${s.label}`).join(" / "),
     "",
     "body には組み込んだあとの本文全体を返す。tags / title / date / dateDisplay は使わない (空配列と null)。",
+    ...(input.places
+      ? [
+          "新しい素材で行った場所が「場所候補」にあれば、その場所の `##` の末尾に `{{場所:K}}` の行を置いてよい",
+          "(差し込む新しい行として。既存の本文にもうその場所のカードがあれば置かない)。",
+        ]
+      : []),
     "",
     "## 既存の本文",
     "",
@@ -140,6 +148,7 @@ export function mergePrompt(input: {
     input.existingBody.trimEnd(),
     "```",
     "",
+    ...(input.places ? [input.places] : []),
     input.materials,
   ].join("\n");
   return { system: input.system, user, included: input.included, truncated: input.truncated };

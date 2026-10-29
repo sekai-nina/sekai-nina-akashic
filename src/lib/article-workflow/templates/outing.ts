@@ -9,6 +9,9 @@
  *   引用しない
  * - `## 関連メディア` (機械): 画像・動画のトークとブログ画像をリンクで、TikTok を埋め込みで、1 つの箇条書きに (flat)。
  *   文章のトークは出典にだけ使う
+ * - 場所のカード (AI が置き場所を決め、機械が展開): AI は場所候補の番号を `{{場所:K}}` の 1 行で
+ *   その場所の `##` の末尾に置き、`expandPlaceCards` が Google マップへの `cardlink` ブロックにする
+ *   (URL を AI に書き写させない)
  * - `locations` (機械): 場所候補。聖地に昇格済みなら `place_id`、未昇格なら座標をインライン
  *   (`place_id` の要素は保存時に ArticlePlace に移る。非公開の聖地は `placeIds` で紐づけだけ付く。#283)
  * - `date` / `date_display` / tags は AI の提案 (同行者 + カテゴリ)
@@ -117,8 +120,10 @@ const RULES = `あなたは日向坂46・坂井新奈のアーカイブサイト
 - **引用はしない。** 本人や相手の言葉をそのまま載せず、事実に言い換える
   (「ホイップたっぷり・いちご添えのパンケーキが1皿5枚」のように)。冒頭の 1 文で本人の
   総括的な一言 (「本当に楽しかった」) を「」で短く引くのは可
-- 場所は「場所候補」にあるものを本文でも \`[店名](Google マップの URL)\` でリンクしてよい
-  (URL は場所候補にあるものだけ。作らない)
+- **場所のカード。** 「場所候補」に \`{{場所:K}}\` が付いている場所に行ったことが本文に出てきたら、
+  その場所の \`##\` の**末尾 (箇条書きのあと) に \`{{場所:K}}\` だけの行**を空行で挟んで置く
+  (機械が Google マップへのリンクカードに置き換える)。1 つの場所につき 1 回。行っていない場所・
+  本文に出てこない場所のカードは置かない。URL やリンクを自分で書かない
 - **短くてよい。** 素材が少なければ \`##\` 1 つ・箇条書き数行で終える。同じ事実を言い換えて
   繰り返さない。節を埋めるために行を足さない
 - **\`## 関連メディア\` は書かない** (機械が後ろに足す)。frontmatter やタイトルも書かない
@@ -166,18 +171,68 @@ export function outingSystemPrompt(context: AiContext): string[] {
   return aiSystemPrompt(RULES, context);
 }
 
+/** Google マップのリンク。候補の URL、無ければ座標、どちらも無ければ名前 + 住所で検索。住所も無ければ作らない */
+function placeMapUrl(p: DossierPlace): string | null {
+  if (p.googleMapsUrl) return p.googleMapsUrl;
+  if (p.lat != null && p.lng != null) return `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}`;
+  if (p.address) return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${p.name} ${p.address}`)}`;
+  return null;
+}
+
+/** カードを置ける場所候補 (`{{場所:K}}` の K は 1 始まり。`placesText` と `expandPlaceCards` で共通) */
+function cardPlaces(places: DossierPlace[]): { no: number; place: DossierPlace; url: string }[] {
+  const out: { no: number; place: DossierPlace; url: string }[] = [];
+  for (const place of places) {
+    const url = placeMapUrl(place);
+    if (url) out.push({ no: out.length + 1, place, url });
+  }
+  return out;
+}
+
+function placeCard(name: string, url: string): string {
+  let host = "www.google.com";
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    // 壊れた URL でもカードは出す (host は既定)
+  }
+  return ["```cardlink", `url: ${url}`, `title: "${name.replace(/"/g, "'")}"`, `host: ${host}`, "```"].join("\n");
+}
+
+const PLACE_MARKER = /^[ \t]*\{\{場所:(\d+)\}\}[ \t]*$/gm;
+
 /**
- * 場所候補をプロンプトに。渡すのは名前・住所・Google マップ URL だけ (`outing_brief.py` と同じ)。
+ * AI が置いた `{{場所:K}}` の行を Google マップのリンクカードに置き換える。知らない番号の行と、
+ * 本文にもうカードがある場所 (同じ URL の cardlink。追記の組み込みで二重にしない) の行は落とす
+ */
+export function expandPlaceCards(body: string, places: DossierPlace[]): string {
+  const byNo = new Map(cardPlaces(places).map((c) => [c.no, c]));
+  const placed = new Set<string>();
+  for (const m of body.matchAll(/```cardlink\n(?:(?!```)[^\n]*\n)*?url:\s*(\S+)/g)) placed.add(m[1]);
+  return body
+    .replace(PLACE_MARKER, (_whole, k: string) => {
+      const c = byNo.get(Number(k));
+      if (!c || placed.has(c.url)) return "";
+      placed.add(c.url);
+      return placeCard(c.place.name, c.url);
+    })
+    .replace(/\n{3,}/g, "\n\n");
+}
+
+/**
+ * 場所候補をプロンプトに。渡すのは名前・住所だけ (`outing_brief.py` と同じ)。URL は渡さず、
+ * カードを置ける場所に番号 (`{{場所:K}}`) を振る。
  * 編集メモ (`note`) は「本人の自宅近く」のような内部の注意書きが入りうるので**渡さない**
  */
-function placesText(places: DossierPlace[]): string {
+export function placesText(places: DossierPlace[]): string {
   if (places.length === 0) return "";
-  const lines = ["## 場所候補 (本文で `[名前](URL)` とリンクしてよい。聖地か座標があるものは locations にも入る)", ""];
+  const cards = new Map(cardPlaces(places).map((c) => [c.place, c.no]));
+  const lines = ["## 場所候補 (行った場所の `##` の末尾に `{{場所:K}}` を置くと、機械がリンクカードにする)", ""];
   for (const p of places) {
     const bits = [p.name];
     if (p.address) bits.push(p.address);
-    if (p.googleMapsUrl) bits.push(p.googleMapsUrl);
-    lines.push(`- ${bits.join(" / ")}`);
+    const no = cards.get(p);
+    lines.push(`- ${bits.join(" / ")}${no ? ` → \`{{場所:${no}}}\`` : " (カードなし)"}`);
   }
   return lines.join("\n") + "\n";
 }
@@ -230,7 +285,9 @@ export function renderOutingArticle(input: DossierRenderInput, draft?: AiDraft |
 
   const hasDraft = !!draft && draft.body.trim().length > 0;
   const body: string[] = [
-    hasDraft ? stripRelatedMedia(normalizeAiBody(draft.body, sources.length)).trimEnd() : OUTING_BODY_PLACEHOLDER,
+    hasDraft
+      ? expandPlaceCards(stripRelatedMedia(normalizeAiBody(draft.body, sources.length)), input.places).trimEnd()
+      : OUTING_BODY_PLACEHOLDER,
     "",
     ...renderRelatedMediaSection({ talks: mediaTalks, blogs, tiktoks: input.tiktoks, talkSourceNo, style: OUTING_MEDIA_STYLE }),
   ];
