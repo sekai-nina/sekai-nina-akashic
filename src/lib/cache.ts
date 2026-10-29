@@ -305,13 +305,23 @@ export const getCachedPlaces = (clearance: ClearanceLevel) => {
               status: "confirmed",
               classification: { in: allowedLevels.length > 0 ? allowedLevels : ["public"] },
             },
-            include: { entity: true },
+            include: {
+              entity: true,
+              // 地図の「訪問した記事」とルート表示に使う
+              articles: {
+                orderBy: { sortOrder: "asc" },
+                select: {
+                  sortOrder: true,
+                  article: { select: { shortId: true, title: true, date: true, dateDisplay: true, draft: true } },
+                },
+              },
+            },
             // 新しく登録した聖地を上に
             orderBy: { createdAt: "desc" },
           })
         ),
-      // アセット数を別に引くようにしたので鍵を変える (Vercel のデータキャッシュはデプロイをまたいで残る)
-      [`places-list-v3-${clearance}`],
+      // 記事を含めるようにしたので鍵を変える (Vercel のデータキャッシュはデプロイをまたいで残る)
+      [`places-list-v4-${clearance}`],
       { tags: [CACHE_TAGS.places], revalidate: 60 }
     )(),
     getCachedEntityAssetCounts(clearance),

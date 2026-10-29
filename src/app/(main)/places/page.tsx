@@ -1,100 +1,46 @@
 import { auth } from "@/lib/auth";
 import { getCachedPlaces } from "@/lib/cache";
 import Link from "next/link";
-import { MapPin, Plus, ExternalLink } from "lucide-react";
+import { MapPin, Plus } from "lucide-react";
 import { notFound } from "next/navigation";
+import type { ClearanceLevel } from "@prisma/client";
 import { PlacesMap } from "./places-map";
-import { PLACE_KIND_LABELS } from "@/lib/utils";
+import { buildPlaceMapData, NEW_PLACE_DAYS } from "@/lib/places/map";
 
 export default async function PlacesPage() {
   const session = await auth();
   if (!session?.user) notFound();
 
-  const places = await getCachedPlaces(session.user.clearance as "public" | "internal" | "confidential" | "restricted");
+  const places = await getCachedPlaces(session.user.clearance as ClearanceLevel);
+  // NEW の判定はキャッシュの外で行う (キャッシュに入れると最大 60 秒ぶん古い「今」で切られる)
+  const data = buildPlaceMapData(places);
+  const newCount = data.places.filter((p) => p.isNew).length;
 
-  const markers = places.map((p) => ({
-    id: p.id,
-    lat: p.latitude,
-    lng: p.longitude,
-    label: p.entity.canonicalName,
-    popupHtml: `<strong>${p.entity.canonicalName}</strong>${p.entity.description ? `<br/><span style="font-size:12px">${p.entity.description}</span>` : ""}`,
-  }));
-
+  // 地図を画面いっぱいに広げるため、レイアウトの余白を打ち消す (スマホは上の 48px がヘッダー)
   return (
-    <div className="max-w-5xl mx-auto">
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-            <MapPin className="h-6 w-6 text-green-600" />
-            聖地マップ
-          </h1>
-          <p className="text-slate-500 text-sm mt-1">
-            全 {places.length} 件の聖地
-          </p>
-        </div>
+    <div className="-mx-4 -mt-2 -mb-24 md:-m-6 h-[calc(100dvh-3rem)] md:h-dvh flex flex-col">
+      <div className="flex items-center gap-3 px-4 py-2 border-b border-slate-200 bg-white">
+        <h1 className="text-base font-bold text-slate-900 flex items-center gap-1.5">
+          <MapPin className="h-5 w-5 text-green-600" />
+          聖地マップ
+        </h1>
+        <p className="text-slate-500 text-xs">
+          全 {data.places.length} 件
+          {newCount > 0 && (
+            <span className="ml-2 font-semibold text-rose-600">
+              新着 {newCount} 件（{NEW_PLACE_DAYS}日以内）
+            </span>
+          )}
+        </p>
         <Link
           href="/places/new"
-          className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors"
+          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors"
         >
           <Plus className="h-4 w-4" />
           新規登録
         </Link>
       </div>
-
-      {/* Map */}
-      <div className="mb-8">
-        <PlacesMap markers={markers} />
-      </div>
-
-      {/* List */}
-      <div className="bg-white border border-slate-200 rounded-lg divide-y divide-slate-100">
-        {places.length === 0 && (
-          <div className="px-4 py-8 text-center text-slate-400 text-sm">
-            聖地が登録されていません
-          </div>
-        )}
-        {places.map((place) => (
-          <Link
-            key={place.id}
-            href={`/places/${place.id}`}
-            className="flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors"
-          >
-            <div className="min-w-0">
-              <span className="text-sm font-medium text-slate-900">
-                {place.entity.canonicalName}
-              </span>
-              {place.entity.description && (
-                <p className="text-xs text-slate-500 mt-0.5 truncate max-w-md">
-                  {place.entity.description}
-                </p>
-              )}
-              {place.address && (
-                <p className="text-xs text-slate-400 mt-0.5">
-                  {place.address}
-                </p>
-              )}
-            </div>
-            <div className="shrink-0 ml-4 flex items-center gap-3 text-right">
-              {place.area && (
-                <span className="text-xs text-slate-500">{place.area}</span>
-              )}
-              {place.kind && (
-                <span className="text-xs text-slate-500 border border-slate-200 rounded-full px-2 py-0.5">
-                  {PLACE_KIND_LABELS[place.kind]}
-                </span>
-              )}
-              {place.googleMapsUrl && (
-                <span className="text-green-600">
-                  <ExternalLink className="h-3.5 w-3.5" />
-                </span>
-              )}
-              <span className="text-xs text-slate-400">
-                {place.entity._count.assets} assets
-              </span>
-            </div>
-          </Link>
-        ))}
-      </div>
+      <PlacesMap data={data} />
     </div>
   );
 }
