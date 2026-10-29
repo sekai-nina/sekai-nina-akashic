@@ -10,8 +10,55 @@
  * 人が画面で直した結果は検査しない (書き換えたいときは人が書き換える)。
  */
 
-import type { RenderedSource } from "./render";
+import { classifyMaterials, numberSources, type ArticleAssetInput, type RenderedSource } from "./render";
 import type { AiPrompt } from "./templates/types";
+
+/**
+ * 記事に素材を取り込んだ (`Article.materialsSyncedAt`) あとで入れた、メモ・抜粋つきのクリップか。
+ * 出典として載っている素材へのクリップは出典が増えないので、これで「新しい素材」と見る。
+ * メモも抜粋も無いクリップは足す中身が無いので数えない。取り込んだ時刻が無い記事は判定しない
+ */
+export function isFreshClip(
+  item: { createdAt: Date; note: string; excerpt: string },
+  syncedAt: Date | null | undefined
+): boolean {
+  if (!syncedAt) return false;
+  return item.createdAt > syncedAt && (item.note.trim() !== "" || item.excerpt.trim() !== "");
+}
+
+export interface FreshMaterial {
+  excerpts: string[];
+  notes: string[];
+  itemIds: string[];
+}
+
+/**
+ * 新しいメモ・抜粋を、組み立ての出典番号 (`numberSources`) ごとにまとめる。
+ * ブログ画像はブログの番号に寄せる。素材に無いアセット (機密で落ちたもの等) は捨てる
+ */
+export function groupFreshBySource(
+  assets: ArticleAssetInput[],
+  items: { id: string; assetId: string; note: string; excerpt: string }[]
+): Map<number, FreshMaterial> {
+  const { blogs, talks } = classifyMaterials(assets);
+  const { talkSourceNo } = numberSources(blogs, talks);
+  const noByAsset = new Map(talkSourceNo);
+  for (const b of blogs) {
+    if (b.ref) noByAsset.set(b.ref, b.sourceNo);
+    for (const img of b.images) noByAsset.set(img.id, b.sourceNo);
+  }
+  const out = new Map<number, FreshMaterial>();
+  for (const item of items) {
+    const no = noByAsset.get(item.assetId);
+    if (no === undefined) continue;
+    const m = out.get(no) ?? { excerpts: [], notes: [], itemIds: [] };
+    m.itemIds.push(item.id);
+    if (item.excerpt.trim()) m.excerpts.push(item.excerpt);
+    if (item.note.trim()) m.notes.push(item.note.trim());
+    out.set(no, m);
+  }
+  return out;
+}
 
 const SECTION_HEAD = /^### \^\[(\d+)\] /;
 

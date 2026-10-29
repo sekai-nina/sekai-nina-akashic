@@ -138,7 +138,12 @@ export function buildMaterialsText(
    * 中身を渡す出典 (組み立ての番号)。省略は全部。ここに無い出典は見出しだけにして、枠を使わず数えない
    * (既存の記事に組み込む #275 では、新しい素材の中身だけ渡す。既存の出典の全文で枠を使い切らないように)
    */
-  focus?: ReadonlySet<number>
+  focus?: ReadonlySet<number>,
+  /**
+   * `focus` の外 (既存の出典) に、記事を作ったあとで入れたメモ・抜粋 (組み立ての番号ごと)。
+   * 本文は渡さず、これだけを見出しの下に並べる (本文全文を渡すと、反映済みの事実まで書き足す)
+   */
+  fresh?: ReadonlyMap<number, { excerpts: string[]; notes: string[] }>
 ): MaterialsText {
   const { blogs, talks } = classifyMaterials(input.assets);
   const { talkSourceNo } = numberSources(blogs, talks);
@@ -151,7 +156,24 @@ export function buildMaterialsText(
 
   const push = (sec: Section, sourceNo: number | undefined) => {
     if (focus && (sourceNo === undefined || !focus.has(sourceNo))) {
-      parts.push(`${sec.text.split("\n")[0]}\n(既存の出典。中身は既存の本文に反映済み)`, "");
+      const header = sec.text.split("\n")[0];
+      const added = sourceNo === undefined ? undefined : fresh?.get(sourceNo);
+      if (added) {
+        const s = section(
+          [header],
+          {
+            ...added,
+            captions: [],
+            body: null,
+            noBodyNote: "(既存の出典。本文・画像は既存の本文に反映済みなので、上のメモ・抜粋だけが新しい)",
+          },
+          0
+        );
+        parts.push(s.text, "");
+        included++;
+        return;
+      }
+      parts.push(`${header}\n(既存の出典。中身は既存の本文に反映済み)`, "");
       return;
     }
     parts.push(sec.text, "");

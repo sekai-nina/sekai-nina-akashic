@@ -887,6 +887,10 @@ model Article {
   /// ドシエが消えたら null に戻る
   dossierId String?
   dossier   Dossier? @relation(fields: [dossierId], references: [id], onDelete: SetNull)
+  /// 企画の素材をこの時刻までに本文へ取り込んだ (記事の新規作成と、AI の組み込みの保存が書く)。
+  /// これより後に入った、出典済みのアセットへのメモ・抜粋つきのクリップを「新しい素材」とみなす。
+  /// null は判定しない (ワークフローの外で作った記事)
+  materialsSyncedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
