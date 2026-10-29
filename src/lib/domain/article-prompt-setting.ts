@@ -41,12 +41,20 @@ export interface ArticlePromptView {
   updatedByName: string | null;
 }
 
-/** 生成に使うルール文。直していなければ null (= テンプレートの既定) */
+/**
+ * 生成に使うルール文。直していなければ null (= テンプレートの既定)。
+ * **読めなくても生成は止めない** (GRANT 漏れ・接続の混雑で記事が作れなくなるより、既定で書くほうがよい)
+ */
 export async function getArticlePromptRules(template: ArticleTemplate): Promise<string | null> {
-  const row = await withClearance(SETTING_CLEARANCE, (tx) =>
-    tx.articlePromptSetting.findUnique({ where: { template }, select: { rules: true } })
-  );
-  return row?.rules.trim() ? row.rules : null;
+  try {
+    const row = await withClearance(SETTING_CLEARANCE, (tx) =>
+      tx.articlePromptSetting.findUnique({ where: { template }, select: { rules: true } })
+    );
+    return row?.rules.trim() ? row.rules : null;
+  } catch (e) {
+    console.error("[article-prompt-setting] 設定を読めないので既定のルール文で生成します", e);
+    return null;
+  }
 }
 
 export async function listArticlePrompts(): Promise<ArticlePromptView[]> {
@@ -78,9 +86,9 @@ export async function updateArticlePromptRules(
 ): Promise<void> {
   const def = aiTemplates().find((t) => t.key === template);
   if (!def) throw new Error("AI を使わないテンプレートです");
-  if (rules.length > MAX_RULES_LENGTH) throw new Error(`長すぎます (${MAX_RULES_LENGTH} 字まで)`);
-  // textarea から来ると改行が CRLF になる。既定との比較とキャッシュの一致のため揃える
+  // textarea から来ると改行が CRLF になる。既定との比較とキャッシュの一致のため揃える (長さも揃えてから見る)
   const normalized = rules.replace(/\r\n?/g, "\n");
+  if (normalized.length > MAX_RULES_LENGTH) throw new Error(`長すぎます (${MAX_RULES_LENGTH} 字まで)`);
   const stored = normalized.trim() === "" || normalized === def.defaultRules ? "" : normalized;
 
   await withClearance(SETTING_CLEARANCE, (tx) =>

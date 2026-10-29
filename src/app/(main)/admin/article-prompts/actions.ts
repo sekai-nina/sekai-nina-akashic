@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { ArticleTemplate } from "@prisma/client";
 import { requireRole } from "@/lib/auth/require-role";
-import { aiTemplates, MAX_RULES_LENGTH, updateArticlePromptRules } from "@/lib/domain/article-prompt-setting";
+import { aiTemplates, updateArticlePromptRules } from "@/lib/domain/article-prompt-setting";
 
 function templateFrom(formData: FormData): ArticleTemplate {
   const key = (formData.get("template") as string) ?? "";
@@ -16,7 +16,8 @@ function templateFrom(formData: FormData): ArticleTemplate {
 export async function saveArticlePrompt(formData: FormData) {
   const user = await requireRole(["admin"]);
   const template = templateFrom(formData);
-  const rules = ((formData.get("rules") as string) ?? "").slice(0, MAX_RULES_LENGTH);
+  // 長さは domain が改行を揃えてから見る (ここで切ると見本の途中で黙って切れる)
+  const rules = (formData.get("rules") as string) ?? "";
   await updateArticlePromptRules(template, rules, user.id);
   revalidatePath("/admin/article-prompts");
 }
