@@ -91,3 +91,74 @@
 .article-content em,
 .article-content i { font-style: italic; }
 :where(.article-content) sup { font-size: 0.75em; vertical-align: super; line-height: 0; }
+
+/* 公開サイトの BaseLayout.astro にあるリンクカード (```cardlink) の見た目。
+   生成ファイルは記事ページの <style> しか拾わないので、ここに写す。サイト側を直したらこちらも直す */
+.article-content a.cardlink {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  height: 100px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  text-decoration: none;
+  color: inherit;
+  background: var(--surface);
+  transition: box-shadow 0.15s ease;
+  margin: 1rem 0;
+  box-sizing: border-box;
+}
+.article-content a.cardlink:hover { box-shadow: var(--shadow-sm); }
+.article-content .cardlink > .cardlink-image {
+  width: 100px;
+  min-width: 100px;
+  height: 100%;
+  flex-shrink: 0;
+  overflow: hidden;
+  order: -1;
+}
+.article-content .cardlink .cardlink-image img {
+  width: 100px;
+  height: 100px;
+  object-fit: cover;
+  display: block;
+  max-width: none;
+  margin: 0;
+  border-radius: 0;
+}
+.article-content .cardlink > .cardlink-content {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+}
+.article-content .cardlink .cardlink-title {
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.article-content .cardlink .cardlink-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: auto;
+}
+.article-content .cardlink .cardlink-favicon {
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.article-content .cardlink .cardlink-host {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
