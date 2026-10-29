@@ -175,6 +175,17 @@ describe("renderOutingArticle", () => {
     expect(p.included).toBe(2);
   });
 
+  it("人が手直しで削ってきたもの (別の話題・同行者だけの話・投稿したこと) を書かないよう指示する", () => {
+    const p = outingPrompt(input([blog]), { existingTitles: [], tagVocabulary: [] });
+    expect(p.system[0]).toContain("## 書かないこと");
+    expect(p.system[0]).toContain("タイトルの出来事以外の話題");
+    expect(p.system[0]).toContain("同行者だけの話");
+    expect(p.system[0]).toContain("投稿したこと自体");
+    // 見本は手直し済みの記事。推測だらけの江ノ島デートはもう見せない
+    expect(p.system[0]).toContain("石塚瑶季と餃子");
+    expect(p.system[0]).not.toContain("おそらく");
+  });
+
   it("画面で直したルール文があれば system の前半を差し替え、語彙のブロックはそのまま", () => {
     const base = { existingTitles: ["ひとりパフェ"], tagVocabulary: ["飲食店"] };
     const p = outingPrompt(input([blog]), { ...base, rules: "直したルール" });
