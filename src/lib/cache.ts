@@ -312,7 +312,7 @@ export const getCachedPlaces = (clearance: ClearanceLevel) => {
                 orderBy: { sortOrder: "asc" },
                 select: {
                   sortOrder: true,
-                  article: { select: { shortId: true, title: true, date: true, dateDisplay: true } },
+                  article: { select: { shortId: true, title: true, date: true, dateDisplay: true, draft: true } },
                 },
               },
             },

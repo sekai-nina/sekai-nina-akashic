@@ -17,7 +17,7 @@ const row = (id: string, o: Partial<PlaceRow> = {}): PlaceRow => ({
 });
 const art = (shortId: string, sortOrder: number, date: string | null = null) => ({
   sortOrder,
-  article: { shortId, title: `記事${shortId}`, date, dateDisplay: null },
+  article: { shortId, title: `記事${shortId}`, date, dateDisplay: null, draft: false },
 });
 
 describe("buildPlaceMapData", () => {

@@ -23,16 +23,14 @@ import { leafletWheelZoom } from "@/lib/places/smooth-zoom";
 import {
   MAP_KIND_COLORS,
   MAP_KIND_ICONS,
+  MAP_KIND_ORDER,
   NEW_PLACE_DAYS,
   type MapArticle,
   type MapKind,
   type MapPlace,
   type PlaceMapData,
 } from "@/lib/places/map";
-import { PLACE_CLASSIFICATION_LABELS, PLACE_KIND_LABELS } from "@/lib/utils";
-
-const KIND_LABELS: Record<MapKind, string> = { ...PLACE_KIND_LABELS, unset: "未設定" };
-const KIND_ORDER: MapKind[] = ["food", "leisure", "scenery", "venue", "shop", "unset"];
+import { jstDayString, MAP_PLACE_KIND_LABELS as KIND_LABELS, PLACE_CLASSIFICATION_LABELS } from "@/lib/utils";
 
 type Sheet = "peek" | "half" | "full";
 type Sort = "new" | "near";
@@ -53,13 +51,13 @@ const km = (a: LatLng, b: LatLng) => {
 };
 const fmtDist = (d: number) => (d < 1 ? `${Math.round(d * 1000)}m` : d < 10 ? `${d.toFixed(1)}km` : `${Math.round(d)}km`);
 const fmtVisit = (date: string, disp: string) => disp || (date ? date.slice(0, 7).replace("-", ".") : "");
-const jstParts = (iso: string) => {
-  const d = new Date(new Date(iso).getTime() + 9 * 3600_000);
-  return { y: d.getUTCFullYear(), m: d.getUTCMonth() + 1, d: d.getUTCDate() };
+const jstParts = (date: Date) => {
+  const [y, m, d] = jstDayString(date).split("-").map(Number);
+  return { y, m, d };
 };
 /** 登録日。今年なら M/D、去年以前は YYYY/M/D (JST) */
 const fmtAdded = (iso: string) => {
-  const a = jstParts(iso), now = jstParts(new Date().toISOString());
+  const a = jstParts(new Date(iso)), now = jstParts(new Date());
   return a.y === now.y ? `${a.m}/${a.d}` : `${a.y}/${a.m}/${a.d}`;
 };
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, "");
@@ -118,6 +116,7 @@ export function PlaceMap({ data }: { data: PlaceMapData }) {
   const qpinMarkerRef = useRef<L.Marker | null>(null);
   const hintTimer = useRef(0);
   const scrollReq = useRef<{ id: string; toTop: boolean } | null>(null);
+  const pendingReveal = useRef<(() => void) | null>(null); // 飛んだ先でピンをまとまりから出す処理 (前の飛行の分は捨てる)
 
   const passes = (p: MapPlace) => {
     if (route) return route.places.includes(p.id);
@@ -175,12 +174,21 @@ export function PlaceMap({ data }: { data: PlaceMapData }) {
       flyVisible([p.lat, p.lng], Math.max(map?.getZoom() ?? 0, 15));
       // flyTo の moveend 時点では markercluster のズームアニメがまだ終わっていない。その最中に zoomToShowLayer が
       // setView を重ねるとアニメ終了処理が全ピンを消すので、終わってから呼ぶ (サイトで踏んだ不具合)
+      if (map && pendingReveal.current) { map.off("moveend", pendingReveal.current); pendingReveal.current = null; }
       if (!route && map && cluster) {
-        map.once("moveend", () => {
-          const go = () => cluster.zoomToShowLayer(markersRef.current.get(p.id)!, decoratePins);
+        // 続けて別の項目を選ぶと前の flyTo は moveend を出さずに止まるので、前の分は外しておく
+        // (残すと後の飛行の終わりに前の聖地へ引き戻される)
+        const reveal = () => {
+          pendingReveal.current = null;
+          const m = markersRef.current.get(p.id);
+          // 絞り込みで外れたピンはまとまりに居ない (zoomToShowLayer は __parent が無いと落ちる)
+          if (!m || !cluster.hasLayer(m)) return;
+          const go = () => cluster.zoomToShowLayer(m, decoratePins);
           if (cluster._inZoomAnimation) cluster.once("animationend", go);
           else go();
-        });
+        };
+        pendingReveal.current = reveal;
+        map.once("moveend", reveal);
       }
     }
     scrollReq.current = { id: p.id, toTop: fromMap || isPhone() };
@@ -208,7 +216,7 @@ export function PlaceMap({ data }: { data: PlaceMapData }) {
     // zoomSnap: 0 はホイール/ピンチを途中の倍率で止めるため
     const map = L.map(mapEl, { zoomControl: !isPhone(), attributionControl: true, maxZoom: 19, minZoom: 4, zoomSnap: 0 });
     mapRef.current = map;
-    leafletWheelZoom(map);
+    const unbindWheel = leafletWheelZoom(map);
     const osm = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       maxZoom: 19,
@@ -325,6 +333,7 @@ export function PlaceMap({ data }: { data: PlaceMapData }) {
     return () => {
       window.clearTimeout(t);
       window.removeEventListener("resize", onResize);
+      unbindWheel();
       map.remove();
       mapRef.current = null;
       markersRef.current.clear();
@@ -466,6 +475,12 @@ export function PlaceMap({ data }: { data: PlaceMapData }) {
     setResults(null);
     (document.activeElement as HTMLElement | null)?.blur();
     clearQpin();
+    // 検索は絞り込みに関係なく全件から引くので、外れている聖地を選んだら絞り込み (ルート) を解く
+    if (!passes(p)) {
+      if (route) setRoute(null);
+      setKinds(new Set());
+      setOnlyNew(false);
+    }
     select(id, { fly: true });
   }
   function goToGeo(lat: number, lng: number, name: string) {
@@ -730,7 +745,7 @@ export function PlaceMap({ data }: { data: PlaceMapData }) {
               <div className="pmap-facet-row">
                 <span className="pmap-facet-label">種類</span>
                 <div className="pmap-chips">
-                  {KIND_ORDER.map((k) => {
+                  {MAP_KIND_ORDER.map((k) => {
                     const n = places.filter((p) => p.kind === k && (!onlyNew || p.isNew)).length;
                     if (k === "unset" && !n) return null;
                     return (
@@ -764,6 +779,7 @@ export function PlaceMap({ data }: { data: PlaceMapData }) {
             <div className="pmap-rt-eyebrow">記事のルート</div>
             <div className="pmap-rt-title">
               {route.title}
+              {route.draft && <span className="pmap-draft">下書き</span>}
               <small>{fmtVisit(route.date, route.dateDisplay)} · {route.places.length}か所を訪れた順に表示</small>
             </div>
             <div className="pmap-rt-actions">
@@ -849,6 +865,7 @@ export function PlaceMap({ data }: { data: PlaceMapData }) {
                           <li key={v.shortId}>
                             <span className="vd">{fmtVisit(v.date, v.dateDisplay)}</span>
                             <Link href={`/articles/${v.shortId}`}>{v.title || v.shortId}</Link>
+                            {v.draft && <span className="pmap-draft">下書き</span>}
                             {v.total > 1 && !route && (
                               <button type="button" className="route-link" onClick={() => setRoute(v.shortId)}>
                                 この記事の{v.total}か所を順に見る

@@ -192,6 +192,9 @@ export const PLACE_KIND_LABELS: Record<PlaceKind, string> = {
   shop: "店・施設",
 };
 
+/** 聖地マップのピン・絞り込み用。種類が未設定の聖地も 1 つの種類として並べる */
+export const MAP_PLACE_KIND_LABELS: Record<PlaceKind | "unset", string> = { ...PLACE_KIND_LABELS, unset: "未設定" };
+
 /**
  * 聖地のクリアランス。公開サイトの聖地マップと記事の locations に出るのは internal まで (#283)。
  * 生活圏など、記事には紐づけたいがサイトに出したくない場所は confidential 以上にする

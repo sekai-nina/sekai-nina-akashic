@@ -1,4 +1,5 @@
 import type { ClearanceLevel, PlaceKind } from "@prisma/client";
+import { jstDayString } from "@/lib/utils";
 
 /**
  * 聖地マップ (/places) に渡すデータ。公開サイト (sekai-nina-site の /map) と同じく場所中心で、
@@ -23,6 +24,7 @@ export interface MapVisit {
   /** 記事内の訪問順 (1 始まり) と地点数 */
   order: number;
   total: number;
+  draft: boolean;
 }
 
 export interface MapPlace {
@@ -51,6 +53,7 @@ export interface MapArticle {
   title: string;
   date: string;
   dateDisplay: string;
+  draft: boolean;
   /** place id を訪問順に */
   places: string[];
 }
@@ -77,12 +80,15 @@ export interface PlaceRow {
   entity: { canonicalName: string; description: string; _count: { assets: number } };
   articles: {
     sortOrder: number;
-    article: { shortId: string; title: string; date: Date | string | null; dateDisplay: string | null };
+    article: { shortId: string; title: string; date: Date | string | null; dateDisplay: string | null; draft: boolean };
   }[];
 }
 
-const jstDate = (d: Date | string | null) =>
-  d ? new Date(new Date(d).getTime() + 9 * 3600_000).toISOString().slice(0, 10) : "";
+const jstDate = (d: Date | string | null) => (d ? jstDayString(new Date(d)) : "");
+
+/** googleMapsUrl は人や API が書く自由文字列なので、http(s) 以外は座標の検索 URL に置き換える */
+const safeMapsUrl = (url: string | null, lat: number, lng: number) =>
+  url && /^https?:\/\//i.test(url) ? url : `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
 
 export function buildPlaceMapData(rows: PlaceRow[], now = new Date()): PlaceMapData {
   // 記事ごとの地点 (訪問順)。ルート表示と「この記事の N か所」に使う
@@ -92,7 +98,7 @@ export function buildPlaceMapData(rows: PlaceRow[], now = new Date()): PlaceMapD
       const a = ap.article;
       let e = byArticle.get(a.shortId);
       if (!e) {
-        e = { shortId: a.shortId, title: a.title, date: jstDate(a.date), dateDisplay: a.dateDisplay ?? "", places: [], orders: [] };
+        e = { shortId: a.shortId, title: a.title, date: jstDate(a.date), dateDisplay: a.dateDisplay ?? "", draft: a.draft, places: [], orders: [] };
         byArticle.set(a.shortId, e);
       }
       e.places.push(p.id);
@@ -118,6 +124,7 @@ export function buildPlaceMapData(rows: PlaceRow[], now = new Date()): PlaceMapD
           dateDisplay: a.dateDisplay,
           order: a.places.indexOf(p.id) + 1,
           total: a.places.length,
+          draft: a.draft,
         };
       })
       .sort((x, y) => y.date.localeCompare(x.date));
@@ -128,7 +135,7 @@ export function buildPlaceMapData(rows: PlaceRow[], now = new Date()): PlaceMapD
       lat: p.latitude,
       lng: p.longitude,
       address: p.address ?? "",
-      gmaps: p.googleMapsUrl || `https://www.google.com/maps/search/?api=1&query=${p.latitude},${p.longitude}`,
+      gmaps: safeMapsUrl(p.googleMapsUrl, p.latitude, p.longitude),
       kind: p.kind ?? "unset",
       area: p.area || OTHER_AREA,
       areaUnset: !p.area,
@@ -148,6 +155,9 @@ export function buildPlaceMapData(rows: PlaceRow[], now = new Date()): PlaceMapD
 
   return { places, articles, areas };
 }
+
+/** 絞り込みチップの並び */
+export const MAP_KIND_ORDER: MapKind[] = ["food", "leisure", "scenery", "venue", "shop", "unset"];
 
 /** 種類の線画アイコン (lucide 相当の path)。ピン・チップ・リストで共用。サイトの map.astro と同じ形 */
 export const MAP_KIND_ICONS: Record<MapKind, string> = {

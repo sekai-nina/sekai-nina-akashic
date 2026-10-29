@@ -31,8 +31,8 @@ export interface ZoomView {
   settle?(): void;
 }
 
-/** el のホイールを capture で先取りして view を Obsidian 流にズームする。el はライブラリのリスナーより外側の要素 */
-export function bindWheelZoom(el: HTMLElement, view: ZoomView): void {
+/** el のホイールを capture で先取りして view を Obsidian 流にズームする。el はライブラリのリスナーより外側の要素。戻り値で外す */
+export function bindWheelZoom(el: HTMLElement, view: ZoomView): () => void {
   let target: number | null = null; // null = 停止中
   let center: Point = { x: 0, y: 0 };
 
@@ -50,7 +50,7 @@ export function bindWheelZoom(el: HTMLElement, view: ZoomView): void {
     requestAnimationFrame(tick);
   };
 
-  el.addEventListener("wheel", (e) => {
+  const onWheel = (e: WheelEvent) => {
     e.preventDefault();
     e.stopPropagation(); // ライブラリ自身のホイール処理（固定量ズーム）に渡さない
     let dy = e.deltaY;
@@ -64,7 +64,9 @@ export function bindWheelZoom(el: HTMLElement, view: ZoomView): void {
     center = next > view.scale() ? { x: e.clientX - r.left, y: e.clientY - r.top } : { x: r.width / 2, y: r.height / 2 };
     if (target === null) requestAnimationFrame(tick);
     target = next;
-  }, { capture: true, passive: false });
+  };
+  el.addEventListener("wheel", onWheel, { capture: true, passive: false });
+  return () => el.removeEventListener("wheel", onWheel, { capture: true });
 }
 
 // ---------- Leaflet ----------
@@ -79,16 +81,16 @@ type LeafletInternals = Leaflet.Map & {
 
 /**
  * 標準の scrollWheelZoom（40ms デバウンス → zoomSnap 単位で 250ms アニメ、その間の入力は捨てる）を置き換える。
- * 途中の倍率で止まるので、map は zoomSnap: 0 で作ること
+ * 途中の倍率で止まるので、map は zoomSnap: 0 で作ること。戻り値で外す (map.remove() ではホイールのリスナーが残る)
  */
-export function leafletWheelZoom(map: Leaflet.Map): void {
+export function leafletWheelZoom(map: Leaflet.Map): () => void {
   const m = map as LeafletInternals;
   map.scrollWheelZoom.disable();
   let active = false;
   // 固定点。_move は pixelOrigin を整数に丸めるので、毎フレーム現在の表示から求め直すと丸めが積もってカーソル下がずれる
   let anchor: Leaflet.LatLng | null = null;
   let anchorAt: Point | null = null;
-  bindWheelZoom(map.getContainer(), {
+  return bindWheelZoom(map.getContainer(), {
     scale: () => 2 ** map.getZoom(),
     limits: () => [2 ** map.getMinZoom(), 2 ** map.getMaxZoom()],
     apply(next, c) {
