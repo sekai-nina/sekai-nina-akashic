@@ -40,6 +40,8 @@ export interface DossierCardData {
   /** 記事の素材ドシエなら、その記事の総数 (バッジ用。`articles` は検索用に先頭数件だけ) */
   articleCount: number;
   articles: { shortId: string; title: string }[];
+  /** サイトに出ている記事 (GitHub に載っていて下書きでない) がある */
+  published: boolean;
 }
 
 /** 企画ごとの反映待ち (`dossier-sync-queue.ts`)。記事に載っていないクリップの数と、最後に入れた日時 */
@@ -47,9 +49,10 @@ export type PendingByDossier = Record<string, { count: number; at: string }>;
 
 /**
  * 既定は未記事化。記事 0 本の企画 = まだ組み立て中のもの。
- * 反映待ち = 記事はあるが、記事に載っていないクリップが入っているもの
+ * 反映待ち = 記事はあるが、記事に載っていないクリップが入っているもの。
+ * 記事のある企画は、サイトに出ているか (公開中) とまだ出ていないか (未公開。下書き・未 push) で分ける
  */
-const FILTERS = ["draft", "pending", "written", "all"] as const;
+const FILTERS = ["draft", "pending", "unpublished", "published", "all"] as const;
 type Filter = (typeof FILTERS)[number];
 
 export function DossierGrid({
@@ -97,18 +100,21 @@ export function DossierGrid({
   );
 
   const writtenCount = useMemo(() => dossiers.filter((d) => d.articleCount > 0).length, [dossiers]);
+  const publishedCount = useMemo(() => dossiers.filter((d) => d.published).length, [dossiers]);
   const pendingCount = useMemo(() => dossiers.filter((d) => d.pendingCount > 0).length, [dossiers]);
   const counts: Record<Filter, number> = {
     draft: dossiers.length - writtenCount,
     pending: pendingCount,
-    written: writtenCount,
+    unpublished: writtenCount - publishedCount,
+    published: publishedCount,
     all: dossiers.length,
   };
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     const list = dossiers.filter((d) => {
-      if (filter === "written" && d.articleCount === 0) return false;
+      if (filter === "unpublished" && (d.articleCount === 0 || d.published)) return false;
+      if (filter === "published" && !d.published) return false;
       if (filter === "draft" && d.articleCount > 0) return false;
       if (filter === "pending" && d.pendingCount === 0) return false;
       if (!q) return true;

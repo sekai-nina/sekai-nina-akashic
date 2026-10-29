@@ -642,7 +642,7 @@ export const ARTICLE_WORKFLOW_LABELS = {
 
 /** 企画一覧 (`/dossiers`) のタブとカード */
 export const DOSSIER_LIST_LABELS = {
-  draft: "未記事化", pending: "反映待ち", written: "記事化済み", all: "すべて",
+  draft: "未記事化", pending: "反映待ち", unpublished: "サイト未公開", published: "サイト公開中", all: "すべて",
   pendingBadge: (n: number) => `未反映 ${n} 件`, addedOn: (date: string) => `${date} 追加`,
   toArticle: "記事に反映する",
 } as const;
