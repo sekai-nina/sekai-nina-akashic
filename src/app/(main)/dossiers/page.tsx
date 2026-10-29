@@ -55,7 +55,7 @@ export default async function DossiersPage({ searchParams }: { searchParams: Pro
           ownerName: d.owner.name,
           itemCount: d._count.items,
           placeCount: d._count.placeCandidates,
-          updatedAt: d.updatedAt.toISOString(),
+          createdAt: d.createdAt.toISOString(),
           articleCount: d._count.articles,
           articles: d.articles,
         }))}

@@ -35,7 +35,8 @@ export interface DossierCardData {
   ownerName: string | null;
   itemCount: number;
   placeCount: number;
-  updatedAt: string;
+  /** 作った日時 (一覧はこの新しい順) */
+  createdAt: string;
   /** 記事の素材ドシエなら、その記事の総数 (バッジ用。`articles` は検索用に先頭数件だけ) */
   articleCount: number;
   articles: { shortId: string; title: string }[];
@@ -223,7 +224,7 @@ export function DossierGrid({
                 </div>
               </div>
               <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400">
-                <span>更新 {formatDate(d.updatedAt)}</span>
+                <span>作成 {formatDate(d.createdAt)}</span>
                 {toArticle && (
                   <span className="inline-flex items-center gap-0.5 text-indigo-700">
                     {L.toArticle} <ArrowRight className="h-3 w-3" />

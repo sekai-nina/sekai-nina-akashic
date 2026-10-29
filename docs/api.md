@@ -1217,6 +1217,7 @@ body は省略可（`subject` を省くと既定のコミットメッセージ�
 
 `GET /dossiers`（一覧）と `GET /dossiers/:id`（詳細。アイテムのテキスト・出典・エンティティ込み）。RLS は所有者と `viewMode` で決まる（`withSession`）。
 
+- `GET /dossiers` は作った新しい順（`createdAt` の降順）
 - **`GET /dossiers` にはクリップのプール（`kind = clips` のドシエ、#41）は出ない。** 記事未定の抜粋の置き場で、画面の `/clips` 専用。`GET /dossiers/:id` は id を直接指定すれば返す（RLS 内なので可視性は変わらない）
 - `POST /dossiers/:id/external-image` はプールには使えない（400）
 
