@@ -262,4 +262,5 @@ export const OUTING_TEMPLATE: ArticleTemplateDef = {
   appendLayout: { ...AI_BODY_APPEND_LAYOUT, media: OUTING_MEDIA_STYLE },
   render: renderOutingArticle,
   prompt: outingPrompt,
+  defaultRules: RULES,
 };

@@ -104,6 +104,11 @@ export interface AiContext {
   existingTitles: string[];
   /** 既存記事のタグ (使用頻度順)。tags はここから選ばせる */
   tagVocabulary: string[];
+  /**
+   * 画面 (`/admin/article-prompts`) で直したルール文。null / 空ならテンプレートの `defaultRules`。
+   * システムプロンプトの前半 (役割・本文の形・鉄則・出力・見本) を丸ごと差し替える
+   */
+  rules?: string | null;
 }
 
 export interface AiPrompt {
@@ -168,6 +173,11 @@ interface ArticleTemplateBase {
 /** 本文を AI が書くか (#171)。書くテンプレートは必ずプロンプトを持ち、新規作成を draft で保存する */
 export type ArticleTemplateDef = ArticleTemplateBase &
   (
-    | { needsAi: true; prompt: (input: DossierRenderInput, context: AiContext) => AiPrompt }
-    | { needsAi: false; prompt?: undefined }
+    | {
+        needsAi: true;
+        prompt: (input: DossierRenderInput, context: AiContext) => AiPrompt;
+        /** 組み込みのルール文 (システムプロンプトの前半)。画面で直していなければこれを使う */
+        defaultRules: string;
+      }
+    | { needsAi: false; prompt?: undefined; defaultRules?: undefined }
   );

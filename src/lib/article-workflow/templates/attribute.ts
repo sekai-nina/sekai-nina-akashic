@@ -146,4 +146,5 @@ export const ATTRIBUTE_TEMPLATE: ArticleTemplateDef = {
   appendLayout: AI_BODY_APPEND_LAYOUT,
   render: renderAttributeArticle,
   prompt: attributePrompt,
+  defaultRules: RULES,
 };

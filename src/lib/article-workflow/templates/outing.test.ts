@@ -174,6 +174,15 @@ describe("renderOutingArticle", () => {
     expect(p.user).toContain("### ^[1] 蔵盛妃那乃ブログ");
     expect(p.included).toBe(2);
   });
+
+  it("画面で直したルール文があれば system の前半を差し替え、語彙のブロックはそのまま", () => {
+    const base = { existingTitles: ["ひとりパフェ"], tagVocabulary: ["飲食店"] };
+    const p = outingPrompt(input([blog]), { ...base, rules: "直したルール" });
+    expect(p.system[0]).toBe("直したルール");
+    expect(p.system[1]).toBe(outingPrompt(input([blog]), base).system[1]);
+    // 空白だけなら既定
+    expect(outingPrompt(input([blog]), { ...base, rules: "  \n" }).system[0]).toBe(OUTING_TEMPLATE.defaultRules);
+  });
 });
 
 describe("outing の追記 (関連メディアは flat)", () => {
