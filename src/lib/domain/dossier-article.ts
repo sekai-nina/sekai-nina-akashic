@@ -31,6 +31,7 @@ import {
 import { recordUsage } from "@/lib/costs/usage";
 import { listArticleTags } from "./articles";
 import { WorkflowInputError, type ActingUser } from "./article-workflow";
+import { getArticlePromptRules } from "./article-prompt-setting";
 import { logAudit } from "./audit";
 import {
   EXTERNAL_AI_OK,
@@ -312,8 +313,13 @@ async function draftForTemplate(
 
   // 語彙は記事 (非保護テーブル) から。wikilink は公開済みの記事にだけ張らせる (下書きへの
   // リンクは公開サイトで宛先が無い)
-  const [titles, tags] = await Promise.all([listPublishedTitles(), listArticleTags()]);
-  const prompt = template.prompt(input, { existingTitles: titles, tagVocabulary: tags });
+  const [titles, tags, rules] = await Promise.all([
+    listPublishedTitles(),
+    listArticleTags(),
+    getArticlePromptRules(template.key),
+  ]);
+  // ルール文は画面 (`/admin/article-prompts`) で直したものがあればそれを使う
+  const prompt = template.prompt(input, { existingTitles: titles, tagVocabulary: tags, rules });
   const counts = { included: prompt.included, truncated: prompt.truncated };
 
   if (!isArticleAiConfigured()) {
@@ -378,8 +384,12 @@ export async function mergeSystemPrompt(
   template: ArticleTemplateDef & { needsAi: true },
   input: DossierRenderInput
 ): Promise<string[]> {
-  const [titles, tags] = await Promise.all([listPublishedTitles(), listArticleTags()]);
-  return template.prompt(input, { existingTitles: titles, tagVocabulary: tags }).system;
+  const [titles, tags, rules] = await Promise.all([
+    listPublishedTitles(),
+    listArticleTags(),
+    getArticlePromptRules(template.key),
+  ]);
+  return template.prompt(input, { existingTitles: titles, tagVocabulary: tags, rules }).system;
 }
 
 /**

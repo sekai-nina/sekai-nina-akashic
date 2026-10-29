@@ -155,4 +155,5 @@ export const QUOTE_SITUATIONAL_TEMPLATE: ArticleTemplateDef = {
   appendLayout: AI_BODY_APPEND_LAYOUT,
   render: renderQuoteSituationalArticle,
   prompt: quoteSituationalPrompt,
+  defaultRules: RULES,
 };

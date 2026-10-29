@@ -70,6 +70,7 @@ const clearance = auth.clearance;
 - `ArticlePlace`（記事と聖地の紐づけ。自前の classification は持たず、紐づく `Place` に従う。#283 → 下の「公開リポジトリへ書き出すもの」）
 - `MeetGreet`（ミーグリ記事ワークフロー。ドシエを include する読みは所有者判定が要るので `withSession`）
 - `SketchSetting`（スケッチ生成のプロンプトと画風の見本。**全体で 1 行**で、個人のデータではないので読み書きは固定のクリアランス（`MAX_EXTERNAL_AI_CLEARANCE`）で行う。操作者のクリアランスで読むと、低い人のときだけ無言で既定の文面に化ける）
+- `ArticlePromptSetting`（記事テンプレートの AI のルール文。**テンプレートごとに 1 行**。`SketchSetting` と同じく固定のクリアランス（`MAX_EXTERNAL_AI_CLEARANCE`）で読み書きする。生成のたびに外部 AI（Anthropic）へ送られるので、機密の内容を書き込まない）
 - `XMentionWatch`, `XMentionSetting`, `XMentionHit`（X 言及監視。cron は `prismaInternal`、`/mentions` は `withClearance`）
 - `Live`, `LivePerformance`, `LiveSong`, `LiveSetlistItem`（ライブ記事ワークフロー。`Live` は自前の classification、子 3 つは親 `Live` に従う。`LiveSetlistItem` は公演のセトリ全曲で、`LiveSong` はそこから組み直す派生。`MeetGreet` と同じく `withSession`。参考画像 `sketchRefs` とスケッチ候補も `MeetGreet` と同じ扱い → 下の「外部の AI に渡すもの」）
 - `Anniversary`（記念日。出典アセットの本文は持たないが、機密アセットから作った記念日が漏れないよう自前の classification で守る）

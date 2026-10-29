@@ -51,12 +51,13 @@ export function normalizeAiTags(tags: string[]): string[] {
 
 /**
  * システムプロンプトを 2 ブロックにする: テンプレートの鉄則・見本 (滅多に変わらない) と、
- * 語彙 (既存タグ・既存記事タイトル。記事を保存すると変わる)。**前から順にキャッシュの区切り**になるので、
+ * 語彙 (既存タグ・既存記事タイトル。記事を保存すると変わる)。前半は画面で直したもの (`context.rules`) があれば
+ * そちらを使う。**前から順にキャッシュの区切り**になるので、
  * 語彙が変わっても前半のキャッシュが残る。ブロック内の順番も変えない (先頭からの一致で効く)
  */
-export function aiSystemPrompt(rules: string, context: AiContext): string[] {
+export function aiSystemPrompt(defaultRules: string, context: AiContext): string[] {
   return [
-    rules,
+    context.rules?.trim() ? context.rules : defaultRules,
     [
       "## 既存のタグ (tags はここから選ぶ)",
       context.tagVocabulary.join("、") || "(なし)",

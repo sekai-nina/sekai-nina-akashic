@@ -79,6 +79,7 @@ const navItems = [
 const adminItems = [
   { href: "/admin/ai", label: "案内AI の運転", icon: Power },
   { href: "/admin/sketch", label: "スケッチ生成の設定", icon: Sparkles },
+  { href: "/admin/article-prompts", label: "記事 AI のプロンプト", icon: FileText },
   { href: "/admin/insta", label: "Instagram の監視対象", icon: Instagram },
   { href: "/admin/tiktok", label: "TikTok の監視対象", icon: Clapperboard },
   { href: "/costs", label: "コスト", icon: Wallet },
