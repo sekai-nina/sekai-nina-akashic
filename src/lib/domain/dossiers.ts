@@ -48,7 +48,8 @@ export async function listDossiers(user: ActingUser) {
   return withSession(user, (tx) =>
     tx.dossier.findMany({
       where: NOT_CLIP_POOL,
-      orderBy: { updatedAt: "desc" },
+      // 作った新しい順。更新順はクリップの追加・記事の同期で動き、並びの理由が見えなかった
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       include: {
         owner: { select: { id: true, name: true, avatarUrl: true } },
         _count: { select: { items: true, placeCandidates: true, articles: true } },
