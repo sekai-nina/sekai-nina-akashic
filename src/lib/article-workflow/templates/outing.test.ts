@@ -4,7 +4,14 @@ import { isPureAppend, planAppend } from "@/lib/meetgreet/append";
 import { groupFreshBySource, isFreshClip } from "../merge";
 import { buildMaterialsText } from "../materials";
 import type { ArticleAssetInput } from "../render";
-import { OUTING_BODY_PLACEHOLDER, OUTING_TEMPLATE, outingLocations, outingPrompt, renderOutingArticle } from "./outing";
+import {
+  expandPlaceCards,
+  OUTING_BODY_PLACEHOLDER,
+  OUTING_TEMPLATE,
+  outingLocations,
+  outingPrompt,
+  renderOutingArticle,
+} from "./outing";
 import type { AiDraft, DossierPlace, DossierRenderInput } from "./types";
 
 const BLOG_URL = "https://www.hinatazaka46.com/s/official/diary/detail/65510";
@@ -169,8 +176,11 @@ describe("renderOutingArticle", () => {
     expect(p.system[0]).toContain("引用はしない");
     expect(p.system[0]).toContain("編集の鉄則");
     expect(p.user).toContain("## 場所候補");
-    expect(p.user).toContain("- べたなぎ / 神奈川県藤沢市 / https://maps.app.goo.gl/x");
-    expect(p.user).toContain("- 江ノ島金魚 / https://maps.app.goo.gl/y");
+    // URL は渡さず、カードの番号を振る (名前だけの候補にはカードが無い)
+    expect(p.user).toContain("- べたなぎ / 神奈川県藤沢市 → `{{場所:1}}`");
+    expect(p.user).toContain("- 江ノ島金魚 → `{{場所:2}}`");
+    expect(p.user).toContain("- 名前だけ (カードなし)");
+    expect(p.user).not.toContain("https://maps.app.goo.gl/x");
     // 編集メモは AI に渡さない
     expect(p.user).not.toContain("未昇格");
     expect(p.user).toContain("### ^[1] 蔵盛妃那乃ブログ");
@@ -322,5 +332,34 @@ describe("出典済みの素材に後から足したメモ・抜粋", () => {
     expect(m.text).not.toContain("江ノ島でデートをしました");
     expect(m.text).toContain("上のメモ・抜粋だけが新しい");
     expect(m.included).toBe(1);
+  });
+});
+
+describe("expandPlaceCards", () => {
+  const card = (name: string, url: string, host: string) =>
+    ["```cardlink", `url: ${url}`, `title: "${name}"`, `host: ${host}`, "```"].join("\n");
+
+  it("{{場所:K}} の行を Google マップのリンクカードにする。知らない番号は落とす", () => {
+    const body = "## 海鮮丼\n\n- 海鮮丼を食べた^[1]\n\n{{場所:1}}\n\n## 金魚\n\n- 金魚を見た^[1]\n\n{{場所:9}}\n";
+    expect(expandPlaceCards(body, places)).toBe(
+      `## 海鮮丼\n\n- 海鮮丼を食べた^[1]\n\n${card("べたなぎ", "https://maps.app.goo.gl/x", "maps.app.goo.gl")}\n\n## 金魚\n\n- 金魚を見た^[1]\n\n`
+    );
+  });
+
+  it("同じ場所のカードは 1 つだけ (本文にもうあるもの・2 回目の印は落とす)", () => {
+    const already = `## 海鮮丼\n\n${card("べたなぎ", "https://maps.app.goo.gl/x", "maps.app.goo.gl")}\n\n{{場所:1}}\n`;
+    expect(expandPlaceCards(already, places)).not.toContain("{{場所:1}}");
+    expect(expandPlaceCards(already, places).match(/```cardlink/g)).toHaveLength(1);
+  });
+
+  it("URL の無い候補は座標で検索するリンクにする", () => {
+    const p: DossierPlace[] = [{ name: "海", placeId: null, lat: 35.1, lng: 139.2, address: null, googleMapsUrl: null, note: "" }];
+    expect(expandPlaceCards("{{場所:1}}\n", p)).toContain("url: https://www.google.com/maps/search/?api=1&query=35.1,139.2");
+  });
+
+  it("下書きの印は保存する本文で展開される", () => {
+    const r = renderOutingArticle(input([blog]), { ...draft, body: "## 海鮮丼\n\n- 海鮮丼を食べた^[1]\n\n{{場所:1}}" });
+    expect(r.body).toContain("url: https://maps.app.goo.gl/x");
+    expect(r.body).not.toContain("{{場所");
   });
 });

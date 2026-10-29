@@ -41,6 +41,7 @@ import {
 } from "@/lib/article-workflow/merge";
 import { buildMaterialsText } from "@/lib/article-workflow/materials";
 import { normalizeAiBody } from "@/lib/article-workflow/templates/shared";
+import { expandPlaceCards, placesText } from "@/lib/article-workflow/templates/outing";
 import { ArticleAiError } from "@/lib/article-workflow/llm";
 import type { ArticleMode, ArticlePreview } from "@/lib/meetgreet/types";
 import type { ArticleAssetInput, RenderedArticle, RenderedSource } from "@/lib/article-workflow/render";
@@ -1238,6 +1239,8 @@ export async function proposeMerge(
     newSources: [...writeSources, ...fresh.map((f) => ({ sourceNo: f.sourceNo, label: f.label }))],
     included: materials.included,
     truncated: materials.truncated,
+    // 場所のカードはおでかけだけ (場所候補を本文に使うテンプレートがほかに無い)
+    ...(template.key === "outing" ? { places: placesText(input.places) } : {}),
   });
 
   let generated;
@@ -1248,7 +1251,8 @@ export async function proposeMerge(
     throw e;
   }
   const maxNo = Math.max(0, ...plan.renumber.values());
-  const body = normalizeAiBody(unwrapFence(generated.body), maxNo);
+  const normalized = normalizeAiBody(unwrapFence(generated.body), maxNo);
+  const body = template.key === "outing" ? expandPlaceCards(normalized, input.places) : normalized;
   const check = checkMerge(plan.body, body);
   if (!check.ok) return { ok: false, error: check.reason };
   return { ok: true, proposal: proposal(body, check.changedLines, generated.ai) };
