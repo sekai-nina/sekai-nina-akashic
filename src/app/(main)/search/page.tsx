@@ -239,7 +239,8 @@ async function SearchResults({
                 </div>
               </Link>
               {editableDossiers.length > 0 && (
-                <div className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                // ホバーで出すのはマウスのある端末だけ。スマホはホバーが無いので常に出す
+                <div className="absolute top-1.5 right-1.5 transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-within:opacity-100">
                   <AddToDossier
                     assetId={item.assetId}
                     dossiers={editableDossiers}

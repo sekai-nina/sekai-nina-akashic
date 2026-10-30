@@ -23,6 +23,8 @@ import {
 const PANEL_WIDTH = 256; // w-64
 const PANEL_MAX_HEIGHT = 380; // 「入っている企画」と「前回の追加先」の分だけ高め
 const VIEWPORT_MARGIN = 8;
+/** これより狭い画面 (スマホ) では、トリガーに付けたパネルでなく画面中央のポップアップで出す */
+const SHEET_MEDIA = "(max-width: 767px)";
 
 interface EditableDossier {
   id: string;
@@ -77,6 +79,9 @@ export function AddToDossier({
   const [isPending, startTransition] = useTransition();
   const anchorRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
+  // 開いたときの画面幅で決める (開いている間に切り替えない)
+  const [sheet, setSheet] = useState(false);
   const [position, setPosition] = useState<{ top: number; left: number; maxHeight: number } | null>(null);
   // このアセットが入っている企画。開くたびに引く (null = 確認中)
   const [containing, setContaining] = useState<ContainingDossier[] | null>(null);
@@ -106,6 +111,7 @@ export function AddToDossier({
 
   useLayoutEffect(() => {
     if (!open) return;
+    setSheet(window.matchMedia(SHEET_MEDIA).matches);
     updatePosition();
   }, [open, updatePosition]);
 
@@ -133,6 +139,8 @@ export function AddToDossier({
       const target = e.target as Node;
       if (anchorRef.current?.contains(target)) return;
       if (panelRef.current?.contains(target)) return;
+      // 背景は onClick で閉じる。ここで閉じると背景が先に消え、続く click が下のリンクに落ちる
+      if (backdropRef.current?.contains(target)) return;
       setOpen(false);
     }
     function handleKey(e: KeyboardEvent) {
@@ -326,22 +334,34 @@ export function AddToDossier({
   // position: fixed なので、位置が確定するまでは描画しない。
   // data-picker-panel: ポータル先では DOM 上の親子関係が切れるため、呼び出し元
   // （アセット本文の引用フローター等）が「自分の中のクリック」と判定できるようにする。
-  const panel = open && position && (
+  const panelBody = open && position && (
     <div
       ref={panelRef}
       data-picker-panel
-      style={{
+      // スマホは画面の上寄りに出す (下に出すと検索欄をタップしたときキーボードに隠れる)
+      style={sheet ? undefined : {
         top: position.top,
         left: position.left,
         width: PANEL_WIDTH,
         maxHeight: position.maxHeight,
       }}
-      className="fixed z-50 flex flex-col overflow-hidden bg-white text-slate-700 border border-slate-200 rounded-lg shadow-lg p-2"
+      className={`fixed z-50 flex flex-col overflow-hidden bg-white text-slate-700 border border-slate-200 rounded-lg shadow-lg ${
+        sheet ? "inset-x-3 top-[8dvh] max-h-[70dvh] p-3 text-sm" : "p-2"
+      }`}
     >
       {!creating ? (
         <>
+          {sheet && (
+            <div className="mb-2 flex shrink-0 items-center justify-between">
+              <p className="text-sm font-semibold text-slate-700">企画に追加</p>
+              <button type="button" onClick={() => setOpen(false)} className="p-1 text-slate-400 hover:text-slate-600" aria-label="閉じる">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          )}
           <input
-            autoFocus
+            // スマホで開いた途端にキーボードが出ると、入っている企画・前回の追加先が隠れる
+            autoFocus={!sheet}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
@@ -475,6 +495,22 @@ export function AddToDossier({
       )}
     </div>
   );
+
+  const panel = panelBody && (sheet ? (
+    <>
+      <div
+        ref={backdropRef}
+        data-picker-panel
+        className="fixed inset-0 z-50 bg-black/40"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setOpen(false);
+        }}
+      />
+      {panelBody}
+    </>
+  ) : panelBody);
 
   return (
     <div ref={anchorRef} className="relative inline-block">
