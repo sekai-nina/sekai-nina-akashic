@@ -22,6 +22,10 @@ import {
 } from "../actions";
 import type { NinaAppearance } from "@/lib/nina";
 import { NinaAppearanceToggle } from "./article/nina-appearance-toggle";
+import { DeleteConfirm } from "./delete-confirm";
+
+/** アイコンだけのボタン。スマホでは指で押せる大きさ (32px) にする */
+const ICON_BUTTON = "inline-flex items-center justify-center h-8 w-8 sm:h-auto sm:w-auto rounded-md";
 
 type Item = {
   id: string;
@@ -124,6 +128,7 @@ export function DossierItemRow({ dossierId, item, editable, isFirst, isLast, ord
   const [caption, setCaption] = useState(item.caption);
   const [note, setNote] = useState(item.note);
   const [excerpt, setExcerpt] = useState(item.excerpt);
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   function persist(field: "caption" | "note" | "excerpt", value: string, original: string) {
@@ -143,7 +148,6 @@ export function DossierItemRow({ dossierId, item, editable, isFirst, isLast, ord
   }
 
   function handleRemove() {
-    if (!confirm("このアイテムを削除しますか？")) return;
     startTransition(() => removeItemAction(item.id, dossierId));
   }
 
@@ -171,37 +175,47 @@ export function DossierItemRow({ dossierId, item, editable, isFirst, isLast, ord
             </p>
           )}
           {editable && (
-            <div className="flex items-center gap-1 shrink-0">
+            <div className="flex items-center gap-0.5 sm:gap-1 shrink-0 -mt-1.5 sm:mt-0">
               <button
                 type="button"
                 disabled={isFirst || isPending}
                 onClick={() => move(-1)}
                 title="上へ"
-                className="text-slate-300 hover:text-slate-600 disabled:opacity-30"
+                className={`${ICON_BUTTON} text-slate-300 hover:text-slate-600 disabled:opacity-30`}
               >
-                <ArrowUp className="h-3.5 w-3.5" />
+                <ArrowUp className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
               </button>
               <button
                 type="button"
                 disabled={isLast || isPending}
                 onClick={() => move(1)}
                 title="下へ"
-                className="text-slate-300 hover:text-slate-600 disabled:opacity-30"
+                className={`${ICON_BUTTON} text-slate-300 hover:text-slate-600 disabled:opacity-30`}
               >
-                <ArrowDown className="h-3.5 w-3.5" />
+                <ArrowDown className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
               </button>
               <button
                 type="button"
-                onClick={handleRemove}
+                onClick={() => setConfirmingRemove((v) => !v)}
                 disabled={isPending}
                 title="削除"
-                className="text-rose-300 hover:text-rose-600"
+                aria-label="削除"
+                className={`${ICON_BUTTON} text-rose-300 hover:text-rose-600`}
               >
-                <Trash2 className="h-3.5 w-3.5" />
+                <Trash2 className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
               </button>
             </div>
           )}
         </div>
+
+        {editable && confirmingRemove && (
+          <DeleteConfirm
+            message="このアイテムを企画から外しますか？"
+            onConfirm={handleRemove}
+            onCancel={() => setConfirmingRemove(false)}
+            pending={isPending}
+          />
+        )}
 
         {/* Source link */}
         {item.asset ? (

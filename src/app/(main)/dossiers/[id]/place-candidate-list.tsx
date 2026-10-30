@@ -13,6 +13,14 @@ import {
   promotePlaceCandidateAction,
   updateCandidatePlaceClassificationAction,
 } from "../actions";
+import { DeleteConfirm } from "./delete-confirm";
+
+/** カード下の操作ボタン。スマホでは指で押せる高さにする */
+const ACTION_BUTTON =
+  "inline-flex items-center gap-1 rounded-md border px-3 py-2 sm:px-2 sm:py-1 text-xs font-medium transition-colors disabled:opacity-40";
+/** フォームの入力欄。スマホは 16px 未満だと iOS がフォーカス時に拡大するので text-base にする */
+const INPUT =
+  "border border-slate-300 rounded px-2 py-2 sm:py-1 text-base sm:text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500";
 
 type Candidate = {
   id: string;
@@ -58,6 +66,9 @@ export function PlaceCandidateList({
   // 確定パネルを開いている候補と、そこで選んだ公開範囲
   const [promotingId, setPromotingId] = useState<string | null>(null);
   const [promoteClassification, setPromoteClassification] = useState<ClearanceLevel>("internal");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  // alert() はスマホで出ないことがあるので、失敗はカードの中に出す
+  const [cardError, setCardError] = useState<{ id: string; message: string } | null>(null);
 
   function add() {
     if (!name && !address && !latitude) return;
@@ -83,19 +94,23 @@ export function PlaceCandidateList({
   }
 
   function remove(id: string) {
-    if (!confirm("この候補を削除しますか？")) return;
-    startTransition(() => removePlaceCandidateAction(id, dossierId));
+    startTransition(async () => {
+      await removePlaceCandidateAction(id, dossierId);
+      setDeletingId(null);
+    });
   }
 
   function openPromote(c: Candidate) {
     if (c.place && c.place.status === "confirmed") return;
+    setCardError(null);
     if (!c.place && (c.latitude == null || c.longitude == null)) {
-      alert("確定にするには緯度・経度が必要です");
+      setCardError({ id: c.id, message: "確定にするには緯度・経度が必要です" });
       return;
     }
     // 既定は「一般」。自分のクリアランスで選べない値なら、選べる中で一番低いものにする
     const initial = c.place?.classification ?? "internal";
     setPromoteClassification(classifications.includes(initial) ? initial : classifications[0]);
+    setDeletingId(null);
     setPromotingId(c.id);
   }
 
@@ -109,7 +124,7 @@ export function PlaceCandidateList({
         );
         setPromotingId(null);
       } catch (e) {
-        alert(`確定できませんでした: ${e instanceof Error ? e.message : String(e)}`);
+        setCardError({ id: c.id, message: `確定できませんでした: ${e instanceof Error ? e.message : String(e)}` });
       }
     });
   }
@@ -117,11 +132,12 @@ export function PlaceCandidateList({
   function changeClassification(c: Candidate, level: ClearanceLevel) {
     if (!c.place || level === c.place.classification) return;
     const placeId = c.place.id;
+    setCardError(null);
     startTransition(async () => {
       try {
         await updateCandidatePlaceClassificationAction(placeId, dossierId, level);
       } catch (e) {
-        alert(`公開範囲を変えられませんでした: ${e instanceof Error ? e.message : String(e)}`);
+        setCardError({ id: c.id, message: `公開範囲を変えられませんでした: ${e instanceof Error ? e.message : String(e)}` });
       }
     });
   }
@@ -176,7 +192,7 @@ export function PlaceCandidateList({
                           onChange={(e) => changeClassification(c, e.target.value as ClearanceLevel)}
                           disabled={isPending}
                           title="公開サイトに出すか"
-                          className="mt-0.5 max-w-full border border-slate-200 rounded px-1 py-0.5 text-[11px] text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50"
+                          className="mt-1 max-w-full border border-slate-200 rounded px-2 py-1.5 sm:px-1 sm:py-0.5 text-base sm:text-[11px] text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50"
                         >
                           {classifications.map((level) => (
                             <option key={level} value={level}>
@@ -193,51 +209,68 @@ export function PlaceCandidateList({
                     {c.address && <p className="text-[11px] text-slate-500 truncate">{c.address}</p>}
                     {c.note && <p className="text-[11px] text-slate-600 mt-1">{c.note}</p>}
                   </div>
-                  <div className="shrink-0 flex flex-col items-end gap-1">
-                    <span className="text-[10px] text-slate-400">確度 {c.confidence}</span>
-                    {c.googleMapsUrl && (
-                      <a
-                        href={c.googleMapsUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-indigo-500 hover:text-indigo-700"
-                        title="地図"
-                      >
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                    )}
+                  <span className="shrink-0 text-[10px] text-slate-400">確度 {c.confidence}</span>
+                </div>
+                {(c.googleMapsUrl || editable) && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
                     {editable && !isConfirmed && (
                       <button
                         type="button"
                         onClick={() => openPromote(c)}
                         disabled={isPending}
-                        className="text-emerald-500 hover:text-emerald-700 disabled:opacity-40"
-                        title="聖地として確定"
+                        className={`${ACTION_BUTTON} border-emerald-300 text-emerald-700 hover:bg-emerald-50`}
                       >
-                        <BadgeCheck className="h-3.5 w-3.5" />
+                        <BadgeCheck className="h-3.5 w-3.5" /> 聖地として確定
                       </button>
+                    )}
+                    {c.googleMapsUrl && (
+                      <a
+                        href={c.googleMapsUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`${ACTION_BUTTON} border-slate-200 text-indigo-600 hover:bg-indigo-50`}
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" /> 地図
+                      </a>
                     )}
                     {editable && (
                       <button
                         type="button"
-                        onClick={() => remove(c.id)}
-                        className="text-rose-400 hover:text-rose-600"
-                        title="削除"
+                        onClick={() => {
+                          setPromotingId(null);
+                          setDeletingId((v) => (v === c.id ? null : c.id));
+                        }}
+                        disabled={isPending}
+                        className={`${ACTION_BUTTON} ml-auto border-slate-200 text-rose-500 hover:bg-rose-50`}
                       >
-                        <Trash2 className="h-3 w-3" />
+                        <Trash2 className="h-3.5 w-3.5" /> 削除
                       </button>
                     )}
                   </div>
-                </div>
+                )}
+                {cardError?.id === c.id && (
+                  <p role="status" className="mt-2 rounded-md bg-amber-50 border border-amber-200 px-2 py-1.5 text-xs text-amber-800">
+                    {cardError.message}
+                  </p>
+                )}
+                {deletingId === c.id && (
+                  <DeleteConfirm
+                    className="mt-2"
+                    message="この候補を削除しますか？"
+                    onConfirm={() => remove(c.id)}
+                    onCancel={() => setDeletingId(null)}
+                    pending={isPending}
+                  />
+                )}
                 {promotingId === c.id && (
                   <div className="mt-2 border-t border-slate-100 pt-2">
-                    <p className="text-[11px] text-slate-600 mb-1">聖地として確定する</p>
-                    <div className="flex items-center gap-2">
+                    <p className="text-xs text-slate-600 mb-1.5">聖地として確定する (公開範囲を選ぶ)</p>
+                    <div className="flex flex-wrap items-center gap-2">
                       {classifications.length > 0 && (
                         <select
                           value={promoteClassification}
                           onChange={(e) => setPromoteClassification(e.target.value as ClearanceLevel)}
-                          className="flex-1 min-w-0 border border-slate-300 rounded px-2 py-1 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          className={`${INPUT} flex-1 min-w-[10rem] bg-white`}
                         >
                           {classifications.map((level) => (
                             <option key={level} value={level}>
@@ -250,7 +283,7 @@ export function PlaceCandidateList({
                         type="button"
                         onClick={() => promote(c)}
                         disabled={isPending}
-                        className="bg-emerald-600 text-white px-2 py-1 rounded text-xs font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+                        className="bg-emerald-600 text-white px-4 py-2 sm:px-3 sm:py-1 rounded-md text-sm sm:text-xs font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors"
                       >
                         確定
                       </button>
@@ -258,10 +291,9 @@ export function PlaceCandidateList({
                         type="button"
                         onClick={() => setPromotingId(null)}
                         disabled={isPending}
-                        className="text-slate-400 hover:text-slate-600 disabled:opacity-40"
-                        title="閉じる"
+                        className="px-3 py-2 sm:px-2 sm:py-1 rounded-md text-sm sm:text-xs text-slate-500 hover:bg-slate-100 disabled:opacity-40"
                       >
-                        <X className="h-3.5 w-3.5" />
+                        やめる
                       </button>
                     </div>
                   </div>
@@ -276,7 +308,7 @@ export function PlaceCandidateList({
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:underline"
+          className="inline-flex items-center gap-1 rounded-md border border-indigo-200 px-3 py-2 sm:px-2 sm:py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50"
         >
           <Plus className="h-3.5 w-3.5" /> 候補を追加
         </button>
@@ -289,9 +321,10 @@ export function PlaceCandidateList({
             <button
               type="button"
               onClick={() => setOpen(false)}
-              className="text-slate-400 hover:text-slate-600"
+              aria-label="閉じる"
+              className="-mr-1 inline-flex h-9 w-9 sm:h-7 sm:w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600"
             >
-              <X className="h-3.5 w-3.5" />
+              <X className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
             </button>
           </div>
 
@@ -316,13 +349,13 @@ export function PlaceCandidateList({
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="店名/場所名"
-                className="border border-slate-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className={INPUT}
               />
               <input
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
                 placeholder="住所"
-                className="border border-slate-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className={INPUT}
               />
               <input
                 value={latitude}
@@ -330,7 +363,7 @@ export function PlaceCandidateList({
                 placeholder="緯度"
                 type="number"
                 step="0.000001"
-                className="border border-slate-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className={INPUT}
               />
               <input
                 value={longitude}
@@ -338,7 +371,7 @@ export function PlaceCandidateList({
                 placeholder="経度"
                 type="number"
                 step="0.000001"
-                className="border border-slate-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className={INPUT}
               />
               <input
                 value={confidence}
@@ -347,13 +380,13 @@ export function PlaceCandidateList({
                 type="number"
                 min="0"
                 max="100"
-                className="border border-slate-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className={INPUT}
               />
               <input
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 placeholder="メモ"
-                className="border border-slate-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className={INPUT}
               />
             </div>
           </div>
@@ -363,7 +396,7 @@ export function PlaceCandidateList({
               type="button"
               onClick={add}
               disabled={isPending}
-              className="bg-indigo-600 text-white px-3 py-1 rounded text-xs font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+              className="bg-indigo-600 text-white px-4 py-2 sm:px-3 sm:py-1 rounded-md text-sm sm:text-xs font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors"
             >
               追加
             </button>

@@ -3,6 +3,10 @@
 import { useState, useTransition } from "react";
 import { Lock, Eye, Pencil, Settings, Trash2, X } from "lucide-react";
 import { updateDossierMetaAction, deleteDossierAction } from "../actions";
+import { DeleteConfirm } from "./delete-confirm";
+
+/** アイコンだけのボタン。スマホでは指で押せる大きさ (36px) にする */
+const ICON_BUTTON = "inline-flex items-center justify-center h-9 w-9 sm:h-7 sm:w-7 rounded-md hover:bg-slate-100";
 
 const CLASSIFICATION_LABEL: Record<string, string> = {
   internal: "一般",
@@ -38,6 +42,7 @@ export function DossierHeader({ dossier, editable, manageable }: DossierHeaderPr
   const [viewMode, setViewMode] = useState(dossier.viewMode);
   const [editMode, setEditMode] = useState(dossier.editMode);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   function persistTitle() {
@@ -55,11 +60,14 @@ export function DossierHeader({ dossier, editable, manageable }: DossierHeaderPr
   }
 
   function handleDelete() {
-    if (!confirm(`「${dossier.title}」を削除しますか？`)) return;
+    setDeleteError(null);
     startTransition(async () => {
       // 成功すると redirect するので、戻ってくるのは失敗したときだけ
       const res = await deleteDossierAction(dossier.id);
-      if (res && !res.ok) setDeleteError(res.error);
+      if (res && !res.ok) {
+        setDeleteError(res.error);
+        setConfirmingDelete(false);
+      }
     });
   }
 
@@ -75,7 +83,7 @@ export function DossierHeader({ dossier, editable, manageable }: DossierHeaderPr
   }
 
   return (
-    <div className="mt-3 bg-white border border-slate-200 rounded-lg p-5">
+    <div className="mt-3 bg-white border border-slate-200 rounded-lg p-4 sm:p-5">
       <div className="flex items-start gap-3">
         <div className="flex-1 min-w-0">
           {editable ? (
@@ -89,7 +97,7 @@ export function DossierHeader({ dossier, editable, manageable }: DossierHeaderPr
             <h1 className="text-xl font-bold tracking-tight text-slate-900">{dossier.title}</h1>
           )}
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
           <span
             className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ${CLASSIFICATION_BADGE[dossier.classification] ?? "bg-slate-100 text-slate-600"}`}
           >
@@ -105,23 +113,35 @@ export function DossierHeader({ dossier, editable, manageable }: DossierHeaderPr
                 type="button"
                 onClick={() => setSettingsOpen((v) => !v)}
                 title="共有設定"
-                className="text-slate-400 hover:text-slate-600"
+                aria-label="共有設定"
+                className={`${ICON_BUTTON} text-slate-400 hover:text-slate-600`}
               >
-                <Settings className="h-4 w-4" />
+                <Settings className="h-5 w-5 sm:h-4 sm:w-4" />
               </button>
               <button
                 type="button"
-                onClick={handleDelete}
+                onClick={() => setConfirmingDelete((v) => !v)}
                 disabled={isPending}
                 title="削除"
-                className="text-rose-400 hover:text-rose-600"
+                aria-label="企画を削除"
+                className={`${ICON_BUTTON} text-rose-400 hover:text-rose-600 hover:bg-rose-50`}
               >
-                <Trash2 className="h-4 w-4" />
+                <Trash2 className="h-5 w-5 sm:h-4 sm:w-4" />
               </button>
             </>
           )}
         </div>
       </div>
+
+      {manageable && confirmingDelete && (
+        <DeleteConfirm
+          className="mt-3"
+          message={`「${dossier.title}」を削除しますか？ 入っているアイテムと場所候補も消えます。`}
+          onConfirm={handleDelete}
+          onCancel={() => setConfirmingDelete(false)}
+          pending={isPending}
+        />
+      )}
 
       {deleteError && (
         <p
@@ -139,9 +159,10 @@ export function DossierHeader({ dossier, editable, manageable }: DossierHeaderPr
             <button
               type="button"
               onClick={() => setSettingsOpen(false)}
-              className="text-slate-400 hover:text-slate-600"
+              aria-label="閉じる"
+              className={`${ICON_BUTTON} -mr-2 text-slate-400 hover:text-slate-600`}
             >
-              <X className="h-3.5 w-3.5" />
+              <X className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
             </button>
           </div>
           <div className="grid gap-3 sm:grid-cols-3">
@@ -150,7 +171,7 @@ export function DossierHeader({ dossier, editable, manageable }: DossierHeaderPr
               <select
                 value={classification}
                 onChange={(e) => setClassification(e.target.value)}
-                className="w-full border border-slate-300 rounded px-2 py-1 text-xs"
+                className="w-full border border-slate-300 rounded px-2 py-2 sm:py-1 text-base sm:text-xs"
               >
                 <option value="internal">一般</option>
                 <option value="confidential">限定</option>
@@ -162,7 +183,7 @@ export function DossierHeader({ dossier, editable, manageable }: DossierHeaderPr
               <select
                 value={viewMode}
                 onChange={(e) => setViewMode(e.target.value)}
-                className="w-full border border-slate-300 rounded px-2 py-1 text-xs"
+                className="w-full border border-slate-300 rounded px-2 py-2 sm:py-1 text-base sm:text-xs"
               >
                 <option value="private">自分のみ</option>
                 <option value="clearance">クリアランス以上</option>
@@ -173,7 +194,7 @@ export function DossierHeader({ dossier, editable, manageable }: DossierHeaderPr
               <select
                 value={editMode}
                 onChange={(e) => setEditMode(e.target.value)}
-                className="w-full border border-slate-300 rounded px-2 py-1 text-xs"
+                className="w-full border border-slate-300 rounded px-2 py-2 sm:py-1 text-base sm:text-xs"
               >
                 <option value="private">自分のみ</option>
                 <option value="clearance">クリアランス以上</option>
@@ -188,7 +209,7 @@ export function DossierHeader({ dossier, editable, manageable }: DossierHeaderPr
               type="button"
               onClick={persistSharing}
               disabled={isPending}
-              className="bg-indigo-600 text-white px-3 py-1 rounded text-xs font-medium hover:bg-indigo-700 disabled:opacity-50"
+              className="bg-indigo-600 text-white px-4 py-2 sm:px-3 sm:py-1 rounded text-sm sm:text-xs font-medium hover:bg-indigo-700 disabled:opacity-50"
             >
               保存
             </button>
