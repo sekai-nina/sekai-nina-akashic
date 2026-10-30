@@ -124,6 +124,39 @@ export async function listDossiersContainingAsset(user: ActingUser, assetId: str
   return [...byId.values()].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
 }
 
+export interface AssetDossierMembership {
+  /** 入っている企画 (クリップのプールは除く。同じ企画に抜粋ごとに複数回入っていても 1 つ) */
+  dossiers: { id: string; title: string }[];
+  /** クリップのプールに入っている件数 (抜粋ごとに 1 件) */
+  clipCount: number;
+}
+
+/**
+ * 検索結果の各アセットが企画・クリップにどれだけ入っているか (一覧のバッジ用)。
+ * 見えるかどうかは Dossier / DossierItem の RLS に任せる。どこにも入っていないアセットはキーが無い
+ */
+export async function listDossierMembershipForAssets(
+  user: ActingUser,
+  assetIds: string[]
+): Promise<Map<string, AssetDossierMembership>> {
+  const result = new Map<string, AssetDossierMembership>();
+  if (assetIds.length === 0) return result;
+  const items = await withSession(user, (tx) =>
+    tx.dossierItem.findMany({
+      where: { assetId: { in: assetIds } },
+      select: { assetId: true, dossier: { select: { id: true, title: true, kind: true } } },
+    })
+  );
+  for (const { assetId, dossier } of items) {
+    if (!assetId) continue;
+    let row = result.get(assetId);
+    if (!row) result.set(assetId, (row = { dossiers: [], clipCount: 0 }));
+    if (dossier.kind === DossierKind.clips) row.clipCount++;
+    else if (!row.dossiers.some((d) => d.id === dossier.id)) row.dossiers.push({ id: dossier.id, title: dossier.title });
+  }
+  return result;
+}
+
 /**
  * この聖地を場所候補に持つドシエ (聖地詳細の「紐付き企画」用)。
  * 見えるかどうかは Dossier / DossierPlaceCandidate の RLS に任せる
