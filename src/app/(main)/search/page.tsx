@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import { search, splitQueryTerms, type SearchResult } from "@/lib/search";
 import { auth } from "@/lib/auth";
 import { getCachedEntityList } from "@/lib/cache";
-import { listEditableDossiers } from "@/lib/domain/dossiers";
+import { listDossierMembershipForAssets, listEditableDossiers, type AssetDossierMembership } from "@/lib/domain/dossiers";
 import { isNinaAppearance } from "@/lib/nina";
 import { AddToDossier } from "@/components/add-to-dossier";
 import { ASSET_KIND_LABELS, formatDate } from "@/lib/utils";
@@ -13,6 +13,10 @@ import Link from "next/link";
 import type { AssetKind, ClearanceLevel, SourceType } from "@prisma/client";
 
 interface EditableDossier { id: string; title: string }
+interface SessionUser { id: string; role: string; clearance: string }
+
+/** ページ送りで戻る先。ページの頭ではなく結果の頭に飛ばす (検索フォームが長いので) */
+const RESULTS_ANCHOR = "search-results";
 
 /** Kinds that are best browsed as a grid — selecting only these defaults to gallery view. */
 const VISUAL_KINDS: AssetKind[] = ["image", "video"];
@@ -70,6 +74,61 @@ const MATCH_FIELD_LABELS: Record<string, string> = {
   ocr: "OCR", transcript: "文字起こし", extracted: "抽出テキスト",
 };
 
+/** 企画・クリップに入っている数。ギャラリーでは画像に重ねる (overlay) */
+function MembershipBadges({ membership, overlay }: { membership?: AssetDossierMembership; overlay?: boolean }) {
+  if (!membership) return null;
+  const { dossiers, clipCount } = membership;
+  if (dossiers.length === 0 && clipCount === 0) return null;
+  const base = overlay
+    ? "inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium shadow-sm"
+    : "inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium";
+  return (
+    <>
+      {dossiers.length > 0 && (
+        <span className={`${base} ${overlay ? "bg-emerald-600/90 text-white" : "bg-emerald-50 text-emerald-700"}`}
+          title={`入っている企画: ${dossiers.map((d) => d.title).join("、")}`}>
+          企画 {dossiers.length}
+        </span>
+      )}
+      {clipCount > 0 && (
+        <span className={`${base} ${overlay ? "bg-amber-500/90 text-white" : "bg-amber-50 text-amber-700"}`}
+          title={`クリップ ${clipCount} 件`}>
+          クリップ {clipCount}
+        </span>
+      )}
+    </>
+  );
+}
+
+function Pagination({ page, hasNextPage, buildUrl, className }: {
+  page: number;
+  hasNextPage: boolean;
+  buildUrl: (overrides: Record<string, string | undefined>) => string;
+  className?: string;
+}) {
+  if (page <= 1 && !hasNextPage) return null;
+  const linkClass = "border border-slate-300 text-slate-700 px-3 py-1.5 rounded text-sm hover:bg-slate-50";
+  const disabledClass = "border border-slate-200 text-slate-300 px-3 py-1.5 rounded text-sm cursor-default";
+  // 押すたびにボタンの位置がずれないよう、押せない側も枠だけ残す
+  return (
+    <div className={`flex items-center justify-between ${className ?? ""}`}>
+      <span className="text-sm text-slate-500">{page} ページ目</span>
+      <div className="flex gap-2">
+        {page > 1 ? (
+          <Link href={`${buildUrl({ page: String(page - 1) })}#${RESULTS_ANCHOR}`} className={linkClass}>← 前へ</Link>
+        ) : (
+          <span className={disabledClass} aria-disabled="true">← 前へ</span>
+        )}
+        {hasNextPage ? (
+          <Link href={`${buildUrl({ page: String(page + 1) })}#${RESULTS_ANCHOR}`} className={linkClass}>次へ →</Link>
+        ) : (
+          <span className={disabledClass} aria-disabled="true">次へ →</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SearchResultsSkeleton() {
   return (
     <div className="space-y-3 animate-pulse">
@@ -98,13 +157,14 @@ function SearchResultsSkeleton() {
 
 async function SearchResults({
   params,
-  clearance,
+  user,
   editableDossiers,
 }: {
   params: { [key: string]: string | undefined };
-  clearance: ClearanceLevel;
+  user: SessionUser;
   editableDossiers: EditableDossier[];
 }) {
+  const clearance = user.clearance as ClearanceLevel;
   const q = params.q ?? "";
   const page = Math.max(1, parseInt(params.page ?? "1"));
 
@@ -162,6 +222,13 @@ async function SearchResults({
         page, perPage: PER_PAGE,
       }, clearance);
 
+  // 企画・クリップのバッジ。失敗しても結果は出す
+  const memberships = await listDossierMembershipForAssets(user, [...new Set(results.items.map((i) => i.assetId))])
+    .catch((e: unknown) => {
+      console.error("企画・クリップの件数の取得に失敗:", e);
+      return new Map<string, AssetDossierMembership>();
+    });
+
   // 件数が正確になったので、最終ページで「次へ」が空振りしないよう total で判定する
   const hasNextPage = page * results.perPage < results.total;
 
@@ -201,6 +268,8 @@ async function SearchResults({
         </div>
       </div>
 
+      <Pagination page={page} hasNextPage={hasNextPage} buildUrl={buildUrl} className="mb-3" />
+
       {results.items.length === 0 ? (
         <div className="text-center py-16 text-slate-400">
           {noVisualKinds ? (
@@ -221,13 +290,19 @@ async function SearchResults({
                 className="block bg-white border border-slate-200 rounded-lg overflow-hidden hover:border-blue-400 transition-colors">
                 {/* storageUrl は Drive の閲覧ページ (HTML) の URL なので <img> には使えない。
                     サムネイルが無ければ kind ラベルのプレースホルダを出す */}
-                {item.thumbnailUrl ? (
-                  <img src={item.thumbnailUrl} alt={item.assetTitle} className="w-full h-32 object-cover" />
-                ) : (
-                  <div className="w-full h-32 bg-slate-100 flex items-center justify-center text-slate-400 text-xs">
-                    {ASSET_KIND_LABELS[item.assetKind] ?? item.assetKind}
+                <div className="relative">
+                  {item.thumbnailUrl ? (
+                    <img src={item.thumbnailUrl} alt={item.assetTitle} className="w-full h-32 object-cover" />
+                  ) : (
+                    <div className="w-full h-32 bg-slate-100 flex items-center justify-center text-slate-400 text-xs">
+                      {ASSET_KIND_LABELS[item.assetKind] ?? item.assetKind}
+                    </div>
+                  )}
+                  {/* 右上は「企画に追加」のボタンが出るので左下に置く */}
+                  <div className="absolute bottom-1.5 left-1.5 flex gap-1">
+                    <MembershipBadges membership={memberships.get(item.assetId)} overlay />
                   </div>
-                )}
+                </div>
                 <div className="p-2">
                   <p className="text-xs font-medium text-slate-800 line-clamp-2">{item.assetTitle}</p>
                   <div className="mt-1 flex items-center gap-1.5 flex-wrap">
@@ -272,6 +347,7 @@ async function SearchResults({
                     {item.matchCount > 1 && (
                       <span className="text-xs text-blue-500 font-medium">×{item.matchCount}</span>
                     )}
+                    <MembershipBadges membership={memberships.get(item.assetId)} />
                   </div>
                   <div className="mt-1 space-y-0.5">
                     {item.snippets.map((snip, si) => (
@@ -316,21 +392,7 @@ async function SearchResults({
         </div>
       )}
 
-      {(page > 1 || hasNextPage) && (
-        <div className="flex items-center justify-between mt-4">
-          <span className="text-sm text-slate-500">{page} ページ目</span>
-          <div className="flex gap-2">
-            {page > 1 && (
-              <Link scroll={false} href={buildUrl({ page: String(page - 1) })}
-                className="border border-slate-300 text-slate-700 px-3 py-1.5 rounded text-sm hover:bg-slate-50">← 前へ</Link>
-            )}
-            {hasNextPage && (
-              <Link scroll={false} href={buildUrl({ page: String(page + 1) })}
-                className="border border-slate-300 text-slate-700 px-3 py-1.5 rounded text-sm hover:bg-slate-50">次へ →</Link>
-            )}
-          </div>
-        </div>
-      )}
+      <Pagination page={page} hasNextPage={hasNextPage} buildUrl={buildUrl} className="mt-4" />
     </>
   );
 }
@@ -381,9 +443,11 @@ export default async function SearchPage({
       </Suspense>
 
       {hasQuery ? (
-        <Suspense fallback={<SearchResultsSkeleton />}>
-          <SearchResults params={params} clearance={userClearance} editableDossiers={editableDossiers} />
-        </Suspense>
+        <div id={RESULTS_ANCHOR} className="scroll-mt-4">
+          <Suspense fallback={<SearchResultsSkeleton />}>
+            <SearchResults params={params} user={session.user} editableDossiers={editableDossiers} />
+          </Suspense>
+        </div>
       ) : (
         <div className="text-center py-16 text-slate-400">
           <p>キーワードを入力するか、種別を選択して検索してください</p>
