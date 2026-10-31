@@ -18,7 +18,7 @@ const GOOGLE_HOST = /^(?:[a-z0-9-]+\.)*google\.[a-z]{2,3}(?:\.[a-z]{2})?$/;
  * MCP 経由では URL の出所が LLM (= 外部入力) になるので、Google 以外のホストや
  * javascript: / data: スキームを弾かないとフィッシング・XSS の入口になる。
  */
-function isAllowedMapsUrl(url: URL): boolean {
+export function isAllowedMapsUrl(url: URL): boolean {
   if (url.protocol !== "https:" && url.protocol !== "http:") return false;
   const host = url.hostname.toLowerCase();
   return SHORT_HOSTS.has(host) || GOOGLE_HOST.test(host);

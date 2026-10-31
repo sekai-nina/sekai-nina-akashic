@@ -189,14 +189,41 @@ function cardPlaces(places: DossierPlace[]): { no: number; place: DossierPlace; 
   return out;
 }
 
-function placeCard(name: string, url: string): string {
+/** カードの座標の行。座標の無い場所は無し (地図サムネイルの出ない、名前とホストだけのカードになる) */
+function coordLines(place: DossierPlace): string[] {
+  return place.lat != null && place.lng != null ? [`lat: ${place.lat}`, `lng: ${place.lng}`] : [];
+}
+
+/** `lat:` / `lng:` があるとカードに地点の地図サムネイルが出る (remark/cardlink.ts) */
+function placeCard(place: DossierPlace, url: string): string {
   let host = "www.google.com";
   try {
     host = new URL(url).hostname;
   } catch {
     // 壊れた URL でもカードは出す (host は既定)
   }
-  return ["```cardlink", `url: ${url}`, `title: "${name.replace(/"/g, "'")}"`, `host: ${host}`, "```"].join("\n");
+  return ["```cardlink", `url: ${url}`, `title: "${place.name.replace(/"/g, "'")}"`, `host: ${host}`, ...coordLines(place), "```"].join(
+    "\n",
+  );
+}
+
+/**
+ * 座標の行が無いころに置いた場所のカードへ `lat:` / `lng:` を足す (地図サムネイルを出すため)。
+ * 同じ URL の場所のカードだけ。ほかの行と、カード以外の本文は触らない。`names` は足した場所
+ */
+export function addCardCoords(body: string, places: DossierPlace[]): { body: string; names: string[] } {
+  const byUrl = new Map(cardPlaces(places).map((c) => [c.url, c.place]));
+  const names: string[] = [];
+  const out = body.replace(/^```cardlink\n((?:(?!```)[^\n]*\n)*?)```$/gm, (whole, inner: string) => {
+    const url = inner.match(/^url:\s*(\S+)/m)?.[1];
+    const place = url ? byUrl.get(url) : undefined;
+    if (!place || /^(lat|lng):/m.test(inner)) return whole;
+    const coords = coordLines(place);
+    if (coords.length === 0) return whole;
+    names.push(place.name);
+    return `\`\`\`cardlink\n${inner}${coords.join("\n")}\n\`\`\``;
+  });
+  return { body: out, names };
 }
 
 const PLACE_MARKER = /^[ \t]*\{\{場所:(\d+)\}\}[ \t]*$/gm;
@@ -214,7 +241,7 @@ export function expandPlaceCards(body: string, places: DossierPlace[]): string {
       const c = byNo.get(Number(k));
       if (!c || placed.has(c.url)) return "";
       placed.add(c.url);
-      return placeCard(c.place.name, c.url);
+      return placeCard(c.place, c.url);
     })
     .replace(/\n{3,}/g, "\n\n");
 }
@@ -273,7 +300,7 @@ export function insertPlaceCards(
     // 名前が出てこない場所 (「コロッケを食べた場所」等) は、訪問順で直前、無ければ直後の場所と同じ節
     const hit = hits[n] ?? hits.slice(0, n).findLast(Boolean) ?? hits.slice(n + 1).find(Boolean);
     const at = hit?.end ?? tailAt;
-    inserts.set(at, [...(inserts.get(at) ?? []), placeCard(c.place.name, c.url)]);
+    inserts.set(at, [...(inserts.get(at) ?? []), placeCard(c.place, c.url)]);
     placements.push({ name: c.place.name, heading: hit?.heading ?? null });
   }
   if (inserts.size === 0) return { body, placements };
