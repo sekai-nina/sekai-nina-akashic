@@ -68,6 +68,7 @@ import {
   type ArticlePlaceRow,
   type ArticleSourceEntry,
 } from "@/lib/articles/frontmatter";
+import { shortIdFromArticleSourceUrl } from "@/lib/articles/source-article";
 import { hasChanged } from "@/lib/articles/changes";
 import { demotableSources, reconcileSources } from "@/lib/articles/reconcile";
 import { articlesDirFromArgs, compareCheckoutWithRemote, listArticleFiles } from "@/lib/articles/files";
@@ -268,6 +269,13 @@ async function main() {
       return refSet.has(e.ref) ? applied(e.ref) : failed("dangling");
     }
 
+    // 記事出典 (#320): `url: /articles/<shortId>` はアセットではなく記事を指す。アセットの照合に
+    // 回すと unresolved になり、--create-missing では url をタイトルにした偽のアセットを作ってしまう。
+    // 参照先の紐づけ (refArticleId) は書き込み時に url から引く
+    if (shortIdFromArticleSourceUrl(e.url)) {
+      return { entry: e, assetId: null, status: ArticleSourceStatus.applied, needsCreate: false };
+    }
+
     const date = parseFrontmatterDate(e.date);
 
     if (e.url) {
@@ -314,6 +322,8 @@ async function main() {
     },
   });
   const existingByShortId = new Map(existing.map((a) => [a.shortId, a]));
+  /** 記事出典 (#320) の参照先を引くため。同じ取り込みで新しく作る記事は次の取り込みで埋まる */
+  const articleIdByShortId = new Map(existing.map((a) => [a.shortId, a.id]));
 
   // path は @@unique。別の short_id が同じ path を持つと upsert が P2002 で落ち、
   // 途中まで書き込んだ中途半端な状態で止まる
@@ -649,7 +659,13 @@ async function main() {
     // 削除と再作成は 1 トランザクションにまとめる。途中で落ちると
     // 出典が消えたまま残るため。
     const { rows, unmatched } = reconcileSources(prev?.sources ?? [], wanted);
-    const replaced = rows.map((w) => ({ ...w, articleId: article.id }));
+    // `url: /articles/<shortId>` の出典は記事出典 (#320)。参照先を引き直して紐づけを保つ
+    // (取り込みは全置換なので、ここで埋めないと push → 取り込みの往復で refArticleId が消える)
+    const replaced = rows.map((w) => ({
+      ...w,
+      articleId: article.id,
+      refArticleId: articleIdByShortId.get(shortIdFromArticleSourceUrl(w.url) ?? "") ?? null,
+    }));
     const demote = demotableSources(unmatched);
     const assetClassification = demote.length
       ? new Map(
@@ -703,6 +719,28 @@ async function main() {
 
     done++;
     if (done % 50 === 0) console.log(`  ${done}/${plan.length}`);
+  }
+
+  // 記事出典 (#320) の紐づけの埋め直し。参照先を同じ取り込みで新しく作った記事や、変更なしで
+  // スキップした記事の行は上の書き込みを通らないので、url から引けるものをまとめて埋める
+  const unlinked = await prisma.articleSource.findMany({
+    where: { refArticleId: null, url: { startsWith: "/articles/" } },
+    select: { id: true, url: true },
+  });
+  if (unlinked.length) {
+    const targets = await prisma.article.findMany({
+      where: { shortId: { in: unlinked.map((u) => shortIdFromArticleSourceUrl(u.url) ?? "") } },
+      select: { id: true, shortId: true },
+    });
+    const idOf = new Map(targets.map((t) => [t.shortId, t.id]));
+    let linked = 0;
+    for (const u of unlinked) {
+      const id = idOf.get(shortIdFromArticleSourceUrl(u.url) ?? "");
+      if (!id) continue;
+      await prisma.articleSource.update({ where: { id: u.id }, data: { refArticleId: id } });
+      linked++;
+    }
+    if (linked) console.log(`記事出典の参照先を埋めた: ${linked} 件`);
   }
 
   console.log(

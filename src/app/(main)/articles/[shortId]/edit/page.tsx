@@ -51,7 +51,7 @@ export default async function ArticleEditPage({
   if (!article) notFound();
   const [articlePlaces, backlinks] = await Promise.all([
     listArticlePlaces(article.id, session.user.clearance),
-    listArticleBacklinks(article.title, article.shortId),
+    listArticleBacklinks(article, session.user.clearance),
   ]);
 
   // related は記事パネルで編集できるので「触れない」一覧から外す
@@ -82,7 +82,7 @@ export default async function ArticleEditPage({
           id: s.id,
           sourceNo: s.sourceNo,
           status: s.status,
-          label: s.asset?.title || s.label,
+          label: s.asset?.title || s.refArticle?.title || s.label,
         }))}
         initialPlaceIds={articlePlaces.map((p) => p.id)}
         placeOptions={places.map((p) => ({

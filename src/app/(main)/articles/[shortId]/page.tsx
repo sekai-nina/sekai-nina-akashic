@@ -187,6 +187,14 @@ export default async function ArticleDetailPage({
                   >
                     {s.asset.title || s.label || "(無題)"}
                   </Link>
+                ) : s.refArticle ? (
+                  // 記事を出典にした行 (#320)。表示はその時のタイトル
+                  <Link
+                    href={`/articles/${s.refArticle.shortId}`}
+                    className="text-sm text-slate-900 hover:underline"
+                  >
+                    {s.refArticle.title || s.label || "(無題)"}
+                  </Link>
                 ) : (
                   <span className="text-sm text-slate-700">{s.label || "(ラベルなし)"}</span>
                 )}

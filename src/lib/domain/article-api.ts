@@ -68,6 +68,8 @@ export function toArticleSourceDetail(s: ArticleSourceRowWithAsset) {
     note: s.note,
     sortOrder: s.sortOrder,
     originalRef: s.originalRef,
+    /** 記事を出典にした行 (#320)。url は `/articles/<shortId>` */
+    refArticle: s.refArticle ? { shortId: s.refArticle.shortId, title: s.refArticle.title } : null,
     asset: s.asset
       ? {
           id: s.asset.id,
