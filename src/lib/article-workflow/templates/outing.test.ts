@@ -6,6 +6,7 @@ import { buildMaterialsText } from "../materials";
 import type { ArticleAssetInput } from "../render";
 import {
   expandPlaceCards,
+  insertPlaceCards,
   OUTING_BODY_PLACEHOLDER,
   OUTING_TEMPLATE,
   outingLocations,
@@ -361,5 +362,70 @@ describe("expandPlaceCards", () => {
     const r = renderOutingArticle(input([blog]), { ...draft, body: "## 海鮮丼\n\n- 海鮮丼を食べた^[1]\n\n{{場所:1}}" });
     expect(r.body).toContain("url: https://maps.app.goo.gl/x");
     expect(r.body).not.toContain("{{場所");
+  });
+});
+
+describe("insertPlaceCards", () => {
+  const card = (name: string, url: string) =>
+    ["```cardlink", `url: ${url}`, `title: "${name}"`, "host: maps.app.goo.gl", "```"].join("\n");
+  const two = places.slice(0, 2);
+
+  it("名前が出てくる ## の末尾に置く。どの場所も出てこなければ関連メディアの前", () => {
+    const body = "## 海鮮丼\n\n- べたなぎで海鮮丼\n\n## 海\n\n- 海を見た\n\n## 関連メディア\n\n- [x](https://x)\n";
+    expect(insertPlaceCards(body, two.slice(0, 1)).body).toBe(
+      `## 海鮮丼\n\n- べたなぎで海鮮丼\n\n${card("べたなぎ", "https://maps.app.goo.gl/x")}\n\n## 海\n\n- 海を見た\n\n## 関連メディア\n\n- [x](https://x)\n`
+    );
+    const r = insertPlaceCards(body, [{ ...two[1], name: "知らない店" }]);
+    expect(r.body).toBe(
+      `## 海鮮丼\n\n- べたなぎで海鮮丼\n\n## 海\n\n- 海を見た\n\n${card("知らない店", "https://maps.app.goo.gl/y")}\n\n## 関連メディア\n\n- [x](https://x)\n`
+    );
+    expect(r.placements).toEqual([{ name: "知らない店", heading: null }]);
+  });
+
+  it("名前が出てこない場所は訪問順で直前の場所と同じ節", () => {
+    const body = "## 1日目\n\n- べたなぎ\n\n## 2日目\n\n- 江ノ島金魚\n";
+    const r = insertPlaceCards(body, [two[0], { ...two[1], name: "海を見た場所", googleMapsUrl: "https://maps.app.goo.gl/z" }, two[1]]);
+    expect(r.placements).toEqual([
+      { name: "べたなぎ", heading: "1日目" },
+      { name: "海を見た場所", heading: "1日目" },
+      { name: "江ノ島金魚", heading: "2日目" },
+    ]);
+  });
+
+  it("見出しの無い本文は最後に置く。補足・おまけの前に置く", () => {
+    expect(insertPlaceCards("- べたなぎに行った\n", two.slice(0, 1)).body).toBe(
+      `- べたなぎに行った\n\n${card("べたなぎ", "https://maps.app.goo.gl/x")}\n`
+    );
+    expect(insertPlaceCards("- 行った\n\n## 補足\n\n- メモ\n", two.slice(0, 1)).body).toBe(
+      `- 行った\n\n${card("べたなぎ", "https://maps.app.goo.gl/x")}\n\n## 補足\n\n- メモ\n`
+    );
+  });
+
+  it("「前」を落とした名前でも探す", () => {
+    const r = insertPlaceCards("## 中華街\n\n- 小籠包\n\n## 海\n\n- べたなぎの近く\n", [{ ...two[0], name: "べたなぎ前" }]);
+    expect(r.placements).toEqual([{ name: "べたなぎ前", heading: "海" }]);
+  });
+
+  it("先頭の語でも探す。同じ節の場所は並び順のまま", () => {
+    const p: DossierPlace[] = [
+      { ...two[0], name: "べたなぎ 本店" },
+      { ...two[1], name: "江ノ島金魚" },
+    ];
+    const r = insertPlaceCards("## 江ノ島\n\n- べたなぎと江ノ島金魚\n", p);
+    expect(r.body).toBe(
+      `## 江ノ島\n\n- べたなぎと江ノ島金魚\n\n${card("べたなぎ 本店", "https://maps.app.goo.gl/x")}\n\n${card("江ノ島金魚", "https://maps.app.goo.gl/y")}\n`
+    );
+  });
+
+  it("差し込む所のほかの空行は触らない", () => {
+    const body = "前置き\n\n\n## 海鮮丼\n\n- べたなぎ\n\n\n## 海\n\n- 海\n";
+    expect(insertPlaceCards(body, two.slice(0, 1)).body).toBe(
+      `前置き\n\n\n## 海鮮丼\n\n- べたなぎ\n\n\n${card("べたなぎ", "https://maps.app.goo.gl/x")}\n\n## 海\n\n- 海\n`
+    );
+  });
+
+  it("もうカードがある場所は足さず、何も無ければ本文をそのまま返す", () => {
+    const body = `## 海鮮丼\n\n${card("べたなぎ", "https://maps.app.goo.gl/x")}\n`;
+    expect(insertPlaceCards(body, two.slice(0, 1))).toEqual({ body, placements: [] });
   });
 });

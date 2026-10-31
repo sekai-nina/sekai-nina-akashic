@@ -34,6 +34,7 @@
     "cli:verify-article-push": "tsx src/cli/verify-article-push.ts",
     "cli:backfill-article-dossiers": "tsx src/cli/backfill-article-dossiers.ts",
     "cli:backfill-article-places": "tsx src/cli/backfill-article-places.ts",
+    "cli:backfill-place-cards": "tsx src/cli/backfill-place-cards.ts",
     "cli:import-songs": "tsx src/cli/import-songs.ts",
     "cli:import-setlists-su": "tsx src/cli/import-setlists-su.ts",
     "cli:fix-insta-dash": "tsx src/cli/fix-insta-story-dash.ts",
