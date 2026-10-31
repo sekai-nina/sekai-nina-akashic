@@ -239,6 +239,10 @@ export function ArticleEditor({
           onChange={(v) => set("body", v)}
           disabled={isSaving}
           candidates={linkCandidates}
+          knownSourceNos={[
+            ...sources.flatMap((x) => (x.sourceNo != null && x.status !== "pending" ? [x.sourceNo] : [])),
+            ...reservedSources.map((x) => x.sourceNo),
+          ]}
           className={cn(tab !== "edit" && "hidden")}
           ref={editorRef}
         />
