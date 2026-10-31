@@ -18,7 +18,7 @@ import {
 import { previewArticleAction, updateArticleAction, type ArticlePreview, type UpdateArticleState } from "./actions";
 import { FootnoteAuditWarnings } from "../footnote-audit-warnings";
 import { TagInput } from "./tag-input";
-import { PlacePicker, type PlaceOption } from "./place-picker";
+import { PlacePicker, type PlaceOption, type PlaceVisit } from "./place-picker";
 import { SourceViewer } from "./source-viewer";
 import { MarkdownEditor, type MarkdownEditorHandle } from "./markdown-editor";
 import { ArticlePanel } from "./article-panel";
@@ -64,7 +64,7 @@ export function ArticleEditor({
   tagOptions,
   extraKeys,
   sources,
-  initialPlaceIds,
+  initialPlaces,
   placeOptions,
   linkCandidates,
   initialRelated,
@@ -80,7 +80,7 @@ export function ArticleEditor({
   extraKeys: string[];
   sources: SourceRef[];
   /** 紐づく聖地 (操作者に見える分、記事内の並び順) */
-  initialPlaceIds: string[];
+  initialPlaces: PlaceVisit[];
   /** 追加できる聖地 (操作者に見える全件) */
   placeOptions: PlaceOption[];
   /** 本文の `[[` で補完する記事 (この記事を除く全件) */
@@ -101,7 +101,7 @@ export function ArticleEditor({
     null,
   );
 
-  const [placeIds, setPlaceIds] = useState(initialPlaceIds);
+  const [places, setPlaces] = useState(initialPlaces);
   const [related, setRelated] = useState(initialRelated);
   /** 「確認済みにする」を押したか (#327)。保存で印が外れる */
   const [reviewed, setReviewed] = useState(false);
@@ -121,7 +121,7 @@ export function ArticleEditor({
   // 離脱時の警告。初期値との比較は雑でよい (JSON で足りる)
   const changed =
     JSON.stringify(values) !== JSON.stringify(initial) ||
-    JSON.stringify(placeIds) !== JSON.stringify(initialPlaceIds) ||
+    JSON.stringify(places) !== JSON.stringify(initialPlaces) ||
     JSON.stringify(related) !== JSON.stringify(initialRelated) ||
     reservedSources.length > 0 ||
     reviewed;
@@ -149,14 +149,14 @@ export function ArticleEditor({
   function showPreview() {
     setTab("preview");
     // 本文と予約中の記事出典が変わっていなければ使い回す
-    const key = `${values.body}\u0000${reservedSources.map((r) => r.sourceNo).join(",")}`;
+    const key = `${values.body}\u0000${reservedSources.map((r) => r.sourceNo).join(",")}\u0000${JSON.stringify(places)}`;
     if (previewedBody.current === key) return;
     const body = values.body;
     const reservedNos = reservedSources.map((r) => r.sourceNo);
     requestedBody.current = body;
     startPreview(async () => {
       try {
-        const r = await previewArticleAction(shortId, body, reservedNos);
+        const r = await previewArticleAction(shortId, body, reservedNos, places);
         if (requestedBody.current !== body) return; // その後に別の本文で投げ直している
         previewedBody.current = key;
         setPreview(r);
@@ -537,8 +537,8 @@ export function ArticleEditor({
 
         {/* 聖地 (#283) */}
         <div className="bg-white border border-slate-200 rounded-lg p-4">
-          <h2 className="text-sm font-medium text-slate-700 mb-2">聖地 {placeIds.length} 件（訪問順。push で locations になる）</h2>
-          <PlacePicker value={placeIds} onChange={setPlaceIds} options={placeOptions} disabled={isSaving} />
+          <h2 className="text-sm font-medium text-slate-700 mb-2">聖地 {places.length} 件（訪問順。push で locations になる）</h2>
+          <PlacePicker value={places} onChange={setPlaces} options={placeOptions} disabled={isSaving} />
         </div>
 
         {/* 出典 (参照用) */}

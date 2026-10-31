@@ -75,6 +75,11 @@ export interface RenderOptions {
   wikilinks?: Map<string, string>;
   /** 記事の出典の URL。本文中の同じ URL のリンクに ↗ を付ける (公開サイトと同じ) */
   sourceUrls?: Iterable<string | null | undefined>;
+  /**
+   * 記事の聖地の訪問 (frontmatter の `locations` の形)。cardlink の `place_id:` と突き合わせて
+   * ほぼ確定 (`certainty: likely`) の印と理由を出す (#333)。公開サイトでは Astro が frontmatter を渡す
+   */
+  locations?: { place_id: string; certainty?: string; certainty_note?: string }[];
 }
 
 export async function renderArticleBody(
@@ -83,6 +88,7 @@ export async function renderArticleBody(
 ): Promise<string> {
   const sourceUrls = new Set([...(opts.sourceUrls ?? [])].filter((u): u is string => !!u));
   const processor = buildProcessor((title) => opts.wikilinks?.get(title), sourceUrls);
-  const file = await processor.process(markdown);
+  // remark-cardlink は公開サイトと同じく file.data.astro.frontmatter から locations を読む
+  const file = await processor.process({ value: markdown, data: { astro: { frontmatter: { locations: opts.locations ?? [] } } } });
   return String(file);
 }

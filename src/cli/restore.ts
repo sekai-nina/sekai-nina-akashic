@@ -283,6 +283,8 @@ async function main() {
               googleMapsUrl: (pc.googleMapsUrl as string) || null,
               note: (pc.note as string) || "",
               confidence: (pc.confidence as number) ?? 0,
+              certainty: pc.certainty === "likely" ? "likely" : "confirmed",
+              certaintyNote: (pc.certaintyNote as string) || "",
               sortOrder: (pc.sortOrder as number) ?? 0,
               createdAt: new Date(pc.createdAt as string),
               updatedAt: new Date((pc.updatedAt as string) ?? (pc.createdAt as string)),

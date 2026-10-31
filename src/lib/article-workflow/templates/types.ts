@@ -6,7 +6,7 @@
  * 素材の読み込み・保存・追記を共通に受け持つ。
  */
 
-import type { ArticleTemplate, ArticleType } from "@prisma/client";
+import type { ArticleTemplate, ArticleType, PlaceCertainty } from "@prisma/client";
 import * as z from "zod";
 import type { AppendLayout } from "@/lib/meetgreet/append";
 import type { ArticleAssetInput, RenderedArticle } from "../render";
@@ -32,8 +32,16 @@ export interface DossierRenderInput {
    * 非公開の聖地の名前・座標は `places` に入らないので、ここには ID しか無い
    */
   linkedPlaceIds?: string[];
+  /** `linkedPlaceIds` の聖地ごとの確度・理由 (企画の候補に付けたもの、#333)。無い聖地は確定 */
+  placeCertainties?: Record<string, PlaceVisitCertainty>;
   /** published_at / synced_at に入れる JST の今日 */
   today: string;
+}
+
+/** 訪問の確度と理由 (#333)。企画の候補 → 記事の ArticlePlace に引き継ぐ */
+export interface PlaceVisitCertainty {
+  certainty: PlaceCertainty;
+  certaintyNote: string;
 }
 
 export interface DossierPlace {

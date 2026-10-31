@@ -280,6 +280,8 @@ export async function loadRenderInput(
     thumbnailUrl: materials.dossierThumb,
     places: materials.places,
     linkedPlaceIds: materials.linkedPlaceIds,
+    // 候補の確度・理由を訪問に引き継ぐ (#333)
+    placeCertainties: materials.placeCertainties,
     today: options.today ?? todayJst(),
   };
   return { input, droppedByClearance: materials.droppedByClearance };

@@ -1,4 +1,4 @@
-import { ArticleSourceStatus, ArticleType, ClearanceLevel } from "@prisma/client";
+import { ArticleSourceStatus, ArticleType, ClearanceLevel, PlaceCertainty } from "@prisma/client";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 /**
@@ -97,6 +97,10 @@ export interface ArticleSourceRow {
 export interface ArticlePlaceEntry {
   placeId: string;
   name: string;
+  /** 訪問の確度 (#333)。ファイルに `certainty: likely` が無ければ confirmed */
+  certainty: PlaceCertainty;
+  /** likely の理由 (`certainty_note`)。confirmed なら "" */
+  certaintyNote: string;
 }
 
 /**
@@ -111,6 +115,29 @@ export interface ArticlePlaceRow {
   name: string;
   classification: ClearanceLevel;
   sortOrder: number;
+  /** 訪問の確度 (#333)。likely だけ `certainty` / `certainty_note` を書き出す */
+  certainty: PlaceCertainty;
+  certaintyNote: string;
+}
+
+/**
+ * 聖地の要素 (`locations[]`) の書き出し。確定 (confirmed) は `name` / `place_id` だけ
+ * (#333 より前の記事と 1 文字も変わらない)。ほぼ確定 (likely) は `certainty: likely` と、理由があれば `certainty_note`
+ */
+export function placeLocationToYaml(p: Pick<ArticlePlaceRow, "name" | "placeId" | "certainty" | "certaintyNote">): Record<string, string> {
+  const loc: Record<string, string> = { name: p.name, place_id: p.placeId };
+  if (p.certainty === PlaceCertainty.likely) {
+    loc.certainty = PlaceCertainty.likely;
+    const note = p.certaintyNote.trim();
+    if (note) loc.certainty_note = note;
+  }
+  return loc;
+}
+
+/** ファイルの `certainty` / `certainty_note` を読む。likely 以外 (無い・知らない値) は確定 */
+function parseCertainty(loc: Record<string, unknown>): { certainty: PlaceCertainty; certaintyNote: string } {
+  if (loc.certainty !== PlaceCertainty.likely) return { certainty: PlaceCertainty.confirmed, certaintyNote: "" };
+  return { certainty: PlaceCertainty.likely, certaintyNote: (str(loc.certainty_note) ?? "").trim() };
 }
 
 /**
@@ -138,6 +165,8 @@ export function toArticlePlaceRows(
     name: e.name,
     classification: classificationOf(e.placeId),
     sortOrder: i,
+    certainty: e.certainty,
+    certaintyNote: e.certaintyNote,
   }));
 }
 
@@ -414,7 +443,7 @@ export function toArticleColumns(parsed: ParsedArticle, path: string): ArticleCo
 
 /**
  * `locations` から聖地 (`place_id`) の要素を抜き出す。残り (座標直書き) は extra に残し、
- * 残りが無ければキーごと消す。`place_id` の要素は name / place_id しか持たない前提
+ * 残りが無ければキーごと消す。`place_id` の要素は name / place_id / certainty / certainty_note しか持たない前提
  * (それ以外のキーは書き出しで消える。`verify.ts` の lossyParseNotes が知らせる)。
  * 同じ聖地が 2 回出てきたら 1 回にする (`ArticlePlace` は記事×聖地で一意)
  */
@@ -435,7 +464,8 @@ export function splitLocations(extra: Record<string, unknown>): {
     }
     if (seen.has(placeId)) continue;
     seen.add(placeId);
-    places.push({ placeId, name: str((loc as Record<string, unknown>).name) ?? "" });
+    const obj = loc as Record<string, unknown>;
+    places.push({ placeId, name: str(obj.name) ?? "", ...parseCertainty(obj) });
   }
   if (!places.length) return { places, extra };
   const { locations: _locations, ...others } = extra;
@@ -591,7 +621,7 @@ export function buildFrontmatter(input: ArticleFrontmatterInput): BuiltFrontmatt
   const placeLocations = (input.places ?? [])
     .filter(isPublishablePlace)
     .sort((a, b) => a.sortOrder - b.sortOrder || (a.placeId < b.placeId ? -1 : a.placeId > b.placeId ? 1 : 0))
-    .map((p) => ({ name: p.name, place_id: p.placeId }));
+    .map(placeLocationToYaml);
   const linkedIds = new Set(placeLocations.map((l) => l.place_id));
   /** extra に残った `place_id` の要素。ArticlePlace と重複するもの・書き出せない聖地は落とす */
   const keepExtraLocation = (loc: unknown) => {

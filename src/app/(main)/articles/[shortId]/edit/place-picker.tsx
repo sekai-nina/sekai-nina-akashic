@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { ArrowDown, ArrowUp, EyeOff, X } from "lucide-react";
+import type { PlaceCertainty } from "@prisma/client";
+import { CERTAINTY_NOTE_INPUT, CERTAINTY_NOTE_PLACEHOLDER, CertaintyToggle } from "@/components/certainty-toggle";
 
 export interface PlaceOption {
   id: string;
@@ -11,6 +13,13 @@ export interface PlaceOption {
   published: boolean;
 }
 
+/** 記事の 1 訪問 (聖地 + この訪問の確度・理由、#333) */
+export interface PlaceVisit {
+  placeId: string;
+  certainty: PlaceCertainty;
+  certaintyNote: string;
+}
+
 const INPUT =
   "w-full border border-slate-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50";
 
@@ -18,8 +27,10 @@ const INPUT =
  * 記事の聖地 (ArticlePlace, #283)。並びは記事内の訪問順で、push で `locations` になる。
  * 非公開 (confidential 以上) の聖地も付けられるが、公開サイトには出ない (バッジで示す)。
  *
- * 保存は記事のフォームと一緒 (`placeIds` の hidden を並べる)。`placesField` は
- * 「この欄を送った」の印で、0 件にした場合と欄が無い場合を区別する。
+ * 訪問ごとに確度 (確定 / ほぼ確定) を選べ、ほぼ確定なら理由を書く。理由は push で公開サイトにも出る。
+ *
+ * 保存は記事のフォームと一緒 (`placeIds` / `placeCertainty` / `placeCertaintyNote` の hidden を
+ * 1 訪問ぶんずつ同じ並びで出す)。`placesField` は「この欄を送った」の印で、0 件にした場合と欄が無い場合を区別する。
  */
 export function PlacePicker({
   value,
@@ -27,20 +38,24 @@ export function PlacePicker({
   options,
   disabled,
 }: {
-  value: string[];
-  onChange: (ids: string[]) => void;
+  value: PlaceVisit[];
+  onChange: (visits: PlaceVisit[]) => void;
   options: PlaceOption[];
   disabled: boolean;
 }) {
   const [query, setQuery] = useState("");
   const byId = new Map(options.map((o) => [o.id, o]));
   const q = query.trim().toLowerCase();
+  const ids = value.map((v) => v.placeId);
   const candidates = q
     ? options
-        .filter((o) => !value.includes(o.id))
+        .filter((o) => !ids.includes(o.id))
         .filter((o) => o.name.toLowerCase().includes(q) || (o.area ?? "").toLowerCase().includes(q))
         .slice(0, 8)
     : [];
+
+  const update = (i: number, patch: Partial<PlaceVisit>) =>
+    onChange(value.map((v, j) => (j === i ? { ...v, ...patch } : v)));
 
   const move = (i: number, d: -1 | 1) => {
     const next = [...value];
@@ -51,18 +66,24 @@ export function PlacePicker({
   return (
     <div>
       <input type="hidden" name="placesField" value="1" />
-      {value.map((id) => (
-        <input key={id} type="hidden" name="placeIds" value={id} />
+      {value.map((v) => (
+        <span key={v.placeId} hidden>
+          <input type="hidden" name="placeIds" value={v.placeId} />
+          <input type="hidden" name="placeCertainty" value={v.certainty} />
+          <input type="hidden" name="placeCertaintyNote" value={v.certainty === "likely" ? v.certaintyNote : ""} />
+        </span>
       ))}
 
       {value.length === 0 ? (
         <p className="text-xs text-slate-400 mb-2">聖地なし</p>
       ) : (
         <ol className="space-y-1 mb-2">
-          {value.map((id, i) => {
+          {value.map((v, i) => {
+            const id = v.placeId;
             const p = byId.get(id);
             return (
-              <li key={id} className="flex items-center gap-1.5 text-sm text-slate-700">
+              <li key={id} className="text-sm text-slate-700">
+                <div className="flex items-center gap-1.5">
                 <span className="font-mono text-xs text-slate-400 w-5 shrink-0">{i + 1}.</span>
                 <span className="truncate">{p?.name ?? id}</span>
                 {p && !p.published && (
@@ -95,7 +116,7 @@ export function PlacePicker({
                   </button>
                   <button
                     type="button"
-                    onClick={() => onChange(value.filter((v) => v !== id))}
+                    onClick={() => onChange(value.filter((x) => x.placeId !== id))}
                     disabled={disabled}
                     className="p-1 text-slate-400 hover:text-red-600 disabled:opacity-30"
                     aria-label="外す"
@@ -103,6 +124,24 @@ export function PlacePicker({
                     <X size={13} />
                   </button>
                 </span>
+                </div>
+                <div className="ml-6 mt-1 flex flex-wrap items-center gap-1.5">
+                  <CertaintyToggle value={v.certainty} onChange={(c) => update(i, { certainty: c })} disabled={disabled} />
+                  {v.certainty === "likely" && (
+                    <input
+                      value={v.certaintyNote}
+                      onChange={(e) => update(i, { certaintyNote: e.target.value })}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") e.preventDefault();
+                      }}
+                      maxLength={300}
+                      placeholder={CERTAINTY_NOTE_PLACEHOLDER}
+                      aria-label="ほぼ確定の理由"
+                      disabled={disabled}
+                      className={CERTAINTY_NOTE_INPUT}
+                    />
+                  )}
+                </div>
               </li>
             );
           })}
@@ -128,7 +167,7 @@ export function PlacePicker({
               <button
                 type="button"
                 onClick={() => {
-                  onChange([...value, o.id]);
+                  onChange([...value, { placeId: o.id, certainty: "confirmed", certaintyNote: "" }]);
                   setQuery("");
                 }}
                 className="w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 flex items-center gap-1.5"

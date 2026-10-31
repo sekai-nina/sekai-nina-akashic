@@ -60,3 +60,30 @@ describe("renderArticleBody: 聖地のカードの地図サムネイル", () => 
     expect(html).not.toContain("style=");
   });
 });
+
+describe("renderArticleBody: ほぼ確定の訪問のカード (#333)", () => {
+  const card = ["```cardlink", "url: https://maps.app.goo.gl/x", 'title: "神社"', "host: maps.app.goo.gl", "place_id: p1", "```"].join("\n");
+
+  it("locations で likely の聖地のカードに印を付け、カードの下に理由を出す", async () => {
+    const html = await renderArticleBody(card, {
+      locations: [{ place_id: "p1", certainty: "likely", certainty_note: "おみくじを引いたとだけ <b>" }],
+    });
+    expect(html).toContain('<div class="cardlink-group">');
+    expect(html).toContain('<div class="cardlink-meta"><span class="cardlink-certainty">ほぼ確定</span>');
+    expect(html).toContain('<div class="cardlink-certainty-note"><span class="cardlink-certainty">ほぼ確定</span>おみくじを引いたとだけ &#x3C;b></div>');
+  });
+
+  it("確定・locations に無い聖地・place_id の無いカードは印なし", async () => {
+    for (const locations of [[{ place_id: "p1" }], [{ place_id: "p2", certainty: "likely" }], []]) {
+      const html = await renderArticleBody(card, { locations });
+      expect(html).not.toContain("cardlink-certainty");
+    }
+  });
+
+  it("理由が無ければ印だけ (カードの下の行は出さない)", async () => {
+    const html = await renderArticleBody(card, { locations: [{ place_id: "p1", certainty: "likely" }] });
+    expect(html).toContain('<span class="cardlink-certainty">ほぼ確定</span>');
+    expect(html).not.toContain("cardlink-certainty-note");
+  });
+});
+

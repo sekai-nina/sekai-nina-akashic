@@ -312,6 +312,8 @@ export const getCachedPlaces = (clearance: ClearanceLevel) => {
                 orderBy: { sortOrder: "asc" },
                 select: {
                   sortOrder: true,
+                  certainty: true,
+                  certaintyNote: true,
                   article: { select: { shortId: true, title: true, date: true, dateDisplay: true, draft: true } },
                 },
               },
@@ -321,7 +323,8 @@ export const getCachedPlaces = (clearance: ClearanceLevel) => {
           })
         ),
       // 記事を含めるようにしたので鍵を変える (Vercel のデータキャッシュはデプロイをまたいで残る)
-      [`places-list-v4-${clearance}`],
+      // 訪問の確度 (#333) を足したので v5
+      [`places-list-v5-${clearance}`],
       { tags: [CACHE_TAGS.places], revalidate: 60 }
     )(),
     getCachedEntityAssetCounts(clearance),

@@ -208,7 +208,8 @@ export async function addPlaceCandidateAction(dossierId: string, formData: FormD
     address: (formData.get("address") as string) || null,
     googleMapsUrl: (formData.get("googleMapsUrl") as string) || null,
     note: (formData.get("note") as string) || "",
-    confidence: formData.get("confidence") ? Number(formData.get("confidence")) : 0,
+    certainty: formData.get("certainty") === "likely" ? "likely" : "confirmed",
+    certaintyNote: (formData.get("certaintyNote") as string) || "",
   });
   revalidatePath(`/dossiers/${dossierId}`);
 }
@@ -219,7 +220,9 @@ export async function updatePlaceCandidateAction(candidateId: string, formData: 
     name: formData.get("name") !== null ? (formData.get("name") as string) : undefined,
     address: formData.get("address") !== null ? (formData.get("address") as string) : undefined,
     note: formData.get("note") !== null ? (formData.get("note") as string) : undefined,
-    confidence: formData.get("confidence") !== null ? Number(formData.get("confidence")) : undefined,
+    certainty:
+      formData.get("certainty") !== null ? (formData.get("certainty") === "likely" ? "likely" : "confirmed") : undefined,
+    certaintyNote: formData.get("certaintyNote") !== null ? (formData.get("certaintyNote") as string) : undefined,
   });
   const dossierId = formData.get("dossierId") as string | null;
   if (dossierId) revalidatePath(`/dossiers/${dossierId}`);

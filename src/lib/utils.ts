@@ -19,6 +19,7 @@ import {
   type MeetGreetEdition,
   type MeetGreetFormat,
   type PlaceKind,
+  type PlaceCertainty,
   type ReleaseKind,
   type SongParticipation,
   type StatusLevel,
@@ -191,6 +192,18 @@ export const PLACE_KIND_LABELS: Record<PlaceKind, string> = {
   scenery: "寺社・公園・景色",
   venue: "会場・放送局",
   shop: "店・施設",
+};
+
+/** 訪問の確度 (#333)。likely はサイトでも「ほぼ確定」の印になる */
+export const PLACE_CERTAINTY_LABELS: Record<PlaceCertainty, string> = {
+  confirmed: "確定",
+  likely: "ほぼ確定",
+};
+
+/** 確度の説明 (選ぶときの手がかり) */
+export const PLACE_CERTAINTY_HINTS: Record<PlaceCertainty, string> = {
+  confirmed: "画像か検証できる証言があり、その場所と完全に一致する",
+  likely: "証言から十中八九ここだが、確定できるほど検証できる材料が無い",
 };
 
 /** 聖地マップのピン・絞り込み用。種類が未設定の聖地も 1 つの種類として並べる */

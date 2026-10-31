@@ -3,6 +3,7 @@ import {
   type ClearanceLevel,
   type DossierAccessMode,
   type DossierItemKind,
+  type PlaceCertainty,
   type Prisma,
   type TextType,
 } from "@prisma/client";
@@ -699,6 +700,20 @@ export interface PlaceCandidateInput {
   googleMapsUrl?: string | null;
   note?: string;
   confidence?: number;
+  /** 確度 (#333)。記事を作る・企画の記事に聖地を足すと、その訪問に引き継ぐ */
+  certainty?: PlaceCertainty;
+  /** ほぼ確定の理由 (サイトに出る)。確定なら捨てる */
+  certaintyNote?: string;
+}
+
+/** 確定なら理由は持たない。理由は 300 字まで */
+function certaintyData(input: PlaceCandidateInput): { certainty?: PlaceCertainty; certaintyNote?: string } {
+  if (input.certainty === undefined) return input.certaintyNote !== undefined ? { certaintyNote: input.certaintyNote.trim().slice(0, 300) } : {};
+  const likely = input.certainty === "likely";
+  return {
+    certainty: likely ? "likely" : "confirmed",
+    certaintyNote: likely ? (input.certaintyNote ?? "").trim().slice(0, 300) : "",
+  };
 }
 
 export async function addPlaceCandidate(
@@ -726,6 +741,7 @@ export async function addPlaceCandidate(
         googleMapsUrl: input.googleMapsUrl ?? null,
         note: input.note ?? "",
         confidence: input.confidence ?? 0,
+        ...certaintyData(input),
         sortOrder: (last?.sortOrder ?? -1) + 1,
       },
     });
@@ -770,6 +786,7 @@ export async function updatePlaceCandidate(
         ...(input.googleMapsUrl !== undefined ? { googleMapsUrl: input.googleMapsUrl } : {}),
         ...(input.note !== undefined ? { note: input.note } : {}),
         ...(input.confidence !== undefined ? { confidence: input.confidence } : {}),
+        ...certaintyData(input),
       },
     });
     if (input.placeId) linked = await linkPlaceToDossierArticles(tx, existing.dossierId, input.placeId);

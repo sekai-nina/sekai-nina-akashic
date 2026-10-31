@@ -43,7 +43,7 @@ export interface ComparableArticle {
    * frontmatter に書き出される ArticlePlace (Place が public / internal) だけを、sortOrder 順に渡す。
    * confidential 以上の行はファイルに無いのが正しいので比べない (取り込みも触らない)
    */
-  places: { placeId: string }[];
+  places: { placeId: string; certainty: string; certaintyNote: string }[];
 }
 
 const time = (d: Date | null | undefined) => (d == null ? null : d.getTime());
@@ -104,7 +104,15 @@ export function hasChanged(
 
   if (
     prev.places.length !== next.places.length ||
-    prev.places.some((p, i) => p.placeId !== next.places[i].placeId)
+    prev.places.some((p, i) => {
+      const n = next.places[i];
+      // 確度・理由 (#333) も frontmatter に出るので比べる (confirmed の理由は書き出されないので比べない)
+      return (
+        p.placeId !== n.placeId ||
+        p.certainty !== n.certainty ||
+        (p.certainty === "likely" && p.certaintyNote.trim() !== n.certaintyNote.trim())
+      );
+    })
   ) {
     return true;
   }

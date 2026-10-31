@@ -84,7 +84,7 @@ export default async function ArticleEditPage({
           status: s.status,
           label: s.asset?.title || s.refArticle?.title || s.label,
         }))}
-        initialPlaceIds={articlePlaces.map((p) => p.id)}
+        initialPlaces={articlePlaces.map((p) => ({ placeId: p.id, certainty: p.certainty, certaintyNote: p.certaintyNote }))}
         placeOptions={places.map((p) => ({
           id: p.id,
           name: p.entity.canonicalName,

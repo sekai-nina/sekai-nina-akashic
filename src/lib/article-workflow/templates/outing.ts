@@ -189,12 +189,17 @@ function cardPlaces(places: DossierPlace[]): { no: number; place: DossierPlace; 
   return out;
 }
 
-/** カードの座標の行。座標の無い場所は無し (地図サムネイルの出ない、名前とホストだけのカードになる) */
-function coordLines(place: DossierPlace): string[] {
-  return place.lat != null && place.lng != null ? [`lat: ${place.lat}`, `lng: ${place.lng}`] : [];
+/**
+ * カードに書く聖地の行。`place_id:` は frontmatter の訪問と突き合わせてほぼ確定の印を出すため (#333)、
+ * `lat:` / `lng:` は写真が無いときの地図サムネイル用 (remark/cardlink.ts)。持っていないものは書かない
+ */
+function placeFieldLines(place: DossierPlace): string[] {
+  return [
+    ...(place.placeId ? [`place_id: ${place.placeId}`] : []),
+    ...(place.lat != null && place.lng != null ? [`lat: ${place.lat}`, `lng: ${place.lng}`] : []),
+  ];
 }
 
-/** `lat:` / `lng:` があるとカードに地点の地図サムネイルが出る (remark/cardlink.ts) */
 function placeCard(place: DossierPlace, url: string): string {
   let host = "www.google.com";
   try {
@@ -202,26 +207,26 @@ function placeCard(place: DossierPlace, url: string): string {
   } catch {
     // 壊れた URL でもカードは出す (host は既定)
   }
-  return ["```cardlink", `url: ${url}`, `title: "${place.name.replace(/"/g, "'")}"`, `host: ${host}`, ...coordLines(place), "```"].join(
+  return ["```cardlink", `url: ${url}`, `title: "${place.name.replace(/"/g, "'")}"`, `host: ${host}`, ...placeFieldLines(place), "```"].join(
     "\n",
   );
 }
 
 /**
- * 座標の行が無いころに置いた場所のカードへ `lat:` / `lng:` を足す (地図サムネイルを出すため)。
+ * 前に置いた場所のカードへ、まだ無い `place_id:` / `lat:` / `lng:` の行を足す。
  * 同じ URL の場所のカードだけ。ほかの行と、カード以外の本文は触らない。`names` は足した場所
  */
-export function addCardCoords(body: string, places: DossierPlace[]): { body: string; names: string[] } {
+export function addCardPlaceFields(body: string, places: DossierPlace[]): { body: string; names: string[] } {
   const byUrl = new Map(cardPlaces(places).map((c) => [c.url, c.place]));
   const names: string[] = [];
   const out = body.replace(/^```cardlink\n((?:(?!```)[^\n]*\n)*?)```$/gm, (whole, inner: string) => {
     const url = inner.match(/^url:\s*(\S+)/m)?.[1];
     const place = url ? byUrl.get(url) : undefined;
-    if (!place || /^(lat|lng):/m.test(inner)) return whole;
-    const coords = coordLines(place);
-    if (coords.length === 0) return whole;
+    if (!place) return whole;
+    const missing = placeFieldLines(place).filter((line) => !new RegExp(`^${line.split(":")[0]}:`, "m").test(inner));
+    if (missing.length === 0) return whole;
     names.push(place.name);
-    return `\`\`\`cardlink\n${inner}${coords.join("\n")}\n\`\`\``;
+    return `\`\`\`cardlink\n${inner}${missing.join("\n")}\n\`\`\``;
   });
   return { body: out, names };
 }
@@ -410,7 +415,7 @@ export function renderOutingArticle(input: DossierRenderInput, draft?: AiDraft |
       dossier: dossierSnapshot(input.dossier, input.today),
       ...(locations.length > 0 ? { locations } : {}),
     },
-    ...(placeIds.length > 0 ? { placeIds } : {}),
+    ...(placeIds.length > 0 ? { placeIds, ...(input.placeCertainties ? { placeCertainties: input.placeCertainties } : {}) } : {}),
   };
 }
 

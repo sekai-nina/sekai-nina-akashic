@@ -14,7 +14,7 @@ import {
   updateArticle,
 } from "@/lib/domain/articles";
 import { parseReservedArticleSources } from "@/lib/articles/source-article";
-import { saveArticlePlaces } from "@/lib/domain/article-places";
+import { listArticlePlaces, saveArticlePlaces, toRenderLocations } from "@/lib/domain/article-places";
 import type { ArticleType } from "@prisma/client";
 import {
   BODY_MAX_LENGTH,
@@ -143,8 +143,20 @@ export async function updateArticleAction(
 
   let placesChanged = false;
   if (formData.get("placesField") === "1") {
-    const placeIds = formData.getAll("placeIds").filter((v): v is string => typeof v === "string" && v !== "");
-    const saved = await saveArticlePlaces(shortId, updatedAt, placeIds, { id: user.id }, user.clearance);
+    // placeIds / placeCertainty / placeCertaintyNote は同じ並び (place-picker.tsx が 1 訪問ぶんずつ出す)
+    const ids = formData.getAll("placeIds");
+    const certainties = formData.getAll("placeCertainty");
+    const notes = formData.getAll("placeCertaintyNote");
+    const visits = ids.flatMap((id, i) =>
+      typeof id === "string" && id !== ""
+        ? [{
+            placeId: id,
+            certainty: certainties[i] === "likely" ? ("likely" as const) : ("confirmed" as const),
+            certaintyNote: typeof notes[i] === "string" ? (notes[i] as string) : "",
+          }]
+        : [],
+    );
+    const saved = await saveArticlePlaces(shortId, updatedAt, visits, { id: user.id }, user.clearance);
     if (!saved.ok) {
       if (result.changed.length || relatedChanged || sourcesChanged) revalidatePath("/articles", "layout");
       const why =
@@ -198,6 +210,8 @@ export async function previewArticleAction(
   shortId: string,
   body: string,
   reservedSourceNos: number[] = [],
+  /** 編集中 (未保存) の聖地の訪問。カードのほぼ確定の印に使う (#333) */
+  places: { placeId: string; certainty: "confirmed" | "likely"; certaintyNote: string }[] = [],
 ): Promise<ArticlePreview> {
   const user = await requireRole(["admin", "member"]);
   const normalized = normalizeBody(body);
@@ -211,6 +225,7 @@ export async function previewArticleAction(
   const html = await renderArticleBody(normalized, {
     wikilinks: titleIndex,
     sourceUrls: sources.map((s) => s.url),
+    locations: toRenderLocations(places.map((p) => ({ ...p, certaintyNote: String(p.certaintyNote ?? "").slice(0, 300) }))),
   });
   const audit = auditFootnotes(
     normalized,
@@ -247,9 +262,11 @@ export async function getArticlePeekAction(targetShortId: string): Promise<Artic
     getArticleTitleIndex(),
   ]);
   if (!article) return null;
+  const visits = await listArticlePlaces(article.id, user.clearance);
   const html = await renderArticleBody(article.body, {
     wikilinks: titleIndex,
     sourceUrls: article.sources.map((s) => s.url),
+    locations: toRenderLocations(visits.map((v) => ({ ...v, placeId: v.id }))),
   });
   return {
     shortId: article.shortId,

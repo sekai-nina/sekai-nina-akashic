@@ -1574,6 +1574,8 @@ export async function renderArticlesForPush(where: Prisma.ArticleWhereInput): Pr
           articleId: true,
           placeId: true,
           sortOrder: true,
+          certainty: true,
+          certaintyNote: true,
           place: { select: { classification: true, entity: { select: { canonicalName: true } } } },
         },
       }),
@@ -1592,6 +1594,8 @@ export async function renderArticlesForPush(where: Prisma.ArticleWhereInput): Pr
       name: row.place.entity.canonicalName,
       classification: row.place.classification,
       sortOrder: row.sortOrder,
+      certainty: row.certainty,
+      certaintyNote: row.certaintyNote,
     };
     const list = placesByArticle.get(row.articleId);
     if (list) list.push(item);
