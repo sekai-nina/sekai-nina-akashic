@@ -94,6 +94,7 @@ export default async function ArticleEditPage({
         linkCandidates={linkCandidates}
         initialRelated={readRelated(article.frontmatterExtra)}
         backlinks={backlinks}
+        needsReview={article.needsReview}
       />
     </div>
   );

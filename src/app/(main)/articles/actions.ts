@@ -9,9 +9,11 @@ import {
   ArticleDossierError,
   ensureArticleDossier,
   removeArticleSource,
+  setArticleSiteVisibility,
 } from "@/lib/domain/articles";
+import { GithubApiError } from "@/lib/github/client";
 import { invalidateDossiers } from "@/lib/cache";
-import { toTextType } from "@/lib/utils";
+import { ARTICLE_REVIEW_LABELS, toTextType } from "@/lib/utils";
 
 /**
  * 出典 (ArticleSource) の紐づけ・解除・反映。記事本文の編集は `[shortId]/edit/actions.ts`。
@@ -125,5 +127,41 @@ export async function ensureArticleDossierAction(
   } catch (e) {
     if (e instanceof ArticleDossierError) return { ok: false, error: e.message };
     throw e;
+  }
+}
+
+export type SiteVisibilityState = { ok: true; message: string } | { ok: false; error: string } | null;
+
+/**
+ * 記事をサイトから隠す / サイトに公開する (#327)。その 1 本だけをすぐ push する。
+ * **admin のみ** (push と同じ。公開リポジトリへの書き込み)
+ */
+export async function setSiteVisibilityAction(shortId: string, hidden: boolean): Promise<SiteVisibilityState> {
+  const user = await requireRole(["admin"]);
+  try {
+    const r = await setArticleSiteVisibility(shortId, hidden, { id: user.id });
+    revalidatePath("/articles", "layout");
+    if (!r.ok) {
+      return {
+        ok: false,
+        error:
+          r.reason === "needs_review"
+            ? `${ARTICLE_REVIEW_LABELS.needsReview}の記事は公開できません。編集画面で「${ARTICLE_REVIEW_LABELS.markReviewed}」を付けてから公開してください`
+            : "記事が見つかりません",
+      };
+    }
+    const p = r.push;
+    if (p.conflicts) {
+      return { ok: false, error: "GitHub 側と衝突したため push できませんでした（設定は元に戻しました）。push 画面で確認してください" };
+    }
+    if (p.blocked) {
+      return { ok: false, error: "公開以外の出典があるため push できませんでした（設定は元に戻しました）。push 画面で確認してください" };
+    }
+    if (p.dbError) return { ok: false, error: `GitHub には載りましたが、DB の更新に失敗しました: ${p.dbError}` };
+    return { ok: true, message: hidden ? "サイトから隠しました（数分でサイトに反映されます）" : "サイトに公開しました（数分でサイトに反映されます）" };
+  } catch (e) {
+    revalidatePath("/articles", "layout");
+    if (e instanceof GithubApiError) return { ok: false, error: `push に失敗しました（設定は元に戻しました）: ${e.message}` };
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 }

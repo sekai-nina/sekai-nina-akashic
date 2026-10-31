@@ -80,7 +80,7 @@ APIキーは `pnpm cli:keygen <user-email> <key-name> [permissions]` で発行�
 | GET | `/coverage/items` | read | 終了（410） |
 | PUT / POST | `/coverage/checks`, `/coverage/checks/bulk` | write | 終了（410） |
 | GET | `/articles` | read | 記事一覧（`hasPending=true` で未反映の紐づけがある記事） |
-| POST | `/articles` | write | 記事の新規作成（`shortId` / `path` はサーバ採番。既定 `draft: true`） |
+| POST | `/articles` | write | 記事の新規作成（`shortId` / `path` はサーバ採番。既定 `draft: true`・AI 書きたて（未確認）） |
 | GET | `/articles/:shortId` | read | 記事詳細（本文・frontmatter・出典） |
 | PATCH | `/articles/:shortId` | write | 記事の部分更新（`updatedAt` 必須の楽観ロック） |
 | POST | `/articles/:shortId/sources` | write | アセット（と抜粋）を記事に pending で紐づける（internal 以下のみ） |
@@ -895,7 +895,7 @@ DataSource は classification ベースの RLS 対象。`public` は「公開サ
 
 3 → 4 の順なのは、途中で止まっても「本文から参照されていない出典」（quote 記事では普通の状態）になるだけで、本文に宛先の無い `^[n]` が残らないため。
 
-記事を起こすところから任せるときは、先に `POST /articles` で作る（`draft: true` で作られるので push されても公開サイトには出ない。draft の解除は人が画面で行う）。紐づけ（pending）がまだ無いアセットは、2 の前に `POST /articles/:shortId/sources` で紐づける。
+記事を起こすところから任せるときは、先に `POST /articles` で作る（`draft: true` かつ「AI 書きたて（未確認）」で作られるので、push されても公開サイトには出ない。公開は人が確認済みにしてから、記事の詳細ページの「サイトに公開する」で行う）。紐づけ（pending）がまだ無いアセットは、2 の前に `POST /articles/:shortId/sources` で紐づける。
 
 書き込み系（PATCH / apply）は **`updatedAt` による楽観ロックが必須**。GET が返した `updatedAt`（ISO 8601）をそのまま渡し、その間に別の保存・取り込み・apply が入っていれば `409 {"reason": "conflict", "updatedAt": "<現在>"}` が返る（読み直して作り直す）。push は `updatedAt` を動かさないので、push を挟んでも通る。
 
@@ -966,7 +966,7 @@ DataSource は classification ベースの RLS 対象。`public` は「公開サ
 
 | フィールド | 既定 | 理由 |
 |---|---|---|
-| `draft` | `true` | 公開サイトの記事ページに出さない。**push そのものは止めないので、本文は公開リポジトリ（`sekai-nina-public`、public）に載る**。公開サイトに出すのは人が編集 UI か PATCH で `draft: false` にしたとき（作成時に `draft: false` を明示することもできる） |
+| `draft` | `true` | 公開サイトの記事ページに出さない。**push そのものは止めないので、本文は公開リポジトリ（`sekai-nina-public`、public）に載る**。公開サイトに出すのは人が記事の詳細ページの「サイトに公開する」（#327。その 1 本をすぐ push する）か PATCH で `draft: false` にしたとき（作成時に `draft: false` を明示することもできる）。あわせて `needsReview: true`（AI 書きたて）で作られ、人が確認済みにするまで push 画面で選べない。PATCH + `POST /articles/:shortId/push` の経路は `needsReview` を見ない |
 | `publishedAt` / `articleUpdatedAt` | 今日（JST） | Obsidian のテンプレートと同じ。呼び出し側が UTC で「今日」を計算すると JST 0〜9 時に 1 日ずれるので、省略してサーバに任せるのが安全 |
 | `date` | null | event 以外はほぼ空。出来事の日は明示する |
 | `tags` / `body` | `[]` / `""` | |
@@ -1013,6 +1013,7 @@ DataSource は classification ベースの RLS 対象。`public` は「公開サ
   "publishedAt": "2026-03-14",
   "articleUpdatedAt": "2026-03-14",
   "draft": true, "unlisted": false, "ongoing": false,
+  "needsReview": true,
   "frontmatterExtraKeys": [],
   "dirty": false, "editedAt": null, "lastPushedAt": null,
   "updatedAt": "2026-09-15T16:11:34.995Z",
@@ -1050,6 +1051,7 @@ DataSource は classification ベースの RLS 対象。`public` は「公開サ
 
 - `status`: `applied` = 本文の `^[n]` から参照される出典（frontmatter に載る）/ `pending` = akashic 側で紐づけただけで未反映 / `unresolved` = frontmatter にあるが Asset に解決できていない
 - 日付の frontmatter 列（`date` / `publishedAt` / `articleUpdatedAt` / `sources[].date`）は `YYYY-MM-DD`（編集 UI と同じく暦日に丸める）。PATCH の入力と同じ形
+- `needsReview` は「AI 書きたて（未確認）」の印（#327）。新規作成（`POST /articles`）と企画から作った記事で `true` になり、人が編集画面で確認済みにすると `false`。`true` の記事は push 画面で選べない（`POST /articles/:shortId/push` は止めない）。API からは変えられない。frontmatter には出ない
 - `frontmatterExtraKeys` はモデル化していない frontmatter のキー名（`featured_quotes` 等）。API からは触れない（push 時にそのまま復元される）
 - クリアランスを超える出典は返らない（RLS）。加えて **`classification` が `internal` より上の `pending` 行は API では返さない**（API からは apply できないので、抜粋だけ見せて本文に貼らせる経路を作らない。画面には出る）
 - `sources[].asset` は Asset が削除済み（`assetId` が null）か、Asset の classification がキーのクリアランスを超えるとき `null`
@@ -1267,16 +1269,16 @@ body は省略可（`subject` を省くと既定のコミットメッセージ�
 - **本文を AI が書くテンプレートの `dryRun` は Claude を 1 回呼ぶ**（数十秒・数十円。`/costs` に `akashic.article_body` で積まれ、監査ログ `dossier.article.ai` が残る。`dryRun` で書き込むのはこの 2 つだけ）。**ドシエの編集権限が要る**（見えるだけの人に費用を使わせない。403）。`dryRun` の応答は常に `ai` と `aiDraft` を持ち、AI を使わないテンプレート（`quote_blog` / ミーグリ）では両方 `null`。`ai` は `{ status: "generated" | "unavailable", model, reason, included, truncated, usage: { inputTokens, cachedInputTokens, outputTokens } | null, costUsd }`。`ANTHROPIC_API_KEY` が無い・Claude が失敗したときは `status: "unavailable"` で本文がプレースホルダの骨組みになる（保存はできる）。追記では AI を呼ばない（地の文は人のもの）
 - **新規作成の `expectedDigest` は本文 + 出典で取る**（AI の本文は素材と独立なので、本文だけだと `dryRun` のあとで素材が増減して脚注の宛先がずれても気づけない）。`dryRun` の `digest` をそのまま渡せばよい
 - `aiDraft.body` の `^[n]` は出典に無い番号（AI が作った / 古い下書き）を落として保存する。宛先の無い脚注を公開リポジトリに出さないため
-- AI が書いた記事は **`draft: true` で保存される。** 記事の編集画面で読んで直し、下書きを外してから push する
+- AI が書いた記事は **「AI 書きたて（未確認）」（`needsReview: true`）で保存される**（#327。`draft` は `false`。未 push の間は公開サイトに出ない）。記事の編集画面で読んで直し、「確認済みにする」を付けて保存すると push 画面で選べるようになる。機械で完成するテンプレート（`quote_blog` / `live` / ミーグリ）は確認済みで作る
 
 テンプレートごとの形:
 
 | template | 記事の型 | 本文 | 備考 |
 |---|---|---|---|
 | `quote_blog` | `quote` | 「坂井新奈ブログでの名言を紹介する。」+ ドシエの抜粋を `>` の引用ブロックで併記 | 本人ブログ **1 本**の抜粋だけを使う（抜粋のあるブログが 2 本以上なら 400、ひなたぼっこ日記は数えない）。タイトルは `坂井新奈ブログ「X」` → `ブログ「X」`。`date` / 関連メディアは持たない。追記は増えた抜粋を末尾に足す |
-| `attribute` | `attribute` | **AI（Claude）が書く**: リード 1 文 + 事実の箇条書き、各事実に `^[n]`（出典番号は素材と同じ採番: ブログ → トーク） | タイトル = ドシエのタイトル。`date` 無し。tags は既存タグから選ぶよう AI に指示する（保証はしない。他メンバー名可）。`[[…]]` は公開済み記事のタイトルにだけ張るよう指示する。**ドシエに画像しか入っていないブログは、同じ URL の本文アセットを素材に足して出典の宛先にする**（人はブログを読んで書くため。RLS と機密の上限は同じに効く。`outing` / `quote_situational` も同じ）。`draft: true` で保存。追記は本文に足すものが無い（新しい素材を反映するには記事の編集画面で手で書く。作り直しは後続） |
-| `outing` | `event` | **AI が書く**: 冒頭 1〜2 文 + 場所 / 行動ごとの `##` と事実の箇条書き `^[n]`（引用しない）。そのあとに機械で `## 関連メディア`（画像・動画のトークとブログ画像をリンクで、TikTok を埋め込みで、1 つの箇条書きに。文章のトークは出典にだけ。AI が書いてしまった同名の章は落とす） | タイトル = ドシエのタイトル。`date` / `date_display` は AI の提案（日が分からなければ月の 1 日 + 「YYYY年M月頃」）。tags = 同行者 + カテゴリ。**`locations` は場所候補から**（聖地に昇格済みなら `{ name, place_id }`、未昇格で座標があれば `{ name, lat, lng, google_maps_url? }`、座標も無ければ落とす。**昇格先の聖地が `internal` を超える / 見えない候補は記事にも AI にも出さない**）。昇格済みの候補は**非公開の聖地も含めて**記事の `ArticlePlace` に紐づける（frontmatter に出るのは push 時に `internal` 以下のものだけ。#283）。場所候補の名前・住所・Google マップ URL も AI に渡す（編集メモは渡さない）。`draft: true`。追記は関連メディアだけ足す（`locations` は追記で更新しない。場所候補を足したら記事の編集画面で） |
-| `quote_situational` | `quote` | **AI が書く**: 状況の地の文 → `>` 発言 → 反応 1 文 | **タイトルは AI が実際の発言の表記に整えてよい**（ドシエのタイトルは目安。`yes, me now?` → `Yes, me now?`。path もそのタイトルで決まる。同名の記事があれば 409）。`date` / `date_display` は発言の時期（分からなければ素材の投稿日 + 「頃」）、tags は関係するメンバー。関連メディアは出さない。`draft: true`。追記は本文に足すものが無い |
+| `attribute` | `attribute` | **AI（Claude）が書く**: リード 1 文 + 事実の箇条書き、各事実に `^[n]`（出典番号は素材と同じ採番: ブログ → トーク） | タイトル = ドシエのタイトル。`date` 無し。tags は既存タグから選ぶよう AI に指示する（保証はしない。他メンバー名可）。`[[…]]` は公開済み記事のタイトルにだけ張るよう指示する。**ドシエに画像しか入っていないブログは、同じ URL の本文アセットを素材に足して出典の宛先にする**（人はブログを読んで書くため。RLS と機密の上限は同じに効く。`outing` / `quote_situational` も同じ）。「AI 書きたて（未確認）」で保存。追記は本文に足すものが無い（新しい素材を反映するには記事の編集画面で手で書く。作り直しは後続） |
+| `outing` | `event` | **AI が書く**: 冒頭 1〜2 文 + 場所 / 行動ごとの `##` と事実の箇条書き `^[n]`（引用しない）。そのあとに機械で `## 関連メディア`（画像・動画のトークとブログ画像をリンクで、TikTok を埋め込みで、1 つの箇条書きに。文章のトークは出典にだけ。AI が書いてしまった同名の章は落とす） | タイトル = ドシエのタイトル。`date` / `date_display` は AI の提案（日が分からなければ月の 1 日 + 「YYYY年M月頃」）。tags = 同行者 + カテゴリ。**`locations` は場所候補から**（聖地に昇格済みなら `{ name, place_id }`、未昇格で座標があれば `{ name, lat, lng, google_maps_url? }`、座標も無ければ落とす。**昇格先の聖地が `internal` を超える / 見えない候補は記事にも AI にも出さない**）。昇格済みの候補は**非公開の聖地も含めて**記事の `ArticlePlace` に紐づける（frontmatter に出るのは push 時に `internal` 以下のものだけ。#283）。場所候補の名前・住所・Google マップ URL も AI に渡す（編集メモは渡さない）。「AI 書きたて（未確認）」。追記は関連メディアだけ足す（`locations` は追記で更新しない。場所候補を足したら記事の編集画面で） |
+| `quote_situational` | `quote` | **AI が書く**: 状況の地の文 → `>` 発言 → 反応 1 文 | **タイトルは AI が実際の発言の表記に整えてよい**（ドシエのタイトルは目安。`yes, me now?` → `Yes, me now?`。path もそのタイトルで決まる。同名の記事があれば 409）。`date` / `date_display` は発言の時期（分からなければ素材の投稿日 + 「頃」）、tags は関係するメンバー。関連メディアは出さない。「AI 書きたて（未確認）」。追記は本文に足すものが無い |
 
 （`meetgreet` / `live` は器側で組む: `POST /meetgreets/:id/article` / `POST /lives/:id/article`）
 

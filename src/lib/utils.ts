@@ -381,9 +381,26 @@ export const ARTICLE_DATE_MODE_LABELS: Record<string, string> = {
   range: "期間",
 };
 
+/** 記事の確認状態 (#327)。AI / API / 企画から作ったばかりの記事に付く印 */
+export const ARTICLE_REVIEW_LABELS = {
+  needsReview: "AI 書きたて（未確認）",
+  markReviewed: "確認済みにする",
+} as const;
+
+/** 記事のサイトでの見え方と切り替え (#327)。詳細ページの SiteVisibility */
+export const ARTICLE_VISIBILITY_LABELS = {
+  unpushed: "未公開（まだ push していません）",
+  hidden: "サイトで非表示",
+  published: "サイトに公開中",
+  hide: "サイトから隠す",
+  publish: "サイトに公開する",
+  publishNow: "今すぐ公開する",
+} as const;
+
 /** 記事の真偽フラグ (frontmatter の draft / unlisted / ongoing) */
 export const ARTICLE_FLAG_LABELS = {
-  draft: "下書き",
+  // frontmatter の draft。#327 から「AI 書きたて」とは分け、サイトに出すかどうかだけを表す
+  draft: "サイトで非表示",
   unlisted: "限定公開",
   ongoing: "進行中",
 } as const;
@@ -637,7 +654,7 @@ export const ARTICLE_WORKFLOW_LABELS = {
   unsupportedTemplate: "このテンプレートは記事の組み立てに対応していません。",
   readOnly: "この記事を作成・更新する権限がありません。", viewArticle: "記事を開く", editArticle: "記事を開いて編集",
   selectQuote: "名言集に載せる一節を選ぶ", publish: "公開の確認へ", afterSave: "保存した記事の本文・出典を確認してから公開へ進めます。",
-  saved: "記事を保存しました。", draft: "下書き", saveDoesNotPublish: "保存しただけでは公開されません。",
+  saved: "記事を保存しました。", draft: "サイトで非表示", saveDoesNotPublish: "保存しただけでは公開されません。",
   generationHelp: "記事のプレビュー・保存は、素材の企画から共通の記事画面で行います。",
   unavailableDossier: "素材の企画を閲覧できないため、記事を生成できません。",
   pendingClips: (n: number) => `記事に載っていないクリップ ${n} 件`,

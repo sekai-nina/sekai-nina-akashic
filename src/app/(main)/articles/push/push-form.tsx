@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { Loader2, UploadCloud } from "lucide-react";
 import { pushArticlesAction, type PushActionState } from "./actions";
+import { ARTICLE_REVIEW_LABELS } from "@/lib/utils";
 
 export interface PushableArticle {
   shortId: string;
@@ -11,6 +12,8 @@ export interface PushableArticle {
   path: string;
   /** GitHub 側にまだ無いファイル */
   isNew: boolean;
+  /** 「AI 書きたて (未確認)」。選べない (#327) */
+  needsReview: boolean;
 }
 
 /**
@@ -40,10 +43,11 @@ export function PushForm({
   const [isPending, startTransition] = useTransition();
 
   // ページが作り直されて消えた記事は選択から外す
-  const chosen = pushable.filter((a) => selected.has(a.shortId));
+  const selectable = pushable.filter((a) => !a.needsReview);
+  const chosen = selectable.filter((a) => selected.has(a.shortId));
   const count = chosen.length;
   const nothingToDo = count === 0 && unchangedShortIds.length === 0;
-  const allChecked = pushable.length > 0 && count === pushable.length;
+  const allChecked = selectable.length > 0 && count === selectable.length;
 
   const toggle = (id: string) =>
     setSelected((prev) => {
@@ -155,19 +159,22 @@ export function PushForm({
                 type="checkbox"
                 checked={allChecked}
                 disabled={isPending}
-                onChange={() => setSelected(allChecked ? new Set() : new Set(pushable.map((a) => a.shortId)))}
+                onChange={() => setSelected(allChecked ? new Set() : new Set(selectable.map((a) => a.shortId)))}
               />
               すべて選ぶ
             </label>
           </h2>
-          <p className="text-xs text-slate-500 mb-2">push する記事にチェックを入れてください。選ばなかった記事は未 push のまま残ります</p>
+          <p className="text-xs text-slate-500 mb-2">
+            push する記事にチェックを入れてください。選ばなかった記事は未 push のまま残ります。
+            {ARTICLE_REVIEW_LABELS.needsReview}の記事は、編集画面で確認済みにするまで選べません
+          </p>
           <div className="bg-white border border-slate-200 rounded-lg divide-y divide-slate-100">
             {pushable.map((a) => (
               <label key={a.shortId} className="px-4 py-2.5 flex items-baseline gap-2 flex-wrap cursor-pointer hover:bg-slate-50">
                 <input
                   type="checkbox"
-                  checked={selected.has(a.shortId)}
-                  disabled={isPending}
+                  checked={!a.needsReview && selected.has(a.shortId)}
+                  disabled={isPending || a.needsReview}
                   onChange={() => toggle(a.shortId)}
                   className="self-center"
                 />
@@ -179,6 +186,14 @@ export function PushForm({
                   {a.title || a.path}
                 </Link>
                 <span className="text-xs text-slate-400">{a.path}</span>
+                {a.needsReview && (
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">
+                    {ARTICLE_REVIEW_LABELS.needsReview}・
+                    <Link href={`/articles/${a.shortId}/edit`} onClick={(e) => e.stopPropagation()} className="underline">
+                      確認する
+                    </Link>
+                  </span>
+                )}
                 {a.isNew && <span className="text-xs text-slate-600 ml-auto">新規ファイル</span>}
               </label>
             ))}

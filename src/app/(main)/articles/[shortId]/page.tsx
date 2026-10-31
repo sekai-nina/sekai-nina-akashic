@@ -5,6 +5,7 @@ import { countArticlesLinkingTo, getArticleByShortId, getArticleTitleIndex } fro
 import { getDossierSummary } from "@/lib/domain/dossiers";
 import {
   ARTICLE_FLAG_LABELS,
+  ARTICLE_REVIEW_LABELS,
   ARTICLE_TYPE_LABELS,
   ARTICLE_SOURCE_STATUS_LABELS,
   ASSET_KIND_LABELS,
@@ -16,6 +17,7 @@ import { FootnoteAuditWarnings } from "./footnote-audit-warnings";
 import { ApplySource } from "./apply-source";
 import { RemoveSource } from "./remove-source";
 import { UnpushedBadge } from "./unpushed-badge";
+import { SiteVisibility } from "./site-visibility";
 import { ArticleDossier } from "./article-dossier";
 import { renderArticleBody } from "@/lib/articles/render";
 import { isListArticle } from "@/lib/articles/list-article";
@@ -98,6 +100,11 @@ export default async function ArticleDetailPage({
               {ARTICLE_FLAG_LABELS.draft}
             </span>
           )}
+          {article.needsReview && (
+            <span className="text-xs px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">
+              {ARTICLE_REVIEW_LABELS.needsReview}
+            </span>
+          )}
           {article.dirty && <UnpushedBadge editedAt={article.editedAt} />}
           {canEdit && (
             <Link
@@ -113,6 +120,14 @@ export default async function ArticleDetailPage({
           {article.publishedAt && <> ・ 公開 {formatDate(article.publishedAt)}</>}
           {article.articleUpdatedAt && <> ・ 更新 {formatDate(article.articleUpdatedAt)}</>}
         </p>
+        <SiteVisibility
+          shortId={article.shortId}
+          draft={article.draft}
+          pushed={article.githubSha != null}
+          dirty={article.dirty}
+          needsReview={article.needsReview}
+          canPush={session.user.role === "admin"}
+        />
         {renamedFrom && inboundLinks > 0 && (
           <div className="mt-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
             {inboundLinks} 本の記事が旧タイトル [[{renamedFrom}]] でこの記事にリンクしています。

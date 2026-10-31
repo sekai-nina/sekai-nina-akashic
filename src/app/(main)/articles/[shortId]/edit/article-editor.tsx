@@ -9,6 +9,7 @@ import type { ArticleEditFormValues } from "@/lib/articles/edit";
 import {
   ARTICLE_DATE_MODE_LABELS,
   ARTICLE_FLAG_LABELS,
+  ARTICLE_REVIEW_LABELS,
   ARTICLE_SOURCE_STATUS_LABELS,
   ARTICLE_TYPE_LABELS,
   cn,
@@ -68,6 +69,7 @@ export function ArticleEditor({
   linkCandidates,
   initialRelated,
   backlinks,
+  needsReview,
 }: {
   shortId: string;
   /** 楽観ロック用。読み込んだ時点の Article.updatedAt (ISO) */
@@ -87,6 +89,8 @@ export function ArticleEditor({
   initialRelated: string[];
   /** この記事を参照している記事 (保存済みのタイトルで引いたもの) */
   backlinks: ArticleBacklink[];
+  /** 「AI 書きたて (未確認)」か (#327) */
+  needsReview: boolean;
 }) {
   const [values, setValues] = useState(initial);
   const set = <K extends keyof ArticleEditFormValues>(key: K, v: ArticleEditFormValues[K]) =>
@@ -99,6 +103,8 @@ export function ArticleEditor({
 
   const [placeIds, setPlaceIds] = useState(initialPlaceIds);
   const [related, setRelated] = useState(initialRelated);
+  /** 「確認済みにする」を押したか (#327)。保存で印が外れる */
+  const [reviewed, setReviewed] = useState(false);
   /** 記事パネルで予約した記事出典 (#320)。保存で確定する */
   const [reservedSources, setReservedSourcesState] = useState<{ shortId: string; title: string; sourceNo: number }[]>([]);
   const reservedRef = useRef(reservedSources);
@@ -117,7 +123,8 @@ export function ArticleEditor({
     JSON.stringify(values) !== JSON.stringify(initial) ||
     JSON.stringify(placeIds) !== JSON.stringify(initialPlaceIds) ||
     JSON.stringify(related) !== JSON.stringify(initialRelated) ||
-    reservedSources.length > 0;
+    reservedSources.length > 0 ||
+    reviewed;
   useEffect(() => {
     if (!changed) return;
     const handler = (e: BeforeUnloadEvent) => {
@@ -199,6 +206,7 @@ export function ArticleEditor({
       )}
     >
       <input type="hidden" name="updatedAt" value={updatedAt} />
+      {reviewed && <input type="hidden" name="reviewed" value="1" />}
       {/* 関連記事 (#319)。パネルの開閉に依らず送る */}
       <input type="hidden" name="relatedField" value="1" />
       {related.map((t) => (
@@ -502,7 +510,11 @@ export function ArticleEditor({
           </div>
 
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-700">
-            {(Object.entries(ARTICLE_FLAG_LABELS) as [keyof typeof ARTICLE_FLAG_LABELS, string][]).map(([key, label]) => (
+            {/* 下書き (サイトで非表示) は詳細ページのボタンで切り替える (#327)。値は保存で消えないよう送るだけ */}
+            {values.draft && <input type="hidden" name="draft" value="on" />}
+            {(Object.entries(ARTICLE_FLAG_LABELS) as [keyof typeof ARTICLE_FLAG_LABELS, string][])
+              .filter(([key]) => key !== "draft")
+              .map(([key, label]) => (
               <label key={key} className="inline-flex items-center gap-1.5">
                 <input
                   type="checkbox"
@@ -513,7 +525,7 @@ export function ArticleEditor({
                 />
                 {label}
               </label>
-            ))}
+              ))}
           </div>
 
           {extraKeys.length > 0 && (
@@ -589,6 +601,17 @@ export function ArticleEditor({
 
         {/* 保存 */}
         <div className="space-y-2">
+          {needsReview && (
+            <div className="text-sm rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 space-y-1.5">
+              <p className="text-violet-800">
+                {ARTICLE_REVIEW_LABELS.needsReview}の記事です。手直しが済んだら「{ARTICLE_REVIEW_LABELS.markReviewed}」を付けてから保存してください（push 画面で選べるようになります）
+              </p>
+              <label className="inline-flex items-center gap-1.5 text-violet-900">
+                <input type="checkbox" checked={reviewed} onChange={(e) => setReviewed(e.target.checked)} disabled={isSaving} />
+                {ARTICLE_REVIEW_LABELS.markReviewed}
+              </label>
+            </div>
+          )}
           {state?.error && (
             <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{state.error}</div>
           )}

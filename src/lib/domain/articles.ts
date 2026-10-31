@@ -155,6 +155,7 @@ export async function listArticles(opts: ListArticlesOptions) {
           articleUpdatedAt: true,
           draft: true,
           unlisted: true,
+          needsReview: true,
           dirty: true,
           editedAt: true,
           updatedAt: true,
@@ -1100,7 +1101,15 @@ async function pathExistsUpstream(path: string): Promise<boolean> {
  * **`include` では引かない** — 保護テーブルを素の prisma で読むと RLS で無言の 0 行になり、
  * 「作成直後だから空」と「RLS で消えた」が型の上で区別できなくなる。空なのは事実なので直に置く。
  */
-export async function createArticle(input: ArticleCreateInput, actor: ArticleActor): Promise<CreateArticleResult> {
+export async function createArticle(
+  input: ArticleCreateInput,
+  actor: ArticleActor,
+  /**
+   * `needsReview`: 「AI 書きたて (未確認)」で作るか (#327)。既定は true (REST / MCP / 企画は AI が書く前提)。
+   * 機械で完成するテンプレートの記事は呼び出し側が false を渡す
+   */
+  opts: { needsReview?: boolean } = {},
+): Promise<CreateArticleResult> {
   const derived = deriveArticlePath(input.type, input.title);
   if (!derived.ok) return { ok: false, reason: "invalid_path", error: derived.error };
   const parsed = parseArticleCreateInput(input, todayJst());
@@ -1138,6 +1147,7 @@ export async function createArticle(input: ArticleCreateInput, actor: ArticleAct
           githubSha: null,
           dirty: true,
           editedAt: new Date(),
+          needsReview: opts.needsReview ?? true,
         },
       });
       const article: ArticleDetailRow = { ...created, sources: [] };
@@ -1180,6 +1190,76 @@ export async function countArticlesLinkingTo(title: string, excludeShortId: stri
       OR: [{ body: { contains: `[[${title}]]` } }, { body: { contains: `[[${title}|` } }],
     },
   });
+}
+
+/**
+ * 「AI 書きたて (未確認)」の印を外す (#327)。編集画面の保存の最後に呼ぶ。
+ * frontmatter に出ないので dirty / editedAt は立てない。外したら true
+ */
+export async function markArticleReviewed(shortId: string, actor: ArticleActor): Promise<boolean> {
+  const { count } = await prisma.article.updateMany({
+    where: { shortId, needsReview: true },
+    data: { needsReview: false },
+  });
+  if (count) {
+    await auditArticle(actor, { action: "article.review", targetType: "Article", targetId: shortId });
+  }
+  return count > 0;
+}
+
+export type SetSiteVisibilityResult =
+  | { ok: true; push: PushArticlesResult }
+  | { ok: false; reason: "not_found" | "needs_review" };
+
+/**
+ * 記事をサイトから隠す / サイトに公開する (#327)。`draft` を切り替えて、その 1 本だけをすぐ push する。
+ *
+ * - 隠しても本文は公開リポジトリに残る (公開サイトの記事ページに出なくなるだけ)
+ * - 「AI 書きたて (未確認)」の記事は公開させない (隠すのはいつでもできる)
+ * - 未 push の編集があれば一緒に push される
+ */
+export async function setArticleSiteVisibility(
+  shortId: string,
+  hidden: boolean,
+  actor: ArticleActor,
+): Promise<SetSiteVisibilityResult> {
+  const article = await prisma.article.findUnique({
+    where: { shortId },
+    select: { title: true, draft: true, needsReview: true },
+  });
+  if (!article) return { ok: false, reason: "not_found" };
+  if (!hidden && article.needsReview) return { ok: false, reason: "needs_review" };
+  const flipped = article.draft !== hidden;
+  if (flipped) {
+    await prisma.article.update({ where: { shortId }, data: { draft: hidden, dirty: true, editedAt: new Date() } });
+  }
+  // push できなかったら draft を元に戻す。画面が「隠した」と表示したまま、次に誰かが push したときに
+  // 黙って切り替わるのを防ぐ (dirty / editedAt は他の未 push 編集と区別できないので残す)
+  const revert = async () => {
+    if (flipped) await prisma.article.update({ where: { shortId }, data: { draft: article.draft } });
+  };
+  // 絵文字は付けない (buildCommitMessage が既定の絵文字を前に付ける)
+  const subject = `${hidden ? "サイトから隠す" : "サイトに公開"}: ${article.title || shortId}`;
+  let push: PushArticlesResult;
+  try {
+    push = await pushDirtyArticles(subject, { shortId });
+  } catch (e) {
+    await revert();
+    throw e;
+  }
+  if (push.conflicts || push.blocked) {
+    await revert();
+    return { ok: true, push };
+  }
+  if (flipped) {
+    await auditArticle(actor, {
+      action: "article.visibility",
+      targetType: "Article",
+      targetId: shortId,
+      metadata: { hidden, commit: push.commit?.commitSha ?? null },
+    });
+  }
+  return { ok: true, push };
 }
 
 export type SaveArticleRelatedResult =
