@@ -882,6 +882,11 @@ model Article {
   lastSyncedAt DateTime?
   lastPushedAt DateTime?
 
+  /// AI / API / 企画から作ったばかりで、人がまだ確認していない (#327)。push 画面では選べない。
+  /// 編集画面の「確認済みにする」で外す。frontmatter には出ない (push の出力に関係しないので dirty も立てない)。
+  /// サイトに出すかどうか (draft) とは別
+  needsReview Boolean @default(false)
+
   /// 素材ドシエ (#41)。クリップを「この記事に足す」ときの移動先。akashic 内部のリンクで
   /// frontmatter には出さない (旧ワークフローの `frontmatterExtra.dossier` はそのまま残す)。
   /// ドシエが消えたら null に戻る
