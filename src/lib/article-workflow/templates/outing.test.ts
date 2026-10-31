@@ -431,6 +431,13 @@ describe("insertPlaceCards", () => {
     );
   });
 
+  it("URL が違っても同じ名前のカードがあれば足さず、そのカードに place_id を足す", () => {
+    const other = ["```cardlink", "url: https://maps.google.com/?cid=1", 'title: "べたなぎ"', "host: maps.google.com", "```"].join("\n");
+    const body = `## 海鮮丼\n\n${other}\n`;
+    expect(insertPlaceCards(body, two.slice(0, 1)).placements).toEqual([]);
+    expect(addCardPlaceFields(body, two.slice(0, 1)).body).toContain('title: "べたなぎ"\nhost: maps.google.com\nplace_id: place-1\nlat: 35.3');
+  });
+
   it("もうカードがある場所は足さず、何も無ければ本文をそのまま返す", () => {
     const body = `## 海鮮丼\n\n${card("べたなぎ", "https://maps.app.goo.gl/x")}\n`;
     expect(insertPlaceCards(body, two.slice(0, 1))).toEqual({ body, placements: [] });
