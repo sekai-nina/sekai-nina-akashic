@@ -42,7 +42,7 @@ describe("addCardPreviews", () => {
       card("https://maps.app.goo.gl/has", [`image: ${PHOTO}`]),
       card("https://example.com/x"),
     ].join("\n\n");
-    const r = await addCardPreviews(body, fake);
+    const r = await addCardPreviews(body, { fetchPreview: fake });
     expect(r.added).toBe(1);
     expect(r.body).toContain(
       card("https://maps.app.goo.gl/a", ["lat: 1", "lng: 2", `image: ${PHOTO}`, "description: \"〒1 '東京'\""])
@@ -51,9 +51,23 @@ describe("addCardPreviews", () => {
     expect(fetched.sort()).toEqual(["https://maps.app.goo.gl/a", "https://maps.app.goo.gl/nophoto"]);
   });
 
+  it("before にもうあったカードは触らない (追記・組み込みで古いカードを書き換えない)", async () => {
+    fetched.length = 0;
+    const old = card("https://maps.app.goo.gl/old");
+    const r = await addCardPreviews(`${old}\n\n${card("https://maps.app.goo.gl/new")}`, { before: old, fetchPreview: fake });
+    expect(r.added).toBe(1);
+    expect(r.body.startsWith(`${old}\n`)).toBe(true);
+    expect(fetched).toEqual(["https://maps.app.goo.gl/new"]);
+  });
+
+  it("住所の改行は空白に詰める", () => {
+    const html = '<meta content="店 · 〒1&#10;東京" property="og:title">';
+    expect(parseGoogleMapsPreview(html).address).toBe("〒1 東京");
+  });
+
   it("カードが無ければ取りに行かない", async () => {
     fetched.length = 0;
-    expect(await addCardPreviews("本文だけ", fake)).toEqual({ body: "本文だけ", added: 0 });
+    expect(await addCardPreviews("本文だけ", { fetchPreview: fake })).toEqual({ body: "本文だけ", added: 0 });
     expect(fetched).toEqual([]);
   });
 });

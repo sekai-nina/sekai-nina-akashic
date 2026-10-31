@@ -93,7 +93,7 @@ async function main() {
     const photos = await addCardPreviews(inserted.body);
     const r = { ...inserted, body: photos.body };
     if (r.body === a.body) {
-      skipped.push(`${a.path}: カードはもうある`);
+      skipped.push(`${a.path}: 足すものが無い (カード・座標・写真がもうある、または写真が取れない)`);
       continue;
     }
 

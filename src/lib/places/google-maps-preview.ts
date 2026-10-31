@@ -20,6 +20,7 @@ export interface GoogleMapsPreview {
 }
 
 const BOT_UA = "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)";
+/** 1 つのリンクにかける時間の上限 (リダイレクトと写真の確認を合わせて)。保存の待ち時間をこれ以上延ばさない */
 const TIMEOUT_MS = 8_000;
 
 function metaContent(html: string, property: string): string | null {
@@ -65,9 +66,11 @@ function thumbnailUrl(url: string): string {
 export function parseGoogleMapsPreview(html: string): GoogleMapsPreview {
   const img = metaContent(html, "og:image");
   const title = metaContent(html, "og:title");
-  // 「リズラボキッチン · 〒150-0001 東京都渋谷区…」の · より後ろ。· が無いもの (「Google マップ」) は住所なし
-  const sep = title?.indexOf(" · ") ?? -1;
-  const address = title && sep >= 0 ? title.slice(sep + 3).trim() : "";
+  // 「リズラボキッチン · 〒150-0001 東京都渋谷区…」の最後の · より後ろ (名前に · が入ることがある)。
+  // · が無いもの (「Google マップ」) は住所なし
+  const sep = title?.lastIndexOf(" · ") ?? -1;
+  // 改行などはカードの 1 行を壊すので空白 1 つに詰める
+  const address = title && sep >= 0 ? title.slice(sep + 3).replace(/\s+/g, " ").trim() : "";
   return {
     image: img && isPhotoUrl(img) ? thumbnailUrl(img) : null,
     address: address || null,
@@ -80,13 +83,14 @@ export function parseGoogleMapsPreview(html: string): GoogleMapsPreview {
  */
 export async function fetchGoogleMapsPreview(url: string): Promise<GoogleMapsPreview | null> {
   let current = url;
+  const signal = AbortSignal.timeout(TIMEOUT_MS);
   try {
     for (let hop = 0; hop < 5; hop++) {
       if (!isAllowedMapsUrl(new URL(current))) return null;
       const res = await fetch(current, {
         redirect: "manual",
         headers: { "User-Agent": BOT_UA, "Accept-Language": "ja" },
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        signal,
       });
       const next = res.headers.get("location");
       if (res.status >= 300 && res.status < 400 && next) {
@@ -97,7 +101,7 @@ export async function fetchGoogleMapsPreview(url: string): Promise<GoogleMapsPre
       const preview = parseGoogleMapsPreview(await res.text());
       // ストリートビューの写真 (gpms-cs-s) などは og:image に載っていても外から読むと 403 になる。
       // 壊れた画像のカードにしないよう、読めることを確かめてから使う (読めなければ地図サムネイルに回る)
-      if (preview.image && !(await isLoadableImage(preview.image))) preview.image = null;
+      if (preview.image && !(await isLoadableImage(preview.image, signal))) preview.image = null;
       return preview;
     }
   } catch {
@@ -106,9 +110,10 @@ export async function fetchGoogleMapsPreview(url: string): Promise<GoogleMapsPre
   return null;
 }
 
-async function isLoadableImage(url: string): Promise<boolean> {
+/** リダイレクトは追わない (googleusercontent.com 以外へ行かない。写真は直接 200 で返る) */
+async function isLoadableImage(url: string, signal: AbortSignal): Promise<boolean> {
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const res = await fetch(url, { redirect: "manual", signal });
     await res.body?.cancel();
     return res.ok && (res.headers.get("content-type") ?? "").startsWith("image/");
   } catch {
@@ -118,18 +123,28 @@ async function isLoadableImage(url: string): Promise<boolean> {
 
 const CARD = /^```cardlink\n((?:(?!```)[^\n]*\n)*?)```$/gm;
 
+function cardUrl(inner: string): string | undefined {
+  return inner.match(/^url:\s*(\S+)/m)?.[1];
+}
+
 /**
  * 本文の Google マップのカードのうち、写真 (`image:`) の無いものに写真と住所 (`description:`) を足す。
- * 取れたものだけ足し、ほかの行・カード以外の本文は触らない。`fetchPreview` はテストで差し替える
+ * 取れたものだけ足し、ほかの行・カード以外の本文は触らない。
+ *
+ * `before` (書き換える前の本文) を渡すと、そこに既にあったカードは触らない。追記・AI の組み込みで
+ * 人が差分で見ていない古いカードを書き換えない (古いカードは `pnpm cli:backfill-place-cards` が埋める)。
+ * `fetchPreview` はテストで差し替える
  */
 export async function addCardPreviews(
   body: string,
-  fetchPreview: (url: string) => Promise<GoogleMapsPreview | null> = fetchGoogleMapsPreview,
+  options: { before?: string; fetchPreview?: (url: string) => Promise<GoogleMapsPreview | null> } = {},
 ): Promise<{ body: string; added: number }> {
+  const fetchPreview = options.fetchPreview ?? fetchGoogleMapsPreview;
+  const existing = new Set([...(options.before ?? "").matchAll(CARD)].map((m) => cardUrl(m[1])));
   const targets = new Set<string>();
   for (const m of body.matchAll(CARD)) {
-    const url = m[1].match(/^url:\s*(\S+)/m)?.[1];
-    if (!url || /^image:/m.test(m[1])) continue;
+    const url = cardUrl(m[1]);
+    if (!url || existing.has(url) || /^image:/m.test(m[1])) continue;
     try {
       if (isAllowedMapsUrl(new URL(url))) targets.add(url);
     } catch {
@@ -143,7 +158,7 @@ export async function addCardPreviews(
 
   let added = 0;
   const out = body.replace(CARD, (whole, inner: string) => {
-    const url = inner.match(/^url:\s*(\S+)/m)?.[1];
+    const url = cardUrl(inner);
     const p = url ? previews.get(url) : null;
     if (!p?.image || /^image:/m.test(inner)) return whole;
     const lines = [`image: ${p.image}`];

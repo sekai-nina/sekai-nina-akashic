@@ -21,10 +21,10 @@
  * classification のガード (公開してよい機密レベルの上限) も効いたままになる。
  */
 
-import { addCardPreviews } from "@/lib/places/google-maps-preview";
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma, withClearance, withSession, type TransactionClient } from "@/lib/db";
+import { addCardPreviews } from "@/lib/places/google-maps-preview";
 import { EXCLUSION_KIND_LABELS, todayJst } from "@/lib/utils";
 import { canEditDossier } from "@/lib/auth/dossier-permissions";
 import { parseFrontmatterDate, splitLocations } from "@/lib/articles/frontmatter";
@@ -763,6 +763,9 @@ export async function saveArticle(
       };
     }
     const today = todayJst();
+    // 聖地のカードにお店の写真と住所を足す。指紋の照合のあと (写真の URL は取るたびに変わる)、
+    // 記事を作る前 (取得に時間がかかっても、本文の空な記事を残さない)
+    const body = (await addCardPreviews(rendered.body)).body;
     // AI が書いた本文は人が見るまで「AI 書きたて (未確認)」にする (#169 → #327)。push 画面で選べない。
     // サイトに出すかどうか (draft) とは分け、作る記事は下書きにしない (未 push の間が未公開)。
     // 機械で完成する型 (テンプレートが draft: false) は確認済みで作る
@@ -821,8 +824,7 @@ export async function saveArticle(
         title: rendered.title,
         type: resolved.template.articleType,
         tags: rendered.tags,
-        // 聖地のカードにお店の写真と住所を足すのは書く直前だけ (写真の URL は取るたびに変わり、指紋に混ぜられない)
-        body: (await addCardPreviews(rendered.body)).body,
+        body,
         date: rendered.dates.date ? parseFrontmatterDate(rendered.dates.date) : null,
         dateDisplay: rendered.dates.dateDisplay,
         dateMode: rendered.dates.dateMode,
@@ -963,7 +965,8 @@ export async function saveArticle(
       title: article.title,
       type: article.type,
       tags: Array.isArray(article.tags) ? (article.tags as string[]) : [],
-      body: (await addCardPreviews(plan.body)).body,
+      // 写真を足すのは追記で増えたカードだけ (既存のカードは人が差分で見ていないので触らない)
+      body: (await addCardPreviews(plan.body, { before: article.body })).body,
       date: article.date,
       dateDisplay: article.dateDisplay,
       dateMode: article.dateMode,
@@ -1302,8 +1305,8 @@ export async function saveMerge(
     return { ok: false, error: "この記事には閲覧できない出典があり、番号がぶつかるため保存できません。クリアランスの高い人が保存してください" };
   }
   const merged = finalizeMerge(body, plan.newSources, new Set([...sourceNos, ...bodyNos]));
-  // 聖地のカードにお店の写真と住所を足す (書く直前だけ。差分の提示には混ぜない)
-  const final = { ...merged, body: (await addCardPreviews(merged.body)).body };
+  // 聖地のカードにお店の写真と住所を足す (書く直前だけ。差分の提示には混ぜない。組み込みで増えたカードだけ)
+  const final = { ...merged, body: (await addCardPreviews(merged.body, { before: article.body })).body };
   // 使わなかった出典のうち、差分で「足すもの」に出ていたもの (出典だけの提示) を除外にする
   const offered = new Set(plan.additions.map((a) => a.key));
   // 機械で足した行 (画像・トーク) を人が消したものも除外にする (消しても反映待ちに残り続けないように)
