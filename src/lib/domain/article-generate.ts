@@ -762,8 +762,11 @@ export async function saveArticle(
       };
     }
     const today = todayJst();
-    // AI が書いた本文は人が見るまで下書き (#169)。機械で完成する型はテンプレートの値のまま
-    const draft = rendered.draft || resolved.template.needsAi;
+    // AI が書いた本文は人が見るまで「AI 書きたて (未確認)」にする (#169 → #327)。push 画面で選べない。
+    // サイトに出すかどうか (draft) とは分け、作る記事は下書きにしない (未 push の間が未公開)。
+    // 機械で完成する型 (テンプレートが draft: false) は確認済みで作る
+    const needsReview = rendered.draft || resolved.template.needsAi;
+    const draft = false;
     const created = await createArticle(
       {
         title: rendered.title,
@@ -777,7 +780,8 @@ export async function saveArticle(
         articleUpdatedAt: today,
         draft,
       },
-      actor
+      actor,
+      { needsReview }
     );
     if (!created.ok) {
       const message =

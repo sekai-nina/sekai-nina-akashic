@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { ArticleType } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { listArticles, getArticleStats, ARTICLE_PAGE_SIZE } from "@/lib/domain/articles";
-import { ARTICLE_TYPE_LABELS, formatDate } from "@/lib/utils";
+import { ARTICLE_FLAG_LABELS, ARTICLE_REVIEW_LABELS, ARTICLE_TYPE_LABELS, formatDate } from "@/lib/utils";
 
 // enum から引く。手で並べると schema 側の増減に追従できず、無い値で
 // 絞り込んで Prisma が落ちる
@@ -146,8 +146,11 @@ export default async function ArticlesPage({
                   {ARTICLE_TYPE_LABELS[a.type]}
                 </span>
               )}
+              {a.needsReview && (
+                <span className="text-xs px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">{ARTICLE_REVIEW_LABELS.needsReview}</span>
+              )}
               {a.draft && (
-                <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">下書き</span>
+                <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">{ARTICLE_FLAG_LABELS.draft}</span>
               )}
               {a.unlisted && (
                 <span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">限定公開</span>

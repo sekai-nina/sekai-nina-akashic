@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/db";
+import { ARTICLE_REVIEW_LABELS } from "@/lib/utils";
 import { pushDirtyArticles, type PushArticlesResult } from "@/lib/domain/articles";
 import { logAudit } from "@/lib/domain/audit";
 import { GithubApiError } from "@/lib/github/client";
@@ -27,6 +29,17 @@ export async function pushArticlesAction(subject: string, shortIds: string[]): P
   // 選んだ記事だけ push する (#328)。空なら何もしない (全部 push に化けさせない)
   const ids = [...new Set(shortIds.filter((id) => typeof id === "string" && /^[0-9A-Za-z]{7}$/.test(id)))];
   if (!ids.length) return { ok: false, error: "push する記事が選ばれていません" };
+  // 「AI 書きたて (未確認)」は push させない (#327。画面でも選べない)
+  const unreviewed = await prisma.article.findMany({
+    where: { shortId: { in: ids }, needsReview: true },
+    select: { shortId: true },
+  });
+  if (unreviewed.length) {
+    return {
+      ok: false,
+      error: `${ARTICLE_REVIEW_LABELS.needsReview}の記事が含まれています。編集画面で「${ARTICLE_REVIEW_LABELS.markReviewed}」を付けてください`,
+    };
+  }
 
   try {
     const result = await pushDirtyArticles(subject, { shortIds: ids });

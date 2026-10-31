@@ -97,6 +97,8 @@ export function toArticleDetail(a: ArticleDetailRow) {
     publishedAt: dateOnly(a.publishedAt),
     articleUpdatedAt: dateOnly(a.articleUpdatedAt),
     draft: a.draft,
+    /** 「AI 書きたて (未確認)」(#327)。push 画面で選べない。編集画面で外す */
+    needsReview: a.needsReview,
     unlisted: a.unlisted,
     ongoing: a.ongoing,
     frontmatterExtraKeys: frontmatterExtraKeys(a),

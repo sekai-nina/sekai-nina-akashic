@@ -113,6 +113,7 @@ export function registerArticleWriteTools(server: McpServer, { user }: ToolConte
         "記事を新規作成する。title と type が必須で、shortId と path (<type>/<title>.md) はサーバが採番する。" +
         "省略時は draft: true (公開サイトの記事ページに出ない。ファイル自体は次の push で公開リポジトリに載るので、"
         + "公開できない内容は本文に書かないこと)、publishedAt / articleUpdatedAt は今日 (JST)。" +
+        "作った記事は「AI 書きたて (未確認)」になり、人が画面で確認済みにするまで push 画面で選べない。" +
         "同じ path の記事があればエラーで既存の shortId を返すので、そちらを akashic_update_article で更新する。" +
         "出典は作成時には付かない (紐づけは画面から)。返った updatedAt を続く更新に渡す。",
       inputSchema: ArticleCreateSchema,

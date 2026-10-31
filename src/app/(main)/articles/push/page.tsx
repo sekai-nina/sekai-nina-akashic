@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { prisma } from "@/lib/db";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { previewArticlePush } from "@/lib/domain/articles";
@@ -66,7 +67,12 @@ export default async function ArticlePushPage() {
   const session = await auth();
   if (!session?.user || session.user.role !== "admin") redirect("/articles");
 
-  const preview = await previewArticlePush();
+  const [preview, unreviewed] = await Promise.all([
+    previewArticlePush(),
+    // 「AI 書きたて (未確認)」は選ばせない (#327)。Article は非保護なので素の prisma
+    prisma.article.findMany({ where: { dirty: true, needsReview: true }, select: { shortId: true } }),
+  ]);
+  const needsReview = new Set(unreviewed.map((a) => a.shortId));
   const plan = preview.state === "ready" ? preview.plan : null;
   const total = plan ? plan.ok.length + plan.unchanged.length + plan.blocked.length + plan.conflicts.length : 0;
 
@@ -122,8 +128,9 @@ export default async function ArticlePushPage() {
               title: i.article.title,
               path: i.article.path,
               isNew: i.kind === "ok" && i.isNew,
+              needsReview: needsReview.has(i.article.shortId),
             }))}
-            unchangedShortIds={plan.unchanged.map((i) => i.article.shortId)}
+            unchangedShortIds={plan.unchanged.map((i) => i.article.shortId).filter((id) => !needsReview.has(id))}
             defaultSubjectFor={Object.fromEntries(
               Array.from({ length: plan.ok.length + 1 }, (_, n) => [n, defaultCommitSubject(n)]),
             )}

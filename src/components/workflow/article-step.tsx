@@ -94,7 +94,7 @@ export function ArticleStep({
             ? "増えているものはありません"
             : res.preview.mode === "create"
               ? res.preview.ai?.status === "generated"
-                ? "AI が本文を書きました。確認して保存してください (下書きとして保存されます)"
+                ? "AI が本文を書きました。確認して保存してください (「AI 書きたて（未確認）」として保存されます)"
                 : "新しい記事の本文です。確認して保存してください"
               : res.preview.addedLines.length === 0
                 ? `出典 ${res.preview.newSources.length} 件を足します（本文は変わりません）`
@@ -122,7 +122,7 @@ export function ArticleStep({
       const dropped = exclude.length > 0 ? ` / ${exclude.length} 件は今後足しません` : "";
       setMsg(
         res.mode === "create"
-          ? `記事を作りました（出典 ${res.sources} 件）。${preview.ai ? "下書きなので、記事の編集画面で確認して下書きを外してください" : "公開は記事の push から"}`
+          ? `記事を作りました（出典 ${res.sources} 件）。${preview.ai ? "AI 書きたて（未確認）なので、記事の編集画面で手直しして「確認済みにする」を付けて保存してください。公開は push から" : "公開は記事の push から"}`
           : res.added === 0
             ? res.sources > 0
               ? `出典を ${res.sources} 件足しました。本文に ^[n] を書いてください${dropped}`
@@ -183,7 +183,7 @@ export function ArticleStep({
           >
             {preview.mode === "create"
               ? preview.ai
-                ? "この内容で下書きを作る"
+                ? "この内容で記事を作る（未確認）"
                 : "この内容で作る"
               : "この差分を追記する"}
           </button>

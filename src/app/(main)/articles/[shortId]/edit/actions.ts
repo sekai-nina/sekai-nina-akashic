@@ -6,6 +6,7 @@ import { requireRole } from "@/lib/auth/require-role";
 import { withClearance } from "@/lib/db";
 import {
   checkReservedArticleSources,
+  markArticleReviewed,
   getArticleByShortId,
   getArticleTitleIndex,
   saveArticleRelated,
@@ -159,9 +160,17 @@ export async function updateArticleAction(
     placesChanged = saved.changed;
   }
 
+  // 「確認済みにする」(#327)。push の出力に関係しないので dirty は立てない。楽観ロックの連鎖の最後に置く
+  let reviewedChanged = false;
+  if (formData.get("reviewed") === "1") {
+    reviewedChanged = await markArticleReviewed(shortId, { id: user.id });
+  }
+
   // 監査ログ (article.update) は domain が書く。一覧・詳細・push 画面の「未 push」表示を
   // まとめて更新する (配下を丸ごと)
-  if (result.changed.length || relatedChanged || sourcesChanged || placesChanged) revalidatePath("/articles", "layout");
+  if (result.changed.length || relatedChanged || sourcesChanged || placesChanged || reviewedChanged) {
+    revalidatePath("/articles", "layout");
+  }
   if (placesChanged) revalidatePath("/places", "layout");
 
   const renamed = result.changed.includes("title") ? `?renamedFrom=${encodeURIComponent(result.previousTitle)}` : "";

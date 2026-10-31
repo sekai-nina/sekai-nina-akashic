@@ -58,7 +58,7 @@ pnpm cli:keygen <user-email> <key-name>
 | `akashic_update_place` | write | 聖地更新 |
 | `akashic_list_articles` | read | 記事一覧（`hasPending: true` で未反映の紐づけがある記事） |
 | `akashic_get_article` | read | 記事 1 本の本文・frontmatter・出典 |
-| `akashic_create_article` | write | 記事の新規作成（`shortId` / `path` はサーバ採番。既定 `draft: true`） |
+| `akashic_create_article` | write | 記事の新規作成（`shortId` / `path` はサーバ採番。既定 `draft: true`・AI 書きたて（未確認）） |
 | `akashic_update_article` | write | 記事の部分更新（`updatedAt` 必須） |
 | `akashic_add_article_source` | write | アセット（と抜粋）を記事に pending で紐づける（internal 以下のみ） |
 | `akashic_apply_article_source` | write | 紐づけを反映済みにし脚注番号を採る（公開判断。internal 以下のみ） |
@@ -226,7 +226,7 @@ MCP のツール引数はもともと zod で検証されるが、REST の `POST
 つまり記事を一から任せるときの順番は「作成 → **紐づけ** → apply → 本文 → 人が push」。
 
 - **`updatedAt` の楽観ロックが必須。** 直前に読んだ値を渡し、その間に別の保存・取り込み・apply が入っていれば `reason: "conflict"` のエラーになる（現在の `updatedAt` を添えて返すので、それで再実行するか読み直す）。apply 自身も `updatedAt` を進めるので、別の apply が割り込んで番号がズレる競合もこれで検出される。エラーの `reason` が `conflict` 以外（`not_pending` / `asset_missing` / `above_limit` / `not_found`）なら再試行しても解消しない
-- `akashic_create_article` は `title` と `type` が必須で、残りは `akashic_update_article` と同じ項目を省略可。**省略時は `draft: true`**（公開サイトの記事ページに出ない。ただし **ファイル自体は次の push で公開リポジトリに載る** ので、公開できない内容を本文に書かせない担保にはならない）、`publishedAt` / `articleUpdatedAt` は今日（JST。AI が UTC で計算した「今日」は JST 0〜9 時にずれるので省略してよい）。`shortId` は 7 桁 base62、`path` は `<type>/<title>.md`（ファイル名に使えない `/ \ : * ? " < > |` は全角に置換。タイトル自体は変えない）。同じ `path` の記事があれば `reason: "path_exists"` のエラーで既存の `shortId` と `title` を返すので、再試行せず、同じ題材ならそちらを更新し、別の記事ならタイトルを変える。公開リポジトリに未取り込みの同名ファイルがあるときは `reason: "path_exists_upstream"`（人に取り込みを依頼する）。出典は作成時には付かない
+- `akashic_create_article` は `title` と `type` が必須で、残りは `akashic_update_article` と同じ項目を省略可。**省略時は `draft: true`**、かつ常に「AI 書きたて（未確認）」（`needsReview`。#327。人が編集画面で確認済みにするまで push 画面で選べない）で作られる（公開サイトの記事ページに出ない。ただし **ファイル自体は次の push で公開リポジトリに載る** ので、公開できない内容を本文に書かせない担保にはならない）、`publishedAt` / `articleUpdatedAt` は今日（JST。AI が UTC で計算した「今日」は JST 0〜9 時にずれるので省略してよい）。`shortId` は 7 桁 base62、`path` は `<type>/<title>.md`（ファイル名に使えない `/ \ : * ? " < > |` は全角に置換。タイトル自体は変えない）。同じ `path` の記事があれば `reason: "path_exists"` のエラーで既存の `shortId` と `title` を返すので、再試行せず、同じ題材ならそちらを更新し、別の記事ならタイトルを変える。公開リポジトリに未取り込みの同名ファイルがあるときは `reason: "path_exists_upstream"`（人に取り込みを依頼する）。出典は作成時には付かない
 - `akashic_update_article` は編集 UI と同じ 12 項目を省略可で受ける（渡した項目だけ変わる）。`null` で消せるのは `type` / `date` / `publishedAt` / `articleUpdatedAt` / `dateDisplay` / `dateMode`。`tags` を空にするなら `[]`。変わっていなければ書かない（`changed` が空）。`path` / `shortId` / モデル外の frontmatter / 出典は変えられない。本文は 200,000 文字まで
 - `akashic_apply_article_source` は **公開を決める操作**。`ArticleSource` が `public` になり、次の push で `label` / `ref` が公開リポジトリの frontmatter に出る。`internal` より上の出典（紐づけ時の値と Asset の現在の値の両方を見る）は反映できない（上の「引き上げのみ」の例外の範囲）。`excerpt` / `note` は残る
 - 一覧・詳細の `sources` はキーの持ち主のクリアランスで見える行だけ（RLS）。加えて `internal` より上の `pending` 行は返さない（apply できない抜粋を本文に貼らせない）。`pendingCount` / `hasPending` も同じ範囲で数える
