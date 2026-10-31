@@ -392,6 +392,7 @@ export const ARTICLE_FLAG_LABELS = {
 export const ARTICLE_BACKLINK_VIA_LABELS: Record<ArticleBacklinkVia, string> = {
   body: "本文で参照",
   related: "関連記事に登録",
+  source: "出典に登録",
 };
 
 /** 状態バッジの配色。/status と /costs で共有する */

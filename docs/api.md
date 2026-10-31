@@ -1028,6 +1028,7 @@ DataSource は classification ベースの RLS 対象。`public` は「公開サ
       "excerpt": "", "excerptType": null, "excerptStart": null, "excerptEnd": null, "note": "",
       "sortOrder": 0,
       "originalRef": "cmn3m8pho000qmoww7achsc61",
+      "refArticle": null,
       "asset": {"id": "cmn3m8pho000qmoww7achsc61", "title": "…", "kind": "text", "canonicalDate": "2025-04-10T00:00:00.000Z", "classification": "internal"}
     },
     {
@@ -1040,6 +1041,7 @@ DataSource は classification ベースの RLS 対象。`public` は「公開サ
       "excerpt": "本文から選んだ抜粋…", "excerptType": "body", "excerptStart": 120, "excerptEnd": 180, "note": "",
       "sortOrder": 2,
       "originalRef": null,
+      "refArticle": null,
       "asset": {"id": "cmu2uyds80001jv048dzpukm7", "title": "おいしいよ〜😋", "kind": "text", "canonicalDate": null, "classification": "internal"}
     }
   ]
@@ -1051,6 +1053,7 @@ DataSource は classification ベースの RLS 対象。`public` は「公開サ
 - `frontmatterExtraKeys` はモデル化していない frontmatter のキー名（`featured_quotes` 等）。API からは触れない（push 時にそのまま復元される）
 - クリアランスを超える出典は返らない（RLS）。加えて **`classification` が `internal` より上の `pending` 行は API では返さない**（API からは apply できないので、抜粋だけ見せて本文に貼らせる経路を作らない。画面には出る）
 - `sources[].asset` は Asset が削除済み（`assetId` が null）か、Asset の classification がキーのクリアランスを超えるとき `null`
+- `sources[].refArticle` は別の記事を出典にした行（#320）の参照先 `{ "shortId", "title" }`。それ以外の行と、参照先が削除済みの行は `null`。記事出典の `url` は `/articles/<shortId>` で、`label` は空（公開サイトがその時のタイトルを出す）。記事出典は編集画面の記事パネルからだけ作れる（API からは作れない）
 
 ### PATCH /articles/:shortId
 

@@ -22,6 +22,7 @@ import { SourceViewer } from "./source-viewer";
 import { MarkdownEditor, type MarkdownEditorHandle } from "./markdown-editor";
 import { ArticlePanel } from "./article-panel";
 import type { ArticleBacklink } from "@/lib/articles/related";
+import { footnoteRefsInBody, nextSourceNo } from "@/lib/articles/footnotes";
 import type { WikiLinkCandidate } from "@/lib/articles/wiki-link-complete";
 import { isListArticle } from "@/lib/articles/list-article";
 
@@ -98,6 +99,13 @@ export function ArticleEditor({
 
   const [placeIds, setPlaceIds] = useState(initialPlaceIds);
   const [related, setRelated] = useState(initialRelated);
+  /** 記事パネルで予約した記事出典 (#320)。保存で確定する */
+  const [reservedSources, setReservedSourcesState] = useState<{ shortId: string; title: string; sourceNo: number }[]>([]);
+  const reservedRef = useRef(reservedSources);
+  const setReservedSources = (next: typeof reservedSources | ((prev: typeof reservedSources) => typeof reservedSources)) => {
+    reservedRef.current = typeof next === "function" ? next(reservedRef.current) : next;
+    setReservedSourcesState(reservedRef.current);
+  };
   /** 右の欄に出しているもの。出典 (id) か記事パネル。どちらでもなければ frontmatter の欄 */
   const [side, setSide] = useState<{ kind: "source"; id: string } | { kind: "articles" } | null>(null);
   const openSourceId = side?.kind === "source" ? side.id : null;
@@ -108,7 +116,8 @@ export function ArticleEditor({
   const changed =
     JSON.stringify(values) !== JSON.stringify(initial) ||
     JSON.stringify(placeIds) !== JSON.stringify(initialPlaceIds) ||
-    JSON.stringify(related) !== JSON.stringify(initialRelated);
+    JSON.stringify(related) !== JSON.stringify(initialRelated) ||
+    reservedSources.length > 0;
   useEffect(() => {
     if (!changed) return;
     const handler = (e: BeforeUnloadEvent) => {
@@ -132,14 +141,17 @@ export function ArticleEditor({
 
   function showPreview() {
     setTab("preview");
-    if (previewedBody.current === values.body) return; // 本文が変わっていなければ使い回す
+    // 本文と予約中の記事出典が変わっていなければ使い回す
+    const key = `${values.body}\u0000${reservedSources.map((r) => r.sourceNo).join(",")}`;
+    if (previewedBody.current === key) return;
     const body = values.body;
+    const reservedNos = reservedSources.map((r) => r.sourceNo);
     requestedBody.current = body;
     startPreview(async () => {
       try {
-        const r = await previewArticleAction(shortId, body);
+        const r = await previewArticleAction(shortId, body, reservedNos);
         if (requestedBody.current !== body) return; // その後に別の本文で投げ直している
-        previewedBody.current = body;
+        previewedBody.current = key;
         setPreview(r);
         setPreviewError(null);
       } catch (e) {
@@ -192,6 +204,12 @@ export function ArticleEditor({
       {related.map((t) => (
         <input key={t} type="hidden" name="related" value={t} />
       ))}
+      {/* 記事出典の予約 (#320) */}
+      <input
+        type="hidden"
+        name="articleSources"
+        value={JSON.stringify(reservedSources.map(({ shortId: s, sourceNo }) => ({ shortId: s, sourceNo })))}
+      />
 
       {/* 本文 */}
       <div className="min-w-0">
@@ -270,6 +288,18 @@ export function ArticleEditor({
             onInsert={(title) => {
               setTab("edit");
               editorRef.current?.insertAtCursor(`[[${title}]]`);
+            }}
+            onAddSource={(c) => {
+              // 既存の出典・予約済み・本文の ^[n] の続きの番号を取る (保存時にも重なりを確かめる)
+              // 続けて押されても同じ番号にならないよう、state ではなく ref の最新の予約で数える
+              const sourceNo = nextSourceNo(
+                [...sources.map((x) => x.sourceNo), ...reservedRef.current.map((x) => x.sourceNo)],
+                values.body,
+              );
+              setReservedSources((prev) => [...prev, { shortId: c.shortId, title: c.title, sourceNo }]);
+              setTab("edit");
+              editorRef.current?.insertAtCursor(`^[${sourceNo}]`);
+              return sourceNo;
             }}
             onClose={() => setSide(null)}
             disabled={isSaving}
@@ -498,6 +528,31 @@ export function ArticleEditor({
         {/* 出典 (参照用) */}
         <div className="bg-white border border-slate-200 rounded-lg p-4">
           <h2 className="text-sm font-medium text-slate-700 mb-2">出典 {sources.length} 件（本文の ^[n] と対応）</h2>
+          {reservedSources.length > 0 && (
+            <ul className="mb-2 space-y-1 text-xs text-slate-700">
+              {reservedSources.map((r) => (
+                <li key={r.sourceNo} className="flex items-baseline gap-1.5">
+                  <span className="font-mono text-slate-400 shrink-0 w-7">[{r.sourceNo}]</span>
+                  <span className="truncate">{r.title}</span>
+                  <span className="shrink-0 text-amber-700">
+                    {footnoteRefsInBody(values.body).includes(r.sourceNo)
+                      ? "（保存で確定）"
+                      : `（本文に ^[${r.sourceNo}] がありません）`}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={isSaving}
+                    onClick={() => setReservedSources((prev) => prev.filter((x) => x.sourceNo !== r.sourceNo))}
+                    aria-label="予約を取り消す"
+                    title={`予約を取り消す (本文の ^[${r.sourceNo}] は自分で消す)`}
+                    className="ml-auto shrink-0 px-1 text-slate-400 hover:text-slate-700"
+                  >
+                    ✕
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
           {sources.length === 0 ? (
             <p className="text-xs text-slate-400">出典なし</p>
           ) : (

@@ -5,6 +5,7 @@ import { createDossier, deleteDossier } from "@/lib/domain/dossiers";
 import { nextSortOrder, nextSourceNo } from "@/lib/articles/apply";
 import { paragraphsCiting } from "@/lib/articles/footnotes";
 import type { WikiLinkCandidate } from "@/lib/articles/wiki-link-complete";
+import { articleSourceUrl, type ReservedArticleSource } from "@/lib/articles/source-article";
 import {
   bodyLinksTo,
   normalizeRelated,
@@ -195,6 +196,8 @@ const ARTICLE_DETAIL_INCLUDE = {
           classification: true,
         },
       },
+      // 記事を出典にした行 (#320)。表示はその時のタイトル
+      refArticle: { select: { shortId: true, title: true } },
     },
   },
 } satisfies Prisma.ArticleInclude;
@@ -1228,14 +1231,152 @@ export async function saveArticleRelated(
 }
 
 /**
+ * 記事出典の予約 (#320) を、本文などを保存する前に確かめる。保存後に断ると本文の `^[n]` だけが
+ * 宛先の無いまま残るので、先に分かる理由 (参照先が無い・番号が埋まっている) はここで返す。
+ * 確定 (`saveArticleSourceArticles`) でも同じ検査を楽観ロックの下でやり直す
+ */
+export async function checkReservedArticleSources(
+  shortId: string,
+  reserved: ReservedArticleSource[],
+  clearance: string,
+): Promise<"invalid_article" | "number_taken" | null> {
+  if (!reserved.length) return null;
+  const targets = await prisma.article.findMany({
+    where: { shortId: { in: reserved.map((r) => r.shortId) } },
+    select: { shortId: true },
+  });
+  const found = new Set(targets.map((t) => t.shortId));
+  if (reserved.some((r) => !found.has(r.shortId) || r.shortId === shortId)) return "invalid_article";
+  const taken = await withClearance(clearance, (tx) =>
+    tx.articleSource.count({
+      where: {
+        article: { shortId },
+        status: { not: ArticleSourceStatus.pending },
+        sourceNo: { in: reserved.map((r) => r.sourceNo) },
+      },
+    }),
+  );
+  return taken ? "number_taken" : null;
+}
+
+export type SaveArticleSourceArticlesResult =
+  | { ok: true; changed: boolean; updatedAt: Date }
+  | { ok: false; reason: "not_found" | "conflict" | "invalid_article" | "number_taken" };
+
+/**
+ * 記事パネルの「出典に追加」で予約した記事出典を確定する (#320)。編集画面の保存から、
+ * 本文などの保存の後に返ってきた `updatedAt` で続けて呼ぶ (関連記事・聖地と同じ楽観ロック)。
+ *
+ * 本文の `^[n]` は保存済みの本文に入っている前提で、行は applied / public で作る
+ * (記事は公開リポジトリのミラーなので公開してよい。pending → 反映の 2 段階は踏まない)。
+ * frontmatter には `url: /articles/<shortId>` だけが出る (label は空)。
+ *
+ * - 参照先が無い・自分自身 → invalid_article
+ * - 番号が既存の出典と重なる (別の保存で埋まった) → number_taken。本文だけ保存済みになる
+ */
+export async function saveArticleSourceArticles(
+  shortId: string,
+  expectedUpdatedAt: Date,
+  reserved: ReservedArticleSource[],
+  actor: ArticleActor,
+  clearance: string,
+): Promise<SaveArticleSourceArticlesResult> {
+  if (!reserved.length) {
+    const a = await prisma.article.findUnique({ where: { shortId }, select: { updatedAt: true } });
+    return a ? { ok: true, changed: false, updatedAt: a.updatedAt } : { ok: false, reason: "not_found" };
+  }
+  type Abort = Exclude<SaveArticleSourceArticlesResult, { ok: true }>["reason"];
+  class SaveAbort extends Error {
+    constructor(readonly reason: Abort) {
+      super(reason);
+    }
+  }
+  try {
+    const result = await withClearance(clearance, async (tx) => {
+      const article = await tx.article.findUnique({
+        where: { shortId },
+        select: {
+          id: true,
+          updatedAt: true,
+          sources: { where: { status: { not: ArticleSourceStatus.pending } }, select: { sourceNo: true, sortOrder: true } },
+        },
+      });
+      if (!article) throw new SaveAbort("not_found");
+      if (article.updatedAt.getTime() !== expectedUpdatedAt.getTime()) throw new SaveAbort("conflict");
+
+      const taken = new Set(article.sources.map((x) => x.sourceNo).filter((n): n is number => n != null));
+      if (reserved.some((r) => taken.has(r.sourceNo))) throw new SaveAbort("number_taken");
+
+      const targets = await tx.article.findMany({
+        where: { shortId: { in: reserved.map((r) => r.shortId) } },
+        select: { id: true, shortId: true },
+      });
+      const idOf = new Map(targets.map((t) => [t.shortId, t.id]));
+      if (reserved.some((r) => !idOf.has(r.shortId) || r.shortId === shortId)) throw new SaveAbort("invalid_article");
+
+      let sortOrder = nextSortOrder(article.sources.map((x) => x.sortOrder));
+      const created: { id: string }[] = [];
+      for (const r of [...reserved].sort((a, b) => a.sourceNo - b.sourceNo)) {
+        created.push(
+          await tx.articleSource.create({
+            data: {
+              articleId: article.id,
+              refArticleId: idOf.get(r.shortId)!,
+              status: ArticleSourceStatus.applied,
+              classification: ClearanceLevel.public,
+              sourceNo: r.sourceNo,
+              sortOrder: sortOrder++,
+              url: articleSourceUrl(r.shortId),
+              label: "",
+            },
+            select: { id: true },
+          }),
+        );
+      }
+      const [after] = await tx.article.updateManyAndReturn({
+        where: { id: article.id, updatedAt: expectedUpdatedAt },
+        data: { dirty: true, editedAt: new Date() },
+        select: { updatedAt: true },
+      });
+      if (!after) throw new SaveAbort("conflict");
+      return { articleId: article.id, created, updatedAt: after.updatedAt };
+    });
+    for (const c of result.created) {
+      await auditArticle(actor, {
+        action: "article.source.add",
+        targetType: "ArticleSource",
+        targetId: c.id,
+        metadata: { articleId: result.articleId, refArticle: true },
+      });
+    }
+    return { ok: true, changed: true, updatedAt: result.updatedAt };
+  } catch (e) {
+    if (e instanceof SaveAbort) return { ok: false, reason: e.reason };
+    throw e;
+  }
+}
+
+/**
  * タイトル `title` の記事を参照している記事 (被リンク) (#319)。本文の `[[題]]` / `[[題|表示]]` /
  * `[[題\|表示]]` と、他記事の `related` の両方を拾う。
  *
  * Article は非保護テーブルなので withClearance は不要。`contains` は Seq Scan だが 300 行台なので構わない
  */
-export async function listArticleBacklinks(title: string, excludeShortId: string): Promise<ArticleBacklink[]> {
-  if (!title) return [];
-  const rows = await prisma.article.findMany({
+export async function listArticleBacklinks(
+  target: { shortId: string; title: string },
+  clearance: string,
+): Promise<ArticleBacklink[]> {
+  const { title, shortId: excludeShortId } = target;
+  // 出典にしている記事 (#320)。ArticleSource は保護テーブルなので RLS 越しに引く (記事出典は public)
+  const citing = await withClearance(clearance, (tx) =>
+    tx.articleSource.findMany({
+      where: { refArticle: { shortId: excludeShortId }, article: { shortId: { not: excludeShortId } } },
+      select: { article: { select: { shortId: true, title: true, draft: true } } },
+    }),
+  );
+  const bySource = new Map(citing.map((c) => [c.article.shortId, c.article]));
+  if (!title && !bySource.size) return [];
+  const rows = !title ? [] : await prisma.article.findMany({
     where: {
       shortId: { not: excludeShortId },
       // 本文は `[[題` で粗く拾い、形 (`]]` / `|` / `\|`) は下の bodyLinksTo で確かめる。
@@ -1249,14 +1390,19 @@ export async function listArticleBacklinks(title: string, excludeShortId: string
     select: { shortId: true, title: true, draft: true, body: true, frontmatterExtra: true },
     orderBy: { title: "asc" },
   });
-  return rows
-    .map((r) => {
-      const via: ArticleBacklink["via"] = [];
-      if (bodyLinksTo(r.body, title)) via.push("body");
-      if (readRelated(r.frontmatterExtra).includes(title)) via.push("related");
-      return { shortId: r.shortId, title: r.title, draft: r.draft, via };
-    })
-    .filter((b) => b.via.length > 0); // `[[題名]]` のような前方一致だけの行を落とす
+  const out = new Map<string, ArticleBacklink>();
+  for (const r of rows) {
+    const via: ArticleBacklink["via"] = [];
+    if (bodyLinksTo(r.body, title)) via.push("body");
+    if (readRelated(r.frontmatterExtra).includes(title)) via.push("related");
+    if (bySource.has(r.shortId)) via.push("source");
+    // `[[題名]]` のような前方一致だけの行は落とす
+    if (via.length) out.set(r.shortId, { shortId: r.shortId, title: r.title, draft: r.draft, via });
+  }
+  for (const [sid, a] of bySource) {
+    if (!out.has(sid)) out.set(sid, { shortId: sid, title: a.title, draft: a.draft, via: ["source"] });
+  }
+  return [...out.values()].sort((a, b) => a.title.localeCompare(b.title, "ja"));
 }
 
 /** LIKE のパターンに埋める文字列を逃がす (Postgres の既定のエスケープ文字は `\`) */

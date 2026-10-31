@@ -4,9 +4,24 @@ import { revalidatePath } from "next/cache";
 import { redirect, RedirectType } from "next/navigation";
 import { requireRole } from "@/lib/auth/require-role";
 import { withClearance } from "@/lib/db";
-import { getArticleTitleIndex, saveArticleRelated, updateArticle } from "@/lib/domain/articles";
+import {
+  checkReservedArticleSources,
+  getArticleByShortId,
+  getArticleTitleIndex,
+  saveArticleRelated,
+  saveArticleSourceArticles,
+  updateArticle,
+} from "@/lib/domain/articles";
+import { parseReservedArticleSources } from "@/lib/articles/source-article";
 import { saveArticlePlaces } from "@/lib/domain/article-places";
-import { BODY_MAX_LENGTH, normalizeBody, parseArticleEditForm, type ArticleEditField } from "@/lib/articles/edit";
+import type { ArticleType } from "@prisma/client";
+import {
+  BODY_MAX_LENGTH,
+  normalizeBody,
+  parseArticleEditForm,
+  toDateInputValue,
+  type ArticleEditField,
+} from "@/lib/articles/edit";
 import { auditFootnotes, type FootnoteAudit } from "@/lib/articles/footnotes";
 import { renderArticleBody } from "@/lib/articles/render";
 import { getArticleSourceContent, type ArticleSourceContent } from "@/lib/domain/article-source-content";
@@ -27,8 +42,8 @@ export type UpdateArticleState = {
  * (楽観ロックの衝突で入力を消したくない)。タイトルを変えたときは `?renamedFrom=` を付けて
  * 飛び、詳細側で `[[旧タイトル]]` の参照元を数えて警告する (ブロックはしない)。
  *
- * 関連記事 (`related`) と聖地 (`placeIds`) は本文・frontmatter の保存の後に、返ってきた `updatedAt` で
- * この順に続けて保存する (同じ楽観ロックに乗せる)。後段だけ失敗したら、前段は保存済みであることを添えて返す。
+ * 関連記事 (`related`)・記事出典 (`articleSources`、#320)・聖地 (`placeIds`) は本文・frontmatter の保存の後に、
+ * 返ってきた `updatedAt` でこの順に続けて保存する (同じ楽観ロックに乗せる)。後段だけ失敗したら、前段は保存済みであることを添えて返す。
  */
 export async function updateArticleAction(
   shortId: string,
@@ -41,6 +56,10 @@ export async function updateArticleAction(
     const v = formData.get(name);
     return typeof v === "string" ? v : null;
   };
+  // 記事パネルで予約した記事出典 (#320)。形が壊れていたら何も書く前に断る
+  const reservedSources = parseReservedArticleSources(text("articleSources"));
+  if (!reservedSources) return { error: "フォームが古いか壊れています。再読み込みしてください" };
+
   const parsed = parseArticleEditForm({
     title: text("title"),
     type: text("type"),
@@ -60,6 +79,17 @@ export async function updateArticleAction(
   // 楽観ロック用。フォームが読み込んだ時点の updatedAt (ISO)
   const expected = new Date(text("updatedAt") ?? "");
   if (Number.isNaN(expected.getTime())) return { error: "フォームが古いか壊れています。再読み込みしてください" };
+
+  // 記事出典の予約は本文を保存する前に確かめる (後で断ると ^[n] だけが宛先なしで残る)
+  const reservedProblem = await checkReservedArticleSources(shortId, reservedSources, user.clearance);
+  if (reservedProblem) {
+    return {
+      error:
+        reservedProblem === "number_taken"
+          ? "出典の番号が別の出典と重なりました。予約を取り消して、出典に追加し直してください"
+          : "出典にできない記事が含まれています (削除された記事か、この記事自身)",
+    };
+  }
 
   const result = await updateArticle(shortId, expected, parsed.values, { id: user.id });
   if (!result.ok) {
@@ -88,12 +118,34 @@ export async function updateArticleAction(
     relatedChanged = saved.changed;
   }
 
+  // 記事出典 (#320)。本文 (^[n] 入り) の保存の後に確定する
+  let sourcesChanged = false;
+  if (reservedSources.length) {
+    const saved = await saveArticleSourceArticles(shortId, updatedAt, reservedSources, { id: user.id }, user.clearance);
+    if (!saved.ok) {
+      if (result.changed.length || relatedChanged) revalidatePath("/articles", "layout");
+      const why =
+        saved.reason === "conflict"
+          ? "別の保存か取り込みが先に入りました"
+          : saved.reason === "number_taken"
+            ? "出典の番号が別の出典と重なりました"
+            : saved.reason === "invalid_article"
+              ? "出典にできない記事が含まれています"
+              : "記事が見つかりません";
+      return {
+        error: `出典を保存できませんでした (${why})。${result.changed.length || relatedChanged ? "本文などは保存済みです。" : ""}再読み込みしてください`,
+      };
+    }
+    updatedAt = saved.updatedAt;
+    sourcesChanged = saved.changed;
+  }
+
   let placesChanged = false;
   if (formData.get("placesField") === "1") {
     const placeIds = formData.getAll("placeIds").filter((v): v is string => typeof v === "string" && v !== "");
     const saved = await saveArticlePlaces(shortId, updatedAt, placeIds, { id: user.id }, user.clearance);
     if (!saved.ok) {
-      if (result.changed.length || relatedChanged) revalidatePath("/articles", "layout");
+      if (result.changed.length || relatedChanged || sourcesChanged) revalidatePath("/articles", "layout");
       const why =
         saved.reason === "conflict"
           ? "別の保存か取り込みが先に入りました"
@@ -101,7 +153,7 @@ export async function updateArticleAction(
             ? "選べない聖地が含まれています"
             : "記事が見つかりません";
       return {
-        error: `聖地を保存できませんでした (${why})。${result.changed.length || relatedChanged ? "本文などは保存済みです。" : ""}再読み込みしてください`,
+        error: `聖地を保存できませんでした (${why})。${result.changed.length || relatedChanged || sourcesChanged ? "本文などは保存済みです。" : ""}再読み込みしてください`,
       };
     }
     placesChanged = saved.changed;
@@ -109,7 +161,7 @@ export async function updateArticleAction(
 
   // 監査ログ (article.update) は domain が書く。一覧・詳細・push 画面の「未 push」表示を
   // まとめて更新する (配下を丸ごと)
-  if (result.changed.length || relatedChanged || placesChanged) revalidatePath("/articles", "layout");
+  if (result.changed.length || relatedChanged || sourcesChanged || placesChanged) revalidatePath("/articles", "layout");
   if (placesChanged) revalidatePath("/places", "layout");
 
   const renamed = result.changed.includes("title") ? `?renamedFrom=${encodeURIComponent(result.previousTitle)}` : "";
@@ -129,7 +181,15 @@ export interface ArticlePreview {
  * 読むだけだが、編集ページ専用なので役割も保存と同じに絞る (remark + KaTeX は CPU を食うので、
  * 誰でも任意の Markdown を投げられる経路にしない)。長さの上限も保存と同じ。
  */
-export async function previewArticleAction(shortId: string, body: string): Promise<ArticlePreview> {
+/**
+ * `reservedSourceNos` は記事パネルで予約した記事出典の番号 (#320)。まだ DB に無いが、
+ * 本文の `^[n]` を「宛先なし」と警告しないよう数に入れる
+ */
+export async function previewArticleAction(
+  shortId: string,
+  body: string,
+  reservedSourceNos: number[] = [],
+): Promise<ArticlePreview> {
   const user = await requireRole(["admin", "member"]);
   const normalized = normalizeBody(body);
   if (normalized.length > BODY_MAX_LENGTH) throw new Error(`本文が長すぎます (${BODY_MAX_LENGTH} 文字まで)`);
@@ -145,7 +205,7 @@ export async function previewArticleAction(shortId: string, body: string): Promi
   });
   const audit = auditFootnotes(
     normalized,
-    sources.map((s) => s.sourceNo),
+    [...sources.map((s) => s.sourceNo), ...reservedSourceNos.filter((n) => Number.isInteger(n))],
     new Set(titleIndex.keys()),
   );
   return { html, audit };
@@ -155,4 +215,39 @@ export async function previewArticleAction(shortId: string, body: string): Promi
 export async function getSourceContentAction(shortId: string, sourceId: string): Promise<ArticleSourceContent | null> {
   const user = await requireRole(["admin", "member"]);
   return getArticleSourceContent(user.clearance, shortId, sourceId);
+}
+
+export interface ArticlePeek {
+  shortId: string;
+  title: string;
+  type: ArticleType | null;
+  /** 記事の日付 (表示用。date_display があればそれ) */
+  dateLabel: string | null;
+  draft: boolean;
+  html: string;
+}
+
+/**
+ * 記事パネルで別の記事の中身を読む (#320)。詳細ページと同じパイプラインで本文を描く。
+ * 見つからなければ null
+ */
+export async function getArticlePeekAction(targetShortId: string): Promise<ArticlePeek | null> {
+  const user = await requireRole(["admin", "member"]);
+  const [article, titleIndex] = await Promise.all([
+    getArticleByShortId(targetShortId, user.clearance),
+    getArticleTitleIndex(),
+  ]);
+  if (!article) return null;
+  const html = await renderArticleBody(article.body, {
+    wikilinks: titleIndex,
+    sourceUrls: article.sources.map((s) => s.url),
+  });
+  return {
+    shortId: article.shortId,
+    title: article.title,
+    type: article.type,
+    dateLabel: article.dateDisplay || toDateInputValue(article.date) || null,
+    draft: article.draft,
+    html,
+  };
 }

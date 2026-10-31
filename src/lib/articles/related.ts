@@ -59,8 +59,8 @@ export interface ArticleBacklink {
   shortId: string;
   title: string;
   draft: boolean;
-  /** どこから参照しているか。本文の `[[ ]]` / frontmatter の `related` */
+  /** どこから参照しているか。本文の `[[ ]]` / frontmatter の `related` / 出典 (#320) */
   via: ArticleBacklinkVia[];
 }
 
-export type ArticleBacklinkVia = "body" | "related";
+export type ArticleBacklinkVia = "body" | "related" | "source";
