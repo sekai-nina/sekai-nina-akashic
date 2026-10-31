@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useImperativeHandle, useRef, type Ref } from "react";
 import { Compartment, EditorState, Transaction } from "@codemirror/state";
 import {
   Decoration,
@@ -31,6 +31,12 @@ import {
 } from "@/lib/articles/wiki-link-complete";
 import { ARTICLE_FLAG_LABELS, ARTICLE_TYPE_LABELS, cn } from "@/lib/utils";
 
+/** 親から本文を操作する口 (記事パネルの「挿入」など) */
+export interface MarkdownEditorHandle {
+  /** カーソル位置 (選択中なら選択範囲) に文字列を入れ、エディタにフォーカスを戻す */
+  insertAtCursor: (text: string) => void;
+}
+
 /**
  * 記事本文の Markdown エディタ (#318)。CodeMirror 6。
  *
@@ -44,12 +50,14 @@ export function MarkdownEditor({
   disabled,
   candidates,
   className,
+  ref,
 }: {
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
   candidates: WikiLinkCandidate[];
   className?: string;
+  ref?: Ref<MarkdownEditorHandle>;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -59,6 +67,8 @@ export function MarkdownEditor({
   const candidatesRef = useRef(candidates);
   /** 直近に onChange で親へ渡した値。親から戻ってきた古い値で上書きしないために持つ */
   const lastSent = useRef(value);
+  /** 一度でもカーソルを置いたか (挿入先の判断に使う) */
+  const touched = useRef(false);
   useEffect(() => {
     onChangeRef.current = onChange;
     candidatesRef.current = candidates;
@@ -85,6 +95,7 @@ export function MarkdownEditor({
           placeholderExt("本文 (Markdown)。[[ で記事へのリンク"),
           editable.current.of(EditorView.editable.of(!disabled)),
           EditorView.updateListener.of((u: ViewUpdate) => {
+            if (u.focusChanged && u.view.hasFocus) touched.current = true;
             if (!u.docChanged) return;
             lastSent.current = u.state.doc.toString();
             onChangeRef.current(lastSent.current);
@@ -115,6 +126,27 @@ export function MarkdownEditor({
       });
     }
   }, [value]);
+
+  useImperativeHandle(ref, () => ({
+    insertAtCursor(text: string) {
+      const view = viewRef.current;
+      if (!view) return;
+      if (touched.current) {
+        view.dispatch(view.state.replaceSelection(text), { scrollIntoView: true, userEvent: "input" });
+      } else {
+        // 一度も触っていなければカーソルは先頭にある。先頭に入れるより末尾に足す方が自然
+        const end = view.state.doc.length;
+        view.dispatch({ changes: { from: end, insert: text }, selection: { anchor: end + text.length }, scrollIntoView: true, userEvent: "input" });
+      }
+      touched.current = true;
+      // プレビュー表示中に呼ばれると、まだ隠れていてフォーカスできない。表示に切り替わってから戻す。
+      // スマホでは記事パネルが本文の下にあるので、本文まで戻す
+      requestAnimationFrame(() => {
+        view.focus();
+        view.dom.scrollIntoView({ block: "nearest" });
+      });
+    },
+  }));
 
   useEffect(() => {
     viewRef.current?.dispatch({ effects: editable.current.reconfigure(EditorView.editable.of(!disabled)) });

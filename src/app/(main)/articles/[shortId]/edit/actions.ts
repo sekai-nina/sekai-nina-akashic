@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect, RedirectType } from "next/navigation";
 import { requireRole } from "@/lib/auth/require-role";
 import { withClearance } from "@/lib/db";
-import { getArticleTitleIndex, updateArticle } from "@/lib/domain/articles";
+import { getArticleTitleIndex, saveArticleRelated, updateArticle } from "@/lib/domain/articles";
 import { saveArticlePlaces } from "@/lib/domain/article-places";
 import { BODY_MAX_LENGTH, normalizeBody, parseArticleEditForm, type ArticleEditField } from "@/lib/articles/edit";
 import { auditFootnotes, type FootnoteAudit } from "@/lib/articles/footnotes";
@@ -27,8 +27,8 @@ export type UpdateArticleState = {
  * (楽観ロックの衝突で入力を消したくない)。タイトルを変えたときは `?renamedFrom=` を付けて
  * 飛び、詳細側で `[[旧タイトル]]` の参照元を数えて警告する (ブロックはしない)。
  *
- * 聖地 (`placeIds`) は本文・frontmatter の保存の後に、返ってきた `updatedAt` で続けて保存する
- * (同じ楽観ロックに乗せる)。聖地だけ失敗したら、本文側は保存済みであることを添えて返す。
+ * 関連記事 (`related`) と聖地 (`placeIds`) は本文・frontmatter の保存の後に、返ってきた `updatedAt` で
+ * この順に続けて保存する (同じ楽観ロックに乗せる)。後段だけ失敗したら、前段は保存済みであることを添えて返す。
  */
 export async function updateArticleAction(
   shortId: string,
@@ -71,12 +71,29 @@ export async function updateArticleAction(
     };
   }
 
+  // 関連記事 (#319)。本文などの保存で進んだ updatedAt で続けて保存する
+  let updatedAt = result.updatedAt;
+  let relatedChanged = false;
+  if (formData.get("relatedField") === "1") {
+    const related = formData.getAll("related").filter((v): v is string => typeof v === "string");
+    const saved = await saveArticleRelated(shortId, updatedAt, related, { id: user.id });
+    if (!saved.ok) {
+      if (result.changed.length) revalidatePath("/articles", "layout");
+      const why = saved.reason === "conflict" ? "別の保存か取り込みが先に入りました" : "記事が見つかりません";
+      return {
+        error: `関連記事を保存できませんでした (${why})。${result.changed.length ? "本文などは保存済みです。" : ""}再読み込みしてください`,
+      };
+    }
+    updatedAt = saved.updatedAt;
+    relatedChanged = saved.changed;
+  }
+
   let placesChanged = false;
   if (formData.get("placesField") === "1") {
     const placeIds = formData.getAll("placeIds").filter((v): v is string => typeof v === "string" && v !== "");
-    const saved = await saveArticlePlaces(shortId, result.updatedAt, placeIds, { id: user.id }, user.clearance);
+    const saved = await saveArticlePlaces(shortId, updatedAt, placeIds, { id: user.id }, user.clearance);
     if (!saved.ok) {
-      if (result.changed.length) revalidatePath("/articles", "layout");
+      if (result.changed.length || relatedChanged) revalidatePath("/articles", "layout");
       const why =
         saved.reason === "conflict"
           ? "別の保存か取り込みが先に入りました"
@@ -84,7 +101,7 @@ export async function updateArticleAction(
             ? "選べない聖地が含まれています"
             : "記事が見つかりません";
       return {
-        error: `聖地を保存できませんでした (${why})。${result.changed.length ? "本文などは保存済みです。" : ""}再読み込みしてください`,
+        error: `聖地を保存できませんでした (${why})。${result.changed.length || relatedChanged ? "本文などは保存済みです。" : ""}再読み込みしてください`,
       };
     }
     placesChanged = saved.changed;
@@ -92,7 +109,7 @@ export async function updateArticleAction(
 
   // 監査ログ (article.update) は domain が書く。一覧・詳細・push 画面の「未 push」表示を
   // まとめて更新する (配下を丸ごと)
-  if (result.changed.length || placesChanged) revalidatePath("/articles", "layout");
+  if (result.changed.length || relatedChanged || placesChanged) revalidatePath("/articles", "layout");
   if (placesChanged) revalidatePath("/places", "layout");
 
   const renamed = result.changed.includes("title") ? `?renamedFrom=${encodeURIComponent(result.previousTitle)}` : "";

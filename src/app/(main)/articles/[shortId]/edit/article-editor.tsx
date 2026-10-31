@@ -19,7 +19,9 @@ import { FootnoteAuditWarnings } from "../footnote-audit-warnings";
 import { TagInput } from "./tag-input";
 import { PlacePicker, type PlaceOption } from "./place-picker";
 import { SourceViewer } from "./source-viewer";
-import { MarkdownEditor } from "./markdown-editor";
+import { MarkdownEditor, type MarkdownEditorHandle } from "./markdown-editor";
+import { ArticlePanel } from "./article-panel";
+import type { ArticleBacklink } from "@/lib/articles/related";
 import type { WikiLinkCandidate } from "@/lib/articles/wiki-link-complete";
 import { isListArticle } from "@/lib/articles/list-article";
 
@@ -63,6 +65,8 @@ export function ArticleEditor({
   initialPlaceIds,
   placeOptions,
   linkCandidates,
+  initialRelated,
+  backlinks,
 }: {
   shortId: string;
   /** 楽観ロック用。読み込んだ時点の Article.updatedAt (ISO) */
@@ -78,6 +82,10 @@ export function ArticleEditor({
   placeOptions: PlaceOption[];
   /** 本文の `[[` で補完する記事 (この記事を除く全件) */
   linkCandidates: WikiLinkCandidate[];
+  /** 関連記事 (frontmatter の related)。記事タイトルの並び */
+  initialRelated: string[];
+  /** この記事を参照している記事 (保存済みのタイトルで引いたもの) */
+  backlinks: ArticleBacklink[];
 }) {
   const [values, setValues] = useState(initial);
   const set = <K extends keyof ArticleEditFormValues>(key: K, v: ArticleEditFormValues[K]) =>
@@ -89,12 +97,18 @@ export function ArticleEditor({
   );
 
   const [placeIds, setPlaceIds] = useState(initialPlaceIds);
-  /** 横で読んでいる出典。開いている間は右の欄を出典の中身に差し替える */
-  const [openSourceId, setOpenSourceId] = useState<string | null>(null);
+  const [related, setRelated] = useState(initialRelated);
+  /** 右の欄に出しているもの。出典 (id) か記事パネル。どちらでもなければ frontmatter の欄 */
+  const [side, setSide] = useState<{ kind: "source"; id: string } | { kind: "articles" } | null>(null);
+  const openSourceId = side?.kind === "source" ? side.id : null;
+  const setOpenSourceId = (id: string | null) => setSide(id ? { kind: "source", id } : null);
+  const editorRef = useRef<MarkdownEditorHandle>(null);
 
   // 離脱時の警告。初期値との比較は雑でよい (JSON で足りる)
   const changed =
-    JSON.stringify(values) !== JSON.stringify(initial) || JSON.stringify(placeIds) !== JSON.stringify(initialPlaceIds);
+    JSON.stringify(values) !== JSON.stringify(initial) ||
+    JSON.stringify(placeIds) !== JSON.stringify(initialPlaceIds) ||
+    JSON.stringify(related) !== JSON.stringify(initialRelated);
   useEffect(() => {
     if (!changed) return;
     const handler = (e: BeforeUnloadEvent) => {
@@ -169,10 +183,15 @@ export function ArticleEditor({
       action={formAction}
       className={cn(
         "grid grid-cols-1 gap-6 items-start",
-        openSourceId ? "lg:grid-cols-[1fr_440px]" : "lg:grid-cols-[1fr_320px]"
+        side?.kind === "source" ? "lg:grid-cols-[1fr_440px]" : side?.kind === "articles" ? "lg:grid-cols-[1fr_380px]" : "lg:grid-cols-[1fr_320px]"
       )}
     >
       <input type="hidden" name="updatedAt" value={updatedAt} />
+      {/* 関連記事 (#319)。パネルの開閉に依らず送る */}
+      <input type="hidden" name="relatedField" value="1" />
+      {related.map((t) => (
+        <input key={t} type="hidden" name="related" value={t} />
+      ))}
 
       {/* 本文 */}
       <div className="min-w-0">
@@ -203,6 +222,7 @@ export function ArticleEditor({
           disabled={isSaving}
           candidates={linkCandidates}
           className={cn(tab !== "edit" && "hidden")}
+          ref={editorRef}
         />
 
         {tab === "preview" && (
@@ -241,8 +261,48 @@ export function ArticleEditor({
             onClose={() => setOpenSourceId(null)}
           />
         )}
-        {/* 出典を読んでいる間は隠すだけ (外すと送信に入力が乗らない) */}
-        <div className={cn("space-y-4", openSourceId && "hidden")}>
+        {side?.kind === "articles" && (
+          <ArticlePanel
+            candidates={linkCandidates}
+            related={related}
+            onRelatedChange={setRelated}
+            backlinks={backlinks}
+            onInsert={(title) => {
+              setTab("edit");
+              editorRef.current?.insertAtCursor(`[[${title}]]`);
+            }}
+            onClose={() => setSide(null)}
+            disabled={isSaving}
+          />
+        )}
+        {/* 出典・記事パネルを出している間は隠すだけ (外すと送信に入力が乗らない) */}
+        <div className={cn("space-y-4", side && "hidden")}>
+        {/* 記事のつながり (#319) */}
+        <div className="bg-white border border-slate-200 rounded-lg p-4">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <h2 className="text-sm font-medium text-slate-700">記事のつながり</h2>
+            <button
+              type="button"
+              onClick={() => setSide({ kind: "articles" })}
+              className="shrink-0 px-2 py-1 rounded border border-slate-300 text-xs text-slate-600 hover:bg-slate-50"
+            >
+              記事パネルを開く
+            </button>
+          </div>
+          <p className="text-xs text-slate-500">
+            関連記事 {related.length} 件 ・ この記事を参照している記事 {backlinks.length} 件
+          </p>
+          {related.length > 0 && (
+            <ol className="mt-1 text-xs text-slate-700 list-decimal list-inside">
+              {related.map((t) => (
+                <li key={t} className="truncate">
+                  {t}
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+
         <div className="bg-white border border-slate-200 rounded-lg p-4 space-y-3">
           <div>
             <label htmlFor="title" className={LABEL}>

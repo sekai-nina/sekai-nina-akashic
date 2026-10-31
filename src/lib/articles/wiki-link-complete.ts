@@ -9,6 +9,7 @@ import type { ArticleType } from "@prisma/client";
 
 /** 補完の候補 1 件。ページ表示時にサーバーから渡す */
 export interface WikiLinkCandidate {
+  shortId: string;
   title: string;
   type: ArticleType | null;
   draft: boolean;

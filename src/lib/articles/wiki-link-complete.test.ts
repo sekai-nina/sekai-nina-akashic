@@ -6,7 +6,7 @@ import {
   type WikiLinkCandidate,
 } from "./wiki-link-complete";
 
-const c = (title: string): WikiLinkCandidate => ({ title, type: null, draft: false, unlisted: false });
+const c = (title: string): WikiLinkCandidate => ({ shortId: "x", title, type: null, draft: false, unlisted: false });
 
 describe("findWikiLinkQuery", () => {
   it("書きかけの [[ を拾う", () => {

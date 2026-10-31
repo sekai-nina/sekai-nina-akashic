@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import type { ArticleBacklinkVia } from "@/lib/articles/related";
 import type { CandidateGroupKind } from "@/lib/meetgreet/candidates";
 import type { ExclusionKind } from "@/lib/meetgreet/types";
 import type { NinaAppearance } from "@/lib/nina";
@@ -386,6 +387,12 @@ export const ARTICLE_FLAG_LABELS = {
   unlisted: "限定公開",
   ongoing: "進行中",
 } as const;
+
+/** 記事パネルの被リンク (#319): どこから参照しているか */
+export const ARTICLE_BACKLINK_VIA_LABELS: Record<ArticleBacklinkVia, string> = {
+  body: "本文で参照",
+  related: "関連記事に登録",
+};
 
 /** 状態バッジの配色。/status と /costs で共有する */
 export const STATUS_LEVEL_BADGE: Record<StatusLevel, string> = {

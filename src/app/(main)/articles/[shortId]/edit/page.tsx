@@ -1,7 +1,13 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { getArticleByShortId, listArticleLinkCandidates, listArticleTags } from "@/lib/domain/articles";
+import {
+  getArticleByShortId,
+  listArticleBacklinks,
+  listArticleLinkCandidates,
+  listArticleTags,
+} from "@/lib/domain/articles";
+import { readRelated } from "@/lib/articles/related";
 import { listArticlePlaces } from "@/lib/domain/article-places";
 import { listPlaces } from "@/lib/domain/places";
 import { isPublishablePlace } from "@/lib/articles/frontmatter";
@@ -19,7 +25,8 @@ import "katex/dist/katex.min.css";
  * 聖地 (ArticlePlace = locations の place_id) もここで付け外しする (#283)。非公開の聖地は
  * akashic の中だけの紐づけになり、push の locations には出ない。
  *
- * `frontmatterExtra` (featured_quotes / 座標直書きの locations / dossier 等) と出典 (ArticleSource) は
+ * 関連記事 (`frontmatterExtra.related`) は記事パネルで編集する (#319)。
+ * それ以外の `frontmatterExtra` (featured_quotes / 座標直書きの locations / dossier 等) と出典 (ArticleSource) は
  * ここでは触らせない。前者は push 時にそのまま復元され、後者は pending → applied の遷移と
  * 一緒に別の画面 (PR3) で扱う。
  *
@@ -42,9 +49,13 @@ export default async function ArticleEditPage({
     listArticleLinkCandidates(shortId),
   ]);
   if (!article) notFound();
-  const articlePlaces = await listArticlePlaces(article.id, session.user.clearance);
+  const [articlePlaces, backlinks] = await Promise.all([
+    listArticlePlaces(article.id, session.user.clearance),
+    listArticleBacklinks(article.title, article.shortId),
+  ]);
 
-  const extraKeys = frontmatterExtraKeys(article);
+  // related は記事パネルで編集できるので「触れない」一覧から外す
+  const extraKeys = frontmatterExtraKeys(article).filter((k) => k !== "related");
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -81,6 +92,8 @@ export default async function ArticleEditPage({
           published: isPublishablePlace(p),
         }))}
         linkCandidates={linkCandidates}
+        initialRelated={readRelated(article.frontmatterExtra)}
+        backlinks={backlinks}
       />
     </div>
   );
