@@ -212,16 +212,43 @@ function placeCard(place: DossierPlace, url: string): string {
   );
 }
 
+const CARD_BLOCK = /^```cardlink\n((?:(?!```)[^\n]*\n)*?)```$/gm;
+
+/** カードの名前の比べ方 (placeCard は " を ' にして書く) */
+const cardName = (name: string) => name.replace(/"/g, "'").trim();
+
+/**
+ * 本文に既にあるカードの URL と名前。同じ場所のカードかは URL か名前で見る
+ * (企画の候補の URL と聖地の URL が違うことがある。聖地に URL が無いと座標の検索 URL になる)
+ */
+function existingCards(body: string): { urls: Set<string>; names: Set<string> } {
+  const urls = new Set<string>();
+  const names = new Set<string>();
+  for (const m of body.matchAll(CARD_BLOCK)) {
+    const url = m[1].match(/^url:\s*(\S+)/m)?.[1];
+    const title = m[1].match(/^title:\s*"?(.+?)"?\s*$/m)?.[1];
+    if (url) urls.add(url);
+    if (title) names.add(cardName(title));
+  }
+  return { urls, names };
+}
+
+const hasCardFor = (cards: { urls: Set<string>; names: Set<string> }, c: { url: string; place: DossierPlace }) =>
+  cards.urls.has(c.url) || cards.names.has(cardName(c.place.name));
+
 /**
  * 前に置いた場所のカードへ、まだ無い `place_id:` / `lat:` / `lng:` の行を足す。
- * 同じ URL の場所のカードだけ。ほかの行と、カード以外の本文は触らない。`names` は足した場所
+ * 同じ URL か同じ名前の場所のカードだけ。ほかの行と、カード以外の本文は触らない。`names` は足した場所
  */
 export function addCardPlaceFields(body: string, places: DossierPlace[]): { body: string; names: string[] } {
-  const byUrl = new Map(cardPlaces(places).map((c) => [c.url, c.place]));
+  const all = cardPlaces(places);
+  const byUrl = new Map(all.map((c) => [c.url, c.place]));
+  const byName = new Map(all.map((c) => [cardName(c.place.name), c.place]));
   const names: string[] = [];
-  const out = body.replace(/^```cardlink\n((?:(?!```)[^\n]*\n)*?)```$/gm, (whole, inner: string) => {
+  const out = body.replace(CARD_BLOCK, (whole, inner: string) => {
     const url = inner.match(/^url:\s*(\S+)/m)?.[1];
-    const place = url ? byUrl.get(url) : undefined;
+    const title = inner.match(/^title:\s*"?(.+?)"?\s*$/m)?.[1];
+    const place = (url ? byUrl.get(url) : undefined) ?? (title ? byName.get(cardName(title)) : undefined);
     if (!place) return whole;
     const missing = placeFieldLines(place).filter((line) => !new RegExp(`^${line.split(":")[0]}:`, "m").test(inner));
     if (missing.length === 0) return whole;
@@ -239,13 +266,13 @@ const PLACE_MARKER = /^[ \t]*\{\{場所:(\d+)\}\}[ \t]*$/gm;
  */
 export function expandPlaceCards(body: string, places: DossierPlace[]): string {
   const byNo = new Map(cardPlaces(places).map((c) => [c.no, c]));
-  const placed = new Set<string>();
-  for (const m of body.matchAll(/```cardlink\n(?:(?!```)[^\n]*\n)*?url:\s*(\S+)/g)) placed.add(m[1]);
+  const placed = existingCards(body);
   return body
     .replace(PLACE_MARKER, (_whole, k: string) => {
       const c = byNo.get(Number(k));
-      if (!c || placed.has(c.url)) return "";
-      placed.add(c.url);
+      if (!c || hasCardFor(placed, c)) return "";
+      placed.urls.add(c.url);
+      placed.names.add(cardName(c.place.name));
       return placeCard(c.place, c.url);
     })
     .replace(/\n{3,}/g, "\n\n");
@@ -293,15 +320,16 @@ export function insertPlaceCards(
       return { heading: lines[start].slice(3).trim(), end, text: lines.slice(start, end).join("\n").toLowerCase() };
     });
 
-  const placed = new Set([...body.matchAll(/```cardlink\n(?:(?!```)[^\n]*\n)*?url:\s*(\S+)/g)].map((m) => m[1]));
+  const placed = existingCards(body);
   /** 差し込む行番号 → カード (同じ行番号は場所の順) */
   const inserts = new Map<number, string[]>();
   const placements: { name: string; heading: string | null }[] = [];
   const all = cardPlaces(places);
   const hits = all.map((c) => sections.find((s) => placeKeys(c.place.name).some((k) => s.text.includes(k))));
   for (const [n, c] of all.entries()) {
-    if (placed.has(c.url)) continue;
-    placed.add(c.url);
+    if (hasCardFor(placed, c)) continue;
+    placed.urls.add(c.url);
+    placed.names.add(cardName(c.place.name));
     // 名前が出てこない場所 (「コロッケを食べた場所」等) は、訪問順で直前、無ければ直後の場所と同じ節
     const hit = hits[n] ?? hits.slice(0, n).findLast(Boolean) ?? hits.slice(n + 1).find(Boolean);
     const at = hit?.end ?? tailAt;
