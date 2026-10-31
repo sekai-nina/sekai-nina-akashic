@@ -1705,12 +1705,20 @@ async function markPushed(pushed: PushedItem[], unchanged: PushedItem[]): Promis
  */
 export async function pushDirtyArticles(
   subject?: string | null,
-  /** 1 本だけ push する (bot が自分の書いた記事だけを出す。#209)。省略で dirty 全部 */
-  only?: { shortId: string },
+  /**
+   * 絞り込み。省略で dirty 全部。
+   * - `shortId`: 1 本だけ (bot が自分の書いた記事だけを出す。#209)
+   * - `shortIds`: push 画面で選んだ記事だけ (#328)。dirty でないものは混ざっても無視される
+   */
+  only?: { shortId: string } | { shortIds: string[] },
 ): Promise<PushArticlesResult> {
   if (!isGithubConfigured()) throw new Error("ARTICLES_GITHUB_TOKEN が設定されていません");
 
-  const where: Prisma.ArticleWhereInput = only ? { dirty: true, shortId: only.shortId } : { dirty: true };
+  const where: Prisma.ArticleWhereInput = !only
+    ? { dirty: true }
+    : "shortId" in only
+      ? { dirty: true, shortId: only.shortId }
+      : { dirty: true, shortId: { in: only.shortIds } };
   const [rendered, { head, tree }] = await Promise.all([renderArticlesForPush(where), readUpstream()]);
   const plan = planPush(rendered, tree);
   const result: PushArticlesResult = {

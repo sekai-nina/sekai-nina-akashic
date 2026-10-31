@@ -11,7 +11,8 @@ export type PushActionState =
   | { ok: false; error: string };
 
 /**
- * dirty な記事を GitHub に一括 push する。**admin のみ。**
+ * 選んだ dirty な記事を GitHub に 1 コミットで push する (#328)。**admin のみ。**
+ * 「内容が同じ」記事 (コミットに載らず未 push の印だけ外す) は画面が `shortIds` に混ぜて送る。
  *
  * 公開リポジトリへの書き込みなので、他の書き込み系 (admin / member) より狭くする。
  * 認可の失敗は他の Server Action と同じく throw (UI は admin にしかボタンを出さない)。
@@ -19,13 +20,16 @@ export type PushActionState =
  * 「tree を読んでから commit するまでにブランチが進んだ」= 別経路の push と
  * 重なったときなので、読み直して再実行してもらう。
  */
-export async function pushArticlesAction(subject: string): Promise<PushActionState> {
+export async function pushArticlesAction(subject: string, shortIds: string[]): Promise<PushActionState> {
   const session = await auth();
   if (!session?.user) throw new Error("Unauthorized");
   if (session.user.role !== "admin") throw new Error("Forbidden");
+  // 選んだ記事だけ push する (#328)。空なら何もしない (全部 push に化けさせない)
+  const ids = [...new Set(shortIds.filter((id) => typeof id === "string" && /^[0-9A-Za-z]{7}$/.test(id)))];
+  if (!ids.length) return { ok: false, error: "push する記事が選ばれていません" };
 
   try {
-    const result = await pushDirtyArticles(subject);
+    const result = await pushDirtyArticles(subject, { shortIds: ids });
     if (result.commit) {
       await logAudit({
         actorId: session.user.id,
