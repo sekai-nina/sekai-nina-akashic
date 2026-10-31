@@ -95,3 +95,18 @@ function isStrictlyHigher(a: ClearanceLevel | string, b: ClearanceLevel | string
   if (levelA === undefined || levelB === undefined) return true;
   return levelA > levelB;
 }
+
+/**
+ * アップロードで付ける機密レベル。指定が無ければ internal (送り主のクリアランスが
+ * それより低ければ送り主に合わせる)。**送り主のクリアランスを既定にしない。** bot は管理者の
+ * API キーで送るので、管理者を restricted に上げた途端に取り込みが全部 restricted になり、
+ * メンバーにも記事にも出なくなった (2026-10-29)。知らない値は null (= 400 で返す)
+ */
+export function uploadClassification(
+  requested: string | null | undefined,
+  uploaderClearance: ClearanceLevel | string
+): ClearanceLevel | null {
+  if (requested) return Object.hasOwn(LEVEL_ORDER, requested) ? (requested as ClearanceLevel) : null;
+  const uploaderLevel = LEVEL_ORDER[uploaderClearance as ClearanceLevel] ?? LEVEL_ORDER.public;
+  return uploaderLevel < LEVEL_ORDER.internal ? (uploaderClearance as ClearanceLevel) : "internal";
+}

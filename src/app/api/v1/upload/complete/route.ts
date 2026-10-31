@@ -7,6 +7,7 @@ import { logAudit } from "@/lib/domain/audit";
 import { generateAndUploadThumbnails } from "@/lib/thumbnails";
 import type { AssetKind, AssetStatus, StorageProvider, SourceType } from "@prisma/client";
 import { guessMimeKind } from "@/lib/mime";
+import { uploadClassification } from "@/lib/classification";
 
 export async function POST(request: Request) {
   const auth = await requireApiAuth(request, "write");
@@ -44,7 +45,10 @@ export async function POST(request: Request) {
     classification?: string;
   };
 
-  const classification = (body as { classification?: string }).classification as "public" | "internal" | "confidential" | "restricted" || auth.clearance as "public" | "internal" | "confidential" | "restricted";
+  const classification = uploadClassification((body as { classification?: string }).classification, auth.clearance);
+  if (!classification) {
+    return NextResponse.json({ error: "classification is invalid" }, { status: 400 });
+  }
 
   if (!driveFileId || !sha256) {
     return NextResponse.json(
