@@ -895,7 +895,9 @@ model Article {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  sources       ArticleSource[]
+  sources       ArticleSource[] @relation("ArticleSources")
+  /// この記事を出典にしている行 (#320)
+  citedBy       ArticleSource[] @relation("ArticleSourceRefArticle")
   places        ArticlePlace[]
   meetGreet     MeetGreet?
   live          Live?
@@ -914,7 +916,13 @@ model Article {
 model ArticleSource {
   id        String  @id @default(cuid())
   articleId String
-  article   Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  article   Article @relation("ArticleSources", fields: [articleId], references: [id], onDelete: Cascade)
+
+  /// 出典が別の記事のとき、その記事 (#320)。frontmatter には `url: /articles/<shortId>` を書く
+  /// (`url` 列にも同じ値を持つので、参照先が消されて SetNull になっても出典は残る)。
+  /// 公開サイトは label の無い記事出典にその時のタイトルを出すので、改題に追従する
+  refArticleId String?
+  refArticle   Article? @relation("ArticleSourceRefArticle", fields: [refArticleId], references: [id], onDelete: SetNull)
 
   /// unresolved のときは null。Asset が後から消されても SetNull で null になる
   /// (元ファイルに ref があった行は originalRef に残るので、push でその ref は消えない)
@@ -953,6 +961,7 @@ model ArticleSource {
 
   @@index([articleId])
   @@index([assetId])
+  @@index([refArticleId])
   @@index([status])
   @@index([classification])
 }
