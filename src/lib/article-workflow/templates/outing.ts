@@ -219,6 +219,77 @@ export function expandPlaceCards(body: string, places: DossierPlace[]): string {
     .replace(/\n{3,}/g, "\n\n");
 }
 
+/** 本文の後ろに付く節。カードはこれより前に置く */
+const TAIL_HEADING = /^## (関連メディア|補足|おまけ)\s*$/;
+
+/**
+ * 本文から場所を探す言い方。正式名、空白抜き、「前」「付近」を落とした名前 (「クイーンズスクエア前」)、
+ * 先頭の語 (「鵬天閣 新館」→「鵬天閣」。英字だけの短い語は誤爆するので使わない)
+ */
+function placeKeys(name: string): string[] {
+  const keys = new Set([name, name.replace(/\s+/g, "")]);
+  const near = name.replace(/\s*(前|付近|周辺)$/, "");
+  if (near !== name && near.length >= 2) keys.add(near);
+  const head = name.split(/\s+/)[0];
+  if (head !== name && (/[^\x00-\x7f]/.test(head) ? head.length >= 2 : head.length >= 5)) keys.add(head);
+  return [...keys].map((k) => k.toLowerCase());
+}
+
+/**
+ * ワークフローの外で書いた・#313 より前の記事に、場所のカードを後から置く (#324)。
+ * 場所の名前が出てくる最初の `##` の末尾。出てこなければ訪問順で前後の場所と同じ節、どれも出てこなければ
+ * 本文の最後 (`## 関連メディア` / `## 補足` / `## おまけ` の前)。
+ * カードは `expandPlaceCards` と同じ形。同じ URL のカードが本文にあれば足さない。
+ * `placements` は置いた場所と、その節の見出し (本文の最後に回したものは null)
+ */
+export function insertPlaceCards(
+  body: string,
+  places: DossierPlace[],
+): { body: string; placements: { name: string; heading: string | null }[] } {
+  const lines = body.split("\n");
+  const headings: number[] = [];
+  let inFence = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].startsWith("```")) inFence = !inFence;
+    else if (!inFence && lines[i].startsWith("## ")) headings.push(i);
+  }
+  const tailAt = headings.find((i) => TAIL_HEADING.test(lines[i])) ?? lines.length;
+  const sections = headings
+    .filter((i) => i < tailAt)
+    .map((start, n, arr) => {
+      const end = arr[n + 1] ?? tailAt;
+      return { heading: lines[start].slice(3).trim(), end, text: lines.slice(start, end).join("\n").toLowerCase() };
+    });
+
+  const placed = new Set([...body.matchAll(/```cardlink\n(?:(?!```)[^\n]*\n)*?url:\s*(\S+)/g)].map((m) => m[1]));
+  /** 差し込む行番号 → カード (同じ行番号は場所の順) */
+  const inserts = new Map<number, string[]>();
+  const placements: { name: string; heading: string | null }[] = [];
+  const all = cardPlaces(places);
+  const hits = all.map((c) => sections.find((s) => placeKeys(c.place.name).some((k) => s.text.includes(k))));
+  for (const [n, c] of all.entries()) {
+    if (placed.has(c.url)) continue;
+    placed.add(c.url);
+    // 名前が出てこない場所 (「コロッケを食べた場所」等) は、訪問順で直前、無ければ直後の場所と同じ節
+    const hit = hits[n] ?? hits.slice(0, n).findLast(Boolean) ?? hits.slice(n + 1).find(Boolean);
+    const at = hit?.end ?? tailAt;
+    inserts.set(at, [...(inserts.get(at) ?? []), placeCard(c.place.name, c.url)]);
+    placements.push({ name: c.place.name, heading: hit?.heading ?? null });
+  }
+  if (inserts.size === 0) return { body, placements };
+
+  // 差し込む所の前後にだけ空行を足す (本文のほかの空行は触らない。push の差分をカードだけにする)
+  const out: string[] = [];
+  for (let i = 0; i <= lines.length; i++) {
+    for (const card of inserts.get(i) ?? []) {
+      if (out.length && out[out.length - 1] !== "") out.push("");
+      out.push(card, "");
+    }
+    if (i < lines.length && !(lines[i] === "" && out[out.length - 1] === "" && inserts.has(i))) out.push(lines[i]);
+  }
+  return { body: out.join("\n"), placements };
+}
+
 /**
  * 場所候補をプロンプトに。渡すのは名前・住所だけ (`outing_brief.py` と同じ)。URL は渡さず、
  * カードを置ける場所に番号 (`{{場所:K}}`) を振る。
