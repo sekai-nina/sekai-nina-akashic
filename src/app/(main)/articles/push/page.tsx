@@ -55,7 +55,8 @@ function Section({
 }
 
 /**
- * 未 push (dirty) の記事を GitHub に一括で書き出す画面。**admin のみ。**
+ * 未 push (dirty) の記事を GitHub に書き出す画面。**admin のみ。**
+ * 「push 可」の記事から選んだものだけを 1 コミットで push する (#328)。
  *
  * dirty な記事を全件組み立てて GitHub の tree と突き合わせ、
  * 「衝突 / 公開以外の出典あり / push 可 / 内容が同じ」に分けて見せる。
@@ -116,9 +117,16 @@ export default async function ArticlePushPage() {
           </p>
 
           <PushForm
-            count={plan.ok.length}
-            unchangedCount={plan.unchanged.length}
-            defaultSubject={defaultCommitSubject(plan.ok.length)}
+            pushable={plan.ok.map((i) => ({
+              shortId: i.article.shortId,
+              title: i.article.title,
+              path: i.article.path,
+              isNew: i.kind === "ok" && i.isNew,
+            }))}
+            unchangedShortIds={plan.unchanged.map((i) => i.article.shortId)}
+            defaultSubjectFor={Object.fromEntries(
+              Array.from({ length: plan.ok.length + 1 }, (_, n) => [n, defaultCommitSubject(n)]),
+            )}
           />
 
           <Section
@@ -144,13 +152,6 @@ export default async function ArticlePushPage() {
             {ARTICLE_SOURCE_STATUS_LABELS.applied} / {ARTICLE_SOURCE_STATUS_LABELS.unresolved} なのに機密レベルが「公開」でない出典があります。
             本文が参照している脚注が消えてしまうので push しません。出典を「公開」にするか外してから、この画面を開き直してください
           </Section>
-
-          <Section
-            title="push 可"
-            badge="bg-emerald-100 text-emerald-700"
-            items={plan.ok}
-            renderNote={(i) => (i.kind === "ok" && i.isNew ? "新規ファイル" : null)}
-          />
 
           <Section title="内容が同じ" badge="bg-slate-100 text-slate-600" items={plan.unchanged}>
             組み立てた Markdown が GitHub 側と同じ blob です。コミットには載せず、push 時に未 push の印だけ外します
