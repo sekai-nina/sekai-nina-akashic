@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useImperativeHandle, useRef, type Ref } from "react";
-import { Compartment, EditorState, Transaction } from "@codemirror/state";
+import { Compartment, EditorState, StateEffect, Transaction } from "@codemirror/state";
 import {
   Decoration,
   EditorView,
@@ -49,6 +49,7 @@ export function MarkdownEditor({
   onChange,
   disabled,
   candidates,
+  knownSourceNos,
   className,
   ref,
 }: {
@@ -56,6 +57,8 @@ export function MarkdownEditor({
   onChange: (value: string) => void;
   disabled?: boolean;
   candidates: WikiLinkCandidate[];
+  /** 出典がある脚注番号 (保存前の予約も含む)。無い番号の ^[n] は赤で出す */
+  knownSourceNos: number[];
   className?: string;
   ref?: Ref<MarkdownEditorHandle>;
 }) {
@@ -69,6 +72,12 @@ export function MarkdownEditor({
   const lastSent = useRef(value);
   /** 一度でもカーソルを置いたか (挿入先の判断に使う) */
   const touched = useRef(false);
+  const knownRef = useRef<ReadonlySet<number>>(new Set(knownSourceNos));
+  const knownKey = [...knownSourceNos].sort((a, b) => a - b).join(",");
+  useEffect(() => {
+    knownRef.current = new Set(knownKey ? knownKey.split(",").map(Number) : []);
+    viewRef.current?.dispatch({ effects: refreshMarks.of(null) });
+  }, [knownKey]);
   useEffect(() => {
     onChangeRef.current = onChange;
     candidatesRef.current = candidates;
@@ -83,9 +92,11 @@ export function MarkdownEditor({
         extensions: [
           history(),
           keymap.of([...completionKeymap, ...defaultKeymap, ...historyKeymap]),
-          markdown({ base: markdownLanguage }),
+          // `^…^` の上付き文字・`~…~` の下付き文字は公開サイト (remark) に無い記法。残すと
+          // `^[1]^[2]` の間が上付き文字と読まれて脚注の色が付かない
+          markdown({ base: markdownLanguage, extensions: [{ remove: ["Superscript", "Subscript"] }] }),
           syntaxHighlighting(highlightStyle),
-          articleMarks,
+          articleMarks(() => knownRef.current),
           autocompletion({
             override: [(ctx) => wikiLinkSource(ctx, candidatesRef.current)],
             icons: false,
@@ -191,26 +202,40 @@ function wikiLinkSource(ctx: CompletionContext, candidates: WikiLinkCandidate[])
   };
 }
 
-/** `[[記事]]` と脚注 `^[n]` に印を付ける (Markdown の文法には無いので正規表現で) */
-const articleMarkDecorator = new MatchDecorator({
-  regexp: /\[\[[^\[\]\n]+\]\]|\^\[\d+\]/g,
-  decoration: (m) => (m[0].startsWith("[[") ? wikiLinkMark : footnoteMark),
-});
+/** 出典の番号が変わったとき、脚注の色を塗り直させる */
+const refreshMarks = StateEffect.define<null>();
+
+/**
+ * `[[記事]]` と脚注 `^[n]` に印を付ける (Markdown の文法には無いので正規表現で)。
+ * 脚注は宛先の出典があるか (`knownSourceNos()`) で色を変える
+ */
+function articleMarks(knownSourceNos: () => ReadonlySet<number>) {
+  const decorator = new MatchDecorator({
+    regexp: /\[\[[^\[\]\n]+\]\]|\^\[(\d+)\]/g,
+    decoration: (m) =>
+      m[0].startsWith("[[") ? wikiLinkMark : knownSourceNos().has(Number(m[1])) ? footnoteMark : danglingFootnoteMark,
+  });
+  return ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet;
+      constructor(view: EditorView) {
+        this.decorations = decorator.createDeco(view);
+      }
+      update(u: ViewUpdate) {
+        this.decorations = u.transactions.some((t) => t.effects.some((e) => e.is(refreshMarks)))
+          ? decorator.createDeco(u.view)
+          : decorator.updateDeco(u, this.decorations);
+      }
+    },
+    { decorations: (v) => v.decorations },
+  );
+}
 const wikiLinkMark = Decoration.mark({ class: "cm-wiki-link" });
 const footnoteMark = Decoration.mark({ class: "cm-footnote-ref" });
-
-const articleMarks = ViewPlugin.fromClass(
-  class {
-    decorations: DecorationSet;
-    constructor(view: EditorView) {
-      this.decorations = articleMarkDecorator.createDeco(view);
-    }
-    update(u: ViewUpdate) {
-      this.decorations = articleMarkDecorator.updateDeco(u, this.decorations);
-    }
-  },
-  { decorations: (v) => v.decorations },
-);
+const danglingFootnoteMark = Decoration.mark({
+  class: "cm-footnote-ref cm-footnote-dangling",
+  attributes: { title: "この番号の出典がありません" },
+});
 
 const highlightStyle = HighlightStyle.define([
   { tag: tags.heading1, fontWeight: "700", fontSize: "1.25em", color: "#0f172a" },
@@ -236,7 +261,13 @@ const theme = EditorView.theme({
   ".cm-content": { padding: "0.375rem 0.75rem" },
   ".cm-line": { padding: "0" },
   ".cm-wiki-link": { color: "#2563eb", backgroundColor: "#eff6ff", borderRadius: "2px" },
-  ".cm-footnote-ref": { color: "#64748b" },
+  // 脚注は常に青。`[n]` は Markdown のリンクとしても色が付くので、内側の span ごと揃える
+  ".cm-footnote-ref, .cm-footnote-ref *": { color: "#2563eb !important" },
+  // 宛先の出典が無い ^[n] は赤の波線
+  ".cm-footnote-dangling, .cm-footnote-dangling *": {
+    color: "#dc2626 !important",
+    textDecoration: "underline wavy #dc2626",
+  },
   ".cm-tooltip.cm-tooltip-autocomplete > ul": { fontFamily: "inherit", maxHeight: "16rem" },
   ".cm-tooltip.cm-tooltip-autocomplete > ul > li": { padding: "0.25rem 0.5rem" },
   ".cm-completionDetail": { marginLeft: "0.75rem", color: "#94a3b8", fontStyle: "normal", fontSize: "0.75rem" },
