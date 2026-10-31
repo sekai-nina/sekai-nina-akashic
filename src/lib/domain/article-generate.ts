@@ -1196,7 +1196,9 @@ export async function proposeMerge(
   options: { manual?: boolean } = {}
 ): Promise<MergeProposalResult> {
   const { resolved, dossierId, input, article, plan, excluded, fresh, strayFresh } = await prepareMerge(user, target);
-  if (plan.newSources.length === 0 && fresh.length === 0) {
+  // 載っている出典の画像 (同じブログの別の画像など) は新しい出典にならず、関連メディアの行 (changedLines) だけが増える。
+  // それも無いときだけ「足せる素材が無い」にする (行だけ増えるクリップを組み込めずに止めていた)
+  if (plan.newSources.length === 0 && fresh.length === 0 && plan.changedLines.length === 0) {
     // 反映待ちには出るのに出典の番号に結びつかないメモ (番号の無い古い出典など) だけがある。
     // 本文はそのままの案を返し、保存で取り込み済みにできるようにする (反映待ちに居座らせない)
     if (strayFresh) {
