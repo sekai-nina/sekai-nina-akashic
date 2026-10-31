@@ -19,6 +19,8 @@ import { FootnoteAuditWarnings } from "../footnote-audit-warnings";
 import { TagInput } from "./tag-input";
 import { PlacePicker, type PlaceOption } from "./place-picker";
 import { SourceViewer } from "./source-viewer";
+import { MarkdownEditor } from "./markdown-editor";
+import type { WikiLinkCandidate } from "@/lib/articles/wiki-link-complete";
 import { isListArticle } from "@/lib/articles/list-article";
 
 declare global {
@@ -48,7 +50,7 @@ const LABEL = "block text-sm font-medium text-slate-700 mb-1";
  * - 入力はすべて制御コンポーネント。`<form action>` は完了時に非制御の欄を reset するので、
  *   保存に失敗 (楽観ロックの衝突など) したとき入力を残すため
  * - プレビューはタブ切替時に Server Action で 1 回だけ描画する (詳細と同じパイプライン)。
- *   textarea はタブに依らずマウントしたままにする (外すと送信に body が乗らない)
+ *   本文のエディタはタブに依らずマウントしたままにする (編集中のカーソル・取り消し履歴を保つ)
  * - 保存は Server Action。成功すると詳細へ redirect されるのでここには戻らない
  */
 export function ArticleEditor({
@@ -60,6 +62,7 @@ export function ArticleEditor({
   sources,
   initialPlaceIds,
   placeOptions,
+  linkCandidates,
 }: {
   shortId: string;
   /** 楽観ロック用。読み込んだ時点の Article.updatedAt (ISO) */
@@ -73,6 +76,8 @@ export function ArticleEditor({
   initialPlaceIds: string[];
   /** 追加できる聖地 (操作者に見える全件) */
   placeOptions: PlaceOption[];
+  /** 本文の `[[` で補完する記事 (この記事を除く全件) */
+  linkCandidates: WikiLinkCandidate[];
 }) {
   const [values, setValues] = useState(initial);
   const set = <K extends keyof ArticleEditFormValues>(key: K, v: ArticleEditFormValues[K]) =>
@@ -190,13 +195,14 @@ export function ArticleEditor({
         </div>
         {fieldError("body") && <p className="text-xs text-red-600 mb-1">{fieldError("body")}</p>}
 
-        <textarea
-          name="body"
+        {/* 送信はこの hidden input が持つ (エディタはタブに依らずマウントしたまま) */}
+        <input type="hidden" name="body" value={values.body} />
+        <MarkdownEditor
           value={values.body}
-          onChange={(e) => set("body", e.target.value)}
+          onChange={(v) => set("body", v)}
           disabled={isSaving}
-          spellCheck={false}
-          className={cn(INPUT, "font-mono leading-relaxed min-h-[60vh] resize-y", tab !== "edit" && "hidden")}
+          candidates={linkCandidates}
+          className={cn(tab !== "edit" && "hidden")}
         />
 
         {tab === "preview" && (

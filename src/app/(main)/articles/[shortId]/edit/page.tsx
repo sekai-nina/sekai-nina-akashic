@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { getArticleByShortId, listArticleTags } from "@/lib/domain/articles";
+import { getArticleByShortId, listArticleLinkCandidates, listArticleTags } from "@/lib/domain/articles";
 import { listArticlePlaces } from "@/lib/domain/article-places";
 import { listPlaces } from "@/lib/domain/places";
 import { isPublishablePlace } from "@/lib/articles/frontmatter";
@@ -35,10 +35,11 @@ export default async function ArticleEditPage({
   const { shortId } = await params;
   if (!["admin", "member"].includes(session.user.role)) redirect(`/articles/${shortId}`);
 
-  const [article, tagOptions, places] = await Promise.all([
+  const [article, tagOptions, places, linkCandidates] = await Promise.all([
     getArticleByShortId(shortId, session.user.clearance),
     listArticleTags(),
     listPlaces(session.user.clearance),
+    listArticleLinkCandidates(shortId),
   ]);
   if (!article) notFound();
   const articlePlaces = await listArticlePlaces(article.id, session.user.clearance);
@@ -79,6 +80,7 @@ export default async function ArticleEditPage({
           area: p.area,
           published: isPublishablePlace(p),
         }))}
+        linkCandidates={linkCandidates}
       />
     </div>
   );
