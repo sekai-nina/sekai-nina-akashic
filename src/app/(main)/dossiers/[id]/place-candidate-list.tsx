@@ -5,10 +5,12 @@ import Link from "next/link";
 import { Plus, X, ExternalLink, Trash2, MapPin, BadgeCheck } from "lucide-react";
 import { DynamicMap } from "@/components/dynamic-map";
 import { PlaceLookup } from "@/components/place-lookup";
-import { PLACE_CLASSIFICATION_LABELS } from "@/lib/utils";
-import type { ClearanceLevel } from "@prisma/client";
+import { PLACE_CERTAINTY_LABELS, PLACE_CLASSIFICATION_LABELS } from "@/lib/utils";
+import { CERTAINTY_NOTE_INPUT, CERTAINTY_NOTE_PLACEHOLDER, CertaintyToggle } from "@/components/certainty-toggle";
+import type { ClearanceLevel, PlaceCertainty } from "@prisma/client";
 import {
   addPlaceCandidateAction,
+  updatePlaceCandidateAction,
   removePlaceCandidateAction,
   promotePlaceCandidateAction,
   updateCandidatePlaceClassificationAction,
@@ -31,7 +33,8 @@ type Candidate = {
   address: string | null;
   googleMapsUrl: string | null;
   note: string;
-  confidence: number;
+  certainty: PlaceCertainty;
+  certaintyNote: string;
   place: {
     id: string;
     status: string;
@@ -44,7 +47,7 @@ interface PlaceCandidateListProps {
   dossierId: string;
   candidates: Candidate[];
   editable: boolean;
-  /** 確定時に選べる公開範囲 (自分のクリアランス以下)。空なら選ばせない (viewer) */
+  /** 聖地に登録するときに選べる公開範囲 (自分のクリアランス以下)。空なら選ばせない (viewer) */
   classifications: ClearanceLevel[];
 }
 
@@ -61,9 +64,10 @@ export function PlaceCandidateList({
   const [longitude, setLongitude] = useState("");
   const [googleMapsUrl, setGoogleMapsUrl] = useState("");
   const [note, setNote] = useState("");
-  const [confidence, setConfidence] = useState("0");
+  const [certainty, setCertainty] = useState<PlaceCertainty>("confirmed");
+  const [certaintyNote, setCertaintyNote] = useState("");
   const [isPending, startTransition] = useTransition();
-  // 確定パネルを開いている候補と、そこで選んだ公開範囲
+  // 登録パネルを開いている候補と、そこで選んだ公開範囲
   const [promotingId, setPromotingId] = useState<string | null>(null);
   const [promoteClassification, setPromoteClassification] = useState<ClearanceLevel>("internal");
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -79,7 +83,8 @@ export function PlaceCandidateList({
     if (longitude) fd.set("longitude", longitude);
     fd.set("googleMapsUrl", googleMapsUrl);
     fd.set("note", note);
-    fd.set("confidence", confidence);
+    fd.set("certainty", certainty);
+    fd.set("certaintyNote", certainty === "likely" ? certaintyNote : "");
     startTransition(async () => {
       await addPlaceCandidateAction(dossierId, fd);
       setName("");
@@ -88,7 +93,8 @@ export function PlaceCandidateList({
       setLongitude("");
       setGoogleMapsUrl("");
       setNote("");
-      setConfidence("0");
+      setCertainty("confirmed");
+      setCertaintyNote("");
       setOpen(false);
     });
   }
@@ -104,7 +110,7 @@ export function PlaceCandidateList({
     if (c.place && c.place.status === "confirmed") return;
     setCardError(null);
     if (!c.place && (c.latitude == null || c.longitude == null)) {
-      setCardError({ id: c.id, message: "確定にするには緯度・経度が必要です" });
+      setCardError({ id: c.id, message: "聖地に登録するには緯度・経度が必要です" });
       return;
     }
     // 既定は「一般」。自分のクリアランスで選べない値なら、選べる中で一番低いものにする
@@ -124,7 +130,7 @@ export function PlaceCandidateList({
         );
         setPromotingId(null);
       } catch (e) {
-        setCardError({ id: c.id, message: `確定できませんでした: ${e instanceof Error ? e.message : String(e)}` });
+        setCardError({ id: c.id, message: `聖地に登録できませんでした: ${e instanceof Error ? e.message : String(e)}` });
       }
     });
   }
@@ -181,7 +187,7 @@ export function PlaceCandidateList({
                       )}
                       {isConfirmed && (
                         <span className="inline-flex items-center gap-0.5 text-[10px] bg-emerald-100 text-emerald-700 px-1 rounded">
-                          <BadgeCheck className="h-2.5 w-2.5" /> 確定
+                          <BadgeCheck className="h-2.5 w-2.5" /> 登録済み
                         </span>
                       )}
                     </p>
@@ -208,8 +214,8 @@ export function PlaceCandidateList({
                     )}
                     {c.address && <p className="text-[11px] text-slate-500 truncate">{c.address}</p>}
                     {c.note && <p className="text-[11px] text-slate-600 mt-1">{c.note}</p>}
+                    <CandidateCertainty dossierId={dossierId} candidate={c} editable={editable} />
                   </div>
-                  <span className="shrink-0 text-[10px] text-slate-400">確度 {c.confidence}</span>
                 </div>
                 {(c.googleMapsUrl || editable) && (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -220,7 +226,7 @@ export function PlaceCandidateList({
                         disabled={isPending}
                         className={`${ACTION_BUTTON} border-emerald-300 text-emerald-700 hover:bg-emerald-50`}
                       >
-                        <BadgeCheck className="h-3.5 w-3.5" /> 聖地として確定
+                        <BadgeCheck className="h-3.5 w-3.5" /> 聖地に登録
                       </button>
                     )}
                     {c.googleMapsUrl && (
@@ -264,7 +270,7 @@ export function PlaceCandidateList({
                 )}
                 {promotingId === c.id && (
                   <div className="mt-2 border-t border-slate-100 pt-2">
-                    <p className="text-xs text-slate-600 mb-1.5">聖地として確定する (公開範囲を選ぶ)</p>
+                    <p className="text-xs text-slate-600 mb-1.5">聖地に登録する (公開範囲を選ぶ)</p>
                     <div className="flex flex-wrap items-center gap-2">
                       {classifications.length > 0 && (
                         <select
@@ -285,7 +291,7 @@ export function PlaceCandidateList({
                         disabled={isPending}
                         className="bg-emerald-600 text-white px-4 py-2 sm:px-3 sm:py-1 rounded-md text-sm sm:text-xs font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors"
                       >
-                        確定
+                        登録
                       </button>
                       <button
                         type="button"
@@ -374,20 +380,24 @@ export function PlaceCandidateList({
                 className={INPUT}
               />
               <input
-                value={confidence}
-                onChange={(e) => setConfidence(e.target.value)}
-                placeholder="確度 (0-100)"
-                type="number"
-                min="0"
-                max="100"
-                className={INPUT}
-              />
-              <input
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
-                placeholder="メモ"
+                placeholder="メモ (内部用。サイトには出ない)"
                 className={INPUT}
               />
+              <div className="sm:col-span-2 flex flex-wrap items-center gap-1.5">
+                <CertaintyToggle value={certainty} onChange={setCertainty} disabled={isPending} />
+                {certainty === "likely" && (
+                  <input
+                    value={certaintyNote}
+                    onChange={(e) => setCertaintyNote(e.target.value)}
+                    maxLength={300}
+                    placeholder={CERTAINTY_NOTE_PLACEHOLDER}
+                    aria-label="ほぼ確定の理由"
+                    className={CERTAINTY_NOTE_INPUT}
+                  />
+                )}
+              </div>
             </div>
           </div>
 
@@ -406,6 +416,61 @@ export function PlaceCandidateList({
 
       {candidates.length === 0 && !open && (
         <p className="text-xs text-slate-400">候補はまだありません。</p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 候補カードの確度と理由。編集できる人はその場で切り替え、理由は欄を離れたときに保存する。
+ * 変えても、もう作った記事の訪問は変わらない (記事の編集画面で変える)
+ */
+function CandidateCertainty({
+  dossierId,
+  candidate,
+  editable,
+}: {
+  dossierId: string;
+  candidate: Candidate;
+  editable: boolean;
+}) {
+  const [note, setNote] = useState(candidate.certaintyNote);
+  const [isPending, startTransition] = useTransition();
+  const save = (certainty: PlaceCertainty, certaintyNote: string) => {
+    const fd = new FormData();
+    fd.set("dossierId", dossierId);
+    fd.set("certainty", certainty);
+    fd.set("certaintyNote", certaintyNote);
+    startTransition(() => updatePlaceCandidateAction(candidate.id, fd));
+  };
+
+  if (!editable) {
+    if (candidate.certainty !== "likely") return null;
+    return (
+      <p className="text-[11px] text-amber-800 mt-1">
+        <span className="bg-amber-100 px-1 rounded mr-1">{PLACE_CERTAINTY_LABELS.likely}</span>
+        {candidate.certaintyNote}
+      </p>
+    );
+  }
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-1.5" title="記事を作る・記事に聖地を足すときに引き継ぐ。作った記事の確度は記事の編集画面で変える">
+      <CertaintyToggle
+        value={candidate.certainty}
+        onChange={(c) => c !== candidate.certainty && save(c, c === "likely" ? note : "")}
+        disabled={isPending}
+      />
+      {candidate.certainty === "likely" && (
+        <input
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          onBlur={() => note !== candidate.certaintyNote && save("likely", note)}
+          maxLength={300}
+          placeholder={CERTAINTY_NOTE_PLACEHOLDER}
+          aria-label="ほぼ確定の理由"
+          disabled={isPending}
+          className={CERTAINTY_NOTE_INPUT}
+        />
       )}
     </div>
   );

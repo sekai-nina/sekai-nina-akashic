@@ -15,8 +15,10 @@ const row = (id: string, o: Partial<PlaceRow> = {}): PlaceRow => ({
   articles: [],
   ...o,
 });
-const art = (shortId: string, sortOrder: number, date: string | null = null) => ({
+const art = (shortId: string, sortOrder: number, date: string | null = null, certainty: "confirmed" | "likely" = "confirmed") => ({
   sortOrder,
+  certainty,
+  certaintyNote: certainty === "likely" ? "理由" : "",
   article: { shortId, title: `記事${shortId}`, date, dateDisplay: null, draft: false },
 });
 
@@ -59,5 +61,18 @@ describe("buildPlaceMapData", () => {
       ["confidential", false],
       ["restricted", false],
     ]);
+  });
+
+  it("訪問が全部ほぼ確定の聖地だけ likelyOnly。理由は訪問に載る (#333)", () => {
+    const d = buildPlaceMapData(
+      [
+        row("all", { articles: [art("A", 0, null, "likely"), art("B", 0, null, "likely")] }),
+        row("mixed", { articles: [art("A", 1, null, "likely"), art("C", 0)] }),
+        row("none"),
+      ],
+      now,
+    );
+    expect(d.places.map((p) => [p.id, p.likelyOnly])).toEqual([["all", true], ["mixed", false], ["none", false]]);
+    expect(d.places[0].visits[0]).toMatchObject({ certainty: "likely", certaintyNote: "理由" });
   });
 });

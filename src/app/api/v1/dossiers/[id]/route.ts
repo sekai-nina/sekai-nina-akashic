@@ -98,6 +98,8 @@ export async function GET(
       googleMapsUrl: pc.googleMapsUrl,
       note: pc.note,
       confidence: pc.confidence,
+      certainty: pc.certainty,
+      certaintyNote: pc.certaintyNote,
       promoted: pc.place != null,
       placeId: pc.placeId,
       placeStatus: pc.place?.status ?? null,

@@ -25,6 +25,9 @@ export interface MapVisit {
   order: number;
   total: number;
   draft: boolean;
+  /** この訪問の確度 (#333)。likely は「ほぼ確定」 */
+  certainty: "confirmed" | "likely";
+  certaintyNote: string;
 }
 
 export interface MapPlace {
@@ -48,6 +51,8 @@ export interface MapPlace {
   isNew: boolean;
   /** 新しい順 */
   visits: MapVisit[];
+  /** 訪問があり、そのすべてがほぼ確定 (ピンを見分ける。#333) */
+  likelyOnly: boolean;
 }
 
 export interface MapArticle {
@@ -82,6 +87,8 @@ export interface PlaceRow {
   entity: { canonicalName: string; description: string; _count: { assets: number } };
   articles: {
     sortOrder: number;
+    certainty: "confirmed" | "likely";
+    certaintyNote: string;
     article: { shortId: string; title: string; date: Date | string | null; dateDisplay: string | null; draft: boolean };
   }[];
 }
@@ -117,7 +124,7 @@ export function buildPlaceMapData(rows: PlaceRow[], now = new Date()): PlaceMapD
   const places: MapPlace[] = rows.map((p) => {
     const createdAt = new Date(p.createdAt);
     const visits = p.articles
-      .map(({ article }): MapVisit => {
+      .map(({ article, certainty, certaintyNote }): MapVisit => {
         const a = articleById.get(article.shortId)!;
         return {
           shortId: a.shortId,
@@ -127,6 +134,8 @@ export function buildPlaceMapData(rows: PlaceRow[], now = new Date()): PlaceMapD
           order: a.places.indexOf(p.id) + 1,
           total: a.places.length,
           draft: a.draft,
+          certainty,
+          certaintyNote: certainty === "likely" ? certaintyNote : "",
         };
       })
       .sort((x, y) => y.date.localeCompare(x.date));
@@ -148,6 +157,7 @@ export function buildPlaceMapData(rows: PlaceRow[], now = new Date()): PlaceMapD
       createdAt: createdAt.toISOString(),
       isNew: createdAt.getTime() >= newSince,
       visits,
+      likelyOnly: visits.length > 0 && visits.every((v) => v.certainty === "likely"),
     };
   });
 

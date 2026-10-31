@@ -6,7 +6,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, MapPin, ExternalLink, Trash2 } from "lucide-react";
 import { SubmitButton } from "@/components/submit-button";
-import { ASSET_KIND_LABELS, PLACE_CLASSIFICATION_LABELS, PLACE_KIND_LABELS, formatDate } from "@/lib/utils";
+import { ASSET_KIND_LABELS, PLACE_CERTAINTY_HINTS, PLACE_CERTAINTY_LABELS, PLACE_CLASSIFICATION_LABELS, PLACE_KIND_LABELS, formatDate } from "@/lib/utils";
 import type { ClearanceLevel, PlaceKind } from "@prisma/client";
 import { accessibleClassifications } from "@/lib/classification";
 import { isPublishablePlace } from "@/lib/articles/frontmatter";
@@ -142,6 +142,14 @@ export default async function PlaceDetailPage({
               >
                 <span className="text-sm text-slate-900 truncate flex-1">{a.title || "(無題)"}</span>
                 {a.draft && <span className="text-xs text-slate-400 shrink-0">下書き</span>}
+                {a.certainty === "likely" && (
+                  <span
+                    className="text-[11px] shrink-0 px-1.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300"
+                    title={a.certaintyNote || PLACE_CERTAINTY_HINTS.likely}
+                  >
+                    {PLACE_CERTAINTY_LABELS.likely}
+                  </span>
+                )}
                 <span className="text-xs text-slate-400 shrink-0">
                   {a.dateDisplay ?? (a.date ? formatDate(a.date) : "")}
                 </span>

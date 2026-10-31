@@ -468,6 +468,8 @@ describe("値レベルの往復", () => {
 describe("locations の聖地 (ArticlePlace) — #283", () => {
   const base: ArticleFrontmatterInput = { shortId: "abc1234" };
   const place = (placeId: string, classification: ClearanceLevel, sortOrder: number): ArticlePlaceRow => ({
+    certainty: "confirmed",
+    certaintyNote: "",
     placeId,
     name: `店${placeId}`,
     classification,
@@ -488,6 +490,47 @@ describe("locations の聖地 (ArticlePlace) — #283", () => {
       { name: "店a", place_id: "a" },
       { name: "店d", place_id: "d" },
     ]);
+  });
+
+  it("ほぼ確定 (likely) の訪問だけ certainty と理由を書く。確定は name / place_id だけ (#333)", () => {
+    const fm = buildFrontmatter({
+      ...base,
+      places: [
+        place("a", ClearanceLevel.internal, 0),
+        { ...place("b", ClearanceLevel.internal, 1), certainty: "likely", certaintyNote: "おみくじを引いたとだけ。周りの神社はここだけ" },
+        { ...place("c", ClearanceLevel.internal, 2), certainty: "likely", certaintyNote: "  " },
+        { ...place("d", ClearanceLevel.internal, 3), certaintyNote: "確定なら理由は書かない" },
+      ],
+    });
+    expect(fm.locations).toEqual([
+      { name: "店a", place_id: "a" },
+      { name: "店b", place_id: "b", certainty: "likely", certainty_note: "おみくじを引いたとだけ。周りの神社はここだけ" },
+      { name: "店c", place_id: "c", certainty: "likely" },
+      { name: "店d", place_id: "d" },
+    ]);
+  });
+
+  it("certainty / certainty_note を読む。likely 以外の値は確定", () => {
+    const { places } = splitLocations({
+      locations: [
+        { name: "A", place_id: "a", certainty: "likely", certainty_note: "理由" },
+        { name: "B", place_id: "b", certainty: "maybe", certainty_note: "捨てる" },
+        { name: "C", place_id: "c" },
+      ],
+    });
+    expect(places).toEqual([
+      { placeId: "a", name: "A", certainty: "likely", certaintyNote: "理由" },
+      { placeId: "b", name: "B", certainty: "confirmed", certaintyNote: "" },
+      { placeId: "c", name: "C", certainty: "confirmed", certaintyNote: "" },
+    ]);
+  });
+
+  it("ほぼ確定の記事は往復しても変わらない", () => {
+    const raw = '---\nshort_id: abc1234\nlocations:\n  - name: 神社\n    place_id: p1\n    certainty: likely\n    certainty_note: おみくじを引いたとだけ\n---\n\n本文\n';
+    const once = roundtrip(raw);
+    expect(once).toContain("certainty: likely");
+    expect(once).toContain("certainty_note: おみくじを引いたとだけ");
+    expect(roundtrip(once)).toBe(once);
   });
 
   it("非公開の聖地しか無ければ locations キーごと出さない", () => {
@@ -559,14 +602,14 @@ describe("locations の聖地 (ArticlePlace) — #283", () => {
         { name: "店A (重複)", place_id: "a" },
       ],
     });
-    expect(places).toEqual([{ placeId: "a", name: "店A" }]);
+    expect(places).toEqual([{ placeId: "a", name: "店A", certainty: "confirmed", certaintyNote: "" }]);
     expect(extra).toEqual({ featured: true, locations: [{ name: "直書き", lat: 1, lng: 2 }] });
   });
 
   it("聖地だけの locations は extra からキーごと消える", () => {
     const raw = ["---", "short_id: abc1234", "locations:", "  - name: 店A", "    place_id: a", "---", "", "本文", ""].join("\n");
     const cols = toArticleColumns(parseArticle(raw), "x.md");
-    expect(cols.places).toEqual([{ placeId: "a", name: "店A" }]);
+    expect(cols.places).toEqual([{ placeId: "a", name: "店A", certainty: "confirmed", certaintyNote: "" }]);
     expect(cols.frontmatterExtra).not.toHaveProperty("locations");
     expect(roundtrip(raw, "x.md")).toBe(raw);
   });

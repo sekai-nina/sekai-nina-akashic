@@ -34,6 +34,8 @@ import {
 import {
   jstDayString,
   MAP_PLACE_KIND_LABELS as KIND_LABELS,
+  PLACE_CERTAINTY_HINTS,
+  PLACE_CERTAINTY_LABELS,
   PLACE_CLASSIFICATION_LABELS,
   PLACE_CLASSIFICATION_SHORT_LABELS,
 } from "@/lib/utils";
@@ -293,7 +295,7 @@ export function PlaceMap({ data }: { data: PlaceMapData }) {
 
     for (const p of places) {
       const html =
-        `<div class="pmap-pin${p.isNew ? " is-new" : ""}${p.onSite ? "" : " is-private"}" style="color:${MAP_KIND_COLORS[p.kind]}">` +
+        `<div class="pmap-pin${p.isNew ? " is-new" : ""}${p.onSite ? "" : " is-private"}${p.likelyOnly ? " is-likely" : ""}" style="color:${MAP_KIND_COLORS[p.kind]}">` +
         `<span class="num"></span>${p.isNew ? '<span class="new">NEW</span>' : ""}` +
         (p.onSite ? "" : `<span class="lock"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${MAP_LOCK_ICON}</svg></span>`) +
         `<div class="disc">${svg(p.kind)}</div><span class="label">${esc(p.name)}</span></div>`;
@@ -891,6 +893,7 @@ export function PlaceMap({ data }: { data: PlaceMapData }) {
                       {p.isNew && <span className="pmap-new">NEW</span>}
                       <ScopeBadge place={p} />
                       {p.name}
+                      {p.likelyOnly && <span className="pmap-likely" title={PLACE_CERTAINTY_HINTS.likely}>{PLACE_CERTAINTY_LABELS.likely}</span>}
                     </span>
                     <span className="pmap-item-sub">{times}{sub}</span>
                   </span>
@@ -916,6 +919,10 @@ export function PlaceMap({ data }: { data: PlaceMapData }) {
                             <span className="vd">{fmtVisit(v.date, v.dateDisplay)}</span>
                             <Link href={`/articles/${v.shortId}`}>{v.title || v.shortId}</Link>
                             {v.draft && <span className="pmap-draft">下書き</span>}
+                            {v.certainty === "likely" && (
+                              <span className="pmap-likely" title={v.certaintyNote || PLACE_CERTAINTY_HINTS.likely}>{PLACE_CERTAINTY_LABELS.likely}</span>
+                            )}
+                            {v.certainty === "likely" && v.certaintyNote && <span className="pmap-likely-note">{v.certaintyNote}</span>}
                             {v.total > 1 && !route && (
                               <button type="button" className="route-link" onClick={() => setRoute(v.shortId)}>
                                 この記事の{v.total}か所を順に見る

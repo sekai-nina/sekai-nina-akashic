@@ -28,6 +28,7 @@ const ALLOWED_CLASSES = [
   "cardlink", "cardlink-content", "cardlink-image", "cardlink-meta",
   "cardlink-title", "cardlink-description", "cardlink-host", "cardlink-favicon",
   "cardlink-map", "cardlink-tile", "cardlink-pin", "cardlink-map-credit",
+  "cardlink-group", "cardlink-certainty", "cardlink-certainty-note",
   // figure-caption.ts
   "article-figure", "figure-caption",
   // footnote-refs.ts

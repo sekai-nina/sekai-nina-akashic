@@ -148,6 +148,14 @@ enum PlaceStatus {
   candidate
 }
 
+// 訪問 (記事×聖地) の確度 (#333)。PlaceStatus (企画の候補 → 登録済み) とは別物。
+// confirmed = 画像か検証できる証言があり、その場所と完全に一致する
+// likely    = 証言から十中八九ここだが、確定できるほど検証できる材料が無い (サイトで「ほぼ確定」の印)
+enum PlaceCertainty {
+  confirmed
+  likely
+}
+
 // 聖地の種類。公開サイトの聖地マップでピンのアイコンと絞り込みに使う
 // (sekai-nina-site の src/utils/places.ts PlaceKind と同じ値の集合)。
 // 未設定 (null) の場所はサイト側が名前・説明から推定する
@@ -501,7 +509,11 @@ model DossierPlaceCandidate {
   address       String?
   googleMapsUrl String?
   note          String   @default("")
+  /// 旧: 数値の確度 (0-100)。どこにも使われていなかった。#333 で certainty に置き換え、列だけ残す
   confidence    Int      @default(0)
+  /// 記事を作ると訪問 (ArticlePlace) の確度・理由に引き継ぐ (#333)。certaintyNote はサイトに出る (note は内部メモ)
+  certainty     PlaceCertainty @default(confirmed)
+  certaintyNote String         @default("")
   sortOrder     Int      @default(0)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -986,6 +998,10 @@ model ArticlePlace {
   place     Place   @relation(fields: [placeId], references: [id], onDelete: Cascade)
   /// 記事内の訪問順 (frontmatter の locations の並び)
   sortOrder Int     @default(0)
+  /// この訪問の確度 (#333)。likely だけ frontmatter の locations に書く
+  certainty     PlaceCertainty @default(confirmed)
+  /// likely にした理由 (サイトにも出る)。confirmed のときは使わない
+  certaintyNote String         @default("")
 
   createdAt DateTime @default(now())
 

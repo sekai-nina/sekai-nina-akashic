@@ -23,6 +23,7 @@
 
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
+import type { PlaceVisitCertainty } from "@/lib/article-workflow/templates/types";
 import { prisma, withClearance, withSession, type TransactionClient } from "@/lib/db";
 import { addCardPreviews } from "@/lib/places/google-maps-preview";
 import { EXCLUSION_KIND_LABELS, todayJst } from "@/lib/utils";
@@ -708,7 +709,12 @@ async function saveFrontmatterExtra(
  * 新規作成した記事に聖地を紐づける (ArticlePlace、訪問順)。非公開の聖地も付ける (#283)。
  * 見えない聖地は RLS で数が合わなくなるので付けずに飛ばす (読んだときと同じ操作者なので通常は起きない)
  */
-async function linkArticlePlaces(articleId: string, placeIds: string[], clearance: string): Promise<void> {
+async function linkArticlePlaces(
+  articleId: string,
+  placeIds: string[],
+  certainties: Record<string, PlaceVisitCertainty>,
+  clearance: string,
+): Promise<void> {
   if (placeIds.length === 0) return;
   await withClearance(clearance, async (tx) => {
     const visible = new Set(
@@ -716,7 +722,18 @@ async function linkArticlePlaces(articleId: string, placeIds: string[], clearanc
     );
     const rows = placeIds
       .filter((id) => visible.has(id))
-      .map((placeId, sortOrder) => ({ articleId, placeId, sortOrder }));
+      .map((placeId, sortOrder) => {
+        // 企画の候補に付けた確度・理由を訪問に引き継ぐ (#333)。確定なら理由は持たない
+        const c = certainties[placeId];
+        const likely = c?.certainty === "likely";
+        return {
+          articleId,
+          placeId,
+          sortOrder,
+          certainty: likely ? ("likely" as const) : ("confirmed" as const),
+          certaintyNote: likely ? c.certaintyNote.trim() : "",
+        };
+      });
     if (rows.length) await tx.articlePlace.createMany({ data: rows, skipDuplicates: true });
   });
 }
@@ -848,6 +865,7 @@ export async function saveArticle(
     await linkArticlePlaces(
       articleId,
       rendered.placeIds ?? splitLocations(rendered.frontmatterExtra).places.map((p) => p.placeId),
+      rendered.placeCertainties ?? {},
       user.clearance
     );
 

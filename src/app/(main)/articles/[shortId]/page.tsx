@@ -1,3 +1,4 @@
+import { listArticlePlaces, toRenderLocations } from "@/lib/domain/article-places";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
@@ -63,9 +64,11 @@ export default async function ArticleDetailPage({
   const tags = Array.isArray(article.tags) ? (article.tags as unknown[]).map(String) : [];
   const extraKeys = frontmatterExtraKeys(article);
   const unresolvedCount = article.sources.filter((s) => s.status === "unresolved").length;
+  const visits = await listArticlePlaces(article.id, session.user.clearance);
   const bodyHtml = await renderArticleBody(article.body, {
     wikilinks: titleIndex,
     sourceUrls: article.sources.map((s) => s.url),
+    locations: toRenderLocations(visits.map((v) => ({ ...v, placeId: v.id }))),
   });
   const hasTweets = bodyHtml.includes('class="twitter-tweet"');
 

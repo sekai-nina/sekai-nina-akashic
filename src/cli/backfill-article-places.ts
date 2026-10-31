@@ -77,7 +77,14 @@ async function main() {
 
     const rows: ArticlePlaceRow[] = split.places.map((e, i) => {
       const pl = placeById.get(e.placeId)!;
-      return { placeId: e.placeId, name: pl.entity.canonicalName, classification: pl.classification, sortOrder: i };
+      return {
+        placeId: e.placeId,
+        name: pl.entity.canonicalName,
+        classification: pl.classification,
+        sortOrder: i,
+        certainty: e.certainty,
+        certaintyNote: e.certaintyNote,
+      };
     });
     const before = renderArticleMarkdown({ ...a, sources: [], places: [] }).markdown;
     const after = renderArticleMarkdown({ ...a, frontmatterExtra: split.extra, sources: [], places: rows }).markdown;
@@ -93,7 +100,13 @@ async function main() {
 
     await prisma.$transaction([
       prisma.articlePlace.createMany({
-        data: rows.map((r) => ({ articleId: a.id, placeId: r.placeId, sortOrder: r.sortOrder })),
+        data: rows.map((r) => ({
+          articleId: a.id,
+          placeId: r.placeId,
+          sortOrder: r.sortOrder,
+          certainty: r.certainty,
+          certaintyNote: r.certaintyNote,
+        })),
       }),
       prisma.$executeRaw`UPDATE "Article" SET "frontmatterExtra" = ${JSON.stringify(split.extra)}::jsonb, "updatedAt" = now() WHERE id = ${a.id}`,
     ]);

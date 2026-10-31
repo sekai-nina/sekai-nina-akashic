@@ -54,11 +54,11 @@ function lossyParseNotes(raw: ReturnType<typeof parseArticle>, cols: ReturnType<
   }
   if (fm.tags != null && !Array.isArray(fm.tags)) notes.push("tags: 配列でないので push で消える");
   if (fm.source != null && !Array.isArray(fm.source)) notes.push("source: 配列でないので push で消える");
-  // 聖地 (place_id) の要素は ArticlePlace に入り、name / place_id 以外は書き出されない
+  // 聖地 (place_id) の要素は ArticlePlace に入り、name / place_id / certainty / certainty_note 以外は書き出されない
   if (Array.isArray(fm.locations)) {
     fm.locations.forEach((loc, i) => {
       if (!loc || typeof loc !== "object" || !(loc as Record<string, unknown>).place_id) return;
-      const lost = Object.keys(loc).filter((k) => k !== "name" && k !== "place_id");
+      const lost = Object.keys(loc).filter((k) => !["name", "place_id", "certainty", "certainty_note"].includes(k));
       if (lost.length) notes.push(`locations[${i}]: 聖地の要素の ${lost.join(", ")} は push で消える`);
     });
   }

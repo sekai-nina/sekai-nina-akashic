@@ -223,3 +223,36 @@
   color: #555;
   background: rgba(255, 255, 255, 0.8);
 }
+
+/* ほぼ確定 (certainty: likely) の訪問のカード (#333)。印はカードの中、理由はカードの下 */
+.article-content .cardlink-group {
+  margin: 1rem 0;
+}
+
+.article-content .cardlink-group > a.cardlink {
+  margin: 0;
+}
+
+.article-content .cardlink-certainty {
+  display: inline-block;
+  flex-shrink: 0;
+  padding: 1px 6px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--brand-sun-ink, #c88a3d);
+  background: rgba(230, 166, 93, 0.15);
+  border: 1px solid rgba(230, 166, 93, 0.4);
+  border-radius: 999px;
+}
+
+.article-content .cardlink-certainty-note {
+  margin-top: 0.35rem;
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.article-content .cardlink-certainty-note .cardlink-certainty {
+  margin-right: 0.4rem;
+}

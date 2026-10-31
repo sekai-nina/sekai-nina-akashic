@@ -9,7 +9,8 @@
  * `shapeDossierMaterials` は純粋関数。
  */
 
-import type { ClearanceLevel, Prisma, TextType } from "@prisma/client";
+import type { ClearanceLevel, PlaceCertainty, Prisma, TextType } from "@prisma/client";
+import type { PlaceVisitCertainty } from "@/lib/article-workflow/templates/types";
 import { withSession, type TransactionClient } from "@/lib/db";
 import { getR2PublicUrl } from "@/lib/r2";
 import { NINA_ENTITY_ID } from "@/lib/nina";
@@ -63,6 +64,8 @@ export interface DossierForMaterials {
     address: string | null;
     googleMapsUrl: string | null;
     note: string;
+    certainty: PlaceCertainty;
+    certaintyNote: string;
     /** 昇格先の聖地。RLS で見えなければ null (= 上位機密。記事にも AI にも出さない) */
     place: { classification: string; entity: { canonicalName: string } } | null;
   }[];
@@ -153,6 +156,8 @@ function dossierSelect<A extends Prisma.AssetSelect>(asset: A) {
         address: true,
         googleMapsUrl: true,
         note: true,
+        certainty: true,
+        certaintyNote: true,
         place: { select: { classification: true, entity: { select: { canonicalName: true } } } },
       },
     },
@@ -232,6 +237,8 @@ export interface DossierMaterials {
    * 名前・座標は持たない (AI にも本文にも渡さない)
    */
   linkedPlaceIds: string[];
+  /** `linkedPlaceIds` の聖地ごとの、候補に付けた確度・理由 (#333)。記事を作ると訪問に引き継ぐ */
+  placeCertainties: Record<string, PlaceVisitCertainty>;
   /** 機密レベルで落としたアセットの数 */
   droppedByClearance: number;
 }
@@ -349,6 +356,12 @@ export function shapeDossierMaterials(dossier: DossierForMaterials): DossierMate
     linkedPlaceIds: [
       ...new Set(dossier.placeCandidates.flatMap((p) => (p.placeId && p.place ? [p.placeId] : []))),
     ],
+    // 候補の確度・理由は、記事を作るとその訪問 (ArticlePlace) に引き継ぐ (#333)。同じ聖地の候補が
+    // 複数あれば並びの先頭 (`linkPlaceToDossierArticles` と同じ)
+    placeCertainties: dossier.placeCandidates.reduce<Record<string, PlaceVisitCertainty>>((acc, p) => {
+      if (p.placeId && p.place && !(p.placeId in acc)) acc[p.placeId] = { certainty: p.certainty, certaintyNote: p.certaintyNote };
+      return acc;
+    }, {}),
     droppedByClearance: dropped.size,
   };
 }

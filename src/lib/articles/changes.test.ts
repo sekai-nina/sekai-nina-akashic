@@ -63,7 +63,7 @@ function baseline(): { prev: ComparableArticle; cols: ReturnType<typeof toArticl
     lng: cols.lng ?? null,
     frontmatterExtra: cols.frontmatterExtra,
     sources: sourcesOf(cols),
-    places: cols.places.map((p) => ({ placeId: p.placeId })),
+    places: cols.places.map((p) => ({ placeId: p.placeId, certainty: p.certainty, certaintyNote: p.certaintyNote })),
   };
   return { prev, cols };
 }

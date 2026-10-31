@@ -160,6 +160,10 @@
 .pmap-visits .route-link:hover { text-decoration: underline; }
 .pmap-draft { margin-left: 6px; font-size: 11px; font-weight: 400; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; }
 .pmap-visits .pmap-draft { margin-left: 0; }
+/* ほぼ確定 (#333): 訪問の行と一覧の札。訪問がすべてほぼ確定の聖地はピンを薄くする */
+.pmap-likely { margin-left: 6px; font-size: 11px; font-weight: 600; color: #78350f; background: #fef3c7; border: 1px solid #fcd34d; border-radius: 999px; padding: 0 6px; white-space: nowrap; }
+.pmap-visits .pmap-likely { margin-left: 0; }
+.pmap-likely-note { display: block; width: 100%; font-size: 11px; color: var(--muted); }
 .pmap-novisit { margin: 0; font-size: 12.5px; color: var(--muted); }
 .pmap-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .pmap-btn {
@@ -195,6 +199,8 @@
 }
 .pmap-map.labels .pmap-pin .label, .pmap-pin.is-selected .label, .pmap-pin.in-route .label, .pmap-pin.is-new .label { display: block; }
 .pmap-pin.is-selected .disc { background: var(--text); transform: scale(1.2); }
+.pmap-pin.is-likely .disc { opacity: 0.55; }
+.pmap-pin.is-likely.is-selected .disc { opacity: 1; }
 .pmap-pin.is-selected .label { font-weight: 800; }
 /* 新着: 赤い輪と NEW の札。低ズームでも名前を出す */
 .pmap-pin.is-new .disc { box-shadow: 0 0 0 3px var(--new), 0 3px 8px rgba(15, 23, 42, 0.3); }

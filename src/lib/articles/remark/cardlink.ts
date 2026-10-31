@@ -6,6 +6,9 @@
 import { visit } from 'unist-util-visit';
 import type { Root, Code } from 'mdast';
 
+/** remark が渡す VFile のうち使う所 (vfile を直接の依存にしないため) */
+type FileLike = { data?: unknown };
+
 /**
  * Remark plugin to convert Obsidian Auto Card Link syntax to bookmark cards.
  *
@@ -21,9 +24,14 @@ import type { Root, Code } from 'mdast';
  * 聖地の Google マップのカードは `image:` にお店の写真、`description:` に住所が入る。
  * 写真が取れなかったカードは `lat:` / `lng:` から、その地点にピンを立てた地図のサムネイルを画像の代わりに出す
  * (OpenStreetMap のタイルを並べるだけ。API キーは要らない)
+ *
+ * `place_id:` のあるカードは、frontmatter の `locations` で同じ聖地の訪問が `certainty: likely` なら
+ * 「ほぼ確定」の印を付け、カードの下に理由 (`certainty_note`) を出す (Akashic の Issue 333)。frontmatter は Astro が
+ * `file.data.astro.frontmatter` に入れる (akashic は renderArticleBody が同じ形で渡す)
  */
 export function remarkCardLink() {
-  return (tree: Root) => {
+  return (tree: Root, file?: FileLike) => {
+    const likely = likelyPlaces(file);
     visit(tree, 'code', (node: Code, index, parent) => {
       if (!parent || index === undefined) return;
       if (node.lang !== 'cardlink') return;
@@ -48,18 +56,46 @@ export function remarkCardLink() {
         ? `<div class="cardlink-image"><img src="${escapeAttr(data.image)}" alt="" loading="lazy" /></div>`
         : map ?? '';
 
-      const html = `<a href="${escapeAttr(data.url)}" class="cardlink" target="_blank" rel="noopener noreferrer">
+      const note = data.place_id ? likely.get(data.place_id) : undefined;
+      const badge = note !== undefined ? `<span class="cardlink-certainty">${LIKELY_LABEL}</span>` : '';
+
+      const card = `<a href="${escapeAttr(data.url)}" class="cardlink" target="_blank" rel="noopener noreferrer">
   ${image}
   <div class="cardlink-content">
     <div class="cardlink-title">${escapeHtml(title)}</div>
     ${data.description ? `<div class="cardlink-description">${escapeHtml(data.description)}</div>` : ''}
-    <div class="cardlink-meta">${favicon}<span class="cardlink-host">${escapeHtml(host)}</span></div>
+    <div class="cardlink-meta">${badge}${favicon}<span class="cardlink-host">${escapeHtml(host)}</span></div>
   </div>
 </a>`;
+      // 理由はカードの外に出す (カード全体が Google マップへのリンクなので、中に押せる物を置けない)
+      const html = note
+        ? `<div class="cardlink-group">${card}<div class="cardlink-certainty-note"><span class="cardlink-certainty">${LIKELY_LABEL}</span>${escapeHtml(note)}</div></div>`
+        : card;
 
       parent.children.splice(index, 1, { type: 'html', value: html });
     });
   };
+}
+
+/** ほぼ確定の印の文言 (akashic の PLACE_CERTAINTY_LABELS.likely と同じ) */
+const LIKELY_LABEL = 'ほぼ確定';
+
+/**
+ * frontmatter の `locations` のうち、ほぼ確定 (`certainty: likely`) の聖地 → 理由 (無ければ "")
+ */
+function likelyPlaces(file: FileLike | undefined): Map<string, string> {
+  const out = new Map<string, string>();
+  const astro = (file?.data as { astro?: { frontmatter?: { locations?: unknown } } } | undefined)?.astro;
+  const locations = astro?.frontmatter?.locations;
+  if (!Array.isArray(locations)) return out;
+  for (const loc of locations) {
+    if (!loc || typeof loc !== 'object') continue;
+    const { place_id, certainty, certainty_note } = loc as Record<string, unknown>;
+    if (typeof place_id === 'string' && certainty === 'likely') {
+      out.set(place_id, typeof certainty_note === 'string' ? certainty_note.trim() : '');
+    }
+  }
+  return out;
 }
 
 /** 地図サムネイルの縮尺と枠の大きさ (CSS の .cardlink-map の幅・高さと揃える) */

@@ -8,7 +8,8 @@
  * - カードにするのは push で frontmatter に載る聖地 (`isPublishablePlace`) だけ。
  *   confidential 以上の聖地の URL を本文に出さない
  * - 同じ URL のカードが既にあれば足さない (冪等。2 回目は全件スキップ)
- * - 座標の行 (`lat:` / `lng:`) が無いころに置いたカードには座標を足す (写真が取れないときの地図サムネイル用)
+ * - 前に置いたカードに、まだ無い `place_id:` (ほぼ確定の印との突き合わせ、#333) と座標 (`lat:` / `lng:`、
+ *   写真が取れないときの地図サムネイル用) の行を足す
  * - 写真 (`image:`) の無い Google マップのカードには、Google のリンクプレビューと同じお店の写真と住所を足す
  * - Google マップの埋め込み (`<iframe>`) がある記事は書かない (手で書いた記事が場所ごとに地図を埋め込んでいる)
  * - 書いた記事は `dirty` と `editedAt` を立てる (push の対象にし、取り込みの上書きから守る)。
@@ -25,7 +26,7 @@
 import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 
-import { addCardCoords, insertPlaceCards } from "@/lib/article-workflow/templates/outing";
+import { addCardPlaceFields, insertPlaceCards } from "@/lib/article-workflow/templates/outing";
 import type { DossierPlace } from "@/lib/article-workflow/templates/types";
 import { isPublishablePlace } from "@/lib/articles/frontmatter";
 import { addCardPreviews } from "@/lib/places/google-maps-preview";
@@ -88,7 +89,7 @@ async function main() {
       skipped.push(`${a.path}: Google マップの埋め込みがもうある`);
       continue;
     }
-    const c = addCardCoords(a.body, places);
+    const c = addCardPlaceFields(a.body, places);
     const inserted = insertPlaceCards(c.body, places);
     const photos = await addCardPreviews(inserted.body);
     const r = { ...inserted, body: photos.body };
@@ -102,7 +103,7 @@ async function main() {
     coords += c.names.length;
     photoCount += photos.added;
     console.log(`\n  ${a.path}${a.editedAt ? " (未 push の編集あり)" : ""}`);
-    for (const name of c.names) console.log(`    - ${name} → 既存のカードに座標を足す`);
+    for (const name of c.names) console.log(`    - ${name} → 既存のカードに聖地の ID・座標を足す`);
     for (const p of r.placements) console.log(`    - ${p.name} → ${p.heading ? `## ${p.heading} の末尾` : "本文の最後"}`);
     if (SHOW) console.log(r.body.replace(/^/gm, "      | "));
     if (!APPLY) continue;
@@ -114,7 +115,7 @@ async function main() {
     if (res.count === 0) console.log("    ! 読んだあとに更新されたので書かなかった (もう一度流す)");
   }
 
-  console.log(`\n${APPLY ? "書いた" : "書く"}記事: ${written} 件 (足すカード ${cards} 枚、座標を足すカード ${coords} 枚、写真を足すカード ${photoCount} 枚)`);
+  console.log(`\n${APPLY ? "書いた" : "書く"}記事: ${written} 件 (足すカード ${cards} 枚、聖地の ID・座標を足すカード ${coords} 枚、写真を足すカード ${photoCount} 枚)`);
   if (skipped.length) {
     console.log(`\n--- 書かない記事 (${skipped.length} 件) ---`);
     for (const s of skipped) console.log(`  ${s}`);

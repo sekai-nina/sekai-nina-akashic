@@ -7,7 +7,7 @@ import type { ArticleAssetInput } from "../render";
 import {
   expandPlaceCards,
   insertPlaceCards,
-  addCardCoords,
+  addCardPlaceFields,
   OUTING_BODY_PLACEHOLDER,
   OUTING_TEMPLATE,
   outingLocations,
@@ -339,7 +339,7 @@ describe("出典済みの素材に後から足したメモ・抜粋", () => {
 
 /** 置かれるカードの座標の行 (fixture の places の URL ごと) */
 const COORDS: Record<string, string[]> = {
-  "https://maps.app.goo.gl/x": ["lat: 35.3", "lng: 139.48"],
+  "https://maps.app.goo.gl/x": ["place_id: place-1", "lat: 35.3", "lng: 139.48"],
   "https://maps.app.goo.gl/y": ["lat: 35.31", "lng: 139.49"],
 };
 
@@ -437,24 +437,31 @@ describe("insertPlaceCards", () => {
   });
 });
 
-describe("addCardCoords", () => {
+describe("addCardPlaceFields", () => {
+  it("座標だけあるカードには place_id だけ足す", () => {
+    const withCoords = ["```cardlink", "url: https://maps.app.goo.gl/x", 'title: "べたなぎ"', "lat: 35.3", "lng: 139.48", "```"].join("\n");
+    expect(addCardPlaceFields(withCoords, places).body).toBe(
+      ["```cardlink", "url: https://maps.app.goo.gl/x", 'title: "べたなぎ"', "lat: 35.3", "lng: 139.48", "place_id: place-1", "```"].join("\n")
+    );
+  });
+
   const old = (name: string, url: string) =>
     ["```cardlink", `url: ${url}`, `title: "${name}"`, "host: maps.app.goo.gl", "```"].join("\n");
 
-  it("座標の無い場所のカードに lat / lng を足す。ほかのカード・本文は触らない", () => {
+  it("前のカードに place_id / lat / lng を足す。ほかのカード・本文は触らない", () => {
     const other = ["```cardlink", "url: https://example.com", 'title: "外部"', "```"].join("\n");
     const body = `## 海鮮丼\n\n- べたなぎ\n\n${old("べたなぎ", "https://maps.app.goo.gl/x")}\n\n${other}\n`;
-    const r = addCardCoords(body, places);
+    const r = addCardPlaceFields(body, places);
     expect(r.body).toBe(
-      `## 海鮮丼\n\n- べたなぎ\n\n${["```cardlink", "url: https://maps.app.goo.gl/x", 'title: "べたなぎ"', "host: maps.app.goo.gl", "lat: 35.3", "lng: 139.48", "```"].join("\n")}\n\n${other}\n`
+      `## 海鮮丼\n\n- べたなぎ\n\n${["```cardlink", "url: https://maps.app.goo.gl/x", 'title: "べたなぎ"', "host: maps.app.goo.gl", "place_id: place-1", "lat: 35.3", "lng: 139.48", "```"].join("\n")}\n\n${other}\n`
     );
     expect(r.names).toEqual(["べたなぎ"]);
   });
 
-  it("座標がもうあるカード・座標の無い場所は触らない (2 回目は何もしない)", () => {
-    const once = addCardCoords(old("べたなぎ", "https://maps.app.goo.gl/x"), places).body;
-    expect(addCardCoords(once, places)).toEqual({ body: once, names: [] });
+  it("もう全部あるカード・ID も座標も無い場所は触らない (2 回目は何もしない)", () => {
+    const once = addCardPlaceFields(old("べたなぎ", "https://maps.app.goo.gl/x"), places).body;
+    expect(addCardPlaceFields(once, places)).toEqual({ body: once, names: [] });
     const noCoord = old("海", "https://maps.app.goo.gl/x");
-    expect(addCardCoords(noCoord, [{ ...places[0], lat: null, lng: null }]).names).toEqual([]);
+    expect(addCardPlaceFields(noCoord, [{ ...places[0], placeId: null, lat: null, lng: null }]).names).toEqual([]);
   });
 });

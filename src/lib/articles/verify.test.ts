@@ -156,12 +156,12 @@ describe("dirtyAfterImport", () => {
     const cols = toArticleColumns(parseArticle(raw), "x.md");
     const { sources, places: _places, ...rest } = cols;
     const hidden = dirtyAfterImport(raw, rest, resolveOffline(sources), [
-      { placeId: "a", name: "旧名", classification: "confidential", sortOrder: 0 },
+      { placeId: "a", name: "旧名", classification: "confidential", sortOrder: 0, certainty: "confirmed", certaintyNote: "" },
     ]);
     expect(hidden.verdict).toBe("places");
     expect(hidden.dirty).toBe(true);
     const renamed = dirtyAfterImport(raw, rest, resolveOffline(sources), [
-      { placeId: "a", name: "新名", classification: "internal", sortOrder: 0 },
+      { placeId: "a", name: "新名", classification: "internal", sortOrder: 0, certainty: "confirmed", certaintyNote: "" },
     ]);
     expect(renamed).toMatchObject({ verdict: "places", dirty: true });
   });

@@ -11,6 +11,7 @@
  */
 
 import type { AssetKind } from "@prisma/client";
+import type { PlaceVisitCertainty } from "./templates/types";
 
 /** 運営ブログの正式名称。本人ブログと区別してこの名前で出す */
 export const STAFF_BLOG_NAME = "ひなたぼっこ日記";
@@ -134,6 +135,8 @@ export interface RenderedArticle<Extra extends Record<string, unknown> = Record<
    * frontmatter の `locations` に載るのは push 時に public / internal のものだけ
    */
   placeIds?: string[];
+  /** `placeIds` の聖地ごとの確度・理由 (#333)。無い聖地は確定 */
+  placeCertainties?: Record<string, PlaceVisitCertainty>;
 }
 
 /**

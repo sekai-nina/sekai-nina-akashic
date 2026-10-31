@@ -244,7 +244,14 @@ async function main() {
   const placeRowsOf = (file: ParsedFile): ArticlePlaceRow[] =>
     file.places.map((e, i) => {
       const pl = placeIndex.get(e.placeId)!;
-      return { placeId: e.placeId, name: pl.entity.canonicalName, classification: pl.classification, sortOrder: i };
+      return {
+        placeId: e.placeId,
+        name: pl.entity.canonicalName,
+        classification: pl.classification,
+        sortOrder: i,
+        certainty: e.certainty,
+        certaintyNote: e.certaintyNote,
+      };
     });
 
   // --- 3. 解決する -----------------------------------------------------------
@@ -306,7 +313,7 @@ async function main() {
       dirty: true, lastSyncedAt: true, githubSha: true, editedAt: true,
       places: {
         orderBy: { sortOrder: "asc" },
-        select: { placeId: true, place: { select: { classification: true } } },
+        select: { placeId: true, certainty: true, certaintyNote: true, place: { select: { classification: true } } },
       },
       sources: {
         where: { status: { not: ArticleSourceStatus.pending } },
@@ -708,7 +715,13 @@ async function main() {
       ...(placeRows.length
         ? [
             prisma.articlePlace.createMany({
-              data: placeRows.map((r) => ({ articleId: article.id, placeId: r.placeId, sortOrder: r.sortOrder })),
+              data: placeRows.map((r) => ({
+                articleId: article.id,
+                placeId: r.placeId,
+                sortOrder: r.sortOrder,
+                certainty: r.certainty,
+                certaintyNote: r.certaintyNote,
+              })),
               // ファイルに書かれた非公開の聖地は既に行があれば残す
               skipDuplicates: true,
             }),
