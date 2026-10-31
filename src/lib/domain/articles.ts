@@ -6,6 +6,14 @@ import { nextSortOrder, nextSourceNo } from "@/lib/articles/apply";
 import { paragraphsCiting } from "@/lib/articles/footnotes";
 import type { WikiLinkCandidate } from "@/lib/articles/wiki-link-complete";
 import {
+  bodyLinksTo,
+  normalizeRelated,
+  readRelated,
+  sameRelated,
+  withRelated,
+  type ArticleBacklink,
+} from "@/lib/articles/related";
+import {
   deriveArticlePath,
   generateShortId,
   parseArticleCreateInput,
@@ -215,11 +223,12 @@ export async function listArticlesForPicker() {
  * 記事エディタの `[[` 補完の候補 (#318)。下書き・一覧外も含めた全件。
  *
  * Article は非保護テーブルなので withClearance は不要。300 行台なのでページ表示時に全件渡す。
+ * 記事パネル (#319) から開けるよう shortId も持たせる。
  */
 export async function listArticleLinkCandidates(excludeShortId: string): Promise<WikiLinkCandidate[]> {
   const rows = await prisma.article.findMany({
     where: { shortId: { not: excludeShortId }, title: { not: "" } },
-    select: { title: true, type: true, draft: true, unlisted: true },
+    select: { shortId: true, title: true, type: true, draft: true, unlisted: true },
     orderBy: { title: "asc" },
   });
   return rows;
@@ -1168,6 +1177,91 @@ export async function countArticlesLinkingTo(title: string, excludeShortId: stri
       OR: [{ body: { contains: `[[${title}]]` } }, { body: { contains: `[[${title}|` } }],
     },
   });
+}
+
+export type SaveArticleRelatedResult =
+  | { ok: true; changed: boolean; updatedAt: Date }
+  | { ok: false; reason: "not_found" | "conflict" };
+
+/**
+ * 関連記事 (frontmatter の `related`) を保存する (#319)。編集画面の保存から、本文などの保存の
+ * 後に返ってきた `updatedAt` で続けて呼ぶ (聖地の保存と同じ楽観ロック)。
+ *
+ * 中身が変わったときだけ `frontmatterExtra.related` を書き換えて `dirty` を立てる。
+ * 空要素だけの `related` (`[null]`) は空と同じに扱い、触らない記事に push の差分を出さない。
+ * 実在しないタイトルも弾かない (公開サイトは一致しないものを無視する。改題前の名前を残す運用もある)
+ */
+export async function saveArticleRelated(
+  shortId: string,
+  expectedUpdatedAt: Date,
+  related: string[],
+  actor: ArticleActor,
+): Promise<SaveArticleRelatedResult> {
+  const current = await prisma.article.findUnique({
+    where: { shortId },
+    select: { frontmatterExtra: true, updatedAt: true },
+  });
+  if (!current) return { ok: false, reason: "not_found" };
+  if (current.updatedAt.getTime() !== expectedUpdatedAt.getTime()) return { ok: false, reason: "conflict" };
+
+  const before = readRelated(current.frontmatterExtra);
+  const after = normalizeRelated(related);
+  if (sameRelated(before, after)) return { ok: true, changed: false, updatedAt: current.updatedAt };
+
+  const [row] = await prisma.article.updateManyAndReturn({
+    where: { shortId, updatedAt: expectedUpdatedAt },
+    data: {
+      frontmatterExtra: withRelated(current.frontmatterExtra, after) as Prisma.InputJsonObject,
+      dirty: true,
+      editedAt: new Date(),
+    },
+    select: { updatedAt: true },
+  });
+  if (!row) return { ok: false, reason: "conflict" };
+  await auditArticle(actor, {
+    action: "article.related.update",
+    targetType: "Article",
+    targetId: shortId,
+    metadata: { before, after },
+  });
+  return { ok: true, changed: true, updatedAt: row.updatedAt };
+}
+
+/**
+ * タイトル `title` の記事を参照している記事 (被リンク) (#319)。本文の `[[題]]` / `[[題|表示]]` /
+ * `[[題\|表示]]` と、他記事の `related` の両方を拾う。
+ *
+ * Article は非保護テーブルなので withClearance は不要。`contains` は Seq Scan だが 300 行台なので構わない
+ */
+export async function listArticleBacklinks(title: string, excludeShortId: string): Promise<ArticleBacklink[]> {
+  if (!title) return [];
+  const rows = await prisma.article.findMany({
+    where: {
+      shortId: { not: excludeShortId },
+      // 本文は `[[題` で粗く拾い、形 (`]]` / `|` / `\|`) は下の bodyLinksTo で確かめる。
+      // Prisma の contains は LIKE のワイルドカードを逃がさないので自前で逃がす
+      // (タイトルの `%` / `_` が任意の文字に一致し、テーブル内の `\|` の `\` がエスケープ文字になる)
+      OR: [
+        { body: { contains: escapeLike(`[[${title}`) } },
+        { frontmatterExtra: { path: ["related"], array_contains: [title] } },
+      ],
+    },
+    select: { shortId: true, title: true, draft: true, body: true, frontmatterExtra: true },
+    orderBy: { title: "asc" },
+  });
+  return rows
+    .map((r) => {
+      const via: ArticleBacklink["via"] = [];
+      if (bodyLinksTo(r.body, title)) via.push("body");
+      if (readRelated(r.frontmatterExtra).includes(title)) via.push("related");
+      return { shortId: r.shortId, title: r.title, draft: r.draft, via };
+    })
+    .filter((b) => b.via.length > 0); // `[[題名]]` のような前方一致だけの行を落とす
+}
+
+/** LIKE のパターンに埋める文字列を逃がす (Postgres の既定のエスケープ文字は `\`) */
+function escapeLike(s: string): string {
+  return s.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
 
 /**

@@ -671,29 +671,36 @@ async function saveFrontmatterExtra(
   rawExtra: Record<string, unknown>
 ): Promise<void> {
   const { extra } = splitLocations(rawExtra);
-  const current = await prisma.article.findUnique({
-    where: { id: articleId },
-    select: { frontmatterExtra: true },
-  });
-  const base =
-    current?.frontmatterExtra && typeof current.frontmatterExtra === "object" && !Array.isArray(current.frontmatterExtra)
-      ? (current.frontmatterExtra as Record<string, unknown>)
-      : {};
-  const next = { ...base, ...extra };
-  // **実質同じなら書かない。** dirty は「DB の出力 ≠ GitHub」の意味なので、何も増えなかった
-  // 保存のたびに立てると、`synced_at` の日付が動いただけの push が積まれる。
-  // 「要反映」の判定に使うのは `item_count` と `updated_at` だけ (`loadNeedsSync`) なので、
-  // `synced_at` の差は変化と見なさない (= 本当に取り込んだ日が残る)
-  if (comparableExtra(next) === comparableExtra(base)) return;
-  await prisma.article.update({
-    where: { id: articleId },
-    // 直接書くので dirty / editedAt も自分で立てる (次の push に載せるため)
-    data: {
-      frontmatterExtra: next as Prisma.InputJsonValue,
-      dirty: true,
-      editedAt: new Date(),
-    },
-  });
+  // 読んでから書くまでに編集画面の保存 (関連記事 `related` など、#319) が入ると、古い base で
+  // 上書きして消してしまう。updatedAt を where に入れ、割り込まれたら読み直してやり直す
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const current = await prisma.article.findUnique({
+      where: { id: articleId },
+      select: { frontmatterExtra: true, updatedAt: true },
+    });
+    if (!current) return;
+    const base =
+      current.frontmatterExtra && typeof current.frontmatterExtra === "object" && !Array.isArray(current.frontmatterExtra)
+        ? (current.frontmatterExtra as Record<string, unknown>)
+        : {};
+    const next = { ...base, ...extra };
+    // **実質同じなら書かない。** dirty は「DB の出力 ≠ GitHub」の意味なので、何も増えなかった
+    // 保存のたびに立てると、`synced_at` の日付が動いただけの push が積まれる。
+    // 「要反映」の判定に使うのは `item_count` と `updated_at` だけ (`loadNeedsSync`) なので、
+    // `synced_at` の差は変化と見なさない (= 本当に取り込んだ日が残る)
+    if (comparableExtra(next) === comparableExtra(base)) return;
+    const { count } = await prisma.article.updateMany({
+      where: { id: articleId, updatedAt: current.updatedAt },
+      // 直接書くので dirty / editedAt も自分で立てる (次の push に載せるため)
+      data: {
+        frontmatterExtra: next as Prisma.InputJsonValue,
+        dirty: true,
+        editedAt: new Date(),
+      },
+    });
+    if (count > 0) return;
+  }
+  throw new Error("frontmatter の保存が他の保存と衝突し続けました。時間をおいてやり直してください");
 }
 
 /**
