@@ -27,6 +27,7 @@ const ALLOWED_CLASSES = [
   // cardlink.ts
   "cardlink", "cardlink-content", "cardlink-image", "cardlink-meta",
   "cardlink-title", "cardlink-description", "cardlink-host", "cardlink-favicon",
+  "cardlink-map", "cardlink-tile", "cardlink-pin", "cardlink-map-credit",
   // figure-caption.ts
   "article-figure", "figure-caption",
   // footnote-refs.ts
@@ -63,6 +64,12 @@ const CLASS_RULE: [string, ...string[]] = [
   "data-footnote-backref", // defaultSchema.attributes.a が元から許可しているもの
 ];
 
+/**
+ * cardlink.ts の地図サムネイルがタイルを並べる位置。style はこの形 (px の left / top だけ) しか通さない。
+ * 任意の CSS を許すと記事の生 HTML から画面を覆う要素などを作れてしまうため
+ */
+const TILE_POSITION_STYLE = /^left:-?\d{1,4}px;top:-?\d{1,4}px$/;
+
 /** defaultSchema 由来の className ルールを外す (CLASS_RULE で置き換えるため) */
 function withoutClassRule(attrs: readonly unknown[] | undefined): unknown[] {
   return (attrs ?? []).filter((x) => !(Array.isArray(x) && x[0] === "className"));
@@ -98,7 +105,7 @@ export const articleSanitizeSchema: SanitizeSchema = {
       "title",
       "dataSourceNo", // footnote-refs.ts が出典番号を持たせる
     ],
-    img: [...withoutClassRule(defaultSchema.attributes?.img), CLASS_RULE, "loading"],
+    img: [...withoutClassRule(defaultSchema.attributes?.img), CLASS_RULE, "loading", ["style", TILE_POSITION_STYLE]],
     details: [CLASS_RULE, "open"],
     span: [CLASS_RULE, "title"],
     div: [...withoutClassRule(defaultSchema.attributes?.div), CLASS_RULE],

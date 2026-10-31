@@ -27,3 +27,36 @@ describe("renderArticleBody: 公開サイトと見た目を揃える変換", () 
     expect(html).toContain('<a href="https://ex/b">B</a>');
   });
 });
+
+describe("renderArticleBody: 聖地のカードの地図サムネイル", () => {
+  const card = (extra: string) =>
+    ["```cardlink", "url: https://maps.app.goo.gl/x", 'title: "リズラボキッチン"', "host: maps.app.goo.gl", extra, "```"].join("\n");
+
+  it("lat / lng があればピン付きの地図を出し、タイルの位置はサニタイズを通る", async () => {
+    const html = await renderArticleBody(card("lat: 35.6595\nlng: 139.7005"));
+    expect(html).toContain('class="cardlink-image cardlink-map"');
+    expect(html).toContain('<span class="cardlink-pin"></span>');
+    expect(html).toMatch(/<img src="https:\/\/tile\.openstreetmap\.org\/16\/\d+\/\d+\.png" alt="" class="cardlink-tile" loading="lazy" style="left:-?\d+px;top:-?\d+px">/);
+  });
+
+  it("写真 (image) があれば地図より写真。住所 (description) をタイトルの下に出す", async () => {
+    const html = await renderArticleBody(card('lat: 35.6\nlng: 139.7\nimage: https://lh3.googleusercontent.com/p=w900\ndescription: "〒150-0001 東京都渋谷区"'));
+    expect(html).toContain('<div class="cardlink-image"><img src="https://lh3.googleusercontent.com/p=w900" alt="" loading="lazy"></div>');
+    expect(html).not.toContain("cardlink-map");
+    expect(html).toContain('<div class="cardlink-description">〒150-0001 東京都渋谷区</div>');
+  });
+
+  it("座標が無い・壊れているカードは画像なしのまま", async () => {
+    for (const extra of ["", "lat: abc\nlng: 139.7", "lat: 35.6"]) {
+      const html = await renderArticleBody(card(extra));
+      expect(html).toContain('class="cardlink"');
+      expect(html).not.toContain("cardlink-map");
+    }
+  });
+
+  it("本文の生 HTML の style は left / top の形以外落とす", async () => {
+    const html = await renderArticleBody('<img src="https://ex/a.png" style="position:fixed;inset:0">\n\n<p style="left:1px;top:1px">x</p>');
+    expect(html).not.toContain("position:fixed");
+    expect(html).not.toContain("style=");
+  });
+});
