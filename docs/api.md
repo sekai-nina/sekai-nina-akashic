@@ -750,6 +750,9 @@ API キーからは **引き上げしかできない。** `PATCH /assets/:id` / 
 | `file` | File | Yes | アップロードするファイル |
 | `title` | string | No | タイトル（省略時はファイル名） |
 | `kind` | string | No | アセット種別（省略時はMIMEタイプから自動判定） |
+| `classification` | string | No | 機密レベル（省略時は `internal`。キーのクリアランスが `public` なら `public`）。キーのクリアランスを超える値はエラー、知らない値は 400 |
+
+機密レベルの既定は **キーのクリアランスではなく `internal`**（`/upload/complete` も同じ）。bot は管理者のキーで送るので、キーのクリアランスを既定にすると管理者を `restricted` に上げた途端に取り込みが全部 `restricted` になり、メンバーにも記事にも出なくなった（2026-10-29〜31）。
 
 **レスポンス (201):**
 

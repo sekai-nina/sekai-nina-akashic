@@ -8,6 +8,7 @@ import { generateAndUploadThumbnails } from "@/lib/thumbnails";
 import { createHash } from "crypto";
 import type { AssetKind, AssetStatus, StorageProvider, SourceType } from "@prisma/client";
 import { guessMimeKind } from "@/lib/mime";
+import { uploadClassification } from "@/lib/classification";
 
 export async function POST(request: Request) {
   const auth = await requireApiAuth(request, "write");
@@ -134,8 +135,10 @@ export async function POST(request: Request) {
     thumbnailUrl = storageUrl;
   }
 
-  const classificationStr = formData.get("classification") as string;
-  const classification = (classificationStr as "public" | "internal" | "confidential" | "restricted") || auth.clearance as "public" | "internal" | "confidential" | "restricted";
+  const classification = uploadClassification(formData.get("classification") as string | null, auth.clearance);
+  if (!classification) {
+    return NextResponse.json({ error: "classification is invalid" }, { status: 400 });
+  }
 
   const asset = await createAsset(
     {
