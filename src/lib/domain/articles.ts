@@ -4,6 +4,7 @@ import { logAudit } from "@/lib/domain/audit";
 import { createDossier, deleteDossier } from "@/lib/domain/dossiers";
 import { nextSortOrder, nextSourceNo } from "@/lib/articles/apply";
 import { paragraphsCiting } from "@/lib/articles/footnotes";
+import type { WikiLinkCandidate } from "@/lib/articles/wiki-link-complete";
 import {
   deriveArticlePath,
   generateShortId,
@@ -208,6 +209,20 @@ export async function listArticlesForPicker() {
     orderBy: [{ title: "asc" }],
     select: { id: true, title: true, type: true },
   });
+}
+
+/**
+ * 記事エディタの `[[` 補完の候補 (#318)。下書き・一覧外も含めた全件。
+ *
+ * Article は非保護テーブルなので withClearance は不要。300 行台なのでページ表示時に全件渡す。
+ */
+export async function listArticleLinkCandidates(excludeShortId: string): Promise<WikiLinkCandidate[]> {
+  const rows = await prisma.article.findMany({
+    where: { shortId: { not: excludeShortId }, title: { not: "" } },
+    select: { title: true, type: true, draft: true, unlisted: true },
+    orderBy: { title: "asc" },
+  });
+  return rows;
 }
 
 /**
