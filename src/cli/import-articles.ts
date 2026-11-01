@@ -69,6 +69,8 @@ import {
   type ArticleSourceEntry,
 } from "@/lib/articles/frontmatter";
 import { shortIdFromArticleSourceUrl } from "@/lib/articles/source-article";
+import { removeArticleSourcesFromDossier, syncArticleSourcesToDossier } from "@/lib/domain/article-dossier-sync";
+import { sourceKey } from "@/lib/article-workflow/dossier-sync";
 import { hasChanged } from "@/lib/articles/changes";
 import { demotableSources, reconcileSources } from "@/lib/articles/reconcile";
 import { articlesDirFromArgs, compareCheckoutWithRemote, listArticleFiles } from "@/lib/articles/files";
@@ -361,6 +363,7 @@ async function main() {
   const overwritten: string[] = [];
   /** akashic で applied にしたが上流に無かったので pending に戻した出典 */
   const demoted: string[] = [];
+  const dossierSync: string[] = [];
 
   /**
    * DB に akashic の未 push 編集があり (`editedAt` が非 null)、ファイルは取り込んだ時点から
@@ -730,6 +733,35 @@ async function main() {
     ]);
     for (const d of demote) demoted.push(`${file.path}  [${d.sourceNo}] asset=${d.assetId}`);
 
+    // 記事の企画を出典に合わせる (#337)。上流で消えた出典の写しを片付けてから、増えた出典を足す。
+    // 出典の書き込みはコミット済みなので、ここで落ちても止めずに知らせる (cli:sync-article-dossiers で直せる)
+    try {
+      // 記事出典は sourceKey が URL の形で null にする (refArticleId を引いていない)
+      const prevRows = (prev?.sources ?? []).map((s) => ({ ...s, refArticleId: null }));
+      const after = new Set(replaced.map(sourceKey));
+      const removedRows = prevRows.filter((s) => {
+        const key = sourceKey(s);
+        return !!key && !after.has(key);
+      });
+      const r = removedRows.length
+        ? await removeArticleSourcesFromDossier(prisma, article.id, removedRows)
+        : { deleted: 0, excluded: 0 };
+      // 足すのは上流で増えた出典だけ (人が企画から消したアイテムを取り込みのたびに復活させない)
+      const before = new Set(prevRows.map(sourceKey));
+      const only = replaced.map(sourceKey).filter((k): k is string => !!k && !before.has(k));
+      const a = only.length
+        ? await syncArticleSourcesToDossier(prisma, article.id, { only })
+        : { dossier: "existing" as const, added: 0, skippedAbove: 0, noOwner: false };
+      if (r.deleted || r.excluded || a.added || a.dossier === "created" || a.noOwner) {
+        dossierSync.push(
+          `${file.path}  企画${a.dossier === "created" ? "を作成" : ""} +${a.added}${a.skippedAbove ? ` (機密で見送り ${a.skippedAbove})` : ""}` +
+            `${r.deleted ? ` -${r.deleted}` : ""}${r.excluded ? ` 足さない ${r.excluded}` : ""}${a.noOwner ? " (所有者が決まらず企画を作れない)" : ""}`,
+        );
+      }
+    } catch (e) {
+      dossierSync.push(`${file.path}  企画に写せなかった: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
     done++;
     if (done % 50 === 0) console.log(`  ${done}/${plan.length}`);
   }
@@ -763,6 +795,10 @@ async function main() {
   if (overwritten.length) {
     console.log(`\n--- akashic の未 push 編集があったが上流が変わっていたので上書きした (${overwritten.length} 件) ---`);
     for (const o of overwritten) console.log(`  ${o}`);
+  }
+  if (dossierSync.length) {
+    console.log(`\n--- 記事の企画を出典に合わせた (${dossierSync.length} 件) ---`);
+    for (const d of dossierSync) console.log(`  ${d}`);
   }
   if (demoted.length) {
     console.log(`\n--- akashic で反映済みにしたが上流に無かったので未反映 (pending) に戻した出典 (${demoted.length} 件) — 本文の ^[n] は消えているので反映し直す ---`);

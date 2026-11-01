@@ -71,6 +71,7 @@ ARTICLES_DIR=<sekai-nina-public のパス> pnpm test              # 実記事 33
 - **push の出力に影響する書き込みは `Article.dirty = true` を立てる。** `dirty` は「DB の出力 ≠ GitHub」の意味で、`/articles/push` はこれしか見ない
 - **`Article.githubSha` は取り込みが埋める git blob SHA。** push の衝突検出に使う。`pnpm cli:import-articles --apply` は checkout が origin/main と一致しないと止まる（pull し忘れで DB が巻き戻るのを防ぐ）
 - GitHub への書き込みは `ARTICLES_GITHUB_TOKEN`（fine-grained PAT）。`src/lib/github/` は素の `fetch`。1 push = 1 コミット
+- **記事の出典 (`ArticleSource`) を足す・外す経路は、コミット後に `src/lib/domain/article-dossier-sync.ts` の `afterArticleSourcesAdded` / `afterArticleSourcesRemoved` を呼ぶ** (#337)。呼ばないと記事の企画とずれ、企画の素材が欠けたり「反映待ち」に居座ったりする。渡すのは足した・外した出典だけ (全部を突き合わせると、人が企画から消したアイテムが復活する)。取りこぼしは `pnpm cli:sync-article-dossiers` (既定は下見)
 
 ## 認可モデル（このリポジトリの肝）
 

@@ -2,6 +2,7 @@ import { withClearance, withSession, prisma } from "@/lib/db";
 import { accessibleClassifications, assertClearance, isAboveClearance } from "@/lib/classification";
 import { logAudit } from "@/lib/domain/audit";
 import { createDossier, deleteDossier } from "@/lib/domain/dossiers";
+import { afterArticleSourcesAdded, afterArticleSourcesRemoved } from "@/lib/domain/article-dossier-sync";
 import { nextSortOrder, nextSourceNo } from "@/lib/articles/apply";
 import { paragraphsCiting } from "@/lib/articles/footnotes";
 import type { WikiLinkCandidate } from "@/lib/articles/wiki-link-complete";
@@ -407,6 +408,11 @@ export interface AddAssetToArticleInput {
   excerptEnd?: number;
   /** 監査ログ `article.source.add` の主体。渡したときだけ書く */
   actor?: ArticleActor;
+  /**
+   * 記事の企画に写さない (#337)。企画から記事を組み立てる経路 (`article-generate.ts`) 用。
+   * 出典は企画の素材から作るので写す必要が無く、写すとブログ画像の親の本文などが企画に増える
+   */
+  skipDossierSync?: boolean;
 }
 
 /** 紐づけの応答に使う形 (記事詳細の sources[] と同じ include) */
@@ -440,6 +446,8 @@ export async function addAssetToArticle(input: AddAssetToArticleInput, clearance
     return createPendingSource(tx, input, asset.classification, clearance);
   });
   if (input.actor) await auditSourceAdd(input.actor, created);
+  // 候補も記事の企画に入れる (#337)
+  if (!input.skipDossierSync) await afterArticleSourcesAdded(input.articleId, [created], input.actor?.id);
   return created;
 }
 
@@ -516,7 +524,10 @@ export async function addArticleSource(
     const source = await createPendingSource(tx, { ...input, articleId: article.id }, asset.classification, clearance);
     return { ok: true, source };
   });
-  if (result.ok) await auditSourceAdd(input.actor, result.source);
+  if (result.ok) {
+    await auditSourceAdd(input.actor, result.source);
+    await afterArticleSourcesAdded(result.source.articleId, [result.source], input.actor.id);
+  }
   return result;
 }
 
@@ -528,10 +539,18 @@ export async function addArticleSource(
  * いないが、Server Action は任意の id を受け取れるのでサーバ側で担保する。
  */
 export async function removeArticleSource(id: string, clearance: string) {
-  const { count } = await withClearance(clearance, (tx) =>
-    tx.articleSource.deleteMany({ where: { id, status: ArticleSourceStatus.pending } }),
-  );
-  if (count === 0) throw new Error("削除できる紐づけが見つかりません (pending のみ削除可)");
+  const removed = await withClearance(clearance, async (tx) => {
+    const row = await tx.articleSource.findFirst({
+      where: { id, status: ArticleSourceStatus.pending },
+      select: { articleId: true, assetId: true, url: true, refArticleId: true, excerpt: true, note: true },
+    });
+    if (!row) return null;
+    const { count } = await tx.articleSource.deleteMany({ where: { id, status: ArticleSourceStatus.pending } });
+    return count ? row : null;
+  });
+  if (!removed) throw new Error("削除できる紐づけが見つかりません (pending のみ削除可)");
+  // 企画に残すと「反映待ち」に出るので、企画の写しも片付ける (#337)
+  await afterArticleSourcesRemoved(removed.articleId, [removed]);
 }
 
 export interface ApplyArticleSourceInput {
@@ -921,6 +940,8 @@ export async function appendToArticle(
   clearance: string,
 ): Promise<AppendToArticleResult> {
   let result: AppendToArticleResult;
+  let articleId: string | null = null;
+  const addedSources: { assetId: string | null; url: string | null; refArticleId: null }[] = [];
   try {
     result = await withClearance(clearance, async (tx): Promise<AppendToArticleResult> => {
       const current = await tx.article.findUnique({
@@ -939,6 +960,7 @@ export async function appendToArticle(
       if (current.updatedAt.getTime() !== input.expectedUpdatedAt.getTime()) {
         throw new AppendAbort({ ok: false, reason: "conflict", currentUpdatedAt: current.updatedAt });
       }
+      articleId = current.id;
 
       const patch: ArticleEditPatch = { body: input.body };
       if (input.articleUpdatedAt !== undefined) patch.articleUpdatedAt = input.articleUpdatedAt;
@@ -989,6 +1011,7 @@ export async function appendToArticle(
         });
         if (assetId) haveAssets.add(assetId);
         if (url) haveUrls.add(url);
+        addedSources.push({ assetId, url, refArticleId: null });
         added++;
       }
 
@@ -1018,6 +1041,9 @@ export async function appendToArticle(
       targetId: input.shortId,
       metadata: { changed: result.changed, addedSources: result.addedSources },
     });
+  }
+  if (result.ok && result.addedSources && articleId) {
+    await afterArticleSourcesAdded(articleId, addedSources, input.actor.id);
   }
   return result;
 }

@@ -33,6 +33,7 @@
     "cli:verify-pgroonga": "tsx src/cli/verify-pgroonga.ts",
     "cli:verify-article-push": "tsx src/cli/verify-article-push.ts",
     "cli:backfill-article-dossiers": "tsx src/cli/backfill-article-dossiers.ts",
+    "cli:sync-article-dossiers": "tsx src/cli/sync-article-dossiers.ts",
     "cli:backfill-article-places": "tsx src/cli/backfill-article-places.ts",
     "cli:backfill-place-cards": "tsx src/cli/backfill-place-cards.ts",
     "cli:import-songs": "tsx src/cli/import-songs.ts",

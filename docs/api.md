@@ -1127,6 +1127,7 @@ DataSource は classification ベースの RLS 対象。`public` は「公開サ
 - `assetId` はキーの持ち主のクリアランスで見えるもの、かつ **`internal` 以下**だけ（apply と同じ上限。見えなければ 400、`internal` より上なら 403）。出典は public で作られ ref と label が公開リポジトリに載るため
 - 本文も出典も変わらなければ何も書かない（`changed: []` / `addedSources: 0`）
 - 書いたら `dirty = true`。公開は `POST /articles/:shortId/push`
+- 足した出典は記事の企画 (`Article.dossierId`) にも素材として入る (#337。企画が無ければ作る)。応答には出さない。失敗しても append は成功のまま (`pnpm cli:sync-article-dossiers` で直す)
 
 **レスポンス:** `{"shortId", "changed": ["body", "articleUpdatedAt"], "addedSources": 1, "hadPendingEdits": false, "updatedAt": "…"}`
 
@@ -1189,6 +1190,7 @@ body は省略可（`subject` を省くと既定のコミットメッセージ�
 - 見えない / 存在しないアセットは 404（`reason: "asset_not_found"`）、記事が無ければ 404（`reason: "article_not_found"`）
 - pending の追加は push の出力に影響しないので、記事の `updatedAt` / `dirty` / `editedAt` は変わらない（楽観ロック不要）
 - 監査ログ `article.source.add`（画面の「記事に追加」でも書く）
+- 紐づけたアセットは記事の企画 (`Article.dossierId`) にも素材として入る (#337)。企画が無ければ作る。企画にもう同じアセットがあれば足さない。企画より機密が上のアセットは足さない。画面で候補を外すと、企画からも消える (企画で人がメモ・抜粋を書いたものは残し、「記事に足さない」にする)
 
 ### POST /articles/:shortId/sources/:sourceId/apply
 
