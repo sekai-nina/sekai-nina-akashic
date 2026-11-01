@@ -580,7 +580,8 @@ async function applySources(
       continue;
     }
     const created = await addAssetToArticle(
-      { articleId, assetId: s.assetId, label: s.label, actor },
+      // 企画の素材から作る出典なので企画には写さない (#337)
+      { articleId, assetId: s.assetId, label: s.label, actor, skipDossierSync: true },
       user.clearance
     );
     const result = await applyArticleSource(
