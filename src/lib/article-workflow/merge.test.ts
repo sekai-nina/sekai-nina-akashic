@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkMerge, finalizeMerge, mergePrompt, renumberMaterials, unwrapFence } from "./merge";
+import { checkMerge, finalizeMerge, onlyAddsFootnotes, mergePrompt, renumberMaterials, unwrapFence } from "./merge";
 import type { RenderedSource } from "./render";
 
 const base = `坂井新奈は祖母と仲が良い。
@@ -53,9 +53,28 @@ describe("checkMerge", () => {
     expect(checkMerge(base, swapped).ok).toBe(false);
   });
 
-  it("行の途中への ^[n] の挿入・末尾への文の追加は書き換えとして弾く", () => {
-    expect(checkMerge(base, base.replace("泊まっていた^[1]", "泊まっていた^[3]^[1]")).ok).toBe(false);
+  it("行の途中の ^[n] の隣への追加は通す (文が 2 つある行の前の文を裏付ける)", () => {
+    const two = "坂井新奈は大田美月とクリスマスマーケットに行った^[1]。この時期は神宮外苑と芝公園で開かれている。\n";
+    expect(checkMerge(two, two.replace("行った^[1]。", "行った^[1]^[9]。"))).toEqual({ ok: true, changedLines: [0] });
+    expect(checkMerge(two, two.replace("行った^[1]。", "行った^[9]^[1]。"))).toEqual({ ok: true, changedLines: [0] });
+    expect(checkMerge(two, two.replace("行った^[1]。", "行った^[1]。^[9]"))).toEqual({ ok: true, changedLines: [0] });
+  });
+
+  it("^[n] 以外の文字を変えた・既存の ^[n] を消した・文を足したのは書き換えとして弾く", () => {
     expect(checkMerge(base, base.replace("泊まっていた^[1]", "泊まっていた^[1]。夏休みは毎年")).ok).toBe(false);
+    expect(checkMerge(base, base.replace("泊まっていた^[1]", "泊まっていた^[3]")).ok).toBe(false);
+    expect(checkMerge(base, base.replace("泊まっていた^[1]", "泊まった^[1]^[3]")).ok).toBe(false);
+  });
+});
+
+describe("onlyAddsFootnotes", () => {
+  it("^[n] を足しただけなら true、それ以外の違いは false", () => {
+    expect(onlyAddsFootnotes("a^[1]b", "a^[1]^[2]b")).toBe(true);
+    expect(onlyAddsFootnotes("a^[1]b", "a^[1]b^[2]")).toBe(true);
+    expect(onlyAddsFootnotes("a^[1]b", "a^[1]b")).toBe(true);
+    expect(onlyAddsFootnotes("a^[1]b", "ab^[2]")).toBe(false);
+    expect(onlyAddsFootnotes("a^[1]b", "a^[1]bc")).toBe(false);
+    expect(onlyAddsFootnotes("a^[1]b", "a^[1]")).toBe(false);
   });
 });
 
