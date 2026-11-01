@@ -75,6 +75,8 @@ export const EXPECTED_JOBS: { key: string; name: string; group: CheckGroup }[] =
   { key: "bot.site_watch", name: "bot: 公式サイト監視", group: "collect" },
   { key: "bot.youtube_watch", name: "bot: YouTube 監視", group: "collect" },
   { key: TIKTOK_JOB_KEY, name: "tiktok-watch: TikTok 監視", group: "collect" },
+  // sekai の毎時 cron (hinatazaka42/lemino-collector)。動画 DL が最大 4h かかるので intervalSec=7200 で報告してくる
+  { key: "lemino.collector", name: "Lemino 収集", group: "collect" },
   { key: "cron.x_mentions", name: "X 言及監視 (日次)", group: "collect" },
   { key: "bot.discovery", name: "bot: 今日の発見の抽出", group: "process" },
   { key: NINA_MENTIONS_JOB_KEY, name: "新奈への言及の付け直し (15 分)", group: "process" },
