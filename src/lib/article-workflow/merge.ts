@@ -5,7 +5,8 @@
  * 出典として足すだけで、本文への書き足しは人が行っていた (#268)。ここでは既存の本文と素材を
  * AI に渡して本文に組み込んだ案を作らせ、人が直してから保存する。
  *
- * **AI に許すのは「新しい行を差し込む」「既存の行の末尾に `^[n]` を足す」の 2 つだけ。**
+ * **AI に許すのは「新しい行を差し込む」「既存の行に `^[n]` を足す」の 2 つだけ。**
+ * `^[n]` は行末でなくてもよい (1 行に文が 2 つあり、前の文の末尾に `^[1]` があるとき、その隣に足す)。
  * 既存の行の書き換え・削除・並べ替えは `checkMerge` が弾く (人が直した文章を AI に壊させない)。
  * 人が画面で直した結果は検査しない (書き換えたいときは人が書き換える)。
  */
@@ -126,10 +127,11 @@ export function mergePrompt(input: {
     "やってよいことは次の 2 つだけです。",
     "1. **新しい行を差し込む。** 箇条書きなら関係の近い項目の後ろ・ネストの位置に、地の文なら段落の間に置く。",
     "   形 (リード・箇条書き・ネスト・`^[n]` の付け方) は既存の本文と見本に揃える",
-    "2. **既存の行の末尾に `^[n]` を足す。** 新しい素材が既存の行と同じ事実を裏付けるとき",
+    "2. **既存の行に `^[n]` を足す。** 新しい素材が既存の行と同じ事実を裏付けるとき。",
+    "   その事実を書いた文の末尾 (既存の `^[n]` があればその直後) に付ける",
     "",
     "**既存の行は 1 文字も変えない・消さない・並べ替えない。** 言い回しの調整や、既存の事実の書き直しが",
-    "必要だと思っても行わない (人が後で直す)。既存の行に `^[n]` を足すときも、行の末尾にだけ付ける。",
+    "必要だと思っても行わない (人が後で直す)。既存の行に `^[n]` を足すときも、`^[n]` 以外の文字は変えない。",
     "新しい素材に、タイトルと関係する事実が無いなら、既存の本文をそのまま返す。",
     "出典番号は素材の見出しに書いてある番号をそのまま使う。新しい素材の番号: " +
       input.newSources.map((s) => `^[${s.sourceNo}] ${s.label}`).join(" / "),
@@ -154,8 +156,32 @@ export function mergePrompt(input: {
   return { system: input.system, user, included: input.included, truncated: input.truncated };
 }
 
-/** 行末の `^[n]` の並び */
-const TRAILING_FOOTNOTES = /^(?:\^\[\d+\])+$/;
+/** 先頭の `^[n]` 1 つ */
+const LEADING_FOOTNOTE = /^\^\[\d+\]/;
+
+/**
+ * `line` が `want` に `^[n]` を足しただけか (足した位置は問わない)。
+ * 先頭から突き合わせ、合わないところで `line` 側が `^[n]` なら足したものとして読み飛ばす。
+ * 既存の `^[n]` と同じものが続くときは既存のものとして突き合わせる (`^[9]^[1]` も `^[1]^[9]` も通る)
+ */
+export function onlyAddsFootnotes(want: string, line: string): boolean {
+  let i = 0;
+  let j = 0;
+  while (j < line.length) {
+    const added = line.slice(j).match(LEADING_FOOTNOTE)?.[0];
+    if (added && !want.startsWith(added, i)) {
+      j += added.length;
+      continue;
+    }
+    if (i < want.length && want[i] === line[j]) {
+      i++;
+      j++;
+      continue;
+    }
+    return false;
+  }
+  return i === want.length;
+}
 
 export type MergeCheck =
   | {
@@ -186,7 +212,7 @@ export function unwrapFence(body: string): string {
 }
 
 /**
- * AI の案が「差し込み」と「既存の行の末尾への `^[n]` の追加」だけでできているか。
+ * AI の案が「差し込み」と「既存の行への `^[n]` の追加」だけでできているか。
  * 段落の区切り (空行) は消せない (消すと Markdown で前後の段落・引用が繋がる)。空行を足すのは許す。
  * 行末の空白・連続する空行の数は見ない
  */
@@ -213,7 +239,7 @@ export function checkMerge(base: string, proposed: string): MergeCheck {
       i++;
       continue;
     }
-    if (want !== undefined && line.startsWith(want) && TRAILING_FOOTNOTES.test(line.slice(want.length))) {
+    if (want !== undefined && onlyAddsFootnotes(want, line)) {
       i++;
       changedLines.push(j);
       continue;
