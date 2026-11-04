@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
 import { getDossierForApi } from "@/lib/domain/dossiers";
+import { resolveCandidateLocation } from "@/lib/domain/place-candidate-location";
 import { canViewDossier } from "@/lib/auth/dossier-permissions";
 
 const R2_PUBLIC_URL = (
@@ -91,11 +92,7 @@ export async function GET(
     }),
     placeCandidates: dossier.placeCandidates.map((pc) => ({
       id: pc.id,
-      name: pc.place?.entity.canonicalName ?? pc.name,
-      address: pc.address,
-      latitude: pc.latitude,
-      longitude: pc.longitude,
-      googleMapsUrl: pc.googleMapsUrl,
+      ...resolveCandidateLocation(pc),
       note: pc.note,
       confidence: pc.confidence,
       certainty: pc.certainty,

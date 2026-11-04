@@ -2,14 +2,17 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { Plus, X, ExternalLink, Trash2, MapPin, BadgeCheck } from "lucide-react";
+import { Plus, X, ExternalLink, Trash2, MapPin, BadgeCheck, Link2 } from "lucide-react";
 import { DynamicMap } from "@/components/dynamic-map";
 import { PlaceLookup } from "@/components/place-lookup";
 import { PLACE_CERTAINTY_LABELS, PLACE_CLASSIFICATION_LABELS } from "@/lib/utils";
 import { CERTAINTY_NOTE_INPUT, CERTAINTY_NOTE_PLACEHOLDER, CertaintyToggle } from "@/components/certainty-toggle";
 import type { ClearanceLevel, PlaceCertainty } from "@prisma/client";
+import type { AssetPlaceSuggestion } from "@/lib/domain/dossier-view";
+import { resolveCandidateLocation } from "@/lib/domain/place-candidate-location";
 import {
   addPlaceCandidateAction,
+  adoptAssetPlaceAction,
   updatePlaceCandidateAction,
   removePlaceCandidateAction,
   promotePlaceCandidateAction,
@@ -23,6 +26,10 @@ const ACTION_BUTTON =
 /** フォームの入力欄。スマホは 16px 未満だと iOS がフォーカス時に拡大するので text-base にする */
 const INPUT =
   "border border-slate-300 rounded px-2 py-2 sm:py-1 text-base sm:text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500";
+
+/** 地図のポップアップは HTML で渡すので、聖地の名前・住所をそのまま埋め込まない */
+const escapeHtml = (s: string) =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 type Candidate = {
   id: string;
@@ -39,6 +46,10 @@ type Candidate = {
     id: string;
     status: string;
     classification: ClearanceLevel;
+    latitude: number;
+    longitude: number;
+    address: string | null;
+    googleMapsUrl: string | null;
     entity: { canonicalName: string };
   } | null;
 };
@@ -46,6 +57,10 @@ type Candidate = {
 interface PlaceCandidateListProps {
   dossierId: string;
   candidates: Candidate[];
+  /** 企画のアセットに結びついた聖地のうち、まだ候補に無いもの。入れるまで記事には影響しない */
+  suggestions: AssetPlaceSuggestion[];
+  /** この企画に記事があるか。候補に入れると記事にも聖地が付くので、押す前に知らせる */
+  hasArticles: boolean;
   editable: boolean;
   /** 聖地に登録するときに選べる公開範囲 (自分のクリアランス以下)。空なら選ばせない (viewer) */
   classifications: ClearanceLevel[];
@@ -54,6 +69,8 @@ interface PlaceCandidateListProps {
 export function PlaceCandidateList({
   dossierId,
   candidates,
+  suggestions,
+  hasArticles,
   editable,
   classifications,
 }: PlaceCandidateListProps) {
@@ -135,6 +152,17 @@ export function PlaceCandidateList({
     });
   }
 
+  function adopt(s: AssetPlaceSuggestion) {
+    setCardError(null);
+    startTransition(async () => {
+      try {
+        await adoptAssetPlaceAction(dossierId, s.id);
+      } catch (e) {
+        setCardError({ id: s.id, message: `候補に入れられませんでした: ${e instanceof Error ? e.message : String(e)}` });
+      }
+    });
+  }
+
   function changeClassification(c: Candidate, level: ClearanceLevel) {
     if (!c.place || level === c.place.classification) return;
     const placeId = c.place.id;
@@ -148,17 +176,26 @@ export function PlaceCandidateList({
     });
   }
 
-  const mapMarkers = candidates
-    .filter((c) => c.latitude != null && c.longitude != null)
-    .map((c) => ({
-      id: c.id,
-      lat: c.latitude!,
-      lng: c.longitude!,
-      label: c.place?.entity.canonicalName ?? c.name ?? "(無題)",
-      popupHtml: c.address
-        ? `<strong>${c.place?.entity.canonicalName ?? c.name ?? ""}</strong><br/>${c.address}`
-        : undefined,
-    }));
+  const shown = candidates.map((c) => ({ ...c, ...resolveCandidateLocation(c) }));
+
+  const mapMarkers = [
+    ...shown
+      .filter((c) => c.latitude != null && c.longitude != null)
+      .map((c) => ({
+        id: c.id,
+        lat: c.latitude!,
+        lng: c.longitude!,
+        label: c.name || "(無題)",
+        popupHtml: c.address ? `<strong>${escapeHtml(c.name)}</strong><br/>${escapeHtml(c.address)}` : undefined,
+      })),
+    ...suggestions.map((s) => ({
+      id: s.id,
+      lat: s.latitude,
+      lng: s.longitude,
+      label: s.name,
+      popupHtml: s.address ? `<strong>${escapeHtml(s.name)}</strong><br/>${escapeHtml(s.address)}` : undefined,
+    })),
+  ];
 
   return (
     <div className="space-y-2">
@@ -168,9 +205,9 @@ export function PlaceCandidateList({
         </div>
       )}
 
-      {candidates.length > 0 && (
+      {(shown.length > 0 || suggestions.length > 0) && (
         <ul className="grid gap-2 sm:grid-cols-2">
-          {candidates.map((c) => {
+          {shown.map((c) => {
             const isConfirmed = c.place?.status === "confirmed";
             return (
               <li key={c.id} className="bg-white border border-slate-200 rounded p-2.5">
@@ -307,6 +344,63 @@ export function PlaceCandidateList({
               </li>
             );
           })}
+          {suggestions.map((s) => (
+            <li key={s.id} className="bg-white border border-dashed border-indigo-300 rounded p-2.5">
+              <p className="text-sm font-medium text-slate-900 truncate flex items-center gap-1">
+                <MapPin className="h-3 w-3 text-slate-400 shrink-0" />
+                <Link href={`/places/${s.id}`} className="truncate hover:text-indigo-600 hover:underline">
+                  {s.name}
+                </Link>
+                <span className="inline-flex items-center gap-0.5 text-[10px] bg-indigo-50 text-indigo-700 px-1 rounded shrink-0">
+                  <Link2 className="h-2.5 w-2.5" /> アセットから
+                </span>
+              </p>
+              {s.address && <p className="text-[11px] text-slate-500 truncate">{s.address}</p>}
+              <ul className="mt-1 space-y-0.5">
+                {s.assets.map((a) => (
+                  <li key={a.id} className="truncate">
+                    <Link href={`/assets/${a.id}`} className="text-[11px] text-indigo-600 hover:underline">
+                      {a.title || a.id}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+              {editable && hasArticles && (
+                <p className="mt-1.5 text-[11px] text-amber-800">
+                  入れるとこの企画の記事にも「確定」で付きます。外す・確度を変えるのは記事の編集画面から
+                </p>
+              )}
+              {(s.googleMapsUrl || editable) && (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {editable && (
+                    <button
+                      type="button"
+                      onClick={() => adopt(s)}
+                      disabled={isPending}
+                      className={`${ACTION_BUTTON} border-indigo-300 text-indigo-700 hover:bg-indigo-50`}
+                    >
+                      <Plus className="h-3.5 w-3.5" /> 候補に入れる
+                    </button>
+                  )}
+                  {s.googleMapsUrl && (
+                    <a
+                      href={s.googleMapsUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={`${ACTION_BUTTON} border-slate-200 text-indigo-600 hover:bg-indigo-50`}
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" /> 地図
+                    </a>
+                  )}
+                </div>
+              )}
+              {cardError?.id === s.id && (
+                <p role="status" className="mt-2 rounded-md bg-amber-50 border border-amber-200 px-2 py-1.5 text-xs text-amber-800">
+                  {cardError.message}
+                </p>
+              )}
+            </li>
+          ))}
         </ul>
       )}
 
@@ -414,7 +508,7 @@ export function PlaceCandidateList({
         </div>
       )}
 
-      {candidates.length === 0 && !open && (
+      {candidates.length === 0 && suggestions.length === 0 && !open && (
         <p className="text-xs text-slate-400">候補はまだありません。</p>
       )}
     </div>

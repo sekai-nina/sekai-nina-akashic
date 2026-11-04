@@ -9,6 +9,7 @@ import { accessibleClassifications } from "@/lib/classification";
 import { ARTICLE_WORKFLOW_LABELS as L, formatDate } from "@/lib/utils";
 import { getR2PublicUrl } from "@/lib/r2";
 import { getClipMedia } from "@/lib/domain/nina-appearance";
+import { deriveAssetPlaceSuggestions, toDossierRows } from "@/lib/domain/dossier-view";
 import { DossierItemRow } from "./item-row";
 import { DossierHeader } from "./dossier-header";
 import { ExternalLinkForm } from "./external-link-form";
@@ -40,6 +41,8 @@ export default async function DossierDetailPage({ params }: DossierDetailProps) 
   const ninaMedia = canMarkNina
     ? await getClipMedia(session.user.clearance, dossier.items.flatMap((i) => (i.asset ? [i.asset.id] : [])))
     : new Map();
+  const placeSuggestions = deriveAssetPlaceSuggestions(dossier.items, dossier.placeCandidates);
+  const rows = toDossierRows(dossier.items);
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6">
@@ -47,7 +50,19 @@ export default async function DossierDetailPage({ params }: DossierDetailProps) 
         <ArrowLeft size={14} /> 企画一覧へ
       </Link>
 
-      <DossierHeader dossier={dossier} editable={editable} manageable={manageable} />
+      <DossierHeader
+        dossier={{
+          id: dossier.id,
+          title: dossier.title,
+          summary: dossier.summary,
+          classification: dossier.classification,
+          viewMode: dossier.viewMode,
+          editMode: dossier.editMode,
+          owner: dossier.owner,
+        }}
+        editable={editable}
+        manageable={manageable}
+      />
 
       {(dossier.articles.length > 0 || canMakeArticle) && (
       <div className="mt-3 flex items-center justify-end gap-3 flex-wrap">
@@ -81,6 +96,8 @@ export default async function DossierDetailPage({ params }: DossierDetailProps) 
         <PlaceCandidateList
           dossierId={dossier.id}
           candidates={dossier.placeCandidates}
+          suggestions={placeSuggestions}
+          hasArticles={dossier.articles.length > 0}
           editable={editable}
           classifications={
             // 公開範囲を変えられるのは admin / member だけ (promotePlaceCandidate と同じ判定)
@@ -113,7 +130,7 @@ export default async function DossierDetailPage({ params }: DossierDetailProps) 
           </div>
         ) : (
           <ul className="space-y-3">
-            {dossier.items.map((item, idx) => (
+            {rows.map(({ item, body, talk }, idx) => (
               <li key={item.id}>
                 <DossierItemRow
                   dossierId={dossier.id}
@@ -130,6 +147,8 @@ export default async function DossierDetailPage({ params }: DossierDetailProps) 
                         }
                       : item
                   }
+                  body={body}
+                  talk={talk}
                   editable={editable}
                   isFirst={idx === 0}
                   isLast={idx === dossier.items.length - 1}
