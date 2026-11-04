@@ -638,7 +638,7 @@ API キーからは **引き上げしかできない。** `PATCH /assets/:id` / 
 
 `classification` は `internal` までが公開サイトに出る（聖地マップも、記事 frontmatter の `locations` も）。生活圏など公開サイトに出したくない場所は `confidential` 以上にする。記事との紐づけ（`ArticlePlace`、記事の編集画面で付ける）とアセットとの紐づけは残り、akashic の中だけで「どの記事・アセットに出てくるか」を追える（#283）。
 
-**訪問の確度（#333）。** 記事×聖地の紐づけ（`ArticlePlace` = 訪問）は確度 `certainty` を持つ。`confirmed`（確定: 画像か検証できる証言があり、その場所と完全に一致する）と `likely`（ほぼ確定: 証言から十中八九ここだが、確定できるほど検証できる材料が無い）。記事の編集画面の聖地欄で訪問ごとに切り替え、`likely` には理由 `certaintyNote` を書ける。push では **`likely` の訪問だけ** frontmatter の `locations` に `certainty: likely` と `certainty_note`（理由があれば）を書く（確定の訪問は `{ name, place_id }` のまま）。取り込みは逆に読む。公開サイトは記事内の Google マップのカード（`place_id:` の行を持つ cardlink）に「ほぼ確定」の印と理由を出し、訪問がすべて `likely` の聖地は聖地マップのピンを見分ける。企画の場所候補も同じ `certainty` / `certaintyNote` を持ち、記事を作る・企画の記事に聖地を足すとその訪問に引き継ぐ（`GET /dossiers/:id` の `placeCandidates[]` に出る。旧 `confidence`（0-100）は使っていない）。
+**訪問の確度（#333）。** 記事×聖地の紐づけ（`ArticlePlace` = 訪問）は確度 `certainty` を持つ。`confirmed`（確定: 画像か検証できる証言があり、その場所と完全に一致する）と `likely`（ほぼ確定: 証言から十中八九ここだが、確定できるほど検証できる材料が無い）。記事の編集画面の聖地欄で訪問ごとに切り替え、`likely` には理由 `certaintyNote` を書ける。push では **`likely` の訪問だけ** frontmatter の `locations` に `certainty: likely` と `certainty_note`（理由があれば）を書く（確定の訪問は `{ name, place_id }` のまま）。取り込みは逆に読む。公開サイトは記事内の Google マップのカード（`place_id:` の行を持つ cardlink）に「ほぼ確定」の印と理由を出し、訪問がすべて `likely` の聖地は聖地マップのピンを見分ける。企画の場所候補も同じ `certainty` / `certaintyNote` を持ち、記事を作る・企画の記事に聖地を足すとその訪問に引き継ぐ（`GET /dossiers/:id` の `placeCandidates[]` に出る。旧 `confidence`（0-100）は使っていない）。企画の画面でアセットから入れた候補は聖地を指すだけで座標・住所を持たないので、`placeCandidates[]` はその値を聖地から補って返す（聖地が見えないときは `null`）。
 
 ### POST /places
 
