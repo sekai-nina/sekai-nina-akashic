@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { checkMerge, finalizeMerge, onlyAddsFootnotes, mergePrompt, renumberMaterials, unwrapFence } from "./merge";
-import type { RenderedSource } from "./render";
+import { checkMerge, finalizeMerge, hasWritableContent, onlyAddsFootnotes, mergePrompt, renumberMaterials, unwrapFence } from "./merge";
+import type { ArticleAssetInput, RenderedSource } from "./render";
 
 const base = `坂井新奈は祖母と仲が良い。
 
@@ -107,6 +107,33 @@ URL: https://example.com/1
     const r = renumberMaterials(materials, new Map([[2, 3]]), new Set([3]));
     expect(r.text).not.toContain("夏の話");
     expect(r.sections).toHaveLength(1);
+  });
+});
+
+describe("hasWritableContent", () => {
+  const asset = (over: Partial<ArticleAssetInput>): ArticleAssetInput => ({
+    id: "a",
+    kind: "video",
+    title: "番組",
+    canonicalDate: null,
+    sortAt: null,
+    source: { kind: "url", title: "番組", url: "https://www.youtube.com/watch?v=x", publishedAt: null },
+    excerpts: [],
+    ...over,
+  });
+
+  it("番組・動画は文字起こし・抜粋・メモのどれかがあれば AI に回し、無ければ行だけ", () => {
+    expect(hasWritableContent(asset({}))).toBe(false);
+    expect(hasWritableContent(asset({ text: "文字起こし" }))).toBe(true);
+    expect(hasWritableContent(asset({ excerpts: ["抜粋"] }))).toBe(true);
+    expect(hasWritableContent(asset({ notes: ["メモ"] }))).toBe(true);
+  });
+
+  it("画像・トークの動画は行だけ。補った本文は数えない", () => {
+    expect(hasWritableContent(asset({ kind: "image", notes: ["メモ"] }))).toBe(false);
+    expect(hasWritableContent(asset({ source: { kind: "other", title: "Talk", url: null, publishedAt: null }, text: "文字起こし" }))).toBe(false);
+    expect(hasWritableContent(asset({ kind: "text" }))).toBe(true);
+    expect(hasWritableContent(asset({ kind: "text", supplement: true }))).toBe(false);
   });
 });
 

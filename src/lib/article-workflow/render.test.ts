@@ -115,6 +115,17 @@ describe("URL 付きの番組・動画・音声の素材", () => {
     expect(m.text).not.toContain("画像だけのブログ");
   });
 
+  it("同じ URL の本文・画像・前後編があっても、どの本文も落とさない", () => {
+    const part2 = { ...video, id: "video2", title: "後編", text: "後編の文字起こし", excerpts: [], notes: [] };
+    const image = { ...video, id: "image", kind: "image" as const, title: "サムネ", text: null, excerpts: [], notes: [] };
+    const text = { ...video, id: "text", kind: "text" as const, title: "説明", text: "動画の説明", excerpts: [], notes: [] };
+    const m = materials([image, video, part2, text]);
+    expect(m.included).toBe(1);
+    for (const body of ["文字起こしの本文", "後編の文字起こし", "動画の説明"]) expect(m.text).toContain(body);
+    expect(classifyMaterials([image, video]).blogs[0].ref).toBe("video");
+    expect(classifyMaterials([image, video, text]).blogs[0].ref).toBe("text");
+  });
+
   it("本文の無い動画は動画の素材と書く", () => {
     const m = materials([{ ...video, text: null, excerpts: [], notes: [] }]);
     expect(m.text).toContain("(本文なし。動画の素材)");

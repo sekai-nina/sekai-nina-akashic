@@ -240,6 +240,18 @@ describe("outing の追記 (関連メディアは flat)", () => {
     expect(p.body).toBe("本文だけ。\n\n## 関連メディア\n\n- 【トーク・画像】坂井新奈トーク 2025.8.18 20:31^[2]\n");
   });
 
+  it("種別だけの動画の行の前にトークを足す (フル生成の並び)", () => {
+    const r = renderOutingArticle(input([talk, blog]), draft);
+    const p = planAppend({
+      existingBody: "本文だけ。\n\n## 関連メディア\n\n- 【動画】番組^[1]\n",
+      parts: r.parts,
+      sources: r.sources,
+      existingSources: [{ sourceNo: 1, assetId: "blog", url: BLOG_URL }],
+      layout: OUTING_TEMPLATE.appendLayout,
+    });
+    expect(p.body).toBe("本文だけ。\n\n## 関連メディア\n\n- 【トーク・画像】坂井新奈トーク 2025.8.18 20:31^[2]\n- 【動画】番組^[1]\n");
+  });
+
   it("坂井新奈が出ているものがあれば、新しい章を小見出しで分ける", () => {
     const r = renderOutingArticle(input([{ ...talk, ninaAppears: true }, blog]), draft);
     const p = planAppend({

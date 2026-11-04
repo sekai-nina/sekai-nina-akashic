@@ -11,7 +11,7 @@
  * 人が画面で直した結果は検査しない (書き換えたいときは人が書き換える)。
  */
 
-import { classifyMaterials, numberSources, type ArticleAssetInput, type RenderedSource } from "./render";
+import { classifyMaterials, isTalk, numberSources, type ArticleAssetInput, type RenderedSource } from "./render";
 import type { AiPrompt } from "./templates/types";
 
 /**
@@ -31,6 +31,13 @@ export interface FreshMaterial {
   excerpts: string[];
   notes: string[];
   itemIds: string[];
+}
+
+/** 本文に書き足す中身があるアセットか。トークの動画・ブログ画像は関連メディアの行だけで終わる */
+export function hasWritableContent(a: ArticleAssetInput): boolean {
+  if (a.kind === "text") return !a.supplement;
+  if (a.kind === "image" || isTalk(a)) return false;
+  return !!a.text?.trim() || a.excerpts.length > 0 || (a.notes?.length ?? 0) > 0;
 }
 
 /**

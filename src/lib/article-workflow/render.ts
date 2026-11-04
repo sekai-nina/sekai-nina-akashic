@@ -251,7 +251,11 @@ export function classifyMaterials(assets: ArticleAssetInput[]): {
       for (const ex of a.excerpts) if (ex && !group.excerpts.includes(ex)) group.excerpts.push(ex);
     } else {
       group.images.push(a);
-      if (a.kind !== "image") for (const ex of a.excerpts) if (ex && !group.mediaExcerpts.includes(ex)) group.mediaExcerpts.push(ex);
+      if (a.kind !== "image") {
+        // 本文を持ちうるので画像より先に出典の宛先にする (本文 text があればそちらが勝つ)
+        group.ref ??= a.id;
+        for (const ex of a.excerpts) if (ex && !group.mediaExcerpts.includes(ex)) group.mediaExcerpts.push(ex);
+      }
     }
     blogs.set(url, group);
   }

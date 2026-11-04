@@ -106,7 +106,8 @@ function blogSection(b: BlogGroup, textAsset: ArticleAssetInput | undefined, bud
       excerpts: [...b.excerpts, ...b.mediaExcerpts],
       notes: assets.flatMap((a) => a.notes ?? []),
       captions: b.images.map((i) => i.caption?.trim()).filter((c): c is string => !!c),
-      body: textAsset?.text ?? null,
+      // 同じ URL に本文と動画や、前編と後編が入っていることがある。どれの本文も落とさない
+      body: assets.flatMap((a) => (a.kind !== "image" && a.text?.trim() ? [a.text] : [])).join("\n\n") || null,
       // 雑誌などは本文のアセットはあっても本文が無く、人のメモにだけ中身がある
       noBodyNote: !textAsset
         ? "(本文なし。画像だけのブログ)"
