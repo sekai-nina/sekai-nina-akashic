@@ -316,8 +316,8 @@ function KindIcon({ kind }: { kind: string }) {
   return <FileText className="h-3 w-3" />;
 }
 
-/** トークの画像。スクショなどは切り抜くと読めないので全体を出し、押すと拡大する */
-function TalkImage({ src, alt }: { src: string; alt: string }) {
+/** トークの画像。スクショなどは切り抜くと読めないので全体を出し、押すと元の大きさで拡大する */
+function TalkImage({ src, fullSrc, alt }: { src: string; fullSrc: string; alt: string }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -325,7 +325,7 @@ function TalkImage({ src, alt }: { src: string; alt: string }) {
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={src} alt={alt} loading="lazy" className="w-full h-auto rounded bg-slate-100 hover:opacity-90 transition-opacity" />
       </button>
-      <Lightbox src={open ? src : null} alt={alt} onClose={() => setOpen(false)} />
+      <Lightbox src={open ? fullSrc : null} alt={alt} onClose={() => setOpen(false)} />
     </>
   );
 }
@@ -365,11 +365,10 @@ function ItemPreview({ item, talk }: { item: Item; talk: boolean }) {
   if (!item.asset) return <PlaceholderBlock label="アセット未参照" />;
   const a = item.asset;
   if (talk && a.kind === "image") {
-    // サムネイルがまだ無いものはアセット詳細と同じく元画像を出す
-    const src =
-      a.thumbnailUrl ??
-      (a.storageProvider === "gdrive" && a.storageKey ? `/api/drive-image/${a.storageKey}` : a.storageUrl);
-    if (src) return <TalkImage src={src} alt={a.title} />;
+    // サムネイルは幅 640px なので、拡大は元画像にする。サムネイルがまだ無いものは一覧も元画像
+    const original = a.storageProvider === "gdrive" && a.storageKey ? `/api/drive-image/${a.storageKey}` : a.storageUrl;
+    const src = a.thumbnailUrl ?? original;
+    if (src) return <TalkImage src={src} fullSrc={original ?? src} alt={a.title} />;
   }
   if (a.thumbnailUrl) {
     // eslint-disable-next-line @next/next/no-img-element
