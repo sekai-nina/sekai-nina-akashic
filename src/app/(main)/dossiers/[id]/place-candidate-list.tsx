@@ -9,6 +9,7 @@ import { PLACE_CERTAINTY_LABELS, PLACE_CLASSIFICATION_LABELS } from "@/lib/utils
 import { CERTAINTY_NOTE_INPUT, CERTAINTY_NOTE_PLACEHOLDER, CertaintyToggle } from "@/components/certainty-toggle";
 import type { ClearanceLevel, PlaceCertainty } from "@prisma/client";
 import type { AssetPlaceSuggestion } from "@/lib/domain/dossier-view";
+import { resolveCandidateLocation } from "@/lib/domain/place-candidate-location";
 import {
   addPlaceCandidateAction,
   adoptAssetPlaceAction,
@@ -25,6 +26,10 @@ const ACTION_BUTTON =
 /** フォームの入力欄。スマホは 16px 未満だと iOS がフォーカス時に拡大するので text-base にする */
 const INPUT =
   "border border-slate-300 rounded px-2 py-2 sm:py-1 text-base sm:text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500";
+
+/** 地図のポップアップは HTML で渡すので、聖地の名前・住所をそのまま埋め込まない */
+const escapeHtml = (s: string) =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 type Candidate = {
   id: string;
@@ -54,6 +59,8 @@ interface PlaceCandidateListProps {
   candidates: Candidate[];
   /** 企画のアセットに結びついた聖地のうち、まだ候補に無いもの。入れるまで記事には影響しない */
   suggestions: AssetPlaceSuggestion[];
+  /** この企画に記事があるか。候補に入れると記事にも聖地が付くので、押す前に知らせる */
+  hasArticles: boolean;
   editable: boolean;
   /** 聖地に登録するときに選べる公開範囲 (自分のクリアランス以下)。空なら選ばせない (viewer) */
   classifications: ClearanceLevel[];
@@ -63,6 +70,7 @@ export function PlaceCandidateList({
   dossierId,
   candidates,
   suggestions,
+  hasArticles,
   editable,
   classifications,
 }: PlaceCandidateListProps) {
@@ -168,14 +176,7 @@ export function PlaceCandidateList({
     });
   }
 
-  // アセットから入れた候補は聖地を指すだけなので、座標・住所は聖地のほうを見る
-  const shown = candidates.map((c) => ({
-    ...c,
-    latitude: c.latitude ?? c.place?.latitude ?? null,
-    longitude: c.longitude ?? c.place?.longitude ?? null,
-    address: c.address ?? c.place?.address ?? null,
-    googleMapsUrl: c.googleMapsUrl ?? c.place?.googleMapsUrl ?? null,
-  }));
+  const shown = candidates.map((c) => ({ ...c, ...resolveCandidateLocation(c) }));
 
   const mapMarkers = [
     ...shown
@@ -184,17 +185,15 @@ export function PlaceCandidateList({
         id: c.id,
         lat: c.latitude!,
         lng: c.longitude!,
-        label: c.place?.entity.canonicalName ?? c.name ?? "(無題)",
-        popupHtml: c.address
-          ? `<strong>${c.place?.entity.canonicalName ?? c.name ?? ""}</strong><br/>${c.address}`
-          : undefined,
+        label: c.name || "(無題)",
+        popupHtml: c.address ? `<strong>${escapeHtml(c.name)}</strong><br/>${escapeHtml(c.address)}` : undefined,
       })),
     ...suggestions.map((s) => ({
       id: s.id,
       lat: s.latitude,
       lng: s.longitude,
       label: s.name,
-      popupHtml: s.address ? `<strong>${s.name}</strong><br/>${s.address}` : undefined,
+      popupHtml: s.address ? `<strong>${escapeHtml(s.name)}</strong><br/>${escapeHtml(s.address)}` : undefined,
     })),
   ];
 
@@ -366,6 +365,11 @@ export function PlaceCandidateList({
                   </li>
                 ))}
               </ul>
+              {editable && hasArticles && (
+                <p className="mt-1.5 text-[11px] text-amber-800">
+                  入れるとこの企画の記事にも「確定」で付きます。外す・確度を変えるのは記事の編集画面から
+                </p>
+              )}
               {(s.googleMapsUrl || editable) && (
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   {editable && (
@@ -373,7 +377,6 @@ export function PlaceCandidateList({
                       type="button"
                       onClick={() => adopt(s)}
                       disabled={isPending}
-                      title="場所候補に入れる。この企画の記事があれば、その記事にも聖地が付く"
                       className={`${ACTION_BUTTON} border-indigo-300 text-indigo-700 hover:bg-indigo-50`}
                     >
                       <Plus className="h-3.5 w-3.5" /> 候補に入れる

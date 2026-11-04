@@ -222,7 +222,7 @@ export async function getDossier(user: ActingUser, id: string) {
                   select: { textType: true, content: true },
                 },
                 sourceRecords: {
-                  orderBy: { createdAt: "asc" },
+                  orderBy: [{ createdAt: "asc" }, { id: "asc" }],
                   take: 1,
                   select: { sourceKind: true, title: true, url: true },
                 },

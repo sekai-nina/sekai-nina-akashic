@@ -12,6 +12,7 @@
 import type { ClearanceLevel, PlaceCertainty, Prisma, TextType } from "@prisma/client";
 import type { PlaceVisitCertainty } from "@/lib/article-workflow/templates/types";
 import { withSession, type TransactionClient } from "@/lib/db";
+import { resolveCandidateLocation } from "./place-candidate-location";
 import { getR2PublicUrl } from "@/lib/r2";
 import { NINA_ENTITY_ID } from "@/lib/nina";
 import { toJstDateOnly } from "@/lib/utils";
@@ -357,16 +358,17 @@ export function shapeDossierMaterials(dossier: DossierForMaterials): DossierMate
       // 公開記事や AI に出さない。座標へのフォールバックもしない (同じ場所なので)
       if (p.placeId && (!p.place || !PUBLISHABLE.has(p.place.classification))) return [];
       // 名前は画面と同じく聖地のエンティティ名を優先 (候補の name が空のまま昇格したものがある)
-      const name = (p.place?.entity.canonicalName || p.name).trim();
+      const location = resolveCandidateLocation(p);
+      const name = location.name.trim();
       if (!name) return [];
       return [
         {
           name,
           placeId: p.placeId,
-          lat: p.latitude ?? p.place?.latitude ?? null,
-          lng: p.longitude ?? p.place?.longitude ?? null,
-          address: p.address ?? p.place?.address ?? null,
-          googleMapsUrl: p.googleMapsUrl ?? p.place?.googleMapsUrl ?? null,
+          lat: location.latitude,
+          lng: location.longitude,
+          address: location.address,
+          googleMapsUrl: location.googleMapsUrl,
           note: p.note,
         },
       ];

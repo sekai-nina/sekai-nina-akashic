@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveAssetPlaceSuggestions, dossierItemBody, isTalkAsset } from "./dossier-view";
+import { deriveAssetPlaceSuggestions, dossierItemBody, isTalkAsset, toDossierRows } from "./dossier-view";
 
 const place = (id: string) => ({ id, latitude: 35.6, longitude: 139.7, address: "東京都", googleMapsUrl: null });
 const item = (id: string, ...links: [string, string][]) => ({
@@ -37,6 +37,31 @@ describe("deriveAssetPlaceSuggestions", () => {
   it("見えないアセットと、聖地が見えないエンティティは飛ばす", () => {
     const hidden = { asset: { id: "h", title: "", entities: [{ entity: { canonicalName: "秘密", place: null } }] } };
     expect(deriveAssetPlaceSuggestions([{ asset: null }, hidden], [])).toEqual([]);
+  });
+});
+
+describe("toDossierRows", () => {
+  const asset = {
+    id: "a",
+    kind: "text",
+    title: "題",
+    thumbnailUrl: null,
+    texts: [{ textType: "body", content: "本文" }],
+    sourceRecords: [{ sourceKind: "url", title: "題", url: "https://example.com/1" }],
+    entities: [],
+  };
+
+  it("本文は同じアセットの先頭の行だけに出し、asset から本文と聖地を外す", () => {
+    const rows = toDossierRows([
+      { id: "1", asset },
+      { id: "2", asset },
+      { id: "3", asset: null },
+    ]);
+    expect(rows.map((r) => r.body?.text ?? null)).toEqual(["本文", null, null]);
+    expect(rows[0].item).toEqual({
+      id: "1",
+      asset: { id: "a", kind: "text", title: "題", thumbnailUrl: null },
+    });
   });
 });
 

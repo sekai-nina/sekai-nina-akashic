@@ -90,6 +90,36 @@ export function isTalkAsset(asset: TalkAsset): boolean {
   });
 }
 
+type RowAsset<I extends { asset: unknown }> = Omit<NonNullable<I["asset"]>, "texts" | "sourceRecords" | "entities">;
+
+export interface DossierRow<I extends { asset: unknown }> {
+  item: Omit<I, "asset"> & { asset: RowAsset<I> | null };
+  body: DossierItemBody | null;
+  talk: boolean;
+}
+
+/**
+ * アイテムの行に渡す形。本文と聖地はここで使い切り、クライアントへ渡す `asset` からは外す
+ * (残すと本文が `body` と二重に転送される)。同じアセットを抜粋ごとに入れていても本文は先頭の 1 行だけに出す
+ */
+export function toDossierRows<I extends { asset: (BodyAsset & { entities: unknown }) | null }>(
+  items: I[]
+): DossierRow<I>[] {
+  const seen = new Set<string>();
+  return items.map((item) => {
+    const { asset, ...rest } = item;
+    if (!asset) return { item: { ...rest, asset: null }, body: null, talk: false };
+    const { texts: _texts, sourceRecords: _sources, entities: _entities, ...rowAsset } = asset;
+    const first = !seen.has(asset.id);
+    seen.add(asset.id);
+    return {
+      item: { ...rest, asset: rowAsset as RowAsset<I> },
+      body: first ? dossierItemBody(asset) : null,
+      talk: isTalkAsset(asset),
+    };
+  });
+}
+
 /** アイテムに出す本文。本文の無いアセットは null */
 export function dossierItemBody(asset: BodyAsset): DossierItemBody | null {
   const parts = DOSSIER_BODY_TEXT_TYPES.flatMap((type) =>

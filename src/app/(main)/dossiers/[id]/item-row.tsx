@@ -253,8 +253,8 @@ export function DossierItemRow({ dossierId, item, body, talk = false, editable, 
           <LinkList urls={parseLinks(item.externalUrl)} />
         ) : null}
 
-        {/* 本文。抜粋が本文そのもの (短いトークのクリップ) なら二重に出さない */}
-        {body && body.text !== item.excerpt.trim() && (
+        {/* 本文。編集できない人には抜粋も全文で見えるので、抜粋が本文そのものなら二重に出さない */}
+        {body && (editable || body.text !== item.excerpt.trim()) && (
           <div
             tabIndex={body.full ? undefined : 0}
             className={`rounded border border-slate-100 bg-slate-50/60 px-2 py-1.5 text-xs leading-relaxed text-slate-700 whitespace-pre-wrap break-words ${body.full ? "" : "max-h-48 overflow-y-auto"}`}
@@ -323,7 +323,7 @@ function TalkImage({ src, alt }: { src: string; alt: string }) {
     <>
       <button type="button" onClick={() => setOpen(true)} title="画像を拡大" className="block w-full cursor-zoom-in">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={src} alt={alt} className="w-full h-auto rounded bg-slate-100 hover:opacity-90 transition-opacity" />
+        <img src={src} alt={alt} loading="lazy" className="w-full h-auto rounded bg-slate-100 hover:opacity-90 transition-opacity" />
       </button>
       <Lightbox src={open ? src : null} alt={alt} onClose={() => setOpen(false)} />
     </>
