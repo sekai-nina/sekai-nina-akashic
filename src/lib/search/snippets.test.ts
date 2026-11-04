@@ -24,6 +24,25 @@ describe("buildSnippets", () => {
     expect(snippets.join("").replaceAll("…", "").length).toBeLessThanOrEqual(MAX_SNIPPET_CHARS);
   });
 
+  it("上限で切るときも、一致を含まない抜粋は出さない", () => {
+    const text = Array.from({ length: 12 }, () => `${"あ".repeat(100)}語${"あ".repeat(100)}`).join("");
+    const { snippets, matchCount } = buildSnippets(text, ["語"]);
+    expect(matchCount).toBe(12);
+    expect(snippets.length).toBeGreaterThan(1);
+    expect(snippets.length).toBeLessThan(12);
+    for (const snippet of snippets) expect(snippet).toContain("語");
+    expect(snippets.join("").replaceAll("…", "").length).toBeLessThanOrEqual(MAX_SNIPPET_CHARS);
+  });
+
+  it("大文字小文字を区別せず、語が複数でも拾う", () => {
+    const { matchCount } = buildSnippets("Hinata と チョコ", ["hinata", "チョコ"]);
+    expect(matchCount).toBe(2);
+  });
+
+  it("語が無ければ先頭を切って返す", () => {
+    expect(buildSnippets("あ".repeat(200), [])).toEqual({ snippets: [`${"あ".repeat(160)}…`], matchCount: 0 });
+  });
+
   it("生の本文に一致が無ければ先頭を返す", () => {
     expect(buildSnippets("本文", ["無い語"])).toEqual({ snippets: ["本文"], matchCount: 0 });
   });

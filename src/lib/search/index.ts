@@ -77,6 +77,9 @@ export interface SearchResult {
   perPage: number;
 }
 
+/** 本文に埋め込まれた画像の目印 */
+const IMG_TOKEN = /\{\{IMG:[a-zA-Z0-9_-]+\}\}/g;
+
 /** Fetch person and tag entity names for a list of asset IDs */
 async function getEntityNames(
   assetIds: string[],
@@ -125,7 +128,7 @@ async function getBodyPreviews(
   `;
   const map = new Map<string, string>();
   for (const row of rows) {
-    const cleaned = row.content.replace(/\{\{IMG:[a-zA-Z0-9_-]+\}\}/g, "").trim();
+    const cleaned = row.content.replace(IMG_TOKEN, "").trim();
     if (!cleaned) continue;
     map.set(row.assetId, cleaned.length > maxLen ? cleaned.slice(0, maxLen) + "…" : cleaned);
   }
@@ -138,8 +141,13 @@ async function getBodyPreviews(
  * 本文に一致が無いときだけ使う。一致位置だけで選ぶと、短い annotation が長い本文に勝ち、
  * 本文の一致が抜粋にも一致数にも出なくなる。
  *
- * 本文の後半の一致も数えるので窓を切らずに全文を返す。対象はページ内の 20 件だけで、
- * 本文は最長でも 1.5 万字程度 (99% は 5,300 字以下)。
+ * ただし生の content に一致がある行を先に見る。正規化列だけで一致した行 (全角半角の違い等) は
+ * 一致箇所を切り出せず、ハイライトの無い先頭の抜粋になるので、他に行が無いときだけ使う。
+ *
+ * 本文の後半の一致も数えるので窓を切らずに全文を返す。対象はページ内の行だけで
+ * (画面は 20 件、API は最大 100 件)、全種別で最長 1.5 万字程度 (body の 99% は 5,300 字以下)。
+ * 全文はここで止まり、応答に載るのは抜粋だけ。
+ * {{IMG:xxx}} は検索の対象外で表示もしないので、一致数や抜粋に混ざらないよう除く。
  */
 async function getTextMatches(
   assetIds: string[],
@@ -158,7 +166,7 @@ async function getTextMatches(
   )})`;
 
   // assetId に ::text を付けると AssetText_assetId_idx が使えなくなるので付けない。
-  // 本文の条件は列を式で包んで PGroonga 索引を使わせない。ページ内の 20 件から
+  // 本文の条件は列を式で包んで PGroonga 索引を使わせない。ページ内の行から
   // 一致箇所を切り出すだけの後処理で、本文側の索引に載せると 7 万行を走らせる
   // 計画に倒れうるため、必ず assetId で駆動させる。
   const rows = await tx.$queryRaw<Array<{ assetId: string; textType: string; content: string }>>`
@@ -174,19 +182,20 @@ async function getTextMatches(
         " OR "
       )})
     ORDER BY t."assetId",
-      CASE t."textType"
-        WHEN 'message_body' THEN 0
-        WHEN 'body' THEN 1
-        WHEN 'extracted' THEN 3
-        WHEN 'annotation' THEN 3
+      CASE WHEN ${positionExpression} = 999999 THEN 1 ELSE 0 END,
+      CASE
+        WHEN t."textType" = 'message_body' THEN 0
+        WHEN t."textType" = 'body' THEN 1
+        WHEN t."textType" IN ('extracted', 'annotation') THEN 3
         ELSE 2
       END,
-      ${positionExpression}
+      ${positionExpression},
+      t."id"
   `;
 
   const map = new Map<string, { textType: string; content: string }>();
   for (const row of rows) {
-    map.set(row.assetId, { textType: row.textType, content: row.content });
+    map.set(row.assetId, { textType: row.textType, content: row.content.replace(IMG_TOKEN, "") });
   }
   return map;
 }
@@ -520,12 +529,13 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
       return normalizedTerms.some((t) => normalized.includes(t));
     })();
 
-  // アセット行だけで一致箇所が分かるものと、本文/タグを引き当てる必要があるものを分ける
+  // アセット行だけで一致箇所が分かるものと、本文/タグを引き当てる必要があるものを分ける。
+  // messageBodyPreview は本文の先頭の切り詰めなので、一致しても本文全体を引いて数える
   const needsLookup = rows.filter(
     (row) =>
       hasKeyword &&
       !(searchAssetFields &&
-        (matchesAny(row.title) || matchesAny(row.description) || matchesAny(row.messageBodyPreview)))
+        (matchesAny(row.title) || matchesAny(row.description)))
   );
   const lookupIds = needsLookup.map((row) => row.id);
   const assetIds = rows.map((row) => row.id);
@@ -581,22 +591,22 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
     } else if (titleHit) {
       matchField = "title";
       score = 3;
-      ({ snippets, matchCount } = buildSnippets(row.title, rawTerms));
+      ({ snippets, matchCount } = buildSnippets(row.title, terms));
     } else if (descHit) {
       matchField = "description";
       matchText = row.description;
       score = 2;
-      ({ snippets, matchCount } = buildSnippets(row.description, rawTerms));
-    } else if (previewHit) {
-      matchField = "messageBodyPreview";
-      matchText = row.messageBodyPreview ?? "";
-      score = 1;
-      ({ snippets, matchCount } = buildSnippets(matchText, rawTerms));
+      ({ snippets, matchCount } = buildSnippets(row.description, terms));
     } else if (textHit) {
       type = "text";
       matchField = textHit.textType;
       score = 1;
-      ({ snippets, matchCount } = buildSnippets(textHit.content, rawTerms));
+      ({ snippets, matchCount } = buildSnippets(textHit.content, terms));
+    } else if (previewHit) {
+      matchField = "messageBodyPreview";
+      matchText = row.messageBodyPreview ?? "";
+      score = 1;
+      ({ snippets, matchCount } = buildSnippets(matchText, terms));
     } else if (entityHit) {
       matchField = "entity";
       score = 2;

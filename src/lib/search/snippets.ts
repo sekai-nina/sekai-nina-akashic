@@ -31,7 +31,7 @@ export function buildSnippets(
 
   positions.sort((a, b) => a.start - b.start);
 
-  const ranges: Array<{ start: number; end: number }> = [];
+  const ranges: Array<{ start: number; end: number; firstMatchEnd: number }> = [];
   for (const pos of positions) {
     const ctxStart = Math.max(0, pos.start - contextLen);
     const ctxEnd = Math.min(text.length, pos.end + contextLen);
@@ -39,14 +39,15 @@ export function buildSnippets(
     if (last && ctxStart <= last.end) {
       last.end = Math.max(last.end, ctxEnd);
     } else {
-      ranges.push({ start: ctxStart, end: ctxEnd });
+      ranges.push({ start: ctxStart, end: ctxEnd, firstMatchEnd: pos.end });
     }
   }
 
   const snippets: string[] = [];
   let remaining = MAX_SNIPPET_CHARS;
   for (const range of ranges) {
-    if (remaining <= 0) break;
+    // 一致の手前で上限に届く範囲は、一致の無い抜粋になるので出さない
+    if (range.start + remaining < range.firstMatchEnd) break;
     const end = Math.min(range.end, range.start + remaining);
     snippets.push(
       (range.start > 0 ? "…" : "") + text.slice(range.start, end) + (end < text.length ? "…" : "")
