@@ -194,6 +194,7 @@ export function PlaceCandidateList({
       lng: s.longitude,
       label: s.name,
       popupHtml: s.address ? `<strong>${escapeHtml(s.name)}</strong><br/>${escapeHtml(s.address)}` : undefined,
+      muted: true,
     })),
   ];
 
@@ -204,11 +205,16 @@ export function PlaceCandidateList({
           <DynamicMap markers={mapMarkers} />
         </div>
       )}
+      {suggestions.length > 0 && (
+        <p className="text-[11px] text-slate-500">薄いピンは、まだ候補に入れていないアセットの聖地です。</p>
+      )}
 
       {(shown.length > 0 || suggestions.length > 0) && (
         <ul className="grid gap-2 sm:grid-cols-2">
           {shown.map((c) => {
             const isConfirmed = c.place?.status === "confirmed";
+            // 指している聖地が自分のクリアランスでは見えない
+            const hidden = !!c.placeId && !c.place;
             return (
               <li key={c.id} className="bg-white border border-slate-200 rounded p-2.5">
                 <div className="flex items-start justify-between gap-2">
@@ -219,6 +225,8 @@ export function PlaceCandidateList({
                         <Link href={`/places/${c.place.id}`} className="truncate hover:text-indigo-600 hover:underline">
                           {c.place.entity.canonicalName}
                         </Link>
+                      ) : hidden ? (
+                        <span className="text-slate-500">閲覧できない聖地</span>
                       ) : (
                         c.name || "(無題)"
                       )}
@@ -256,7 +264,7 @@ export function PlaceCandidateList({
                 </div>
                 {(c.googleMapsUrl || editable) && (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    {editable && !isConfirmed && (
+                    {editable && !isConfirmed && !hidden && (
                       <button
                         type="button"
                         onClick={() => openPromote(c)}
