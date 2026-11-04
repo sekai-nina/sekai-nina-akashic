@@ -460,7 +460,12 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
         FROM "AssetEntity" ae
         JOIN "Entity" e ON e."id" = ae."entityId"
         ${joinAssetForFilters}
-        WHERE ${plainOrNormalized(Prisma.sql`e."canonicalName"`, Prisma.sql`e."normalizedName"`)} ${filtersIfJoined}`);
+        WHERE ${plainOrNormalized(Prisma.sql`e."canonicalName"`, Prisma.sql`e."normalizedName"`)}
+          -- Entity の RLS は素通しで、AssetEntity の RLS は親 Asset しか見ないので、このままだと
+          -- 上位機密の聖地名で紐づくアセットが引ける。Place の RLS を通して見える聖地だけに絞る
+          -- (entityClearanceWhere と同じ判定。#345)
+          AND (e."type" <> 'place' OR EXISTS (SELECT 1 FROM "Place" p WHERE p."entityId" = e."id"))
+          ${filtersIfJoined}`);
     }
     if (searchTextContent) {
       // 本文は normalizedContent だけを見る。normalizeText() が {{IMG:xxx}} の除去と
