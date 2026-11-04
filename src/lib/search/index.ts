@@ -2,6 +2,7 @@ import { withClearance } from "@/lib/db";
 import { normalizeText, jstDayStart, jstDayEndExclusive } from "@/lib/utils";
 import { Prisma, AssetKind, AssetStatus, TrustLevel, SourceType } from "@prisma/client";
 import { NINA_ENTITY_ID, type NinaAppearance } from "@/lib/nina";
+import { buildSnippets } from "./snippets";
 
 export interface SearchQuery {
   q: string;
@@ -76,62 +77,6 @@ export interface SearchResult {
   perPage: number;
 }
 
-/**
- * Find all occurrences of query terms in text and return snippets.
- * Nearby occurrences are merged into a single snippet.
- */
-function buildSnippets(text: string, query: string, contextLen = 80): { snippets: string[]; matchCount: number } {
-  const terms = splitQueryTerms(query);
-  if (terms.length === 0) return { snippets: [text.slice(0, contextLen * 2) + (text.length > contextLen * 2 ? "…" : "")], matchCount: 0 };
-
-  const lower = text.toLowerCase();
-
-  // Find all match positions
-  const positions: Array<{ start: number; end: number }> = [];
-  for (const term of terms) {
-    const termLower = term.toLowerCase();
-    let cursor = 0;
-    while (cursor < lower.length) {
-      const idx = lower.indexOf(termLower, cursor);
-      if (idx === -1) break;
-      positions.push({ start: idx, end: idx + term.length });
-      cursor = idx + term.length;
-    }
-  }
-
-  if (positions.length === 0) {
-    return { snippets: [text.slice(0, contextLen * 2) + (text.length > contextLen * 2 ? "…" : "")], matchCount: 0 };
-  }
-
-  // Sort by position
-  positions.sort((a, b) => a.start - b.start);
-
-  // Merge nearby positions into context ranges
-  const ranges: Array<{ start: number; end: number }> = [];
-  for (const pos of positions) {
-    const ctxStart = Math.max(0, pos.start - contextLen);
-    const ctxEnd = Math.min(text.length, pos.end + contextLen);
-    if (ranges.length > 0 && ctxStart <= ranges[ranges.length - 1].end) {
-      ranges[ranges.length - 1].end = Math.max(
-        ranges[ranges.length - 1].end,
-        ctxEnd
-      );
-    } else {
-      ranges.push({ start: ctxStart, end: ctxEnd });
-    }
-  }
-
-  const snippets = ranges.map((range) => {
-    let snippet = "";
-    if (range.start > 0) snippet += "…";
-    snippet += text.slice(range.start, range.end);
-    if (range.end < text.length) snippet += "…";
-    return snippet;
-  });
-
-  return { snippets, matchCount: positions.length };
-}
-
 /** Fetch person and tag entity names for a list of asset IDs */
 async function getEntityNames(
   assetIds: string[],
@@ -187,8 +132,14 @@ async function getBodyPreviews(
   return map;
 }
 /**
- * キーワード一致した AssetText から、一致箇所の周辺だけを1アセット1行で取り出す。
- * 全文を転送すると1行あたり数KBになるため、位置を求めて窓を切る。
+ * キーワード一致した AssetText を 1 アセット 1 行で取り出す。
+ *
+ * 本文 (message_body / body) を優先し、AI が本文から作った annotation / extracted は
+ * 本文に一致が無いときだけ使う。一致位置だけで選ぶと、短い annotation が長い本文に勝ち、
+ * 本文の一致が抜粋にも一致数にも出なくなる。
+ *
+ * 本文の後半の一致も数えるので窓を切らずに全文を返す。対象はページ内の 20 件だけで、
+ * 本文は最長でも 1.5 万字程度 (99% は 5,300 字以下)。
  */
 async function getTextMatches(
   assetIds: string[],
@@ -212,13 +163,7 @@ async function getTextMatches(
   // 計画に倒れうるため、必ず assetId で駆動させる。
   const rows = await tx.$queryRaw<Array<{ assetId: string; textType: string; content: string }>>`
     SELECT DISTINCT ON (t."assetId")
-      t."assetId", t."textType",
-      CASE WHEN ${positionExpression} = 999999
-        -- 生の content には一致が無い (改行を挟む・全角半角が違う等で正規化列だけで
-        -- 一致した) 場合。そのまま窓を切ると空文字列になり、スニペットが消える
-        THEN substring(t."content" FROM 1 FOR 800)
-        ELSE substring(t."content" FROM GREATEST(1, ${positionExpression} - 150) FOR 800)
-      END as content
+      t."assetId", t."textType", t."content"
     FROM "AssetText" t
     WHERE t."assetId" = ANY(${assetIds})
       AND (${Prisma.join(
@@ -228,7 +173,15 @@ async function getTextMatches(
         ]),
         " OR "
       )})
-    ORDER BY t."assetId", ${positionExpression}
+    ORDER BY t."assetId",
+      CASE t."textType"
+        WHEN 'message_body' THEN 0
+        WHEN 'body' THEN 1
+        WHEN 'extracted' THEN 3
+        WHEN 'annotation' THEN 3
+        ELSE 2
+      END,
+      ${positionExpression}
   `;
 
   const map = new Map<string, { textType: string; content: string }>();
@@ -628,22 +581,22 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
     } else if (titleHit) {
       matchField = "title";
       score = 3;
-      ({ snippets, matchCount } = buildSnippets(row.title, q));
+      ({ snippets, matchCount } = buildSnippets(row.title, rawTerms));
     } else if (descHit) {
       matchField = "description";
       matchText = row.description;
       score = 2;
-      ({ snippets, matchCount } = buildSnippets(row.description, q));
+      ({ snippets, matchCount } = buildSnippets(row.description, rawTerms));
     } else if (previewHit) {
       matchField = "messageBodyPreview";
       matchText = row.messageBodyPreview ?? "";
       score = 1;
-      ({ snippets, matchCount } = buildSnippets(matchText, q));
+      ({ snippets, matchCount } = buildSnippets(matchText, rawTerms));
     } else if (textHit) {
       type = "text";
       matchField = textHit.textType;
       score = 1;
-      ({ snippets, matchCount } = buildSnippets(textHit.content, q));
+      ({ snippets, matchCount } = buildSnippets(textHit.content, rawTerms));
     } else if (entityHit) {
       matchField = "entity";
       score = 2;
