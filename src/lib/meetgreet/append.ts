@@ -486,7 +486,7 @@ export function planAppend(input: {
   };
 
   if (layout.media?.kind === "flat") {
-    // おでかけ記事: `## 関連メディア` の箇条書きに足す。坂井新奈が出ているものがあれば
+    // おでかけ・物の記事: `## 関連メディア` の箇条書きに足す。坂井新奈が出ているものがあれば
     // `### 坂井新奈が写っているもの` / `### そのほか` に分ける (フル生成と同じ)
     if (freshTiktoks.length > 0 || freshTalks.length > 0 || freshImages.length > 0) {
       ensureSection(sections, H_MEDIA, []);

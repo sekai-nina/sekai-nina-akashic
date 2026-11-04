@@ -323,6 +323,7 @@ export const ARTICLE_TEMPLATE_LABELS: Record<ArticleTemplate, string> = {
   quote_blog: "言葉（ブログの名言）",
   quote_situational: "言葉（状況つき）",
   attribute: "スナップ",
+  item: "物",
 };
 
 /** 本人ブログ → 言葉記事の進捗 (`/progress/blog`, #206)。キーは `BlogQuoteStatus` */

@@ -137,8 +137,8 @@ describe("computePending のブログ画像", () => {
     expect(pendingIds(row([img1, img2], { articleTemplate: "meetgreet" }), state({ bodies: [body] }))).toEqual(["i2"]);
   });
 
-  it("行で足すテンプレートでは、ブログの出典が URL で当たっても行が無ければ未反映", () => {
-    expect(pendingIds(row([img1], { articleTemplate: "outing" }), state({ citedUrls: new Set([BLOG]) }))).toEqual(["i1"]);
+  it.each(["outing", "item"])("行で足すテンプレート (%s) では、ブログの出典が URL で当たっても行が無ければ未反映", (articleTemplate) => {
+    expect(pendingIds(row([img1], { articleTemplate }), state({ citedUrls: new Set([BLOG]) }))).toEqual(["i1"]);
   });
 
   it("スナップでは、ブログの出典が URL で当たれば画像も反映済み (差分に出ない)", () => {
