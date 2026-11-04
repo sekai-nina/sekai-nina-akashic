@@ -9,6 +9,7 @@ import { accessibleClassifications } from "@/lib/classification";
 import { ARTICLE_WORKFLOW_LABELS as L, formatDate } from "@/lib/utils";
 import { getR2PublicUrl } from "@/lib/r2";
 import { getClipMedia } from "@/lib/domain/nina-appearance";
+import { deriveAssetPlaceSuggestions, dossierItemBody, isTalkAsset } from "@/lib/domain/dossier-view";
 import { DossierItemRow } from "./item-row";
 import { DossierHeader } from "./dossier-header";
 import { ExternalLinkForm } from "./external-link-form";
@@ -40,6 +41,7 @@ export default async function DossierDetailPage({ params }: DossierDetailProps) 
   const ninaMedia = canMarkNina
     ? await getClipMedia(session.user.clearance, dossier.items.flatMap((i) => (i.asset ? [i.asset.id] : [])))
     : new Map();
+  const placeSuggestions = deriveAssetPlaceSuggestions(dossier.items, dossier.placeCandidates);
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6">
@@ -81,6 +83,7 @@ export default async function DossierDetailPage({ params }: DossierDetailProps) 
         <PlaceCandidateList
           dossierId={dossier.id}
           candidates={dossier.placeCandidates}
+          suggestions={placeSuggestions}
           editable={editable}
           classifications={
             // 公開範囲を変えられるのは admin / member だけ (promotePlaceCandidate と同じ判定)
@@ -130,6 +133,8 @@ export default async function DossierDetailPage({ params }: DossierDetailProps) 
                         }
                       : item
                   }
+                  body={item.asset ? dossierItemBody(item.asset) : null}
+                  talk={item.asset ? isTalkAsset(item.asset) : false}
                   editable={editable}
                   isFirst={idx === 0}
                   isLast={idx === dossier.items.length - 1}

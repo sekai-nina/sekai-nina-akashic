@@ -16,6 +16,7 @@ import {
   listDossiersContainingAsset,
   reorderDossierItems as reorderDossierItemsDomain,
   addPlaceCandidate as addPlaceCandidateDomain,
+  adoptAssetPlace as adoptAssetPlaceDomain,
   updatePlaceCandidate as updatePlaceCandidateDomain,
   removePlaceCandidate as removePlaceCandidateDomain,
   promotePlaceCandidate as promotePlaceCandidateDomain,
@@ -211,6 +212,12 @@ export async function addPlaceCandidateAction(dossierId: string, formData: FormD
     certainty: formData.get("certainty") === "likely" ? "likely" : "confirmed",
     certaintyNote: (formData.get("certaintyNote") as string) || "",
   });
+  revalidatePath(`/dossiers/${dossierId}`);
+}
+
+export async function adoptAssetPlaceAction(dossierId: string, placeId: string) {
+  const user = await requireUser();
+  await adoptAssetPlaceDomain(user, dossierId, placeId);
   revalidatePath(`/dossiers/${dossierId}`);
 }
 

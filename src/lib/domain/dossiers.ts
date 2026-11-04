@@ -15,6 +15,7 @@ import { logAudit } from "./audit";
 import { entityClearanceWhere } from "./entities";
 import { markArticlesForPlace } from "./places";
 import { linkPlaceToDossierArticles } from "./article-places";
+import { DOSSIER_BODY_TEXT_TYPES } from "./dossier-view";
 
 interface ActingUser {
   id: string;
@@ -214,6 +215,32 @@ export async function getDossier(user: ActingUser, id: string) {
                 storageUrl: true,
                 storageKey: true,
                 classification: true,
+                // 本文 (トークは全文、ブログは窓の中で読む)。トークかどうかは先頭の出典で見る
+                texts: {
+                  where: { textType: { in: [...DOSSIER_BODY_TEXT_TYPES] } },
+                  orderBy: { createdAt: "asc" },
+                  select: { textType: true, content: true },
+                },
+                sourceRecords: {
+                  orderBy: { createdAt: "asc" },
+                  take: 1,
+                  select: { sourceKind: true, title: true, url: true },
+                },
+                // アセットに結びついた聖地 (場所候補に自動で出す)。上位機密の聖地は名前も出さない
+                entities: {
+                  where: { entity: { AND: [{ type: "place" }, entityClearanceWhere(user.clearance)] } },
+                  orderBy: { createdAt: "asc" },
+                  select: {
+                    entity: {
+                      select: {
+                        canonicalName: true,
+                        place: {
+                          select: { id: true, latitude: true, longitude: true, address: true, googleMapsUrl: true },
+                        },
+                      },
+                    },
+                  },
+                },
               },
             },
           },
@@ -757,6 +784,27 @@ export async function addPlaceCandidate(
   });
   await auditLinkedArticles(user, dossierId, candidate.placeId, linked);
   return candidate;
+}
+
+/**
+ * 企画のアセットに結びついた聖地を場所候補に入れる (企画の画面の「候補に入れる」)。
+ * 名前や座標は写さず聖地を指すだけにする。写すと、企画より上の機密の聖地の座標が
+ * 候補の行から見えてしまう。すでに候補にあれば何もしない
+ */
+export async function adoptAssetPlace(user: ActingUser, dossierId: string, placeId: string) {
+  await requireEditAccess(user, dossierId);
+  const state = await withSession(user, async (tx) => {
+    const place = await tx.place.findUnique({ where: { id: placeId }, select: { entityId: true } });
+    if (!place) return null;
+    const linked = await tx.dossierItem.count({
+      where: { dossierId, asset: { entities: { some: { entityId: place.entityId } } } },
+    });
+    if (linked === 0) return null;
+    return { exists: (await tx.dossierPlaceCandidate.count({ where: { dossierId, placeId } })) > 0 };
+  });
+  if (!state) throw new Error("この企画のアセットに結びついた聖地ではありません");
+  if (state.exists) return;
+  await addPlaceCandidate(user, dossierId, { placeId });
 }
 
 export async function updatePlaceCandidate(

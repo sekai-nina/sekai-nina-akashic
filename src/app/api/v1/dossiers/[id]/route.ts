@@ -92,10 +92,11 @@ export async function GET(
     placeCandidates: dossier.placeCandidates.map((pc) => ({
       id: pc.id,
       name: pc.place?.entity.canonicalName ?? pc.name,
-      address: pc.address,
-      latitude: pc.latitude,
-      longitude: pc.longitude,
-      googleMapsUrl: pc.googleMapsUrl,
+      // アセットから入れた候補は聖地を指すだけで、座標・住所は聖地のほうにある
+      address: pc.address ?? pc.place?.address ?? null,
+      latitude: pc.latitude ?? pc.place?.latitude ?? null,
+      longitude: pc.longitude ?? pc.place?.longitude ?? null,
+      googleMapsUrl: pc.googleMapsUrl ?? pc.place?.googleMapsUrl ?? null,
       note: pc.note,
       confidence: pc.confidence,
       certainty: pc.certainty,

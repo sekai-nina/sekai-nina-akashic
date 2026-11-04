@@ -66,8 +66,18 @@ export interface DossierForMaterials {
     note: string;
     certainty: PlaceCertainty;
     certaintyNote: string;
-    /** 昇格先の聖地。RLS で見えなければ null (= 上位機密。記事にも AI にも出さない) */
-    place: { classification: string; entity: { canonicalName: string } } | null;
+    /**
+     * 昇格先の聖地。RLS で見えなければ null (= 上位機密。記事にも AI にも出さない)。
+     * アセットから入れた候補は座標・住所を持たないので、こちらの値を使う
+     */
+    place: {
+      classification: string;
+      latitude: number;
+      longitude: number;
+      address: string | null;
+      googleMapsUrl: string | null;
+      entity: { canonicalName: string };
+    } | null;
   }[];
   /**
    * `withTexts` のときだけ。ドシエに**画像しか入っていないブログ**の本文アセット (同じ URL の text)。
@@ -158,7 +168,16 @@ function dossierSelect<A extends Prisma.AssetSelect>(asset: A) {
         note: true,
         certainty: true,
         certaintyNote: true,
-        place: { select: { classification: true, entity: { select: { canonicalName: true } } } },
+        place: {
+          select: {
+            classification: true,
+            latitude: true,
+            longitude: true,
+            address: true,
+            googleMapsUrl: true,
+            entity: { select: { canonicalName: true } },
+          },
+        },
       },
     },
   } satisfies Prisma.DossierSelect;
@@ -344,10 +363,10 @@ export function shapeDossierMaterials(dossier: DossierForMaterials): DossierMate
         {
           name,
           placeId: p.placeId,
-          lat: p.latitude,
-          lng: p.longitude,
-          address: p.address,
-          googleMapsUrl: p.googleMapsUrl,
+          lat: p.latitude ?? p.place?.latitude ?? null,
+          lng: p.longitude ?? p.place?.longitude ?? null,
+          address: p.address ?? p.place?.address ?? null,
+          googleMapsUrl: p.googleMapsUrl ?? p.place?.googleMapsUrl ?? null,
           note: p.note,
         },
       ];

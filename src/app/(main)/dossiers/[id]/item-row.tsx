@@ -21,7 +21,9 @@ import {
   reorderItemsAction,
 } from "../actions";
 import type { NinaAppearance } from "@/lib/nina";
+import { Lightbox } from "@/components/lightbox";
 import { NinaAppearanceToggle } from "./article/nina-appearance-toggle";
+import type { DossierItemBody } from "@/lib/domain/dossier-view";
 import { DeleteConfirm } from "./delete-confirm";
 
 /** アイコンだけのボタン。スマホでは指で押せる大きさ (32px) にする */
@@ -59,6 +61,10 @@ type Item = {
 interface ItemRowProps {
   dossierId: string;
   item: Item;
+  /** アセットの本文。トークは全文、ブログなどは小さい窓の中でスクロールする */
+  body?: DossierItemBody | null;
+  /** トークのアセットか。画像は切り抜かず全体を出す */
+  talk?: boolean;
   editable: boolean;
   isFirst: boolean;
   isLast: boolean;
@@ -124,7 +130,7 @@ function driveUrl(asset: NonNullable<Item["asset"]>): string | null {
   return null;
 }
 
-export function DossierItemRow({ dossierId, item, editable, isFirst, isLast, orderedIds, indexInList, ninaAppearance }: ItemRowProps) {
+export function DossierItemRow({ dossierId, item, body, talk = false, editable, isFirst, isLast, orderedIds, indexInList, ninaAppearance }: ItemRowProps) {
   const [caption, setCaption] = useState(item.caption);
   const [note, setNote] = useState(item.note);
   const [excerpt, setExcerpt] = useState(item.excerpt);
@@ -155,7 +161,7 @@ export function DossierItemRow({ dossierId, item, editable, isFirst, isLast, ord
     <div className="bg-white border border-slate-200 rounded-lg p-3 sm:p-4 flex gap-3">
       {/* Preview column */}
       <div className="shrink-0 w-24 sm:w-32">
-        <ItemPreview item={item} />
+        <ItemPreview item={item} talk={talk} />
       </div>
 
       {/* Body */}
@@ -247,6 +253,16 @@ export function DossierItemRow({ dossierId, item, editable, isFirst, isLast, ord
           <LinkList urls={parseLinks(item.externalUrl)} />
         ) : null}
 
+        {/* 本文。抜粋が本文そのもの (短いトークのクリップ) なら二重に出さない */}
+        {body && body.text !== item.excerpt.trim() && (
+          <div
+            tabIndex={body.full ? undefined : 0}
+            className={`rounded border border-slate-100 bg-slate-50/60 px-2 py-1.5 text-xs leading-relaxed text-slate-700 whitespace-pre-wrap break-words ${body.full ? "" : "max-h-48 overflow-y-auto"}`}
+          >
+            {body.text}
+          </div>
+        )}
+
         {/* Excerpt (for text-bearing assets) */}
         {(item.excerpt || (editable && item.kind === "asset_ref" && item.asset && (item.asset.kind === "text" || item.asset.kind === "document"))) && (
           <div className="rounded border-l-2 border-slate-300 bg-slate-50/60 px-2 py-1.5">
@@ -300,7 +316,21 @@ function KindIcon({ kind }: { kind: string }) {
   return <FileText className="h-3 w-3" />;
 }
 
-function ItemPreview({ item }: { item: Item }) {
+/** トークの画像。スクショなどは切り抜くと読めないので全体を出し、押すと拡大する */
+function TalkImage({ src, alt }: { src: string; alt: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} title="画像を拡大" className="block w-full cursor-zoom-in">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={src} alt={alt} className="w-full h-auto rounded bg-slate-100 hover:opacity-90 transition-opacity" />
+      </button>
+      <Lightbox src={open ? src : null} alt={alt} onClose={() => setOpen(false)} />
+    </>
+  );
+}
+
+function ItemPreview({ item, talk }: { item: Item; talk: boolean }) {
   if (item.kind === "external_image") {
     const fullSrc = item.externalImageUrl ?? null;
     const thumbSrc = item.externalImageThumbnailUrl ?? fullSrc;
@@ -334,6 +364,13 @@ function ItemPreview({ item }: { item: Item }) {
   // asset_ref
   if (!item.asset) return <PlaceholderBlock label="アセット未参照" />;
   const a = item.asset;
+  if (talk && a.kind === "image") {
+    // サムネイルがまだ無いものはアセット詳細と同じく元画像を出す
+    const src =
+      a.thumbnailUrl ??
+      (a.storageProvider === "gdrive" && a.storageKey ? `/api/drive-image/${a.storageKey}` : a.storageUrl);
+    if (src) return <TalkImage src={src} alt={a.title} />;
+  }
   if (a.thumbnailUrl) {
     // eslint-disable-next-line @next/next/no-img-element
     return <img src={a.thumbnailUrl} alt={a.title} className="w-full h-24 sm:h-32 object-cover rounded bg-slate-100" />;

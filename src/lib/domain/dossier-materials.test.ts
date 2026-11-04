@@ -33,7 +33,14 @@ const dossier = (placeCandidates: Candidate[]): DossierForMaterials =>
     placeCandidates,
   }) as unknown as DossierForMaterials;
 
-const place = (name: string, classification = "internal") => ({ classification, entity: { canonicalName: name } });
+const place = (name: string, classification = "internal") => ({
+  classification,
+  latitude: 35.6,
+  longitude: 139.7,
+  address: "東京都",
+  googleMapsUrl: "https://maps.example/p",
+  entity: { canonicalName: name },
+});
 
 describe("shapeDossierMaterials: 場所候補の確度 (#333)", () => {
   it("聖地に登録済みの候補の確度・理由を placeCertainties に載せる。同じ聖地は並びの先頭", () => {
@@ -50,6 +57,17 @@ describe("shapeDossierMaterials: 場所候補の確度 (#333)", () => {
       p2: { certainty: "confirmed", certaintyNote: "" },
     });
     expect(m.linkedPlaceIds).toEqual(["p1", "p2"]);
+  });
+
+  it("座標を持たない候補は聖地の座標・住所を使い、候補に値があればそちらを優先する", () => {
+    const m = shapeDossierMaterials(
+      dossier([
+        candidate({ placeId: "p1", place: place("神社") }),
+        candidate({ placeId: "p2", place: place("かき氷屋"), latitude: 1, longitude: 2, address: "手入力" }),
+      ]),
+    );
+    expect(m.places[0]).toMatchObject({ lat: 35.6, lng: 139.7, address: "東京都", googleMapsUrl: "https://maps.example/p" });
+    expect(m.places[1]).toMatchObject({ lat: 1, lng: 2, address: "手入力" });
   });
 
   it("見えない (RLS で place が null) 聖地の確度は載せない", () => {
