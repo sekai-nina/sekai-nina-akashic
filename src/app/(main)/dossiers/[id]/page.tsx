@@ -10,6 +10,7 @@ import { ARTICLE_WORKFLOW_LABELS as L, formatDate } from "@/lib/utils";
 import { getR2PublicUrl } from "@/lib/r2";
 import { getClipMedia } from "@/lib/domain/nina-appearance";
 import { deriveAssetPlaceSuggestions, toDossierRows } from "@/lib/domain/dossier-view";
+import { toVisibleCandidate } from "@/lib/domain/place-candidate-location";
 import { DossierItemRow } from "./item-row";
 import { DossierHeader } from "./dossier-header";
 import { ExternalLinkForm } from "./external-link-form";
@@ -95,7 +96,7 @@ export default async function DossierDetailPage({ params }: DossierDetailProps) 
         </h2>
         <PlaceCandidateList
           dossierId={dossier.id}
-          candidates={dossier.placeCandidates}
+          candidates={dossier.placeCandidates.map(toVisibleCandidate)}
           suggestions={placeSuggestions}
           hasArticles={dossier.articles.length > 0}
           editable={editable}

@@ -35,3 +35,17 @@ export function resolveCandidateLocation(c: CandidateLocationInput) {
     googleMapsUrl: c.googleMapsUrl ?? c.place?.googleMapsUrl ?? null,
   };
 }
+
+/**
+ * 画面や API へ返す形の候補。場所を解決し、聖地が見えない候補はメモと理由も落とす
+ * (「○○の 2 階」のように、メモから場所が分かることがある)。**サーバーで通すこと**
+ */
+export function toVisibleCandidate<C extends CandidateLocationInput & { note: string; certaintyNote: string }>(c: C) {
+  const hidden = !!c.placeId && !c.place;
+  return {
+    ...c,
+    ...resolveCandidateLocation(c),
+    note: hidden ? "" : c.note,
+    certaintyNote: hidden ? "" : c.certaintyNote,
+  };
+}

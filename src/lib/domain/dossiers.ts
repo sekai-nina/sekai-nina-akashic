@@ -749,32 +749,42 @@ export async function addPlaceCandidate(
   input: PlaceCandidateInput
 ) {
   await requireEditAccess(user, dossierId);
+  const { candidate, linked } = await withSession(user, (tx) => insertPlaceCandidate(tx, dossierId, input));
+  await auditAddedCandidate(user, dossierId, candidate, linked);
+  return candidate;
+}
 
-  let linked: string[] = [];
-  const candidate = await withSession(user, async (tx) => {
-    const last = await tx.dossierPlaceCandidate.findFirst({
-      where: { dossierId },
-      orderBy: { sortOrder: "desc" },
-      select: { sortOrder: true },
-    });
-    const created = await tx.dossierPlaceCandidate.create({
-      data: {
-        dossierId,
-        placeId: input.placeId ?? null,
-        name: input.name ?? "",
-        latitude: input.latitude ?? null,
-        longitude: input.longitude ?? null,
-        address: input.address ?? null,
-        googleMapsUrl: input.googleMapsUrl ?? null,
-        note: input.note ?? "",
-        confidence: input.confidence ?? 0,
-        ...certaintyData(input),
-        sortOrder: (last?.sortOrder ?? -1) + 1,
-      },
-    });
-    if (created.placeId) linked = await linkPlaceToDossierArticles(tx, dossierId, created.placeId);
-    return created;
+async function insertPlaceCandidate(tx: Prisma.TransactionClient, dossierId: string, input: PlaceCandidateInput) {
+  const last = await tx.dossierPlaceCandidate.findFirst({
+    where: { dossierId },
+    orderBy: { sortOrder: "desc" },
+    select: { sortOrder: true },
   });
+  const candidate = await tx.dossierPlaceCandidate.create({
+    data: {
+      dossierId,
+      placeId: input.placeId ?? null,
+      name: input.name ?? "",
+      latitude: input.latitude ?? null,
+      longitude: input.longitude ?? null,
+      address: input.address ?? null,
+      googleMapsUrl: input.googleMapsUrl ?? null,
+      note: input.note ?? "",
+      confidence: input.confidence ?? 0,
+      ...certaintyData(input),
+      sortOrder: (last?.sortOrder ?? -1) + 1,
+    },
+  });
+  const linked = candidate.placeId ? await linkPlaceToDossierArticles(tx, dossierId, candidate.placeId) : [];
+  return { candidate, linked };
+}
+
+async function auditAddedCandidate(
+  user: ActingUser,
+  dossierId: string,
+  candidate: { id: string; placeId: string | null },
+  linked: string[]
+) {
   await logAudit({
     actorId: user.id,
     action: "dossier.place.add",
@@ -783,28 +793,31 @@ export async function addPlaceCandidate(
     metadata: { dossierId },
   });
   await auditLinkedArticles(user, dossierId, candidate.placeId, linked);
-  return candidate;
 }
 
 /**
  * 企画のアセットに結びついた聖地を場所候補に入れる (企画の画面の「候補に入れる」)。
  * 名前や座標は写さず聖地を指すだけにする。写すと、企画より上の機密の聖地の座標が
- * 候補の行から見えてしまう。すでに候補にあれば何もしない
+ * 候補の行から見えてしまう。すでに候補にあれば何もしない。
+ *
+ * 別タブから同時に押しても重複しないよう、確認と追加を 1 つのトランザクションにして企画ごとに
+ * 直列にする。ユニーク制約にしないのは、手入力の候補を同じ聖地へ昇格したときに失敗させないため
  */
 export async function adoptAssetPlace(user: ActingUser, dossierId: string, placeId: string) {
   await requireEditAccess(user, dossierId);
-  const state = await withSession(user, async (tx) => {
+  const added = await withSession(user, async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`dossier-place:${dossierId}`}, 0))`;
     const place = await tx.place.findUnique({ where: { id: placeId }, select: { entityId: true } });
-    if (!place) return null;
-    const linked = await tx.dossierItem.count({
-      where: { dossierId, asset: { entities: { some: { entityId: place.entityId } } } },
-    });
-    if (linked === 0) return null;
-    return { exists: (await tx.dossierPlaceCandidate.count({ where: { dossierId, placeId } })) > 0 };
+    const linkedAssets =
+      place &&
+      (await tx.dossierItem.count({
+        where: { dossierId, asset: { entities: { some: { entityId: place.entityId } } } },
+      }));
+    if (!linkedAssets) throw new Error("この企画のアセットに結びついた聖地ではありません");
+    if ((await tx.dossierPlaceCandidate.count({ where: { dossierId, placeId } })) > 0) return null;
+    return insertPlaceCandidate(tx, dossierId, { placeId });
   });
-  if (!state) throw new Error("この企画のアセットに結びついた聖地ではありません");
-  if (state.exists) return;
-  await addPlaceCandidate(user, dossierId, { placeId });
+  if (added) await auditAddedCandidate(user, dossierId, added.candidate, added.linked);
 }
 
 export async function updatePlaceCandidate(

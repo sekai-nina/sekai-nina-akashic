@@ -18,6 +18,8 @@ export interface MapMarker {
   lng: number;
   label: string;
   popupHtml?: string;
+  /** 薄く出す (企画のまだ候補に入れていない聖地など) */
+  muted?: boolean;
 }
 
 interface LeafletMapProps {
@@ -69,7 +71,7 @@ export function LeafletMap({
     // Add markers
     const markerGroup: L.Marker[] = [];
     for (const m of markers) {
-      const marker = L.marker([m.lat, m.lng]).addTo(map);
+      const marker = L.marker([m.lat, m.lng], { opacity: m.muted ? 0.5 : 1 }).addTo(map);
       if (m.popupHtml) {
         marker.bindPopup(m.popupHtml);
       } else {
