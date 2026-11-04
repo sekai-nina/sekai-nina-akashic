@@ -13,6 +13,7 @@ import {
   classifyMaterials,
   numberSources,
   type ArticleAssetInput,
+  mediaLabel,
   type BlogGroup,
 } from "./render";
 import type { DossierRenderInput } from "./templates/types";
@@ -95,17 +96,23 @@ function section(
 function blogSection(b: BlogGroup, textAsset: ArticleAssetInput | undefined, budget: number): Section {
   const header = [`### ^[${b.sourceNo}] ${b.title}${b.date ? `（${b.date}）` : ""}`];
   if (b.url) header.push(`URL: ${b.url}`);
-  const people = joinPeople(textAsset ? [textAsset, ...b.images] : b.images);
+  // 番組・動画は本文の持ち主と素材が同じアセットなので、メモが二重にならないよう 1 件にする
+  const assets = [...new Set(textAsset ? [textAsset, ...b.images] : b.images)];
+  const people = joinPeople(assets);
   if (people.length > 0) header.push(`登場人物: ${people.join("、")}`);
   return section(
     header,
     {
-      excerpts: b.excerpts,
-      notes: [textAsset, ...b.images].flatMap((a) => a?.notes ?? []),
+      excerpts: [...b.excerpts, ...b.mediaExcerpts],
+      notes: assets.flatMap((a) => a.notes ?? []),
       captions: b.images.map((i) => i.caption?.trim()).filter((c): c is string => !!c),
       body: textAsset?.text ?? null,
       // 雑誌などは本文のアセットはあっても本文が無く、人のメモにだけ中身がある
-      noBodyNote: textAsset ? "(本文なし)" : "(本文なし。画像だけのブログ)",
+      noBodyNote: !textAsset
+        ? "(本文なし。画像だけのブログ)"
+        : textAsset.kind === "text"
+          ? "(本文なし)"
+          : `(本文なし。${mediaLabel(textAsset.kind)}の素材)`,
     },
     budget
   );
@@ -147,7 +154,8 @@ export function buildMaterialsText(
 ): MaterialsText {
   const { blogs, talks } = classifyMaterials(input.assets);
   const { talkSourceNo } = numberSources(blogs, talks);
-  const textAssetById = new Map(input.assets.filter((a) => a.kind === "text").map((a) => [a.id, a]));
+  // 本文を持つのは text のほか、URL 付きの番組・動画・音声 (文字起こし・説明)。画像は本文を持たない
+  const textAssetById = new Map(input.assets.filter((a) => a.kind !== "image").map((a) => [a.id, a]));
 
   const parts: string[] = [`# ドシエ「${input.dossier.title}」の素材`, ""];
   let remaining = MAX_CHARS_TOTAL;

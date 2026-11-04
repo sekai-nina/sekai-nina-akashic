@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { classifyMaterials, isBlogAssetTitle, numberSources, type ArticleAssetInput } from "./render";
+import { buildMaterialsText } from "./materials";
+import {
+  classifyMaterials,
+  isBlogAssetTitle,
+  numberSources,
+  quotedBlogs,
+  renderRelatedMediaSection,
+  type ArticleAssetInput,
+} from "./render";
 
 const asset = (over: Partial<ArticleAssetInput> & { id: string }): ArticleAssetInput => ({
   kind: "text",
@@ -56,5 +64,60 @@ describe("isBlogAssetTitle", () => {
     expect(isBlogAssetTitle("高井俐香ブログ「自分を変える」")).toBe(true);
     expect(isBlogAssetTitle("坂井新奈ブログ「待ち合わせ」 (1/3)")).toBe(false);
     expect(isBlogAssetTitle("自分を変える")).toBe(false);
+  });
+});
+
+describe("URL 付きの番組・動画・音声の素材", () => {
+  const video: ArticleAssetInput = {
+    id: "video",
+    kind: "video",
+    title: "【ガチ検証】わらしべ長者",
+    canonicalDate: "2026-02-10",
+    sortAt: "2026-02-10T10:00:00.000Z",
+    source: { kind: "url", title: "【ガチ検証】わらしべ長者", url: "https://www.youtube.com/watch?v=x", publishedAt: "2026-02-10" },
+    excerpts: ["柔道着を持ってきました"],
+    text: "文字起こしの本文",
+    notes: ["人のメモ"],
+  };
+  const materials = (assets: ArticleAssetInput[]) =>
+    buildMaterialsText({
+      dossier: { id: "d1", title: "柔道着", updatedAt: "2026-11-05T00:00:00.000Z", itemCount: assets.length },
+      assets,
+      reports: [],
+      tiktoks: [],
+      thumbnailUrl: null,
+      places: [],
+      today: "2026-11-05",
+    });
+
+  it("関連メディアの行はブログ画像と名乗らず、抜粋は引用にしない", () => {
+    const { blogs, talks } = classifyMaterials([video]);
+    const { talkSourceNo, sources } = numberSources(blogs, talks);
+    expect(sources[0]).toMatchObject({ sourceNo: 1, assetId: "video", url: "https://www.youtube.com/watch?v=x" });
+    expect(renderRelatedMediaSection({ talks, blogs, tiktoks: [], talkSourceNo, style: { kind: "flat" } })).toContain(
+      "- 【動画】【ガチ検証】わらしべ長者^[1]"
+    );
+    expect(quotedBlogs(blogs)).toEqual([]);
+  });
+
+  it("ミーグリの形でも、写真の無い章に写真の導入文を書かない", () => {
+    const { blogs, talks } = classifyMaterials([video]);
+    const { talkSourceNo } = numberSources(blogs, talks);
+    expect(renderRelatedMediaSection({ talks, blogs, tiktoks: [], talkSourceNo }).join("\n")).not.toContain("写真");
+  });
+
+  it("文字起こし・抜粋・メモを AI の素材に 1 回ずつ入れる", () => {
+    const m = materials([video]);
+    expect(m.included).toBe(1);
+    expect(m.text).toContain("文字起こしの本文");
+    expect(m.text).toContain("> 柔道着を持ってきました");
+    expect(m.text.match(/人のメモ\n/g)).toHaveLength(1);
+    expect(m.text).not.toContain("画像だけのブログ");
+  });
+
+  it("本文の無い動画は動画の素材と書く", () => {
+    const m = materials([{ ...video, text: null, excerpts: [], notes: [] }]);
+    expect(m.text).toContain("(本文なし。動画の素材)");
+    expect(m.included).toBe(0);
   });
 });
