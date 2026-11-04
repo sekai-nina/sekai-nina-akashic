@@ -2,6 +2,7 @@ import { withClearance } from "@/lib/db";
 import { normalizeText, jstDayStart, jstDayEndExclusive } from "@/lib/utils";
 import { Prisma, AssetKind, AssetStatus, TrustLevel, SourceType } from "@prisma/client";
 import { NINA_ENTITY_ID, type NinaAppearance } from "@/lib/nina";
+import { buildSnippets } from "./snippets";
 
 export interface SearchQuery {
   q: string;
@@ -76,61 +77,8 @@ export interface SearchResult {
   perPage: number;
 }
 
-/**
- * Find all occurrences of query terms in text and return snippets.
- * Nearby occurrences are merged into a single snippet.
- */
-function buildSnippets(text: string, query: string, contextLen = 80): { snippets: string[]; matchCount: number } {
-  const terms = splitQueryTerms(query);
-  if (terms.length === 0) return { snippets: [text.slice(0, contextLen * 2) + (text.length > contextLen * 2 ? "…" : "")], matchCount: 0 };
-
-  const lower = text.toLowerCase();
-
-  // Find all match positions
-  const positions: Array<{ start: number; end: number }> = [];
-  for (const term of terms) {
-    const termLower = term.toLowerCase();
-    let cursor = 0;
-    while (cursor < lower.length) {
-      const idx = lower.indexOf(termLower, cursor);
-      if (idx === -1) break;
-      positions.push({ start: idx, end: idx + term.length });
-      cursor = idx + term.length;
-    }
-  }
-
-  if (positions.length === 0) {
-    return { snippets: [text.slice(0, contextLen * 2) + (text.length > contextLen * 2 ? "…" : "")], matchCount: 0 };
-  }
-
-  // Sort by position
-  positions.sort((a, b) => a.start - b.start);
-
-  // Merge nearby positions into context ranges
-  const ranges: Array<{ start: number; end: number }> = [];
-  for (const pos of positions) {
-    const ctxStart = Math.max(0, pos.start - contextLen);
-    const ctxEnd = Math.min(text.length, pos.end + contextLen);
-    if (ranges.length > 0 && ctxStart <= ranges[ranges.length - 1].end) {
-      ranges[ranges.length - 1].end = Math.max(
-        ranges[ranges.length - 1].end,
-        ctxEnd
-      );
-    } else {
-      ranges.push({ start: ctxStart, end: ctxEnd });
-    }
-  }
-
-  const snippets = ranges.map((range) => {
-    let snippet = "";
-    if (range.start > 0) snippet += "…";
-    snippet += text.slice(range.start, range.end);
-    if (range.end < text.length) snippet += "…";
-    return snippet;
-  });
-
-  return { snippets, matchCount: positions.length };
-}
+/** 本文に埋め込まれた画像の目印 */
+const IMG_TOKEN = /\{\{IMG:[a-zA-Z0-9_-]+\}\}/g;
 
 /** Fetch person and tag entity names for a list of asset IDs */
 async function getEntityNames(
@@ -180,15 +128,26 @@ async function getBodyPreviews(
   `;
   const map = new Map<string, string>();
   for (const row of rows) {
-    const cleaned = row.content.replace(/\{\{IMG:[a-zA-Z0-9_-]+\}\}/g, "").trim();
+    const cleaned = row.content.replace(IMG_TOKEN, "").trim();
     if (!cleaned) continue;
     map.set(row.assetId, cleaned.length > maxLen ? cleaned.slice(0, maxLen) + "…" : cleaned);
   }
   return map;
 }
 /**
- * キーワード一致した AssetText から、一致箇所の周辺だけを1アセット1行で取り出す。
- * 全文を転送すると1行あたり数KBになるため、位置を求めて窓を切る。
+ * キーワード一致した AssetText を 1 アセット 1 行で取り出す。
+ *
+ * 本文 (message_body / body) を優先し、AI が本文から作った annotation / extracted は
+ * 本文に一致が無いときだけ使う。一致位置だけで選ぶと、短い annotation が長い本文に勝ち、
+ * 本文の一致が抜粋にも一致数にも出なくなる。
+ *
+ * ただし生の content に一致がある行を先に見る。正規化列だけで一致した行 (全角半角の違い等) は
+ * 一致箇所を切り出せず、ハイライトの無い先頭の抜粋になるので、他に行が無いときだけ使う。
+ *
+ * 本文の後半の一致も数えるので窓を切らずに全文を返す。対象はページ内の行だけで
+ * (画面は 20 件、API は最大 100 件)、全種別で最長 1.5 万字程度 (body の 99% は 5,300 字以下)。
+ * 全文はここで止まり、応答に載るのは抜粋だけ。
+ * {{IMG:xxx}} は検索の対象外で表示もしないので、一致数や抜粋に混ざらないよう除く。
  */
 async function getTextMatches(
   assetIds: string[],
@@ -207,18 +166,12 @@ async function getTextMatches(
   )})`;
 
   // assetId に ::text を付けると AssetText_assetId_idx が使えなくなるので付けない。
-  // 本文の条件は列を式で包んで PGroonga 索引を使わせない。ページ内の 20 件から
+  // 本文の条件は列を式で包んで PGroonga 索引を使わせない。ページ内の行から
   // 一致箇所を切り出すだけの後処理で、本文側の索引に載せると 7 万行を走らせる
   // 計画に倒れうるため、必ず assetId で駆動させる。
   const rows = await tx.$queryRaw<Array<{ assetId: string; textType: string; content: string }>>`
     SELECT DISTINCT ON (t."assetId")
-      t."assetId", t."textType",
-      CASE WHEN ${positionExpression} = 999999
-        -- 生の content には一致が無い (改行を挟む・全角半角が違う等で正規化列だけで
-        -- 一致した) 場合。そのまま窓を切ると空文字列になり、スニペットが消える
-        THEN substring(t."content" FROM 1 FOR 800)
-        ELSE substring(t."content" FROM GREATEST(1, ${positionExpression} - 150) FOR 800)
-      END as content
+      t."assetId", t."textType", t."content"
     FROM "AssetText" t
     WHERE t."assetId" = ANY(${assetIds})
       AND (${Prisma.join(
@@ -228,12 +181,21 @@ async function getTextMatches(
         ]),
         " OR "
       )})
-    ORDER BY t."assetId", ${positionExpression}
+    ORDER BY t."assetId",
+      CASE WHEN ${positionExpression} = 999999 THEN 1 ELSE 0 END,
+      CASE
+        WHEN t."textType" = 'message_body' THEN 0
+        WHEN t."textType" = 'body' THEN 1
+        WHEN t."textType" IN ('extracted', 'annotation') THEN 3
+        ELSE 2
+      END,
+      ${positionExpression},
+      t."id"
   `;
 
   const map = new Map<string, { textType: string; content: string }>();
   for (const row of rows) {
-    map.set(row.assetId, { textType: row.textType, content: row.content });
+    map.set(row.assetId, { textType: row.textType, content: row.content.replace(IMG_TOKEN, "") });
   }
   return map;
 }
@@ -567,12 +529,13 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
       return normalizedTerms.some((t) => normalized.includes(t));
     })();
 
-  // アセット行だけで一致箇所が分かるものと、本文/タグを引き当てる必要があるものを分ける
+  // アセット行だけで一致箇所が分かるものと、本文/タグを引き当てる必要があるものを分ける。
+  // messageBodyPreview は本文の先頭の切り詰めなので、一致しても本文全体を引いて数える
   const needsLookup = rows.filter(
     (row) =>
       hasKeyword &&
       !(searchAssetFields &&
-        (matchesAny(row.title) || matchesAny(row.description) || matchesAny(row.messageBodyPreview)))
+        (matchesAny(row.title) || matchesAny(row.description)))
   );
   const lookupIds = needsLookup.map((row) => row.id);
   const assetIds = rows.map((row) => row.id);
@@ -628,22 +591,22 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
     } else if (titleHit) {
       matchField = "title";
       score = 3;
-      ({ snippets, matchCount } = buildSnippets(row.title, q));
+      ({ snippets, matchCount } = buildSnippets(row.title, terms));
     } else if (descHit) {
       matchField = "description";
       matchText = row.description;
       score = 2;
-      ({ snippets, matchCount } = buildSnippets(row.description, q));
-    } else if (previewHit) {
-      matchField = "messageBodyPreview";
-      matchText = row.messageBodyPreview ?? "";
-      score = 1;
-      ({ snippets, matchCount } = buildSnippets(matchText, q));
+      ({ snippets, matchCount } = buildSnippets(row.description, terms));
     } else if (textHit) {
       type = "text";
       matchField = textHit.textType;
       score = 1;
-      ({ snippets, matchCount } = buildSnippets(textHit.content, q));
+      ({ snippets, matchCount } = buildSnippets(textHit.content, terms));
+    } else if (previewHit) {
+      matchField = "messageBodyPreview";
+      matchText = row.messageBodyPreview ?? "";
+      score = 1;
+      ({ snippets, matchCount } = buildSnippets(matchText, terms));
     } else if (entityHit) {
       matchField = "entity";
       score = 2;

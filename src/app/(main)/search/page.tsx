@@ -72,6 +72,7 @@ const MATCH_FIELD_LABELS: Record<string, string> = {
   title: "タイトル", description: "説明", messageBodyPreview: "メッセージ",
   entity: "エンティティ", note: "メモ", body: "本文", sourceUrl: "URL",
   ocr: "OCR", transcript: "文字起こし", extracted: "抽出テキスト",
+  message_body: "メッセージ", annotation: "注釈",
 };
 
 /** 企画・クリップに入っている数。ギャラリーでは画像に重ねる (overlay) */
