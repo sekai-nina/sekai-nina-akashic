@@ -1244,15 +1244,15 @@ body は省略可（`subject` を省くと既定のコミットメッセージ�
   "template": "quote_blog",
   "templateSupported": true,
   "suggestedTemplate": "quote_blog",
-  "selectableTemplates": ["quote_blog", "quote_situational", "attribute", "outing"],
+  "selectableTemplates": ["quote_blog", "quote_situational", "attribute", "outing", "item"],
   "articles": [{"id": "…", "shortId": "HtP8cV6", "title": "ブログ「だいすき！」", "type": "quote", "draft": false}]
 }
 ```
 
 - `container` は `meetgreet` / `live` / `null`。**器に使われているドシエは `/meetgreets/:id/article` から作る**（`POST` は 400）。器が呼び出し側の機密より上だと `null` に見えるが、その場合も `template` が `meetgreet` / `live` なので `POST` は 400
-- `template` は `Dossier.articleTemplate`（`meetgreet` / `live` / `outing` / `quote_blog` / `quote_situational` / `attribute`、未設定は `null`）。`templateSupported` が `false` なら、決まってはいるがまだ組み立てに対応していない（`meetgreet` / `live` は器側で組むので `true`）
-- `suggestedTemplate` は紐づく記事の型から推した既定値（`attribute` → `attribute`、`event` → `outing`、`quote` → タイトルが「ブログ「」で始まれば `quote_blog`、それ以外 `quote_situational`。推せなければ `null`）
-- `selectableTemplates` は器を持たないドシエが `POST` の `template` に指定できるもの（実装済みのものだけ。`quote_blog` / `quote_situational` / `attribute` / `outing`。`meetgreet` / `live` は器側）
+- `template` は `Dossier.articleTemplate`（`meetgreet` / `live` / `outing` / `quote_blog` / `quote_situational` / `attribute` / `item`、未設定は `null`）。`templateSupported` が `false` なら、決まってはいるがまだ組み立てに対応していない（`meetgreet` / `live` は器側で組むので `true`）
+- `suggestedTemplate` は紐づく記事の型から推した既定値（`attribute` → `attribute`、`event` → `outing`、`item` → `item`、`quote` → タイトルが「ブログ「」で始まれば `quote_blog`、それ以外 `quote_situational`。推せなければ `null`）
+- `selectableTemplates` は器を持たないドシエが `POST` の `template` に指定できるもの（実装済みのものだけ。`quote_blog` / `quote_situational` / `attribute` / `outing` / `item`。`meetgreet` / `live` は器側）
 
 ### POST /dossiers/:id/article
 
@@ -1262,7 +1262,7 @@ body は省略可（`subject` を省くと既定のコミットメッセージ�
 |---|---|---|---|
 | `template` | string | 未設定なら必須 | 記事テンプレート。`selectableTemplates` のいずれか。未設定のドシエに決める（監査ログ `dossier.template.set`）。**記事を作った後は別の型に変えられない**（400）。既に同じ値ならそのまま。**永続化されるのは保存のときだけ**で、`dryRun` / `restore` と併せたときはその要求の間だけ当てる（`dryRun` は書き込まない、の約束を守る） |
 | `articleId` | string | 記事が 2 本以上のとき必須 | 追記する記事。`GET` の `articles[].id`。1 本ならそれに追記、0 本なら新規作成 |
-| `aiDraft` | object \| null | | **本文を AI が書くテンプレート**（`attribute` / `outing` / `quote_situational`）の新規作成で、`dryRun` が返した `aiDraft` をそのまま渡す（`{ body, tags, title, date, dateDisplay }`。`body` ≤ 20,000 字、`tags` ≤ 10）。保存で生成し直すと別の文になり `expectedDigest` が合わないため。`null` か省略なら AI を使わず骨組み（出典だけ採番、本文はプレースホルダ）で作る。`dryRun` / `restore` とは併用できない（400） |
+| `aiDraft` | object \| null | | **本文を AI が書くテンプレート**（`attribute` / `outing` / `quote_situational` / `item`）の新規作成で、`dryRun` が返した `aiDraft` をそのまま渡す（`{ body, tags, title, date, dateDisplay }`。`body` ≤ 20,000 字、`tags` ≤ 10）。保存で生成し直すと別の文になり `expectedDigest` が合わないため。`null` か省略なら AI を使わず骨組み（出典だけ採番、本文はプレースホルダ）で作る。`dryRun` / `restore` とは併用できない（400） |
 
 - テンプレートが未設定のまま送ると 400（`template` で決めてから）
 - クリップのプール（`kind = clips`）は 400。器に使われているドシエも 400
@@ -1283,6 +1283,8 @@ body は省略可（`subject` を省くと既定のコミットメッセージ�
 | `attribute` | `attribute` | **AI（Claude）が書く**: リード 1 文 + 事実の箇条書き、各事実に `^[n]`（出典番号は素材と同じ採番: ブログ → トーク） | タイトル = ドシエのタイトル。`date` 無し。tags は既存タグから選ぶよう AI に指示する（保証はしない。他メンバー名可）。`[[…]]` は公開済み記事のタイトルにだけ張るよう指示する。**ドシエに画像しか入っていないブログは、同じ URL の本文アセットを素材に足して出典の宛先にする**（人はブログを読んで書くため。RLS と機密の上限は同じに効く。`outing` / `quote_situational` も同じ）。「AI 書きたて（未確認）」で保存。追記は本文に足すものが無い（新しい素材を反映するには記事の編集画面で手で書く。作り直しは後続） |
 | `outing` | `event` | **AI が書く**: 冒頭 1〜2 文 + 場所 / 行動ごとの `##` と事実の箇条書き `^[n]`（引用しない）。そのあとに機械で `## 関連メディア`（画像・動画のトークとブログ画像をリンクで、TikTok を埋め込みで、1 つの箇条書きに。文章のトークは出典にだけ。AI が書いてしまった同名の章は落とす） | タイトル = ドシエのタイトル。`date` / `date_display` は AI の提案（日が分からなければ月の 1 日 + 「YYYY年M月頃」）。tags = 同行者 + カテゴリ。**`locations` は場所候補から**（聖地に昇格済みなら `{ name, place_id }`、未昇格で座標があれば `{ name, lat, lng, google_maps_url? }`、座標も無ければ落とす。**昇格先の聖地が `internal` を超える / 見えない候補は記事にも AI にも出さない**）。昇格済みの候補は**非公開の聖地も含めて**記事の `ArticlePlace` に紐づける（frontmatter に出るのは push 時に `internal` 以下のものだけ。#283）。候補の確度・理由はその訪問に引き継ぐ（#333）。本文の聖地のカードは `place_id:` / `lat:` / `lng:` の行を持つ。場所候補の名前・住所・Google マップ URL も AI に渡す（編集メモは渡さない）。「AI 書きたて（未確認）」。追記は関連メディアだけ足す（`locations` は追記で更新しない。場所候補を足したら記事の編集画面で） |
 | `quote_situational` | `quote` | **AI が書く**: 状況の地の文 → `>` 発言 → 反応 1 文 | **タイトルは AI が実際の発言の表記に整えてよい**（ドシエのタイトルは目安。`yes, me now?` → `Yes, me now?`。path もそのタイトルで決まる。同名の記事があれば 409）。`date` / `date_display` は発言の時期（分からなければ素材の投稿日 + 「頃」）、tags は関係するメンバー。関連メディアは出さない。「AI 書きたて（未確認）」。追記は本文に足すものが無い |
+
+| `item` | `item` | **AI が書く**: リード 1〜2 文 + 事実の箇条書き `^[n]`。そのあとに機械で `## 関連メディア`（`outing` と同じ。画像・動画のトークとブログ画像をリンクで、TikTok を埋め込みで。文章のトークは出典にだけ。AI が書いてしまった同名の章は落とす） | タイトル = ドシエのタイトル（= 物の名前）。`date` / `date_display` は AI の提案（その物が話に出た最も早い時期。分からなければ月の 1 日 + 「YYYY年M月頃」）。tags = 関係するメンバー + カテゴリ。場所候補は使わない。「AI 書きたて（未確認）」。追記は関連メディアだけ足す |
 
 （`meetgreet` / `live` は器側で組む: `POST /meetgreets/:id/article` / `POST /lives/:id/article`）
 
