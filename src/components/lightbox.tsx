@@ -13,10 +13,13 @@ export function Lightbox({
   src,
   alt,
   onClose,
+  onError,
 }: {
   src: string | null;
   alt: string;
   onClose: () => void;
+  /** 画像を読めなかったとき (別の画像に差し替えるのに使う) */
+  onError?: () => void;
 }) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const openerRef = useRef<Element | null>(null);
@@ -48,7 +51,7 @@ export function Lightbox({
       onClick={onClose}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={src} alt={alt} className="max-w-[96vw] max-h-[96vh] rounded-lg" />
+      <img src={src} alt={alt} onError={onError} className="max-w-[96vw] max-h-[96vh] rounded-lg" />
       <button
         ref={closeRef}
         type="button"

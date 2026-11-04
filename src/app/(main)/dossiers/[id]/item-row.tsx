@@ -316,16 +316,22 @@ function KindIcon({ kind }: { kind: string }) {
   return <FileText className="h-3 w-3" />;
 }
 
-/** トークの画像。スクショなどは切り抜くと読めないので全体を出し、押すと元の大きさで拡大する */
+/** トークの画像。スクショなどは切り抜くと読めないので全体を出し、押すと元画像で拡大する (読めなければ一覧の画像) */
 function TalkImage({ src, fullSrc, alt }: { src: string; fullSrc: string; alt: string }) {
   const [open, setOpen] = useState(false);
+  const [fullFailed, setFullFailed] = useState(false);
   return (
     <>
       <button type="button" onClick={() => setOpen(true)} title="画像を拡大" className="block w-full cursor-zoom-in">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={src} alt={alt} loading="lazy" className="w-full h-auto rounded bg-slate-100 hover:opacity-90 transition-opacity" />
       </button>
-      <Lightbox src={open ? fullSrc : null} alt={alt} onClose={() => setOpen(false)} />
+      <Lightbox
+        src={open ? (fullFailed ? src : fullSrc) : null}
+        alt={alt}
+        onClose={() => setOpen(false)}
+        onError={() => setFullFailed(true)}
+      />
     </>
   );
 }
