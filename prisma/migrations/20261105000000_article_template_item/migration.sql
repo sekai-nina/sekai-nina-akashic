@@ -4,6 +4,7 @@
 -- `src/lib/article-workflow/templates/item.ts` が持つ。
 --
 -- 値の追加なので、コードより先に本番へ当てる (画面で選んだ値を `Dossier.articleTemplate` に書くため)。
+-- 適用してからマージまでは Preview で「物」を保存しない (古い Prisma Client が読めない値になる)。
 -- 既存の行は変わらず、RLS ポリシーの変更も GRANT も要らない。
 
 -- AlterEnum
