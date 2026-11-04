@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
 import { getDossierForApi } from "@/lib/domain/dossiers";
-import { resolveCandidateLocation } from "@/lib/domain/place-candidate-location";
+import { toVisibleCandidate } from "@/lib/domain/place-candidate-location";
 import { canViewDossier } from "@/lib/auth/dossier-permissions";
 
 const R2_PUBLIC_URL = (
@@ -90,9 +90,13 @@ export async function GET(
           : null,
       };
     }),
-    placeCandidates: dossier.placeCandidates.map((pc) => ({
+    placeCandidates: dossier.placeCandidates.map(toVisibleCandidate).map((pc) => ({
       id: pc.id,
-      ...resolveCandidateLocation(pc),
+      name: pc.name,
+      address: pc.address,
+      latitude: pc.latitude,
+      longitude: pc.longitude,
+      googleMapsUrl: pc.googleMapsUrl,
       note: pc.note,
       confidence: pc.confidence,
       certainty: pc.certainty,

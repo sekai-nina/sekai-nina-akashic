@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveCandidateLocation } from "./place-candidate-location";
+import { resolveCandidateLocation, toVisibleCandidate } from "./place-candidate-location";
 
 const place = {
   latitude: 35.6,
@@ -34,6 +34,12 @@ describe("resolveCandidateLocation", () => {
   it("見えない聖地を指す候補は、行に値が残っていても何も返さない", () => {
     const got = resolveCandidateLocation({ ...blank, placeId: "secret", name: "店", latitude: 1, longitude: 2, address: "住所" });
     expect(got).toEqual({ name: "", latitude: null, longitude: null, address: null, googleMapsUrl: null });
+  });
+
+  it("見えない聖地を指す候補はメモと理由も落とし、見える候補は残す", () => {
+    const row = { ...blank, placeId: "secret", name: "店", latitude: 1, longitude: 2, note: "2 階", certaintyNote: "看板" };
+    expect(toVisibleCandidate(row)).toMatchObject({ name: "", latitude: null, note: "", certaintyNote: "" });
+    expect(toVisibleCandidate({ ...row, place })).toMatchObject({ name: "神社", note: "2 階", certaintyNote: "看板" });
   });
 
   it("手入力の候補はそのまま", () => {
