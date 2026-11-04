@@ -72,7 +72,7 @@ const RULES = `あなたは日向坂46・坂井新奈のアーカイブサイト
 
 ## 本文の形
 
-- **リード 1〜2 文**: どんな物かを言い切り、何をもとにまとめたかを続ける
+- **リード 1〜2 文**: どんな物かを言い切り、何をもとにまとめたか、どこで話に出たかを続ける
   (「坂井新奈が先輩からもらった、〜。2025年6月29日のブログでの言及をもとにまとめる。」のように)
 - 続けて \`- \` の箇条書きで事実を並べる。1 項目 1 事実。入手の経緯 → 使い方・本人の感想 → その後、の
   順を目安にする。細部・補足は tab でネストする
@@ -91,7 +91,8 @@ const RULES = `あなたは日向坂46・坂井新奈のアーカイブサイト
 - **タイトルの物以外の話題。** ブログは本文が丸ごと入っているが、使うのはこの物の段落だけ
 - **投稿したこと自体。** 「トークで写真を公開した」「ブログを更新した」は事実の行にしない。
   トークやブログは出典 (\`^[n]\`) として使うだけ
-- **画像・動画の中身。** 本文の無いトークは中身が見えない。色・形・写っているものを想像で書かない
+- **画像・動画の中身。** 素材の本文・説明・メモに書かれたことだけ書く。本文の無いトークは中身が見えない。
+  色・形・写っているものを想像で書かない
 - **商品情報の補足。** 品名・ブランド・値段などは素材に書かれているものだけ
 
 ${EDITORIAL_RULES}
@@ -102,12 +103,10 @@ JSON で返す。
 - body: 本文 (Markdown)。上の形に従う
 - tags: 「既存のタグ」から 0〜4 個。**関係するメンバー名 + カテゴリ** (ぬいぐるみ など)。
   出典の種類や時期を表すタグ (ninatalk / ブログ / 2026年 など) は付けない。タイトルそのものはタグにしない
-- date: その物が話に出た日 "YYYY-MM-DD"。素材が複数なら最も早いもの。素材の日付 (ブログ / トークの投稿日) と
-  本文の「今日」「昨日」等から決める。日が分からなければ**その月の 1 日** (例: 2025年8月なら "2025-08-01")。
-  月も分からなければ null
-- dateDisplay: 記事に出す日付の表記。"2026年2月" のように月まで (日が確かでもこの形でよい)。
-  日が分からず月の 1 日にしたときや、もらった時期ではなく言及の時期しか分からないときは
-  "2025年6月頃" と「頃」を付ける。何も分からなければ null
+- date: 素材の投稿日のうち、この物が話に出た最も早い日 "YYYY-MM-DD"。本文の「今日」「昨日」で動かさない。
+  投稿日が分からず月だけ分かるなら**その月の 1 日** (例: 2025年8月なら "2025-08-01")。月も分からなければ null
+- dateDisplay: 記事に出す日付の表記。"2026年2月" のように月まで。その月の 1 日にしたときや、もらった・
+  買った時期が分からず話に出た時期しか言えないときは "2025年6月頃" と「頃」を付ける。何も分からなければ null
 - title: null (記事のタイトルはドシエのタイトルを使う)
 
 ## 見本 (既存記事。この形に揃える)
@@ -143,24 +142,25 @@ export function renderItemArticle(input: DossierRenderInput, draft?: AiDraft | n
   // 関連メディアに載せるのは画像・動画のトークだけ (文章のトークは出典としてだけ使う。おでかけと同じ)
   const mediaTalks = talks.filter((a) => a.kind !== "text");
 
-  // 空の本文は「下書き無し」と同じ (骨組みだけにする)
-  const hasDraft = !!draft && draft.body.trim().length > 0;
+  // 本文が空なら「下書き無し」と同じ (骨組みだけにする)。AI が関連メディアしか書かなかったときも空になる
+  const written = draft ? stripRelatedMedia(normalizeAiBody(draft.body, sources.length)).trimEnd() : "";
+  const used = written ? draft : null;
   const body: string[] = [
-    hasDraft ? stripRelatedMedia(normalizeAiBody(draft.body, sources.length)).trimEnd() : ITEM_BODY_PLACEHOLDER,
+    written || ITEM_BODY_PLACEHOLDER,
     "",
     ...renderRelatedMediaSection({ talks: mediaTalks, blogs, tiktoks: input.tiktoks, talkSourceNo, style: ITEM_MEDIA_STYLE }),
   ];
 
   return {
     title: input.dossier.title,
-    tags: hasDraft ? normalizeAiTags(draft.tags) : [],
+    tags: used ? normalizeAiTags(used.tags) : [],
     body: joinBody(body),
     sources,
     // 引用の章は無い (地の文は AI / 人が持つ)。関連メディアだけ追記の対象
     parts: buildParts({ quoted: [], reports: [], tiktoks: input.tiktoks, talks: mediaTalks, blogs, talkSourceNo }),
     dates: {
-      date: hasDraft ? draft.date : null,
-      dateDisplay: hasDraft ? draft.dateDisplay : null,
+      date: used?.date ?? null,
+      dateDisplay: used?.dateDisplay ?? null,
       dateMode: null,
     },
     draft: true,

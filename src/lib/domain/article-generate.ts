@@ -6,7 +6,7 @@
  *
  * - **MeetGreet** (`ArticleTarget.kind = "meetgreet"`): 開催日などの構造化メタを持つ行。組み立ては
  *   `buildMeetGreetArticle`、記事の紐づけは `MeetGreet.articleId`、除外は `MeetGreet.articleExclusions`
- * - **Dossier** (`kind = "dossier"`): 器を持たないテンプレート (言葉・スナップ・おでかけ)。
+ * - **Dossier** (`kind = "dossier"`): 器を持たないテンプレート (言葉・スナップ・おでかけ・物)。
  *   `Dossier.articleTemplate` が型を決め、組み立てはテンプレートの `render`、記事の紐づけは
  *   `Article.dossierId`、除外は `Dossier.articleExclusions`
  *
@@ -1049,7 +1049,7 @@ export interface MergeProposal {
   /** AI が差し込んだ / `^[n]` を足した行 (`body` の 0 始まりの位置) */
   changedLines: number[];
   /**
-   * AI に渡す前に機械で足した行の中身 (おでかけの関連メディアの画像・トークの行)。画面で別の色を付ける。
+   * AI に渡す前に機械で足した行の中身 (おでかけ・物の関連メディアの画像・トークの行)。画面で別の色を付ける。
    * 位置ではなく中身で持つ (AI が前に行を差し込むと位置がずれる)
    */
   mechanicalLines: string[];

@@ -82,7 +82,7 @@ describe("renderItemArticle", () => {
     const tiktok = "https://www.tiktok.com/@hinatazaka46/video/7000000000000000000";
     const r = renderItemArticle(input([blog, blogImage, imageTalk, textTalk], [tiktok]), draft);
     const media = r.body.slice(r.body.indexOf("## 関連メディア"));
-    expect(media).not.toBe("");
+    expect(r.body).toContain("## 関連メディア");
     expect(media).toContain("氷の溶ける音");
     expect(media).toContain("坂井新奈トーク 2025.6.29 20:31");
     expect(media).not.toContain("20:32");
@@ -97,8 +97,8 @@ describe("renderItemArticle", () => {
     expect(r.body.match(/## 関連メディア/g)).toHaveLength(1);
   });
 
-  it("下書きが無い / 空ならプレースホルダの骨組みで、出典と関連メディアは残す", () => {
-    for (const d of [null, { ...draft, body: "  " }]) {
+  it("下書きが無い / 空 / 関連メディアだけならプレースホルダの骨組みで、出典と関連メディアは残す", () => {
+    for (const d of [null, { ...draft, body: "  " }, { ...draft, body: "## 関連メディア\n\n- AI の行" }]) {
       const r = renderItemArticle(input([blog, imageTalk]), d);
       expect(r.body.startsWith(ITEM_BODY_PLACEHOLDER)).toBe(true);
       expect(r.body).toContain("## 関連メディア");
