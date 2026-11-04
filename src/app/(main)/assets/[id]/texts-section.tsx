@@ -521,13 +521,11 @@ function ExcerptFloater({
   useLayoutEffect(() => {
     setWidth(floaterRef.current?.offsetWidth ?? 0);
   }, [confirmation, articleConfirmation, canClip, editableDossiers.length, articles.length]);
-  const top = window.scrollY + selection.rect.top - 38;
-  const center = window.scrollX + selection.rect.left + selection.rect.width / 2;
+  // rect はビューポート座標なので fixed でそのまま置ける (main は relative なので absolute だとずれる)
+  const top = selection.rect.top - 38;
+  const center = selection.rect.left + selection.rect.width / 2;
   const margin = 8;
-  const left = Math.max(
-    window.scrollX + margin,
-    Math.min(center - width / 2, window.scrollX + window.innerWidth - width - margin)
-  );
+  const left = Math.max(margin, Math.min(center - width / 2, window.innerWidth - width - margin));
 
   useEffect(() => {
     if (!confirmation && !articleConfirmation) return;
@@ -540,7 +538,7 @@ function ExcerptFloater({
       <div
         ref={floaterRef}
         data-excerpt-floater
-        style={{ position: "absolute", top, left, zIndex: 60 }}
+        style={{ position: "fixed", top, left, zIndex: 60 }}
         className="bg-emerald-600 text-white rounded-lg shadow-lg px-3 py-1.5 flex items-center gap-2"
       >
         <Check className="h-3.5 w-3.5" />
@@ -556,7 +554,7 @@ function ExcerptFloater({
       <div
         ref={floaterRef}
         data-excerpt-floater
-        style={{ position: "absolute", top, left, zIndex: 60 }}
+        style={{ position: "fixed", top, left, zIndex: 60 }}
         className="bg-emerald-600 text-white rounded-lg shadow-lg px-3 py-1.5 flex items-center gap-2"
       >
         <Check className="h-3.5 w-3.5" />
@@ -577,7 +575,7 @@ function ExcerptFloater({
     <div
       ref={floaterRef}
       data-excerpt-floater
-      style={{ position: "absolute", top, left, zIndex: 60 }}
+      style={{ position: "fixed", top, left, zIndex: 60 }}
       className="bg-slate-900 text-white rounded-lg shadow-lg px-2 py-1 flex items-center gap-2"
     >
       <Quote className="h-3 w-3" />

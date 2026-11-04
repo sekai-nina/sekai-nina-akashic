@@ -27,7 +27,9 @@ export default async function MainLayout({
         <NavigationProgress />
       </Suspense>
       <Sidebar user={session.user} clipCount={clipCount} />
-      <main className="flex-1 overflow-auto mt-12 md:mt-0">
+      {/* relative: sr-only などの absolute 要素の基準を main にする。無いと main のスクロールを
+          抜けて body まで伸び、サイドバーごと動く余白のスクロールができる */}
+      <main className="relative flex-1 overflow-auto mt-12 md:mt-0">
         <div className="px-4 pt-2 pb-24 md:px-6 md:pt-6 md:pb-6">{children}</div>
       </main>
       <QuickCreateModal variant="fab" />
