@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isPureAppend, planAppend } from "@/lib/meetgreet/append";
+import { exclusionKey, isPureAppend, planAppend } from "@/lib/meetgreet/append";
 import { groupFreshBySource, isFreshClip } from "../merge";
 import { buildMaterialsText } from "../materials";
 import type { ArticleAssetInput } from "../render";
@@ -238,6 +238,20 @@ describe("outing の追記 (関連メディアは flat)", () => {
       layout: OUTING_TEMPLATE.appendLayout,
     });
     expect(p.body).toBe("本文だけ。\n\n## 関連メディア\n\n- 【トーク・画像】坂井新奈トーク 2025.8.18 20:31^[2]\n");
+  });
+
+  it("画像を全部外すと、ブログの本文の出典も提示しない (反映待ちの判定はこれに合わせている)", () => {
+    const r = renderOutingArticle(input([blogImage, blog]), draft);
+    const p = planAppend({
+      existingBody: "本文だけ。\n",
+      parts: r.parts,
+      sources: r.sources,
+      existingSources: [],
+      excluded: [exclusionKey("blogImage", "img-1")],
+      layout: OUTING_TEMPLATE.appendLayout,
+    });
+    expect(p.empty).toBe(true);
+    expect(p.newSources).toEqual([]);
   });
 
   it("坂井新奈が出ている画像だけを足すとき、中身の無い「そのほか」を作らない", () => {

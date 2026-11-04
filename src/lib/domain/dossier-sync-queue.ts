@@ -21,8 +21,9 @@
  *   画像自体は出典にならない (出典はブログ本文の 1 行) ので、出典だけで見ると載っている画像が全部未反映に見える
  * - それ以外 (トーク・本文を AI / 人が書くテンプレートの素材) は出典 (`ArticleSource`) になっているかで見る。
  *   出典は ID のほか URL でも突き合わせる (`planAppend` と同じ。URL だけの出典や、先頭画像が出典のブログがある)
- * - 行で足すテンプレート (`MEDIA_TEMPLATES`) では、ブログの画像を全部「足さない」にしたら本文も数えない。
- *   差分はそのブログの出典を行に付けて出すので、行が全部外れると本文の出典も出てこない
+ * - 行で足すテンプレート (`MEDIA_TEMPLATES`) では、そのブログに足す行が残っていなければ本文も数えない。
+ *   差分はブログの出典を行に付けて出すので、行が全部外れると本文の出典も出てこない。
+ *   ただし抜粋・メモつきの本文は残す (人が書いたものを黙って消さない。企画から外せば片付く)
  * - テンプレートが使わない素材は数えない: 言葉 (ブログ) は抜粋だけ、器のテンプレートの抜粋の無い本文は単独では載らない
  * - 公開リポジトリに載せられない機密のアセット (`PUBLISHABLE` の外) は数えない (組み立てで落ちる)
  * - アセットが見えない (上位機密) アイテム、外部リンク・外部画像は数えない
@@ -121,6 +122,19 @@ function lineCores(bodies: string[]): string[] {
 
 type Verdict = "pending" | "done" | "ignored";
 
+function itemIsTalk(assetId: string, asset: NonNullable<ItemRow["asset"]>): boolean {
+  const src = asset.sourceRecords[0] ?? null;
+  return isTalk({
+    id: assetId,
+    kind: asset.kind as never,
+    title: asset.title,
+    canonicalDate: null,
+    sortAt: null,
+    source: src ? { kind: src.sourceKind, title: src.title, url: src.url, publishedAt: null } : null,
+    excerpts: [],
+  });
+}
+
 /** 1 アイテムの判定。純粋関数 */
 export function judgeItem(
   item: ItemRow,
@@ -128,9 +142,9 @@ export function judgeItem(
   excluded: Set<string>,
   article: ArticleState,
   cores: string[],
-  excludedLineUrls: ReadonlySet<string> = new Set()
+  finishedBlogUrls: ReadonlySet<string> = new Set()
 ): Verdict {
-  const verdict = judgeCitation(item, template, excluded, article, cores, excludedLineUrls);
+  const verdict = judgeCitation(item, template, excluded, article, cores, finishedBlogUrls);
   // 載っている出典へのクリップでも、取り込んだあとのメモ・抜粋は AI に組み込ませる新しい素材
   if (verdict === "done" && !!template && getTemplate(template as ArticleTemplate)?.needsAi && isFreshClip(item, article.materialsSyncedAt)) {
     return "pending";
@@ -145,21 +159,13 @@ function judgeCitation(
   excluded: Set<string>,
   article: ArticleState,
   cores: string[],
-  excludedLineUrls: ReadonlySet<string>
+  finishedBlogUrls: ReadonlySet<string>
 ): Verdict {
   const asset = item.asset;
   if (!item.assetId || !asset) return "ignored";
   if (!PUBLISHABLE.has(asset.classification)) return "ignored";
   const src = asset.sourceRecords[0] ?? null;
-  const talk = isTalk({
-    id: item.assetId,
-    kind: asset.kind as never,
-    title: asset.title,
-    canonicalDate: null,
-    sortAt: null,
-    source: src ? { kind: src.sourceKind, title: src.title, url: src.url, publishedAt: null } : null,
-    excerpts: [],
-  });
+  const talk = itemIsTalk(item.assetId, asset);
   const quotes = !!template && QUOTE_TEMPLATES.has(template);
   const assetExcluded = excluded.has(exclusionKey("source", item.assetId));
   const citedById = article.citedAssets.has(item.assetId);
@@ -175,7 +181,9 @@ function judgeCitation(
     }
     if (assetExcluded) return "ignored";
     if (cited) return "done";
-    return src?.url && excludedLineUrls.has(normalizeSourceUrl(src.url)) ? "ignored" : "pending";
+    // 抜粋・メモを付けた本文は人が書いたものなので、黙って消さない (企画から外せば片付く)
+    const handWritten = !!item.excerpt.trim() || !!item.note.trim();
+    return src?.url && finishedBlogUrls.has(src.url) && !handWritten ? "ignored" : "pending";
   }
   // 言葉 (ブログ) は引用の元のブログだけを組み立てる。画像・トークは使わない
   if (template === "quote_blog") return "ignored";
@@ -193,21 +201,23 @@ function judgeCitation(
 }
 
 /**
- * 関連メディアの行が全部「足さない」になっているブログの URL。`planAppend` は行の宛先の出典を
- * 出典だけでは提示しないので、本文のアイテムを反映待ちに残すと片付ける手段が無い
+ * これ以上足す行が残っていないブログの URL。`planAppend` は行の宛先の出典を出典だけでは提示しないので、
+ * 本文のアイテムを反映待ちに残すと片付ける手段が無い。組み立てと同じく生の URL でまとめる
  */
-function excludedLineBlogUrls(row: DossierRow, excluded: Set<string>): Set<string> {
+function blogUrlsWithoutFreshLines(row: DossierRow, excluded: Set<string>, cores: string[]): Set<string> {
   const out = new Set<string>();
   if (!row.articleTemplate || !MEDIA_TEMPLATES.has(row.articleTemplate)) return out;
-  const kept = new Set<string>();
+  const fresh = new Set<string>();
   for (const i of row.items) {
-    const url = i.asset?.sourceRecords[0]?.url;
-    if (!i.assetId || !url || i.asset?.kind === "text") continue;
-    const key = normalizeSourceUrl(url);
-    if (excluded.has(exclusionKey("source", i.assetId))) out.add(key);
-    else kept.add(key);
+    const asset = i.asset;
+    const url = asset?.sourceRecords[0]?.url;
+    if (!i.assetId || !asset || !url || asset.kind === "text") continue;
+    if (!PUBLISHABLE.has(asset.classification) || itemIsTalk(i.assetId, asset)) continue;
+    const lined = !!asset.title && cores.some((c) => c.endsWith(`】${asset.title}`));
+    if (excluded.has(exclusionKey("source", i.assetId)) || lined) out.add(url);
+    else fresh.add(url);
   }
-  for (const url of kept) out.delete(url);
+  for (const url of fresh) out.delete(url);
   return out;
 }
 
@@ -216,9 +226,9 @@ export function computePending(row: DossierRow, article: ArticleState): PendingD
   if (row.articles.length === 0) return null;
   const excluded = new Set(storedExclusions(row));
   const cores = lineCores(article.bodies);
-  const excludedLineUrls = excludedLineBlogUrls(row, excluded);
+  const finishedBlogUrls = blogUrlsWithoutFreshLines(row, excluded, cores);
   const clips = row.items
-    .filter((i) => judgeItem(i, row.articleTemplate, excluded, article, cores, excludedLineUrls) === "pending")
+    .filter((i) => judgeItem(i, row.articleTemplate, excluded, article, cores, finishedBlogUrls) === "pending")
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
     .map((i) => ({
       itemId: i.id,

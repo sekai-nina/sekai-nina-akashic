@@ -149,6 +149,18 @@ describe("computePending のブログ画像", () => {
     expect(pendingIds(r([exclusionKey("source", "i1")]), state()).sort()).toEqual(["b", "i2"]);
   });
 
+  it("足す行が残っていないかは、機密の画像を数えず、本文に載っている行は足さないものとして見る", () => {
+    const secret = item("s", { kind: "image", title: "機密の写真", classification: "confidential" });
+    const lined = `- 【ブログ・画像】${img2.asset!.title}^[1]`;
+    const r = row([item("b"), img1, img2, secret], { articleTemplate: "outing", articleExclusions: [exclusionKey("source", "i1")] });
+    expect(pendingIds(r, state({ bodies: [lined] }))).toEqual([]);
+  });
+
+  it("画像を全部外しても、抜粋・メモつきの本文は黙って消さない", () => {
+    const r = row([item("b", { note: "人のメモ" }), img1], { articleTemplate: "outing", articleExclusions: [exclusionKey("source", "i1")] });
+    expect(pendingIds(r, state())).toEqual(["b"]);
+  });
+
   it("スナップでは、ブログの出典が URL で当たれば画像も反映済み (差分に出ない)", () => {
     expect(pendingIds(row([img1], { articleTemplate: "attribute" }), state({ citedUrls: new Set([BLOG]) }))).toEqual([]);
   });

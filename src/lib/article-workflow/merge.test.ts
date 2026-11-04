@@ -111,6 +111,11 @@ URL: https://example.com/1
 });
 
 describe("mergePrompt", () => {
+  it("既存の関連メディアの章を残すよう指示する (消すと checkMerge が拒否する)", () => {
+    const p = mergePrompt({ system: [], title: "t", existingBody: "本文", materials: "", newSources: [], included: 0, truncated: 0 });
+    expect(p.user).toContain("既存の本文にある章はそのまま残す");
+  });
+
   it("既存の本文・素材・新しい出典の番号をユーザーメッセージに入れ、システムプロンプトはそのまま使う", () => {
     const p = mergePrompt({
       system: ["鉄則"],
