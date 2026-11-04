@@ -84,7 +84,7 @@ const clearance = auth.clearance;
 
 ### クリップ（`/clips`、#41）
 
-クリップ（記事未定の抜粋）は新しいテーブルではなく、**`kind = clips` の共有ドシエ 1 本の `DossierItem`**。RLS / GRANT / バックアップは Dossier 系がそのまま効く。
+クリップ（記事未定の抜粋）は新しいテーブルではなく、**`kind = clips` の共有ドシエ 1 本の `DossierItem`**。RLS / GRANT は Dossier 系がそのまま効く。
 
 - プールは `viewMode` / `editMode` とも `clearance`、`internal`。クリアランスが足りる全員に見え、admin / member が書ける。public クリアランスにはプール自体が見えない（`findClipPool` が null）
 - 全体で 1 本なのは部分ユニーク索引 `Dossier_clips_singleton`（Prisma は表現できないので `migrate diff` が `DROP` を提案しても捨てる。trgm / pgroonga と同じ扱い）
@@ -94,7 +94,6 @@ const clearance = auth.clearance;
 - **`requireEditAccess` はプールを既定で拒否する。** ピッカーが隠していても Server Action の `dossierId` はクライアント入力なので、ここで止めないと「ドシエに追加」でプールに任意のアセットを入れられる（= `createClip` の classification 検査を素通りする）。プール内アイテムのメモ編集・削除だけ `allowClipPool: true` で通す。外部画像 API（`/api/v1/dossiers/:id/external-image`）と `createMeetGreet` も `kind` を見て拒否する
 - 移動（`moveClips`）も移動先ドシエの classification とアセットの classification を突き合わせる。RLS の WITH CHECK はドシエしか見ないので、internal の抜粋を public のドシエへ移すと下位に見える。見えないアセット（後から機密が上がったもの）のクリップも移せない
 - **アセットの機密を後から上げても、プールに入っている抜粋は消えない**（DossierItem の RLS は親ドシエしか見ない）。一般のドシエと同じ穴だが、プールは全員共有なので範囲が広い。機密を上げるときはプール（と各ドシエ）の抜粋を手で確認する
-- バックアップ/リストア: `backup.ts` は全列を書くが、`restore.ts` は列を列挙して書くので **`Dossier.kind` / `Dossier.articleTemplate` / `Dossier.articleExclusions` と `DossierItem.createdById` を落とさないこと**（落とすとリストア後にプールが普通のドシエになり、次のクリップでプールが 2 本目できる）。`Article.dossierId` は Article がバックアップ対象外なので、リストア後は `pnpm cli:backfill-article-dossiers` で張り直す
 - サイドバーの件数バッジは `getCachedClipCount(clearance)`（`withClearance`。`app.user_id` 無しでも `viewMode = clearance` のプールは RLS が通る）
 
 **非保護テーブルを足したら `REVOKE ALL ON TABLE "<Table>" FROM anon, authenticated;` を migration に書く。** Supabase は public スキーマの全テーブルに `anon` / `authenticated` への DML を既定で与え、PostgREST (`/rest/v1/<table>`) がそれを外に出す。保護テーブルが守られているのは RLS が `TO app_runtime` のポリシーしか持たないからで、権限のためではない。

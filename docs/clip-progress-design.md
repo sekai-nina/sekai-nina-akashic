@@ -160,7 +160,6 @@ Issue: https://github.com/sekai-nina/sekai-nina-akashic/issues/233 (合意の経
   - 索引は true の行だけの部分索引 `Asset_mentionsNina_idx`（schema 管理外。`migrate diff` が DROP を出すので捨てる）
   - 検索が 0 件なのに印が付いているときは、検索の故障とみなして書き込まない（全件の印を無言で外さない）
   - `/status` のハートビートには件数を載せない（RLS を通さず数えた値で、上位機密のアセットも含むため）。件数は Vercel のログ
-  - `pnpm cli:restore` は mentionsNina を戻さない。リストア後は `pnpm cli:refresh-nina-mentions --apply`（回さなくても最長 15 分で cron が埋める）
   - 本番への入れ方: migration → `pnpm cli:refresh-nina-mentions --apply` → コードのデプロイ。逆順だと最初の cron まで言及だけの素材が分母から落ちる
 - 残る冷えたときの重さ: 表示 50 件のアセット・クリップ数（`withSession`、冷えて約 1 秒・キャッシュなし）
 
