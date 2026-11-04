@@ -168,36 +168,6 @@ export async function getOrCreateDriveFolder(
 }
 
 /**
- * 指定フォルダ内のファイル一覧を取得する。
- */
-export async function listDriveFiles(
-  folderId: string
-): Promise<Array<{ id: string; name: string }>> {
-  const auth = getAuth();
-  if (!auth) return [];
-
-  const drive = google.drive({ version: "v3", auth: auth as Parameters<typeof google.drive>[0]["auth"] });
-  const files: Array<{ id: string; name: string }> = [];
-  let pageToken: string | undefined;
-
-  do {
-    const res = await drive.files.list({
-      q: `'${folderId}' in parents and trashed=false`,
-      fields: "nextPageToken, files(id, name)",
-      pageSize: 100,
-      pageToken,
-      supportsAllDrives: true,
-    });
-    for (const f of res.data.files ?? []) {
-      if (f.id && f.name) files.push({ id: f.id, name: f.name });
-    }
-    pageToken = res.data.nextPageToken ?? undefined;
-  } while (pageToken);
-
-  return files;
-}
-
-/**
  * Driveからファイルのバイナリをダウンロードする。
  * `timeoutMs` を渡すとその時間で打ち切る (cron が maxDuration を超えないように)。
  */
