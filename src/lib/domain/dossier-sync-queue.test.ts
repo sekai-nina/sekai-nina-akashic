@@ -141,6 +141,14 @@ describe("computePending のブログ画像", () => {
     expect(pendingIds(row([img1], { articleTemplate }), state({ citedUrls: new Set([BLOG]) }))).toEqual(["i1"]);
   });
 
+  it.each(["outing", "item"])("行で足すテンプレート (%s) で画像を全部外したブログは、本文も反映待ちに残さない", (articleTemplate) => {
+    const blog = item("b");
+    const r = (articleExclusions: string[]) => row([blog, img1, img2], { articleTemplate, articleExclusions });
+    expect(pendingIds(r([exclusionKey("source", "i1"), exclusionKey("source", "i2")]), state())).toEqual([]);
+    // 1 枚でも残っていれば、その行の宛先として本文の出典も差分に出る
+    expect(pendingIds(r([exclusionKey("source", "i1")]), state()).sort()).toEqual(["b", "i2"]);
+  });
+
   it("スナップでは、ブログの出典が URL で当たれば画像も反映済み (差分に出ない)", () => {
     expect(pendingIds(row([img1], { articleTemplate: "attribute" }), state({ citedUrls: new Set([BLOG]) }))).toEqual([]);
   });

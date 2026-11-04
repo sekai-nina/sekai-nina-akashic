@@ -21,6 +21,8 @@
  *   画像自体は出典にならない (出典はブログ本文の 1 行) ので、出典だけで見ると載っている画像が全部未反映に見える
  * - それ以外 (トーク・本文を AI / 人が書くテンプレートの素材) は出典 (`ArticleSource`) になっているかで見る。
  *   出典は ID のほか URL でも突き合わせる (`planAppend` と同じ。URL だけの出典や、先頭画像が出典のブログがある)
+ * - 行で足すテンプレート (`MEDIA_TEMPLATES`) では、ブログの画像を全部「足さない」にしたら本文も数えない。
+ *   差分はそのブログの出典を行に付けて出すので、行が全部外れると本文の出典も出てこない
  * - テンプレートが使わない素材は数えない: 言葉 (ブログ) は抜粋だけ、器のテンプレートの抜粋の無い本文は単独では載らない
  * - 公開リポジトリに載せられない機密のアセット (`PUBLISHABLE` の外) は数えない (組み立てで落ちる)
  * - アセットが見えない (上位機密) アイテム、外部リンク・外部画像は数えない
@@ -125,9 +127,10 @@ export function judgeItem(
   template: string | null,
   excluded: Set<string>,
   article: ArticleState,
-  cores: string[]
+  cores: string[],
+  excludedLineUrls: ReadonlySet<string> = new Set()
 ): Verdict {
-  const verdict = judgeCitation(item, template, excluded, article, cores);
+  const verdict = judgeCitation(item, template, excluded, article, cores, excludedLineUrls);
   // 載っている出典へのクリップでも、取り込んだあとのメモ・抜粋は AI に組み込ませる新しい素材
   if (verdict === "done" && !!template && getTemplate(template as ArticleTemplate)?.needsAi && isFreshClip(item, article.materialsSyncedAt)) {
     return "pending";
@@ -141,7 +144,8 @@ function judgeCitation(
   template: string | null,
   excluded: Set<string>,
   article: ArticleState,
-  cores: string[]
+  cores: string[],
+  excludedLineUrls: ReadonlySet<string>
 ): Verdict {
   const asset = item.asset;
   if (!item.assetId || !asset) return "ignored";
@@ -170,7 +174,8 @@ function judgeCitation(
       return article.bodies.some((b) => b.includes(head)) ? "done" : "pending";
     }
     if (assetExcluded) return "ignored";
-    return cited ? "done" : "pending";
+    if (cited) return "done";
+    return src?.url && excludedLineUrls.has(normalizeSourceUrl(src.url)) ? "ignored" : "pending";
   }
   // 言葉 (ブログ) は引用の元のブログだけを組み立てる。画像・トークは使わない
   if (template === "quote_blog") return "ignored";
@@ -187,13 +192,33 @@ function judgeCitation(
   return cited ? "done" : "pending";
 }
 
+/**
+ * 関連メディアの行が全部「足さない」になっているブログの URL。`planAppend` は行の宛先の出典を
+ * 出典だけでは提示しないので、本文のアイテムを反映待ちに残すと片付ける手段が無い
+ */
+function excludedLineBlogUrls(row: DossierRow, excluded: Set<string>): Set<string> {
+  const out = new Set<string>();
+  if (!row.articleTemplate || !MEDIA_TEMPLATES.has(row.articleTemplate)) return out;
+  const kept = new Set<string>();
+  for (const i of row.items) {
+    const url = i.asset?.sourceRecords[0]?.url;
+    if (!i.assetId || !url || i.asset?.kind === "text") continue;
+    const key = normalizeSourceUrl(url);
+    if (excluded.has(exclusionKey("source", i.assetId))) out.add(key);
+    else kept.add(key);
+  }
+  for (const url of kept) out.delete(url);
+  return out;
+}
+
 /** 純粋関数。記事の無い企画・未反映の無い企画は null */
 export function computePending(row: DossierRow, article: ArticleState): PendingDossier | null {
   if (row.articles.length === 0) return null;
   const excluded = new Set(storedExclusions(row));
   const cores = lineCores(article.bodies);
+  const excludedLineUrls = excludedLineBlogUrls(row, excluded);
   const clips = row.items
-    .filter((i) => judgeItem(i, row.articleTemplate, excluded, article, cores) === "pending")
+    .filter((i) => judgeItem(i, row.articleTemplate, excluded, article, cores, excludedLineUrls) === "pending")
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
     .map((i) => ({
       itemId: i.id,
