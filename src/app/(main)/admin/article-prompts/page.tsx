@@ -9,7 +9,7 @@ import { resetArticlePrompt, saveArticlePrompt } from "./actions";
 /**
  * 記事テンプレートの AI プロンプト。
  *
- * 企画 → 記事で本文を AI に書かせるとき (おでかけ・スナップ・言葉 (状況つき)) のルール文を
+ * 企画 → 記事で本文を AI に書かせるとき (おでかけ・スナップ・言葉 (状況つき)・物) のルール文を
  * 確認・修正する。**テンプレートごとに 1 つ**で、そのテンプレートのすべての生成に効く。
  */
 export const dynamic = "force-dynamic";

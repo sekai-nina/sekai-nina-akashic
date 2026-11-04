@@ -44,6 +44,12 @@ export function normalizeAiBody(body: string, sourceCount: number): string {
   );
 }
 
+/** AI が指示に反して `## 関連メディア` を書いてきたら落とす (機械が同じ章を足すので二重になる) */
+export function stripRelatedMedia(body: string): string {
+  const at = body.indexOf("\n## 関連メディア");
+  return at >= 0 ? body.slice(0, at) : body.startsWith("## 関連メディア") ? "" : body;
+}
+
 /** 下書きのタグを記事に入れる形に (前後の空白・空・重複を除く) */
 export function normalizeAiTags(tags: string[]): string[] {
   return [...new Set(tags.map((t) => t.trim()).filter((t) => t.length > 0))];
@@ -80,7 +86,7 @@ export const NO_QUOTES_APPEND_LAYOUT: AppendLayout = {
 };
 
 /**
- * 本文を AI / 人が書くテンプレート (スナップ・言葉 (場面)・おでかけ) の追記の置き方。
+ * 本文を AI / 人が書くテンプレート (スナップ・言葉 (場面)・おでかけ・物) の追記の置き方。
  * 本文の行を足せないので、新しい素材は出典だけ提示する (#267)
  */
 export const AI_BODY_APPEND_LAYOUT: AppendLayout = { ...NO_QUOTES_APPEND_LAYOUT, bareSources: true };

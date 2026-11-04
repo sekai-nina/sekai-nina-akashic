@@ -102,7 +102,7 @@ export interface ArticleState {
 /** 引用を本文に足すテンプレート。器のドシエは `articleTemplate` に器の種類が入っている */
 const QUOTE_TEMPLATES = new Set(["meetgreet", "live", "quote_blog"]);
 /** トーク・ブログ画像を「関連メディア」の行で足すテンプレート (行の有無で判定し、出典では見ない) */
-const MEDIA_TEMPLATES = new Set(["meetgreet", "live", "outing"]);
+const MEDIA_TEMPLATES = new Set(["meetgreet", "live", "outing", "item"]);
 
 /**
  * 除外キーの置き場。器 (MeetGreet / Live) のある企画は器が持ち、無ければ企画が持つ

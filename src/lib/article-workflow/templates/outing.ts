@@ -30,7 +30,14 @@ import {
   type RelatedMediaStyle,
   type RenderedArticle,
 } from "../render";
-import { AI_BODY_APPEND_LAYOUT, aiSystemPrompt, EDITORIAL_RULES, normalizeAiBody, normalizeAiTags } from "./shared";
+import {
+  AI_BODY_APPEND_LAYOUT,
+  aiSystemPrompt,
+  EDITORIAL_RULES,
+  normalizeAiBody,
+  normalizeAiTags,
+  stripRelatedMedia,
+} from "./shared";
 import type { AiContext, AiDraft, AiPrompt, ArticleTemplateDef, DossierPlace, DossierRenderInput } from "./types";
 
 /** AI が使えなかったときに本文に置くプレースホルダ。記事編集画面で人が置き換える */
@@ -400,12 +407,6 @@ export function outingLocations(places: DossierPlace[]): Record<string, unknown>
     out.push(loc);
   }
   return out;
-}
-
-/** AI が指示に反して `## 関連メディア` を書いてきたら落とす (機械が同じ章を足すので二重になる) */
-function stripRelatedMedia(body: string): string {
-  const at = body.indexOf("\n## 関連メディア");
-  return at >= 0 ? body.slice(0, at) : body.startsWith("## 関連メディア") ? "" : body;
 }
 
 export function renderOutingArticle(input: DossierRenderInput, draft?: AiDraft | null): RenderedArticle {

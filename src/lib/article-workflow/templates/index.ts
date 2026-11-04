@@ -2,12 +2,13 @@
  * 記事テンプレートの登録簿 (#169 / #170)。
  *
  * `ArticleTemplate` (Prisma enum) の値ごとに定義を引く。この登録簿が実装状況の正
- * (全 6 つ実装済み。器のもの = meetgreet / live は `render: null` で器側が組む)。
+ * (全 7 つ実装済み。器のもの = meetgreet / live は `render: null` で器側が組む)。
  */
 
 import type { ArticleTemplate } from "@prisma/client";
 import { MEETGREET_APPEND_LAYOUT } from "@/lib/meetgreet/append";
 import { ATTRIBUTE_TEMPLATE } from "./attribute";
+import { ITEM_TEMPLATE } from "./item";
 import { LIVE_TEMPLATE } from "./live";
 import { OUTING_TEMPLATE } from "./outing";
 import { QUOTE_BLOG_TEMPLATE } from "./quote-blog";
@@ -44,6 +45,7 @@ const TEMPLATES: Partial<Record<ArticleTemplate, ArticleTemplateDef>> = {
   quote_situational: QUOTE_SITUATIONAL_TEMPLATE,
   attribute: ATTRIBUTE_TEMPLATE,
   outing: OUTING_TEMPLATE,
+  item: ITEM_TEMPLATE,
 };
 
 export function getTemplate(key: ArticleTemplate): ArticleTemplateDef | null {

@@ -182,6 +182,7 @@ export function suggestTemplate(dossier: DossierForArticle): ArticleTemplate | n
   const [type] = types;
   if (type === "attribute") return "attribute";
   if (type === "event") return "outing";
+  if (type === "item") return "item";
   if (type === "quote") {
     return dossier.articles.every((a) => isQuoteBlogTitle(a.title)) ? "quote_blog" : "quote_situational";
   }
