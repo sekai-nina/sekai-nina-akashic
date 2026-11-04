@@ -56,6 +56,7 @@ const clearance = auth.clearance;
 | 統計集計（全体カウント等） | `prismaInternal` |
 | User / Entity / Article / Job / JobRun / StatusCheckState の操作 | `prisma`（保護対象外テーブル） |
 | Entity を一覧・検索でユーザーに返す | `listEntities` / `searchEntities` / `getEntityById`（`entityClearanceWhere` を通す） |
+| 生 SQL で Entity を一致条件に使う（返さなくても） | `e."type" <> 'place' OR EXISTS (SELECT 1 FROM "Place" p WHERE p."entityId" = e."id")` を入れる（`withClearance` の中でだけ有効。`src/lib/search/index.ts` の `visibleEntity`。#345） |
 
 ## 保護テーブル一覧
 
