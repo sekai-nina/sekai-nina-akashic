@@ -53,7 +53,7 @@ pnpm db:seed
 pnpm test             # vitest。変更後は typecheck とあわせて実行
 ```
 
-`pnpm cli:*` は運用スクリプト群（`import` / `backup` / `restore` / `thumbnails` / `keygen` 等）。`src/cli/` 参照。
+`pnpm cli:*` は運用スクリプト群（`import` / `thumbnails` / `keygen` 等）。`src/cli/` 参照。
 
 一度きりの後片付けスクリプトは既定が下見で、`--apply` を付けたときだけ書く（`cli:import-articles` / `cli:fix-insta-dash` 等）。
 
@@ -101,16 +101,16 @@ withSession({ id, clearance }, tx => …)    // 上記 + app.user_id — Dossier
   - 素の `prisma` は `app.clearance` 未設定で **RLS が全行を落とす**（明示フィルタを足しても無駄。RLS は別に効く）
   - `withClearance` で包むとインタラクティブトランザクションの **15,000ms 上限**に当たる（`/analysis` の集計は実測 21 秒で P2028）
   - つまり「RLS に任せる」か「RLS をバイパスして明示フィルタ」の二択で、中間は無い
-- **バックアップ・リストア・全体統計は `prismaInternal`（CLI なら `DIRECT_URL` を明示）。** 素の `prisma` だと無言の 0 行で「バックアップしたつもり」になる
+- **アセットの Drive バックアップ・全体統計は `prismaInternal`（CLI なら `DIRECT_URL` を明示）。** 素の `prisma` だと無言の 0 行で「バックアップしたつもり」になる
   - `new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL } } })` は **`DIRECT_URL` 未設定でも型エラーにならず `DATABASE_URL` に無言でフォールバックする**ので、スクリプト冒頭で存在チェックして `process.exit(1)` する
 
 #### `Entity` の place だけはクリアランスで絞る
 
 `Entity` の RLS ポリシーは `USING (true)` の素通しなので、`type: "place"` のエンティティは**紐づく `Place` が上位機密でも名前と説明が誰にでも列挙できる**（`Place` 側の RLS は Place 行しか守らない）。
 
-`Entity` は CLI のバックアップを含め 30 箇所以上から素の `prisma` で触られており、DB 側のポリシーを締めると `app.clearance` 未設定の経路が無言で 0 行になる（= バックアップから聖地が欠落する）。加えて索引も効かなくなる。そのため**アプリ層で塞いでいる** → `src/lib/domain/entities.ts` の `entityClearanceWhere()`。
+`Entity` は 30 箇所以上から素の `prisma` で触られており、DB 側のポリシーを締めると `app.clearance` 未設定の経路が無言で 0 行になる。加えて索引も効かなくなる。そのため**アプリ層で塞いでいる** → `src/lib/domain/entities.ts` の `entityClearanceWhere()`。
 
-ユーザーに Entity を返す経路（`listEntities` / `searchEntities` / `getEntityById` / `src/lib/cache.ts` の `getCachedEntity*`）はすべてこれを通す。**アセットに紐づくエンティティの include も同様**（`AssetEntity` の RLS は親 Asset の classification にしか依存しないので、`internal` のアセットに `confidential` の聖地が紐づいていると名前が漏れる）→ `entities: { where: { entity: entityClearanceWhere(clearance) }, … }`。CLI のバックアップ（`src/cli/backup.ts` / `src/lib/drive/`）は**絞ってはいけない**。`entityClearanceWhere` は **`withClearance` の中でしか使えない**（素の `prisma` から使うと `Place` の RLS で全 place エンティティが消える）。
+ユーザーに Entity を返す経路（`listEntities` / `searchEntities` / `getEntityById` / `src/lib/cache.ts` の `getCachedEntity*`）はすべてこれを通す。**アセットに紐づくエンティティの include も同様**（`AssetEntity` の RLS は親 Asset の classification にしか依存しないので、`internal` のアセットに `confidential` の聖地が紐づいていると名前が漏れる）→ `entities: { where: { entity: entityClearanceWhere(clearance) }, … }`。アセットの Drive バックアップ（`src/lib/drive/`）は**絞ってはいけない**。`entityClearanceWhere` は **`withClearance` の中でしか使えない**（素の `prisma` から使うと `Place` の RLS で全 place エンティティが消える）。
 
 ### 保護テーブル
 

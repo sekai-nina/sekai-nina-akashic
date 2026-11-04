@@ -41,7 +41,7 @@
 | `prisma` | `DATABASE_URL`（`app_runtime` ロール） | 適用 |
 | `prismaInternal` | `DIRECT_URL`（Vercel は `app_internal`、手元の CLI は `akashic_cli` ロール。どちらも DDL 不可） | バイパス |
 
-バックアップ・リストア・全体統計は全行が見えないと成立しないので `prismaInternal` を使う。ユーザーに返すデータは必ず `withClearance` / `withSession` を通す。
+アセットの Drive バックアップ・全体統計は全行が見えないと成立しないので `prismaInternal` を使う。ユーザーに返すデータは必ず `withClearance` / `withSession` を通す。
 
 **RLS は読みを守るが、自分より上のクリアランスを付けて書く操作は止められない。** そこはアプリ層（`src/lib/classification.ts` の `assertClearance`）で止める。既存レコードの機密レベルの**引き下げ**も RLS では止まらないため、API キー経由の再分類は引き上げのみに制限している。
 
@@ -77,7 +77,7 @@ Asset は元データの管理単位、AssetText はそこから抽出・付与�
 
 `@@unique([type, canonicalName])`。`type: "place"` の Entity は `Place` と 1 対 1 で、`Place` 側だけが `classification` を持つ。
 
-**Entity テーブル自体には実質的な RLS が無い**（ポリシーは `USING (true)` の素通し）。CLI のバックアップを含む多数の経路が素の `prisma` で触るため、DB 側で締めると無言で 0 行になる箇所が出るため。代わりに、ユーザーに Entity を返す経路はアプリ層の `entityClearanceWhere()` で `place` を絞る。
+**Entity テーブル自体には実質的な RLS が無い**（ポリシーは `USING (true)` の素通し）。多数の経路が素の `prisma` で触るため、DB 側で締めると無言で 0 行になる箇所が出るため。代わりに、ユーザーに Entity を返す経路はアプリ層の `entityClearanceWhere()` で `place` を絞る。
 
 ### Dossier の多態アイテム
 
@@ -153,7 +153,7 @@ AI がツールを呼ぶ経路である以上、プロンプトインジェク�
 - 未設定でもシステム全体は動作する（`isDriveEnabled()` で任意化）
 - 設定がある場合: ファイルを Drive にアップロードし、fileId と共有 URL を Asset に保存
 - 未設定の場合: Discord attachment URL や手入力 URL を `storageUrl` として保存
-- アセット作成・更新時に JSON を `akashic-backup/` へバックアップする
+- アセット作成・更新時に JSON を `akashic-backup/` へバックアップする。読み戻す CLI は無い（DB の復旧は Supabase の日次バックアップで行う）
 
 ## 重複検出
 
