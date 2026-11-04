@@ -345,6 +345,11 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
     ? Prisma.sql`AND ${Prisma.join(assetWhereConditions, " AND ")}`
     : Prisma.empty;
 
+  // Entity の RLS は素通しで、AssetEntity の RLS は親 Asset しか見ないので、Entity を一致条件に
+  // 使うと上位機密の聖地から紐づくアセットが引ける。Place の RLS を通して見える聖地だけに絞る
+  // (entityClearanceWhere と同じ結果になる。withClearance の中でだけ有効。#345)
+  const visibleEntity = Prisma.sql`(e."type" <> 'place' OR EXISTS (SELECT 1 FROM "Place" p WHERE p."entityId" = e."id"))`;
+
   // Entity filter as subquery.
   // 既定は OR（いずれかのタグ/人物を含む）。entityMatch: "all" で AND になる。
   const allEntityIds = [
@@ -357,14 +362,20 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
       ? Prisma.sql`${Prisma.join(
           allEntityIds.map(
             (eid) =>
-              Prisma.sql`AND EXISTS (SELECT 1 FROM "AssetEntity" ae WHERE ae."assetId" = a."id" AND ae."entityId" = ${eid})`
+              Prisma.sql`AND EXISTS (
+                SELECT 1 FROM "AssetEntity" ae
+                JOIN "Entity" e ON e."id" = ae."entityId"
+                WHERE ae."assetId" = a."id" AND ae."entityId" = ${eid} AND ${visibleEntity}
+              )`
           ),
           " "
         )}`
       : Prisma.sql`AND EXISTS (
           SELECT 1 FROM "AssetEntity" ae
+          JOIN "Entity" e ON e."id" = ae."entityId"
           WHERE ae."assetId" = a."id"
           AND ae."entityId" IN (${Prisma.join(allEntityIds)})
+          AND ${visibleEntity}
         )`;
 
   // Author filter: any of the given entities linked with roleLabel='author' (OR within group)
@@ -372,9 +383,11 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
   const authorFilter = authorIds.length > 0
     ? Prisma.sql`AND EXISTS (
         SELECT 1 FROM "AssetEntity" ae
+        JOIN "Entity" e ON e."id" = ae."entityId"
         WHERE ae."assetId" = a."id"
         AND ae."roleLabel" = 'author'
         AND ae."entityId" IN (${Prisma.join(authorIds)})
+        AND ${visibleEntity}
       )`
     : Prisma.empty;
 
@@ -461,11 +474,7 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
         JOIN "Entity" e ON e."id" = ae."entityId"
         ${joinAssetForFilters}
         WHERE ${plainOrNormalized(Prisma.sql`e."canonicalName"`, Prisma.sql`e."normalizedName"`)}
-          -- Entity の RLS は素通しで、AssetEntity の RLS は親 Asset しか見ないので、このままだと
-          -- 上位機密の聖地名で紐づくアセットが引ける。Place の RLS を通して見える聖地だけに絞る
-          -- (entityClearanceWhere と同じ判定。#345)
-          AND (e."type" <> 'place' OR EXISTS (SELECT 1 FROM "Place" p WHERE p."entityId" = e."id"))
-          ${filtersIfJoined}`);
+          AND ${visibleEntity} ${filtersIfJoined}`);
     }
     if (searchTextContent) {
       // 本文は normalizedContent だけを見る。normalizeText() が {{IMG:xxx}} の除去と
