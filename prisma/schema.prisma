@@ -135,6 +135,8 @@ enum ArticleTemplate {
   quote_situational
   /// 属性 (スナップ)。「坂井新奈は〜」の事実の箇条書き
   attribute
+  /// 物。持っている・もらった物の事実の箇条書き + 関連メディア
+  item
 }
 
 enum DossierItemKind {
