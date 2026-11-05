@@ -302,7 +302,7 @@ function toAssetInput(a: LoadedAsset, item: { excerpt?: string; caption?: string
  * (本文のカードに書くので、壊れた URL が記事の生成を止めたり公開されたりしないように)。
  * `href` は `"` などをエスケープするので、カードの 1 行にそのまま書ける
  */
-function linkUrl(raw: string): string | null {
+export function linkUrl(raw: string): string | null {
   const token = raw.split(/\s+/)[0];
   if (!URL.canParse(token)) return null;
   const url = new URL(token);
