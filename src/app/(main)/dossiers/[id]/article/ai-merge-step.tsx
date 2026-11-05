@@ -64,7 +64,7 @@ export function AiMergeStep({
       setEditing(manual);
       setMsg(
         res.proposal.mechanicalOnly && !manual
-          ? "新しいクリップは画像・動画だけなので、黄色の行を機械で足しました（AI は使っていません）。確認して保存してください"
+          ? "新しいクリップは本文に書き足す中身が無いので、黄色の行を機械で足しました（AI は使っていません）。確認して保存してください"
           : manual
           ? "右の素材を見ながら本文を書き足し、使う素材の番号を ^[n] で付けてください"
           : res.proposal.changedLines.length === 0

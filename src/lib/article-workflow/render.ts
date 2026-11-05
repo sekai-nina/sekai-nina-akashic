@@ -94,6 +94,8 @@ export interface ArticleParts {
   talks: { assetId: string; line: string; sortAt: string | null; ninaAppears?: boolean }[];
   /** 関連メディアのブログ画像 */
   blogImages: { assetId: string; line: string; ninaAppears?: boolean }[];
+  /** 購入リンクのカード (物の記事だけ) */
+  links?: { url: string; card: string }[];
   /** 毎回作り直す区間 (無いテンプレートは省略) */
   blocks?: MarkerBlock[];
 }
@@ -367,15 +369,33 @@ function blogImageLine(b: BlogGroup, a: ArticleAssetInput): string {
  * 関連メディアの章の形。
  * - `sections`: ミーグリ記事の形。`### TikTok` / `### トーク` / `### ブログ（画像）` に分ける
  * - `flat`: おでかけ・物の記事の形。トーク → ブログ画像を 1 つの箇条書きに並べる。坂井新奈が出ているものが
- *   あれば `### 坂井新奈が写っているもの` と `### そのほか` に分ける (導入文で「写っている」と書くと
- *   写っていない画像のぶん嘘になるため)
+ *   あれば `### 坂井新奈が出ているもの` と `### そのほか` に分ける (導入文で「写っている」と書くと
+ *   写っていない画像のぶん嘘になるため。音声も入るので見出しも「出ている」)
  */
 export type RelatedMediaStyle = { kind: "sections" } | { kind: "flat" };
 
 /** おでかけ・物の記事の関連メディアで、坂井新奈が出ているものの小見出し */
-export const NINA_MEDIA_HEADING = "### 坂井新奈が写っているもの";
+export const NINA_MEDIA_HEADING = "### 坂井新奈が出ているもの";
+/** 音声が入ると変なので改めた前の小見出し。公開済みの記事に残っているので、追記はこちらにも足す */
+export const LEGACY_NINA_MEDIA_HEADING = "### 坂井新奈が写っているもの";
 /** おでかけ・物の記事の関連メディアで、それ以外の小見出し (出ているものがあるときだけ作る) */
 export const OTHER_MEDIA_HEADING = "### そのほか";
+
+/** 物の記事の、その物を買いたい人のためのリンクの章。本文と関連メディアの間に置く */
+export const LINKS_HEADING = "## 購入リンク";
+
+/** 公開サイトのリンクカード。題は 1 行の `"…"` で書くので、改行と `"` は持ち込まない */
+export function linkCard(url: string, title: string): string {
+  const host = new URL(url).hostname.replace(/^www\./, "");
+  const safeTitle = title.replace(/\s+/g, " ").replace(/"/g, "”").trim();
+  return ["```cardlink", `url: ${url}`, `title: "${safeTitle}"`, `host: ${host}`, "```"].join("\n");
+}
+
+/** `## 購入リンク` の章。リンクが無ければ空 */
+export function renderLinksSection(cards: string[]): string[] {
+  if (cards.length === 0) return [];
+  return [LINKS_HEADING, "", ...cards.flatMap((c) => [c, ""])];
+}
 
 /** `## 関連メディア` の章 (トーク・ブログ画像はリンクのみ、TikTok は埋め込み)。何も無ければ空 */
 export function renderRelatedMediaSection(input: {

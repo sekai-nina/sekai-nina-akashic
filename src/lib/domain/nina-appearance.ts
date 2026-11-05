@@ -93,7 +93,7 @@ export interface ClipMedia {
 
 /**
  * 企画のクリップ (画像・動画) の見た目と出演の状態。記事の関連メディアを
- * 「坂井新奈が写っているもの / そのほか」に分ける印を、記事にする画面から付けるのに使う
+ * 「坂井新奈が出ているもの / そのほか」に分ける印を、記事にする画面から付けるのに使う
  */
 export async function getClipMedia(clearance: string, assetIds: string[]): Promise<Map<string, ClipMedia>> {
   if (assetIds.length === 0) return new Map();

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { isPureAppend, planAppend } from "@/lib/meetgreet/append";
-import type { ArticleAssetInput } from "../render";
+import { exclusionKey, isPureAppend, planAppend } from "@/lib/meetgreet/append";
+import { linkCard, type ArticleAssetInput } from "../render";
 import { getTemplate, selectableTemplates } from "./index";
 import { ITEM_BODY_PLACEHOLDER, ITEM_TEMPLATE, itemPrompt, renderItemArticle } from "./item";
 import type { AiDraft, DossierRenderInput } from "./types";
@@ -147,5 +147,111 @@ describe("追記", () => {
     expect(plan.newSources.map((s) => s.assetId)).toEqual(["talk-image"]);
     expect(plan.body).toContain("坂井新奈トーク 2025.6.29 20:31");
     expect(isPureAppend(before.body, plan.body)).toBe(true);
+  });
+});
+
+describe("物の記事のサムネと購入リンク", () => {
+  const THUMB = "https://r2.example/dossiers/d1/image.webp";
+  const AMAZON = "https://www.amazon.co.jp/dp/B000000000?ref=x&s=1";
+  const X = "https://x.com/gtchiikawa/status/1777503752909672817";
+  const withExtras: DossierRenderInput = {
+    ...input([blog]),
+    thumbnailUrl: THUMB,
+    links: [
+      { url: AMAZON, caption: "Amazon の販売ページ" },
+      { url: X, caption: "" },
+    ],
+  };
+
+  it("サムネは本文の冒頭と frontmatter の thumbnail に入れる", () => {
+    const r = renderItemArticle(withExtras, draft);
+    expect(r.body.startsWith(`<img src="${THUMB}" alt="赤い服を着たカンガルーのぬいぐるみ サムネイル" width="600">\n\n`)).toBe(true);
+    expect(r.frontmatterExtra.thumbnail).toBe(THUMB);
+  });
+
+  it("サムネが無ければ本文にも frontmatter にも何も足さない", () => {
+    const r = renderItemArticle(input([blog]), draft);
+    expect(r.body).not.toContain("<img");
+    expect(r.frontmatterExtra).not.toHaveProperty("thumbnail");
+  });
+
+  it("購入リンクは本文と関連メディアの間にカードで置く。題はキャプション、無ければ物の名前", () => {
+    const r = renderItemArticle({ ...withExtras, assets: [blog, imageTalk] }, draft);
+    expect(r.body).toContain(
+      [
+        "## 購入リンク",
+        "",
+        "```cardlink",
+        `url: ${AMAZON}`,
+        'title: "Amazon の販売ページ"',
+        "host: amazon.co.jp",
+        "```",
+        "",
+        "```cardlink",
+        `url: ${X}`,
+        'title: "赤い服を着たカンガルーのぬいぐるみ"',
+        "host: x.com",
+        "```",
+        "",
+        "## 関連メディア",
+      ].join("\n")
+    );
+  });
+
+  it("リンクが無ければ章を作らない", () => {
+    expect(renderItemArticle(input([blog]), draft).body).not.toContain("## 購入リンク");
+  });
+
+  it("追記: 載っていないリンクだけを関連メディアの前に足す", () => {
+    const r = renderItemArticle(withExtras, draft);
+    const existing = `本文。\n\n## 購入リンク\n\n\`\`\`cardlink\nurl: ${AMAZON}\ntitle: "前の題"\nhost: amazon.co.jp\n\`\`\`\n\n## 関連メディア\n\n- 【トーク・画像】前からある^[1]\n`;
+    const p = planAppend({
+      existingBody: existing,
+      parts: r.parts,
+      sources: r.sources,
+      existingSources: [{ sourceNo: 1, assetId: "blog", url: BLOG_URL }],
+      layout: ITEM_TEMPLATE.appendLayout,
+    });
+    expect(p.added.links).toBe(1);
+    expect(p.additions.map((a) => a.key)).toEqual([exclusionKey("link", X)]);
+    expect(p.body).toContain(`host: amazon.co.jp\n\`\`\`\n\n\`\`\`cardlink\nurl: ${X}\n`);
+    expect(p.body.indexOf(X)).toBeLessThan(p.body.indexOf("## 関連メディア"));
+    expect(isPureAppend(existing, p.body)).toBe(true);
+  });
+
+  it("追記: 章が無ければ関連メディアの前に作り、除外したリンクは足さない", () => {
+    const r = renderItemArticle(withExtras, draft);
+    const existing = "本文。\n\n## 関連メディア\n\n- 【トーク・画像】前からある^[1]\n";
+    const plan = (excluded: string[]) =>
+      planAppend({
+        existingBody: existing,
+        parts: r.parts,
+        sources: r.sources,
+        existingSources: [{ sourceNo: 1, assetId: "blog", url: BLOG_URL }],
+        excluded,
+        layout: ITEM_TEMPLATE.appendLayout,
+      });
+    expect(plan([]).body).toMatch(/本文。\n\n## 購入リンク\n\n```cardlink\n[\s\S]*```\n\n## 関連メディア/);
+    expect(plan([exclusionKey("link", AMAZON), exclusionKey("link", X)]).empty).toBe(true);
+  });
+
+  it("追記: 本文の URL の前方一致を載っているとは見ない。除外キーは長い URL でも短い", () => {
+    const long = `https://s.example/item/1?${"a".repeat(300)}`;
+    const r = renderItemArticle({ ...input([blog]), links: [{ url: "https://s.example/item/1", caption: "" }, { url: long, caption: "" }] }, draft);
+    const p = planAppend({
+      existingBody: "本文。\n\n- [別の商品](https://s.example/item/12)\n",
+      parts: r.parts,
+      sources: r.sources,
+      existingSources: [{ sourceNo: 1, assetId: "blog", url: BLOG_URL }],
+      layout: ITEM_TEMPLATE.appendLayout,
+    });
+    expect(p.added.links).toBe(2);
+    expect(exclusionKey("link", long).length).toBeLessThan(200);
+  });
+});
+
+describe("linkCard", () => {
+  it("題の改行と二重引用符は 1 行に収める", () => {
+    expect(linkCard("https://example.com/a", 'ちいかわ\nの"靴下"')).toContain('title: "ちいかわ の”靴下”"');
   });
 });

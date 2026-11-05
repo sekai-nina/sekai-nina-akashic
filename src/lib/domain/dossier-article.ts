@@ -278,7 +278,8 @@ export async function loadRenderInput(
     assets: materials.assets,
     reports: materials.reports,
     tiktoks,
-    thumbnailUrl: materials.dossierThumb,
+    links: materials.links,
+    thumbnailUrl: materials.dossierThumb ?? materials.firstImage,
     places: materials.places,
     linkedPlaceIds: materials.linkedPlaceIds,
     // 候補の確度・理由を訪問に引き継ぐ (#333)

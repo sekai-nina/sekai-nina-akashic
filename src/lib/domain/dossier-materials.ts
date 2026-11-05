@@ -19,7 +19,7 @@ import { toJstDateOnly } from "@/lib/utils";
 import { accessibleClassifications } from "@/lib/classification";
 import { MAX_ARTICLE_CLEARANCE, MAX_EXTERNAL_AI_CLEARANCE } from "@/lib/meetgreet/config";
 import { normalizeTweetUrl, type ArticleAssetInput } from "@/lib/article-workflow/render";
-import type { DossierPlace } from "@/lib/article-workflow/templates/types";
+import type { DossierLink, DossierPlace } from "@/lib/article-workflow/templates/types";
 
 /** 本文に載せてよい機密レベル */
 export const PUBLISHABLE = new Set<string>(accessibleClassifications(MAX_ARTICLE_CLEARANCE));
@@ -247,8 +247,12 @@ export interface DossierMaterials {
   reports: string[];
   /** external_link の TikTok の URL (**未解決**。短縮 URL のことがある) */
   tiktoks: string[];
+  /** external_link のうち TikTok 以外 (X も含む。ドシエの並び順)。物の記事の購入リンクになる */
+  links: DossierLink[];
   /** caption「サムネ」の external_image */
   dossierThumb: string | null;
+  /** 先頭の external_image (キャプションを問わない)。物の記事のサムネの代わりになる */
+  firstImage: string | null;
   /** 場所候補 (おでかけ記事の `locations`) */
   places: DossierPlace[];
   /**
@@ -293,6 +297,18 @@ function toAssetInput(a: LoadedAsset, item: { excerpt?: string; caption?: string
 }
 
 /** ドシエのアイテムを組み立ての入力に振り分ける (純粋関数) */
+/**
+ * 購入リンクにする URL。入力は検証されていないので、後ろの書き添えは落とし、URL でない行は使わない
+ * (本文のカードに書くので、壊れた URL が記事の生成を止めたり公開されたりしないように)。
+ * `href` は `"` などをエスケープするので、カードの 1 行にそのまま書ける
+ */
+function linkUrl(raw: string): string | null {
+  const token = raw.split(/\s+/)[0];
+  if (!URL.canParse(token)) return null;
+  const url = new URL(token);
+  return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+}
+
 export function shapeDossierMaterials(dossier: DossierForMaterials): DossierMaterials {
   // アセットを 1 件にまとめる (同じアセットが抜粋ごとに複数 item になる)
   const assets = new Map<string, ArticleAssetInput>();
@@ -300,6 +316,8 @@ export function shapeDossierMaterials(dossier: DossierForMaterials): DossierMate
   const reports: string[] = [];
   const tiktoks: string[] = [];
   let dossierThumb: string | null = null;
+  let firstImage: string | null = null;
+  const links: DossierLink[] = [];
 
   /**
    * 本文に載せてよいか。AI に渡す経路 (`texts` を読んでいる) は外部に出す上限も見る。
@@ -310,8 +328,9 @@ export function shapeDossierMaterials(dossier: DossierForMaterials): DossierMate
 
   for (const item of dossier.items) {
     if (item.kind === "external_image") {
-      if (item.caption === "サムネ" && item.externalImageKey) {
-        dossierThumb = getR2PublicUrl(item.externalImageKey);
+      if (item.externalImageKey) {
+        firstImage ??= getR2PublicUrl(item.externalImageKey);
+        if (item.caption === "サムネ") dossierThumb = getR2PublicUrl(item.externalImageKey);
       }
       continue;
     }
@@ -320,8 +339,13 @@ export function shapeDossierMaterials(dossier: DossierForMaterials): DossierMate
       for (const raw of (item.externalUrl ?? "").split("\n")) {
         const u = raw.trim();
         if (!u) continue;
-        if (u.includes("tiktok.com")) tiktoks.push(u);
-        else if (/(?:x|twitter)\.com\//.test(u)) reports.push(u);
+        if (u.includes("tiktok.com")) {
+          tiktoks.push(u);
+          continue;
+        }
+        if (/(?:x|twitter)\.com\//.test(u)) reports.push(u);
+        const url = linkUrl(u);
+        if (url && !links.some((l) => l.url === url)) links.push({ url, caption: item.caption });
       }
       continue;
     }
@@ -352,7 +376,9 @@ export function shapeDossierMaterials(dossier: DossierForMaterials): DossierMate
     assets: [...assets.values()],
     reports,
     tiktoks,
+    links,
     dossierThumb,
+    firstImage,
     places: dossier.placeCandidates.flatMap((p) => {
       // 昇格済みの候補は聖地 (Place) の機密で判定する。見えない (RLS) / 本文に載せられない聖地の名前・座標を
       // 公開記事や AI に出さない。座標へのフォールバックもしない (同じ場所なので)
