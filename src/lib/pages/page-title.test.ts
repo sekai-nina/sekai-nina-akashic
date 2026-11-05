@@ -11,11 +11,31 @@ describe("extractTitle", () => {
   it("og:title が無ければ <head> の <title>。本文の SVG の title は拾わない", () => {
     expect(extractTitle("<head><title>\n  商品ページ\n</title></head>")).toBe("商品ページ");
     expect(extractTitle("<head></head><body><svg><title>icon-account</title></svg></body>")).toBeNull();
+    expect(extractTitle("<html><body><svg><title>icon-account</title></svg></body>")).toBeNull();
   });
 
   it("ボット避け・エラーのページの題は使わない", () => {
     expect(extractTitle("<head><title>Just a moment...</title></head>")).toBeNull();
     expect(extractTitle("<head><title>404 Not Found</title></head>")).toBeNull();
+  });
+
+  it("シングルクォートと name の og:title も読む", () => {
+    expect(extractTitle(`<head><meta name='og:title' content='靴下'></head>`)).toBe("靴下");
+  });
+
+  it("DB や本文に載せられない文字を落とし、絵文字を割らずに切る", () => {
+    expect(extractTitle("<head><title>A&#0;B</title></head>")).toBe("A B");
+    expect(extractTitle("<head><title>A&#xD800;B</title></head>")).toBeNull();
+    const cut = extractTitle(`<head><title>${"あ".repeat(119)}😀😀</title></head>`)!;
+    expect(cut.isWellFormed()).toBe(true);
+    expect(cut.endsWith("😀…")).toBe(true);
+  });
+
+  it("閉じない <title> や <meta を繰り返す入力でも時間をかけない", () => {
+    const started = performance.now();
+    expect(extractTitle("<title".repeat(170_000))).toBeNull();
+    expect(extractTitle("<meta ".repeat(170_000))).toBeNull();
+    expect(performance.now() - started).toBeLessThan(1000);
   });
 
   it("長い題は切る", () => {
@@ -35,6 +55,13 @@ describe("isBlockedAddress", () => {
     for (const ip of ["127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "::1", "fd00::1", "fe80::1", "::ffff:127.0.0.1"]) {
       expect(isBlockedAddress(ip)).toBe(true);
     }
+  });
+
+  it("URL が正規化した IPv4 射影の IPv6 も止める", () => {
+    for (const host of ["[::ffff:127.0.0.1]", "[::ffff:a9fe:a9fe]", "[::ffff:a00:1]", "[::7f00:1]", "[64:ff9b::7f00:1]", "[2002:7f00:1::]", "[fec0::1]"]) {
+      expect(isBlockedAddress(new URL(`http://${host}/`).hostname.replace(/^\[|\]$/g, ""))).toBe(true);
+    }
+    expect(isBlockedAddress("198.18.0.1")).toBe(true);
   });
 
   it("公開のアドレスは通す", () => {

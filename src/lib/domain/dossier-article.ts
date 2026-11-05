@@ -248,9 +248,18 @@ export async function fillDossierLinkTitles(
 ): Promise<void> {
   // 記事にできない企画の URL は外に問い合わせない
   if (!PUBLISHABLE.has(dossier.classification)) return;
+  // 題は補助の情報なので、失敗で組み立てを止めない (空なら物の名前になる)
+  try {
+    await writeLinkTitles(user, dossier.id);
+  } catch (e) {
+    console.error("購入リンクの題を埋められませんでした", e);
+  }
+}
+
+async function writeLinkTitles(user: ActingUser, dossierId: string): Promise<void> {
   const items = await withSession(user, (tx) =>
     tx.dossierItem.findMany({
-      where: { dossierId: dossier.id, kind: "external_link", caption: "" },
+      where: { dossierId, kind: "external_link", caption: "" },
       select: { id: true, externalUrl: true },
     })
   );

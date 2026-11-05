@@ -386,10 +386,6 @@ async function buildOrThrow(resolved: ResolvedTarget, aiDraft?: AiDraft | null) 
   }
 }
 
-/**
- * 生成結果を見せる (DB には書かない)。
- * 既存記事があれば追記の差分、無ければ新規作成の本文を返す。
- */
 /** 物の記事の購入リンクの題を埋める。書けない人のプレビューでは何もしない (空なら物の名前で出る) */
 async function fillLinkTitles(user: ActingUser, target: ArticleTarget, resolved: ResolvedTarget): Promise<void> {
   if (target.kind !== "dossier" || resolved.template.key !== "item") return;
@@ -401,6 +397,10 @@ async function fillLinkTitles(user: ActingUser, target: ArticleTarget, resolved:
   await fillDossierLinkTitles(user, target.dossier);
 }
 
+/**
+ * 生成結果を見せる (記事には書かない。物の記事の購入リンクの題だけ企画に書く)。
+ * 既存記事があれば追記の差分、無ければ新規作成の本文を返す。
+ */
 export async function previewArticle(
   user: ActingUser,
   target: ArticleTarget,
@@ -1085,7 +1085,7 @@ export type MergeProposalResult =
   | { ok: false; error: string; excluded?: { key: string; label: string }[] };
 
 /** 組み込みの下準備: 素材・追記の計画・既存の出典。案と保存で同じものを使う (指紋を揃える) */
-async function prepareMerge(user: ActingUser, target: ArticleTarget) {
+async function prepareMerge(user: ActingUser, target: ArticleTarget, options: { fillTitles?: boolean } = {}) {
   if (target.kind !== "dossier") throw new DossierArticleError("AI の組み込みは企画が器の記事だけです");
   const resolved = resolveTarget(user, target);
   if (!resolved.template.needsAi) {
@@ -1093,6 +1093,8 @@ async function prepareMerge(user: ActingUser, target: ArticleTarget) {
   }
   if (!resolved.articleId) throw resolved.inputError("まだ記事がありません。先に記事を作ってください");
   resolved.assertCanSave();
+  // 保存では取らない (案を作ったあとで題が変わると本文が食い違う)
+  if (options.fillTitles) await fillLinkTitles(user, target, resolved);
   const { input } = await loadRenderInput(user, target.dossier, resolved.template, { withTexts: true });
   let rendered;
   try {
@@ -1210,8 +1212,7 @@ export async function proposeMerge(
   target: ArticleTarget,
   options: { manual?: boolean } = {}
 ): Promise<MergeProposalResult> {
-  await fillLinkTitles(user, target, resolveTarget(user, target));
-  const { resolved, dossierId, input, article, plan, excluded, fresh, strayFresh } = await prepareMerge(user, target);
+  const { resolved, dossierId, input, article, plan, excluded, fresh, strayFresh } = await prepareMerge(user, target, { fillTitles: true });
   // 載っている出典の画像 (同じブログの別の画像など) は新しい出典にならず、関連メディアの行 (changedLines) だけが増える。
   // それも無いときだけ「足せる素材が無い」にする (行だけ増えるクリップを組み込めずに止めていた)
   if (plan.newSources.length === 0 && fresh.length === 0 && plan.changedLines.length === 0) {

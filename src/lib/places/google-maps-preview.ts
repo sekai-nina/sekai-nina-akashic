@@ -23,7 +23,7 @@ const BOT_UA = "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_ua
 /** 1 つのリンクにかける時間の上限 (リダイレクトと写真の確認を合わせて)。保存の待ち時間をこれ以上延ばさない */
 const TIMEOUT_MS = 8_000;
 
-export function metaContent(html: string, property: string): string | null {
+function metaContent(html: string, property: string): string | null {
   for (const m of html.matchAll(/<meta\s[^>]*>/gi)) {
     const tag = m[0];
     if (!new RegExp(`(?:property|itemprop)="${property}"`).test(tag)) continue;
