@@ -142,7 +142,7 @@ export function judgeItem(
   excluded: Set<string>,
   article: ArticleState,
   cores: string[],
-  finishedBlogUrls: ReadonlySet<string> = new Set()
+  finishedBlogUrls: ReadonlySet<string>
 ): Verdict {
   const verdict = judgeCitation(item, template, excluded, article, cores, finishedBlogUrls);
   // 載っている出典へのクリップでも、取り込んだあとのメモ・抜粋は AI に組み込ませる新しい素材
