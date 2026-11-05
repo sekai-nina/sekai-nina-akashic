@@ -1,14 +1,14 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
+import type { ReportSearchPanel } from "@/lib/domain/meetgreet-import";
 import type { RepoPreset } from "@/lib/domain/repo-presets";
+import { cn } from "@/lib/utils";
 import {
   formatReportGroups,
   parseReportGroups,
   previewReportQuery,
 } from "@/lib/meetgreet/report-query";
-import type { HashtagGroup } from "@/lib/twitter/x-search";
 import {
   deleteReportPresetAction,
   saveReportPresetAction,
@@ -20,7 +20,7 @@ const fieldCls =
 const buttonCls =
   "h-8 px-3 rounded-md border border-slate-200 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50";
 
-type ActionResult = { ok: true } | { ok: false; error: string };
+type ActionResult = { ok: true; id?: string } | { ok: false; error: string };
 
 /**
  * この回の収集の検索条件と、プリセットの管理。
@@ -28,22 +28,17 @@ type ActionResult = { ok: true } | { ok: false; error: string };
  */
 export function ReportSearchForm({
   id,
-  groups,
-  extra,
-  query,
-  excludeRetweets,
-  langJa,
+  collection,
   presets,
+  canSavePreset,
 }: {
   id: string;
-  groups: HashtagGroup[];
-  extra: string;
-  query: string;
-  excludeRetweets: boolean;
-  langJa: boolean;
+  collection: NonNullable<ReportSearchPanel["collection"]>;
   presets: RepoPreset[];
+  /** 機密の回の条件はプリセットに写さない */
+  canSavePreset: boolean;
 }) {
-  const router = useRouter();
+  const { groups, extra, query, excludeRetweets, langJa } = collection;
   const [pending, startTransition] = useTransition();
   const [tagsText, setTagsText] = useState(formatReportGroups(groups));
   const [extraText, setExtraText] = useState(extra);
@@ -55,6 +50,8 @@ export function ReportSearchForm({
   const preview = parsed.ok
     ? previewReportQuery(parsed.groups, extraText, { excludeRetweets, langJa })
     : null;
+  // `/repo` のグループ間 AND や移行した収集は入力欄で表せず、保存すると検索式が変わる
+  const notEditable = previewReportQuery(groups, extra, { excludeRetweets, langJa }) !== query;
 
   function pickPreset(nextId: string) {
     setPresetId(nextId);
@@ -69,7 +66,11 @@ export function ReportSearchForm({
     setExtraText(preset.extra);
   }
 
-  function run(action: () => Promise<ActionResult>, done: string, after?: () => void) {
+  function run(
+    action: () => Promise<ActionResult>,
+    done: string,
+    after?: (res: { id?: string }) => void
+  ) {
     setMsg("保存中…");
     startTransition(async () => {
       const res = await action().catch((e: unknown) => ({
@@ -81,8 +82,7 @@ export function ReportSearchForm({
         return;
       }
       setMsg(done);
-      after?.();
-      router.refresh();
+      after?.(res);
     });
   }
 
@@ -95,17 +95,24 @@ export function ReportSearchForm({
     if (input) run(() => updateReportSearchAction(id, input), "保存しました。次の収集から使います");
   }
 
-  function savePreset(presetIdToUpdate?: string) {
+  function savePreset() {
     const input = search();
     if (!input) return;
     run(
-      () =>
-        saveReportPresetAction(id, {
-          ...(presetIdToUpdate ? { id: presetIdToUpdate } : {}),
-          name: presetName,
-          search: input,
-        }),
-      presetIdToUpdate ? "プリセットを上書きしました" : "プリセットを追加しました"
+      () => saveReportPresetAction(id, { name: presetName, search: input }),
+      "プリセットを追加しました",
+      (res) => setPresetId(res.id ?? "")
+    );
+  }
+
+  function overwritePreset() {
+    const input = search();
+    const preset = presets.find((p) => p.id === presetId);
+    if (!input || !preset) return;
+    if (!confirm(`プリセット「${preset.name}」を今の内容で上書きしますか？ 全員に反映され、元に戻せません`)) return;
+    run(
+      () => saveReportPresetAction(id, { id: preset.id, name: presetName, search: input }),
+      "プリセットを上書きしました"
     );
   }
 
@@ -132,12 +139,12 @@ export function ReportSearchForm({
           </label>
           <select
             id="report-preset"
-            className={`${fieldCls} h-8`}
+            className={cn(fieldCls, "h-8")}
             value={presetId}
             onChange={(e) => pickPreset(e.target.value)}
             disabled={pending}
           >
-            <option value="">選ばない</option>
+            <option value="">プリセットを選ぶ</option>
             {presets.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
@@ -174,6 +181,12 @@ export function ReportSearchForm({
           />
         </div>
 
+        {notEditable && (
+          <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+            今の検索式はこの欄では表せません。保存すると、下の式に置き換わります。
+          </p>
+        )}
+
         <p className="text-[11px] text-slate-500 break-all">
           {parsed.ok ? (preview ?? "条件を入れてください") : <span className="text-red-700">{parsed.error}</span>}
         </p>
@@ -194,39 +207,46 @@ export function ReportSearchForm({
           )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
-          <input
-            aria-label="プリセットの名前"
-            className={`${fieldCls} w-48 h-8`}
-            value={presetName}
-            onChange={(e) => setPresetName(e.target.value)}
-            placeholder="プリセットの名前"
-            disabled={pending}
-          />
-          <button
-            type="button"
-            onClick={() => savePreset()}
-            disabled={pending || !preview || !presetName.trim()}
-            className={buttonCls}
-          >
-            新しいプリセットにする
-          </button>
-          {presetId && (
-            <>
-              <button
-                type="button"
-                onClick={() => savePreset(presetId)}
-                disabled={pending || !preview || !presetName.trim()}
-                className={buttonCls}
-              >
-                上書き
-              </button>
-              <button type="button" onClick={deletePreset} disabled={pending} className={buttonCls}>
-                削除
-              </button>
-            </>
-          )}
-        </div>
+        {canSavePreset && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+            <input
+              aria-label="プリセットの名前"
+              className={cn(fieldCls, "w-48 h-8")}
+              value={presetName}
+              onChange={(e) => setPresetName(e.target.value)}
+              placeholder="プリセットの名前"
+              disabled={pending}
+            />
+            <button
+              type="button"
+              onClick={savePreset}
+              disabled={pending || !preview || !presetName.trim()}
+              className={buttonCls}
+            >
+              新しいプリセットにする
+            </button>
+            {presetId && (
+              <>
+                <button
+                  type="button"
+                  onClick={overwritePreset}
+                  disabled={pending || !preview || !presetName.trim()}
+                  className={buttonCls}
+                >
+                  上書き
+                </button>
+                <button
+                  type="button"
+                  onClick={deletePreset}
+                  disabled={pending}
+                  className={cn(buttonCls, "text-red-600 hover:bg-red-50")}
+                >
+                  削除
+                </button>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </details>
   );

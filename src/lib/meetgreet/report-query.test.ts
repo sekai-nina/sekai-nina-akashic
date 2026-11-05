@@ -3,9 +3,9 @@ import {
   formatReportGroups,
   parseReportGroups,
   previewReportQuery,
-  ReportSearchSchema,
   storedGroups,
 } from "./report-query";
+import { ReportSearchSchema } from "./api";
 
 describe("parseReportGroups", () => {
   it("行の中は AND、行どうしは別のグループ", () => {
@@ -36,8 +36,21 @@ describe("parseReportGroups", () => {
     expect(parseReportGroups("#A #B OR #C").ok).toBe(false);
   });
 
-  it("OR で終わる行・# だけのタグは断る", () => {
+  it("小文字・全角の or も OR にする", () => {
+    expect(parseReportGroups("#A or #B ｏｒ #C")).toEqual({
+      ok: true,
+      groups: [{ tags: ["A", "B", "C"], op: "or" }],
+    });
+  });
+
+  it("除外や括弧で始まるものはタグにしない", () => {
+    expect(parseReportGroups("-#除外 #A").ok).toBe(false);
+    expect(parseReportGroups("(#A").ok).toBe(false);
+  });
+
+  it("OR で始まる・終わる行、# だけのタグは断る", () => {
     expect(parseReportGroups("#A OR").ok).toBe(false);
+    expect(parseReportGroups("OR #A").ok).toBe(false);
     expect(parseReportGroups("# #B").ok).toBe(false);
   });
 });
@@ -56,6 +69,13 @@ describe("storedGroups", () => {
   it("形が崩れた Json は空にする", () => {
     expect(storedGroups({ tags: [] })).toEqual([]);
     expect(storedGroups(null)).toEqual([]);
+  });
+
+  it("崩れたグループだけを落とし、入力の上限は見ない", () => {
+    const many = Array.from({ length: 11 }, (_, i) => `t${i}`);
+    expect(
+      storedGroups([{ tags: many, op: "and" }, { tags: [], op: "and" }, { tags: ["A"], op: "AND" }])
+    ).toEqual([{ tags: many, op: "and" }]);
   });
 });
 

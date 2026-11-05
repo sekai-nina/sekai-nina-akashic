@@ -133,7 +133,7 @@ export async function updateCollectionSearch(
         extra: search.extra,
         query: buildQuery(search.groups, "or", collection.excludeRetweets, collection.langJa, search.extra),
       },
-      select: { id: true, query: true },
+      select: { id: true },
     });
   });
 }

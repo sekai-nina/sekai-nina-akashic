@@ -6,14 +6,23 @@
  */
 
 import { Prisma, type ClearanceLevel } from "@prisma/client";
-import { assertClearance } from "@/lib/classification";
-import { withClearance } from "@/lib/db";
+import { accessibleClassifications, assertClearance } from "@/lib/classification";
+import { withClearance, type TransactionClient } from "@/lib/db";
 import { storedGroups, type ReportSearch } from "@/lib/meetgreet/report-query";
 import type { HashtagGroup } from "@/lib/twitter/x-search";
 import { logAudit } from "./audit";
-import type { ActingUser } from "./meetgreets";
+import type { ActingUser } from "./article-workflow";
 
 const PRESET_CLASSIFICATION: ClearanceLevel = "internal";
+
+/** この機密の回の条件をプリセットに写してよいか (プリセットは internal の全員に見える) */
+export function canSaveAsPreset(classification: string): boolean {
+  return accessibleClassifications(PRESET_CLASSIFICATION).includes(classification as ClearanceLevel);
+}
+
+function isMissingRecord(e: unknown): boolean {
+  return e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2025";
+}
 
 export interface RepoPreset {
   id: string;
@@ -22,13 +31,12 @@ export interface RepoPreset {
   extra: string;
 }
 
-export async function listRepoPresets(clearance: string): Promise<RepoPreset[]> {
-  const rows = await withClearance(clearance, (tx) =>
-    tx.repoQueryPreset.findMany({
-      orderBy: { createdAt: "asc" },
-      select: { id: true, name: true, groups: true, extra: true },
-    })
-  );
+/** `withClearance` の中で読む */
+export async function listRepoPresetsIn(tx: TransactionClient): Promise<RepoPreset[]> {
+  const rows = await tx.repoQueryPreset.findMany({
+    orderBy: [{ createdAt: "asc" }, { name: "asc" }],
+    select: { id: true, name: true, groups: true, extra: true },
+  });
   return rows.map((r) => ({ ...r, groups: storedGroups(r.groups) }));
 }
 
@@ -42,6 +50,7 @@ export async function saveRepoPreset(
     name: input.name,
     groups: input.search.groups as unknown as Prisma.InputJsonValue,
     extra: input.search.extra,
+    classification: PRESET_CLASSIFICATION,
   };
   let saved: { id: string };
   try {
@@ -54,6 +63,7 @@ export async function saveRepoPreset(
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
       throw new Error(`「${input.name}」という名前のプリセットは既にあります`);
     }
+    if (isMissingRecord(e)) throw new Error("プリセットが見つかりません (消された可能性があります)");
     throw e;
   }
   await logAudit({
@@ -68,7 +78,12 @@ export async function saveRepoPreset(
 
 export async function deleteRepoPreset(user: ActingUser, id: string): Promise<void> {
   assertClearance(user.clearance, PRESET_CLASSIFICATION);
-  await withClearance(user.clearance, (tx) => tx.repoQueryPreset.delete({ where: { id } }));
+  try {
+    await withClearance(user.clearance, (tx) => tx.repoQueryPreset.delete({ where: { id } }));
+  } catch (e) {
+    if (isMissingRecord(e)) throw new Error("プリセットが見つかりません (消された可能性があります)");
+    throw e;
+  }
   await logAudit({
     actorId: user.id,
     action: "repo_preset.delete",

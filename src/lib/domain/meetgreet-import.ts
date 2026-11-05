@@ -10,9 +10,12 @@
 import { prisma, withClearance, withSession } from "@/lib/db";
 import { assertClearance } from "@/lib/classification";
 import { parseDossierTitle, parseSingleFromCollectionName } from "@/lib/meetgreet/import";
-import type { MeetGreetFormat } from "@prisma/client";
+import { storedGroups } from "@/lib/meetgreet/report-query";
+import type { HashtagGroup } from "@/lib/twitter/x-search";
+import type { ClearanceLevel, MeetGreetFormat } from "@prisma/client";
 import { logAudit } from "./audit";
 import { keepCounts } from "./article-workflow";
+import { listRepoPresetsIn, type RepoPreset } from "./repo-presets";
 import { createMeetGreet, type ActingUser } from "./meetgreets";
 import { NOT_CLIP_POOL } from "./dossiers";
 
@@ -108,37 +111,76 @@ export interface LinkableCollection {
   id: string;
   name: string;
   startDate: string | null;
-  endDate: string | null;
-  query: string;
   tweetCount: number;
   keepCount: number;
 }
 
+const LINKABLE_COLLECTION_LIMIT = 100;
+
+export interface ReportSearchPanel {
+  /** 今の収集の検索条件。見えない / 紐づいていないなら null */
+  collection: {
+    id: string;
+    groups: HashtagGroup[];
+    extra: string;
+    query: string;
+    excludeRetweets: boolean;
+    langJa: boolean;
+  } | null;
+  presets: RepoPreset[];
+  /** 開催日と同じ日に始まる収集が先頭 */
+  candidates: LinkableCollection[];
+}
+
 /**
- * どの回 (ミーグリ / ライブ) にも使われていない X レポ収集。`/repo` で先に集めていたものを
- * 回に結びつけるときの候補で、開催日と同じ日に始まるものを先に出す
+ * 回の画面の検索条件と結びつけの欄に要るものを 1 トランザクションで読む
+ * (接続が少ないので、ページの並列トランザクションを増やさない)。
+ *
+ * 候補は、どの回 (ミーグリ / ライブ) にも使われていない、回と同じ機密の収集。
+ * 同じ日の収集は `take` で切られないよう別に読む
  */
-export async function listLinkableCollections(
+export async function loadReportSearchPanel(
   user: ActingUser,
-  date: string
-): Promise<LinkableCollection[]> {
-  const { rows, counts } = await withClearance(user.clearance, async (tx) => {
-    const rows = await tx.repoCollection.findMany({
-      where: { meetGreet: null, live: null },
-      orderBy: { startDate: { sort: "desc", nulls: "last" } },
-      take: 100,
-      select: { id: true, name: true, startDate: true, endDate: true, query: true },
+  meetGreet: { date: string; classification: ClearanceLevel; repoCollectionId: string | null }
+): Promise<ReportSearchPanel> {
+  return withClearance(user.clearance, async (tx) => {
+    const where = { meetGreet: null, live: null, classification: meetGreet.classification };
+    const select = { id: true, name: true, startDate: true };
+    const collection = meetGreet.repoCollectionId
+      ? await tx.repoCollection.findUnique({
+          where: { id: meetGreet.repoCollectionId },
+          select: {
+            id: true,
+            groups: true,
+            extra: true,
+            query: true,
+            excludeRetweets: true,
+            langJa: true,
+          },
+        })
+      : null;
+    const presets = await listRepoPresetsIn(tx);
+    const sameDay = await tx.repoCollection.findMany({
+      where: { ...where, startDate: meetGreet.date },
+      select,
     });
-    return { rows, counts: await keepCounts(tx, rows.map((r) => r.id)) };
+    const others = await tx.repoCollection.findMany({
+      where: { ...where, NOT: { startDate: meetGreet.date } },
+      orderBy: { startDate: { sort: "desc", nulls: "last" } },
+      take: LINKABLE_COLLECTION_LIMIT,
+      select,
+    });
+    const rows = [...sameDay, ...others];
+    const counts = await keepCounts(tx, rows.map((r) => r.id));
+    return {
+      collection: collection && { ...collection, groups: storedGroups(collection.groups) },
+      presets,
+      candidates: rows.map((r) => {
+        const n = counts.get(r.id) ?? { keep: 0, total: 0 };
+        return { ...r, tweetCount: n.total, keepCount: n.keep };
+      }),
+    };
   });
-  const collections = rows.map((r) => {
-    const n = counts.get(r.id) ?? { keep: 0, total: 0 };
-    return { ...r, tweetCount: n.total, keepCount: n.keep };
-  });
-  return [
-    ...collections.filter((c) => c.startDate === date),
-    ...collections.filter((c) => c.startDate !== date),
-  ];
 }
 
 /**

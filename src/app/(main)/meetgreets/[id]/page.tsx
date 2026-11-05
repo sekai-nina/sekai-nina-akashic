@@ -17,10 +17,8 @@ import { PreviewForm } from "./preview-form";
 import { FeaturedReports } from "./featured-reports";
 import { ReportCollectionLink } from "./report-collection-link";
 import { ReportSearchForm } from "./report-search-form";
-import { listLinkableCollections } from "@/lib/domain/meetgreet-import";
-import { getCollection } from "@/lib/domain/repo";
-import { listRepoPresets } from "@/lib/domain/repo-presets";
-import { storedGroups } from "@/lib/meetgreet/report-query";
+import { loadReportSearchPanel } from "@/lib/domain/meetgreet-import";
+import { canSaveAsPreset } from "@/lib/domain/repo-presets";
 import { listArticleReports } from "@/lib/domain/meetgreet-featured";
 import { getPreviewSources } from "@/lib/domain/meetgreet-preview";
 import { MaterialsStep } from "@/components/materials-step";
@@ -67,9 +65,7 @@ export default async function MeetGreetDetailPage({ params, searchParams }: Prop
     sketchSetting,
     previewSources,
     articleReports,
-    linkableCollections,
-    reportPresets,
-    collection,
+    reportPanel,
   ] = await Promise.all([
     listMaterialCandidates(session.user, mg),
     listSketchSources(session.user, mg),
@@ -77,9 +73,7 @@ export default async function MeetGreetDetailPage({ params, searchParams }: Prop
     getSketchSetting(),
     getPreviewSources(session.user.clearance, mg.previewSourceAssetIds),
     listArticleReports(session.user, mg.articleId),
-    listLinkableCollections(session.user, mg.date),
-    listRepoPresets(session.user.clearance),
-    mg.repoCollectionId ? getCollection(mg.repoCollectionId, session.user.clearance) : null,
+    loadReportSearchPanel(session.user, mg),
   ]);
   // 新しい候補を先に出す (作り直すほど古いものが上に溜まらないように)
   const sketchCandidates = jsonStringArray(mg.sketchCandidates)
@@ -193,19 +187,16 @@ export default async function MeetGreetDetailPage({ params, searchParams }: Prop
         <ReportCollectionLink
           id={mg.id}
           date={mg.date}
-          hasReports={(mg.reports?.total ?? 0) > 0}
-          candidates={linkableCollections}
+          reportCount={mg.reports?.total ?? 0}
+          candidates={reportPanel.candidates}
         />
-        {collection && (
+        {reportPanel.collection && (
           <ReportSearchForm
-            key={collection.id}
+            key={reportPanel.collection.id}
             id={mg.id}
-            groups={storedGroups(collection.groups)}
-            extra={collection.extra}
-            query={collection.query}
-            excludeRetweets={collection.excludeRetweets}
-            langJa={collection.langJa}
-            presets={reportPresets}
+            collection={reportPanel.collection}
+            presets={reportPanel.presets}
+            canSavePreset={canSaveAsPreset(mg.classification)}
           />
         )}
         <ReportsStep

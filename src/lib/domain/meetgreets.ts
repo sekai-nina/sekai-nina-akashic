@@ -12,7 +12,7 @@
 
 import { Prisma } from "@prisma/client";
 import type { ClearanceLevel, MeetGreetEdition, MeetGreetFormat } from "@prisma/client";
-import { withClearance, withSession } from "@/lib/db";
+import { prismaInternal, withClearance, withSession } from "@/lib/db";
 import { assertClearance } from "@/lib/classification";
 import {
   addDaysToDateString,
@@ -503,39 +503,52 @@ export async function applyMaterials(
  * 既にある収集をこの回に結びつける。`/repo` で先に集めていたぶんを拾うのに使う。
  *
  * 今の収集は、取得 0 件なら消す (自動で作られた空の収集が `/repo` に残らないように)。
- * ツイートが入っていれば紐づけだけ外して残す。判定の結果を捨てないため
+ * ツイートが入っていれば紐づけだけ外して残す。判定の結果を捨てないため。
+ *
+ * **収集の機密は回と同じものだけ受ける。** 作成時と同じ不変条件で、ずれると機密の回の
+ * 検索条件が下位の収集に書かれたり、下位の人に「収集なし」と見えて付け替えられたりする
  */
 export async function linkReportCollection(
   user: ActingUser,
-  meetGreetId: string,
+  meetGreet: { id: string; repoCollectionId: string | null; classification: ClearanceLevel },
   collectionId: string
 ): Promise<{ removedEmpty: boolean }> {
-  let result: { previousId: string | null; removedEmpty: boolean };
-  try {
-    result = await withSession(user, async (tx) => {
-      const mg = await tx.meetGreet.findUnique({
-        where: { id: meetGreetId },
-        select: { repoCollectionId: true },
-      });
-      if (!mg) throw new MeetGreetInputError("ミーグリが見つかりません");
-      const previousId = mg.repoCollectionId;
-      if (previousId === collectionId) return { previousId, removedEmpty: false };
+  const previousId = meetGreet.repoCollectionId;
+  if (previousId === collectionId) return { removedEmpty: false };
 
+  // 回とライブの `@unique` は別なので、見えないライブに使われていても DB は止めない。
+  // RLS の外で「使われているか」だけを見る (中身は返さない)
+  const liveUses = await prismaInternal.live.findMany({
+    where: { repoCollectionId: { in: [collectionId, ...(previousId ? [previousId] : [])] } },
+    select: { repoCollectionId: true },
+  });
+  const usedByLive = new Set(liveUses.map((l) => l.repoCollectionId));
+  if (usedByLive.has(collectionId)) throw new MeetGreetInputError("その収集は結びつけられません");
+
+  let removedEmpty = false;
+  try {
+    removedEmpty = await withSession(user, async (tx) => {
       await assertContainersFree(tx, { repoCollectionId: collectionId });
+      const target = await tx.repoCollection.findUnique({
+        where: { id: collectionId },
+        select: { classification: true },
+      });
+      if (target?.classification !== meetGreet.classification) {
+        throw new MeetGreetInputError("機密レベルが回と違う収集は結びつけられません");
+      }
       await tx.meetGreet.update({
-        where: { id: meetGreetId },
+        where: { id: meetGreet.id },
         data: { repoCollectionId: collectionId },
       });
 
-      const previous = previousId
-        ? await tx.repoCollection.findUnique({
-            where: { id: previousId },
-            select: { live: { select: { id: true } }, _count: { select: { tweets: true } } },
-          })
-        : null;
-      const removedEmpty = !!previous && !previous.live && previous._count.tweets === 0;
-      if (removedEmpty) await tx.repoCollection.delete({ where: { id: previousId! } });
-      return { previousId, removedEmpty };
+      if (!previousId || usedByLive.has(previousId)) return false;
+      // 数えてから消すまでに走っている収集が書き込むと、取れたツイートごと消えるので押さえる
+      await tx.$queryRaw`SELECT id FROM "RepoCollection" WHERE id = ${previousId} FOR UPDATE`;
+      const tweets = await tx.repoTweet.count({ where: { collectionId: previousId } });
+      if (tweets > 0) return false;
+      // 見えない収集は RLS で 0 行になり、消えない
+      const removed = await tx.repoCollection.deleteMany({ where: { id: previousId } });
+      return removed.count > 0;
     });
   } catch (e) {
     if (e instanceof WorkflowInputError) throw new MeetGreetInputError(e.message);
@@ -550,10 +563,10 @@ export async function linkReportCollection(
     actorId: user.id,
     action: "meetgreet.report_collection.link",
     targetType: "MeetGreet",
-    targetId: meetGreetId,
-    metadata: { collectionId, ...result },
+    targetId: meetGreet.id,
+    metadata: { collectionId, previousId, removedEmpty },
   });
-  return { removedEmpty: result.removedEmpty };
+  return { removedEmpty };
 }
 
 /** この回の収集の検索条件を差し替える */
@@ -569,7 +582,7 @@ export async function updateReportSearch(
     action: "meetgreet.report_search.update",
     targetType: "MeetGreet",
     targetId: meetGreet.id,
-    metadata: { collectionId: updated.id, query: updated.query },
+    metadata: { collectionId: updated.id },
   });
 }
 

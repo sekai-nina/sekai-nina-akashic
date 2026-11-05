@@ -33,10 +33,12 @@ import {
   ExclusionKeysSchema,
   GenerateSketchSchema,
   MAX_MATERIALS_PER_APPLY,
+  RecordIdSchema,
+  ReportPresetSchema,
+  ReportSearchSchema,
   UpdateMeetGreetSchema,
 } from "@/lib/meetgreet/api";
-import { ReportPresetSchema, ReportSearchSchema } from "@/lib/meetgreet/report-query";
-import { deleteRepoPreset, saveRepoPreset } from "@/lib/domain/repo-presets";
+import { canSaveAsPreset, deleteRepoPreset, saveRepoPreset } from "@/lib/domain/repo-presets";
 import { formatZodError } from "@/lib/zod-error";
 import type { ApplyExcerptInput } from "@/lib/meetgreet/types";
 
@@ -138,12 +140,18 @@ export async function updateReportSearchAction(id: string, input: unknown) {
   }
 }
 
-export async function linkReportCollectionAction(id: string, collectionId: string) {
+export async function linkReportCollectionAction(id: string, collectionId: unknown) {
   const user = await requireMember();
   try {
-    const { removedEmpty } = await linkReportCollection(user, id, collectionId);
+    const parsed = RecordIdSchema.safeParse(collectionId);
+    if (!parsed.success) return { ok: false as const, error: "収集を選んでください" };
+    const mg = await getMeetGreet(user, id);
+    if (!mg) throw new Error("見つかりません");
+    const { removedEmpty } = await linkReportCollection(user, mg, parsed.data);
     revalidatePath(`/meetgreets/${id}`);
     revalidatePath("/meetgreets");
+    revalidatePath(`/repo/${parsed.data}`);
+    if (mg.repoCollectionId) revalidatePath(`/repo/${mg.repoCollectionId}`);
     revalidatePath("/repo");
     return { ok: true as const, removedEmpty };
   } catch (e) {
@@ -156,6 +164,12 @@ export async function saveReportPresetAction(meetGreetId: string, input: unknown
   try {
     const parsed = ReportPresetSchema.safeParse(input);
     if (!parsed.success) return { ok: false as const, error: formatZodError(parsed.error) };
+    const mg = await getMeetGreet(user, meetGreetId);
+    if (!mg) throw new Error("見つかりません");
+    // プリセットは internal の全員に見えるので、機密の回の条件を写さない
+    if (!canSaveAsPreset(mg.classification)) {
+      return { ok: false as const, error: "機密の回の条件はプリセットにできません" };
+    }
     const saved = await saveRepoPreset(user, parsed.data);
     revalidatePath(`/meetgreets/${meetGreetId}`);
     return { ok: true as const, id: saved.id };
@@ -164,10 +178,12 @@ export async function saveReportPresetAction(meetGreetId: string, input: unknown
   }
 }
 
-export async function deleteReportPresetAction(meetGreetId: string, id: string) {
+export async function deleteReportPresetAction(meetGreetId: string, id: unknown) {
   const user = await requireMember();
   try {
-    await deleteRepoPreset(user, id);
+    const parsed = RecordIdSchema.safeParse(id);
+    if (!parsed.success) return { ok: false as const, error: "プリセットを選んでください" };
+    await deleteRepoPreset(user, parsed.data);
     revalidatePath(`/meetgreets/${meetGreetId}`);
     return { ok: true as const };
   } catch (e) {
