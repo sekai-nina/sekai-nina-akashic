@@ -1,8 +1,10 @@
 /**
  * ミーグリ記事ワークフロー (#106) の固定値。
  *
- * 運用で変えたくなったら PR で直す (= 設定画面は持たない)。X の検索条件は
- * 既存の RepoCollection (2026-07〜08) で使っていたものをそのまま定数化した。
+ * 運用で変えたくなったら PR で直す (= 設定画面は持たない)。
+ * X の検索条件はここが新しい回の既定で、回ごとの編集とプリセット (`RepoQueryPreset`) は
+ * 回の画面で行う。リアルの既定は `#坂井新奈` 単独も含む広い条件で、初期プリセットの
+ * 「リアル」は手で作った収集の条件なので、この 2 つは同じではない。
  */
 
 import type { MeetGreetFormat } from "@prisma/client";
@@ -38,15 +40,18 @@ export const REPORT_WINDOW_DAYS = 1;
 export function reportTagGroups(format: MeetGreetFormat): HashtagGroup[] {
   const base: HashtagGroup[] = [
     { tags: [MEETGREET_PERSON_NAME, "ミーグリ"], op: "and" },
+    { tags: [MEETGREET_PERSON_NAME, "ミーグリレポ"], op: "and" },
     { tags: ["にぃぐり"], op: "and" },
   ];
   if (format === "real") {
     return [
       base[0],
+      base[1],
       { tags: [MEETGREET_PERSON_NAME, "リアルミーグリ"], op: "and" },
       { tags: [MEETGREET_PERSON_NAME, "リアルレポ"], op: "and" },
+      { tags: [MEETGREET_PERSON_NAME, "リアミレポ"], op: "and" },
       { tags: [MEETGREET_PERSON_NAME], op: "and" },
-      base[1],
+      base[2],
     ];
   }
   return base;

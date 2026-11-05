@@ -712,6 +712,20 @@ model RepoTweet {
   @@index([collectionId, status])
 }
 
+/// X レポ収集の検索ワードのプリセット。ミーグリの回の画面で選んで収集の条件に写す。
+/// 写したあとの収集はプリセットと独立する (プリセットを直しても既存の収集は変わらない)
+model RepoQueryPreset {
+  id             String         @id @default(cuid())
+  name           String         @unique
+  groups         Json // [{ tags: string[], op: "and" | "or" }]。グループ間は常に OR
+  extra          String         @default("") // ハッシュタグ以外の X クエリ
+  classification ClearanceLevel @default(internal)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([classification])
+}
+
 model RepoTweetMedia {
   id        String    @id @default(cuid())
   tweetId   String

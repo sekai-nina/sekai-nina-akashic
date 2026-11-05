@@ -259,3 +259,35 @@ export function projectUpcomingPreview(p: UpcomingPreview) {
     })),
   };
 }
+
+// --- X レポの検索条件 ---
+
+const ReportGroupSchema = z.object({
+  tags: z
+    .array(z.string().trim().min(1).max(50, "タグは 50 文字までです"))
+    .min(1)
+    .max(10, "1 行のタグは 10 個までです"),
+  op: z.enum(["and", "or"]),
+});
+
+export const ReportSearchSchema = z
+  .object({
+    groups: z.array(ReportGroupSchema).max(20, "条件は 20 行までです"),
+    extra: z.string().trim().max(400, "追加条件は 400 文字までです"),
+  })
+  .refine((v) => v.groups.length > 0 || v.extra.length > 0, {
+    message: "ハッシュタグか追加条件を 1 つ以上入れてください",
+  });
+
+export const ReportPresetSchema = z.object({
+  /** 指定すると上書き、無ければ新規 */
+  id: z.string().min(1).optional(),
+  name: z
+    .string()
+    .trim()
+    .min(1, "プリセットの名前を入れてください")
+    .max(50, "プリセットの名前は 50 文字までです"),
+  search: ReportSearchSchema,
+});
+
+export const RecordIdSchema = z.string().min(1);
