@@ -244,11 +244,17 @@ export function exclusionKey(kind: ExclusionKind, value: string): string {
   // video ID が取れない短縮 URL は記事に載らない (resolveTiktokUrl が落とす) ので、
   // ここに来るのは本来 ID 付きだけ。念のため URL そのままで持つ
   if (kind === "tiktok") return `tiktok:${tiktokVideoId(value) ?? value}`;
-  if (kind === "link") return `link:${value}`;
+  // 除外キーの長さには上限があり、URL は長いので指紋で持つ
+  if (kind === "link") return `link:${fingerprint(value)}`;
   // 抜粋は**先頭行**で見る。重複判定も先頭行なので identity を揃える
   // (下の行を直しただけで別キーになると、除外したはずの引用が復活する)
   if (kind === "quote") return `quote:${fingerprint(quoteHead(value))}`;
   return `asset:${value}`; // talk / blogImage / source はアセット単位
+}
+
+/** 本文に書かれた URL。購入リンクの突き合わせは URL 全体で見る (前方一致だと別の商品を載っていると見誤る) */
+export function bodyUrls(body: string): Set<string> {
+  return new Set(body.match(/https?:\/\/[^\s)"'<>\]]+/g) ?? []);
 }
 
 /** TikTok の URL から video ID を取り出す (短縮 URL からは取れない) */
@@ -324,9 +330,8 @@ export function planAppend(input: {
     (u) => !seenReports.has(normalizeTweetUrl(u)) && take("report", u, `レポ ${u}`)
   );
 
-  const freshLinks = (parts.links ?? []).filter(
-    (l) => !existingBody.includes(l.url) && take("link", l.url, `購入リンク ${l.url}`)
-  );
+  const seenUrls = bodyUrls(existingBody);
+  const freshLinks = (parts.links ?? []).filter((l) => !seenUrls.has(l.url) && take("link", l.url, l.url));
 
   // TikTok は **video ID で突き合わせる** (ドシエには短縮 URL、記事には解決済みの URL が
   // 載るので、URL の文字列比較だと毎回「新規」になる)

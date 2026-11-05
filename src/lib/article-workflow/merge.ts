@@ -11,7 +11,7 @@
  * 人が画面で直した結果は検査しない (書き換えたいときは人が書き換える)。
  */
 
-import { classifyMaterials, isTalk, numberSources, type ArticleAssetInput, type RenderedSource } from "./render";
+import { classifyMaterials, isTalk, LINKS_HEADING, numberSources, type ArticleAssetInput, type RenderedSource } from "./render";
 import type { AiPrompt } from "./templates/types";
 
 /**
@@ -140,7 +140,7 @@ export function mergePrompt(input: {
     "**既存の行は 1 文字も変えない・消さない・並べ替えない。** 言い回しの調整や、既存の事実の書き直しが",
     "必要だと思っても行わない (人が後で直す)。既存の行に `^[n]` を足すときも、`^[n]` 以外の文字は変えない。",
     "「`## 関連メディア` は書かない」は新しく書かないという意味で、既存の本文にある章はそのまま残す。",
-    "新しい行は `## 関連メディア` の前に置く。",
+    "新しい行は `## 購入リンク` と `## 関連メディア` の前に置く。",
     "新しい素材に、タイトルと関係する事実が無いなら、既存の本文をそのまま返す。",
     "出典番号は素材の見出しに書いてある番号をそのまま使う。新しい素材の番号: " +
       input.newSources.map((s) => `^[${s.sourceNo}] ${s.label}`).join(" / "),
@@ -225,6 +225,12 @@ export function unwrapFence(body: string): string {
  * 段落の区切り (空行) は消せない (消すと Markdown で前後の段落・引用が繋がる)。空行を足すのは許す。
  * 行末の空白・連続する空行の数は見ない
  */
+/** その行が属する `## ` の章の見出し。無ければ null */
+function headingAbove(lines: string[], index: number): string | null {
+  for (let i = index; i >= 0; i--) if (lines[i].startsWith("## ")) return lines[i];
+  return null;
+}
+
 export function checkMerge(base: string, proposed: string): MergeCheck {
   const before = significantLines(base);
   const after = proposed.split("\n").map((l) => l.trimEnd());
@@ -254,6 +260,10 @@ export function checkMerge(base: string, proposed: string): MergeCheck {
       continue;
     }
     changedLines.push(j);
+  }
+  const inLinks = changedLines.find((j) => headingAbove(after, j) === LINKS_HEADING);
+  if (inLinks !== undefined) {
+    return { ok: false, reason: `AI が「${LINKS_HEADING}」の章に行を足しました。もう一度試すか、手で書いてください` };
   }
   if (i < before.length) {
     const what = before[i] === "" ? `段落の区切り (「${(before[i - 1] ?? "").slice(0, 30)}」の後の空行)` : `「${before[i].slice(0, 40)}」`;

@@ -30,7 +30,7 @@ import { EXCLUSION_KIND_LABELS, todayJst } from "@/lib/utils";
 import { canEditDossier } from "@/lib/auth/dossier-permissions";
 import { parseFrontmatterDate, splitLocations } from "@/lib/articles/frontmatter";
 import { jsonStringArray, MAX_ARTICLE_CLEARANCE } from "@/lib/meetgreet/config";
-import { exclusionKey, planAppend, isPureAppend, type AppendLayout } from "@/lib/meetgreet/append";
+import { bodyUrls, exclusionKey, planAppend, isPureAppend, type AppendLayout } from "@/lib/meetgreet/append";
 import {
   checkMerge,
   finalizeMerge,
@@ -1331,10 +1331,13 @@ export async function saveMerge(
   const final = { ...merged, body: (await addCardPreviews(merged.body, { before: article.body })).body };
   // 使わなかった出典のうち、差分で「足すもの」に出ていたもの (出典だけの提示) を除外にする
   const offered = new Set(plan.additions.map((a) => a.key));
-  // 機械で足した行 (画像・トーク) を人が消したものも除外にする (消しても反映待ちに残り続けないように)
+  // 機械で足した行 (画像・トーク・購入リンク) を人が消したものも除外にする (消しても反映待ちに残り続けないように)
   const finalLines = new Set(final.body.split("\n").map((l) => l.replace(/\^\[\d+\]\s*$/, "").trim()));
+  const finalUrls = bodyUrls(final.body);
   const removedLines = plan.additions
-    .filter((a) => (a.kind === "talk" || a.kind === "blogImage") && !finalLines.has(a.label))
+    .filter((a) =>
+      a.kind === "link" ? !finalUrls.has(a.label) : (a.kind === "talk" || a.kind === "blogImage") && !finalLines.has(a.label)
+    )
     .map((a) => a.key);
   const unusedKeys = [
     ...final.unused.flatMap((s) => (s.assetId ? [exclusionKey("source", s.assetId)] : [])).filter((k) => offered.has(k)),

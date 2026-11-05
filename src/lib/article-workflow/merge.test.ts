@@ -9,6 +9,13 @@ const base = `坂井新奈は祖母と仲が良い。
 `;
 
 describe("checkMerge", () => {
+  it("購入リンクの章に行を足した案は止め、章の前に足した案は通す", () => {
+    const body = "本文。\n\n## 購入リンク\n\n```cardlink\nurl: https://a.example/\n```\n\n## 関連メディア\n\n- 【トーク・画像】行^[1]\n";
+    expect(checkMerge(body, body.replace("```\n\n## 関連", "```\n\n- 足した^[2]\n\n## 関連")).ok).toBe(false);
+    expect(checkMerge(body, body.replace("url: https", "- 足した^[2]\nurl: https")).ok).toBe(false);
+    expect(checkMerge(body, body.replace("本文。\n", "本文。\n- 足した^[2]\n"))).toEqual({ ok: true, changedLines: [1] });
+  });
+
   it("行の差し込みと、既存の行の末尾への ^[n] の追加は通す", () => {
     const proposed = `坂井新奈は祖母と仲が良い。
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isPureAppend, planAppend } from "@/lib/meetgreet/append";
+import { exclusionKey, isPureAppend, planAppend } from "@/lib/meetgreet/append";
 import { linkCard, type ArticleAssetInput } from "../render";
 import { getTemplate, selectableTemplates } from "./index";
 import { ITEM_BODY_PLACEHOLDER, ITEM_TEMPLATE, itemPrompt, renderItemArticle } from "./item";
@@ -213,7 +213,7 @@ describe("物の記事のサムネと購入リンク", () => {
       layout: ITEM_TEMPLATE.appendLayout,
     });
     expect(p.added.links).toBe(1);
-    expect(p.additions.map((a) => a.key)).toEqual([`link:${X}`]);
+    expect(p.additions.map((a) => a.key)).toEqual([exclusionKey("link", X)]);
     expect(p.body).toContain(`host: amazon.co.jp\n\`\`\`\n\n\`\`\`cardlink\nurl: ${X}\n`);
     expect(p.body.indexOf(X)).toBeLessThan(p.body.indexOf("## 関連メディア"));
     expect(isPureAppend(existing, p.body)).toBe(true);
@@ -232,7 +232,21 @@ describe("物の記事のサムネと購入リンク", () => {
         layout: ITEM_TEMPLATE.appendLayout,
       });
     expect(plan([]).body).toMatch(/本文。\n\n## 購入リンク\n\n```cardlink\n[\s\S]*```\n\n## 関連メディア/);
-    expect(plan([`link:${AMAZON}`, `link:${X}`]).empty).toBe(true);
+    expect(plan([exclusionKey("link", AMAZON), exclusionKey("link", X)]).empty).toBe(true);
+  });
+
+  it("追記: 本文の URL の前方一致を載っているとは見ない。除外キーは長い URL でも短い", () => {
+    const long = `https://s.example/item/1?${"a".repeat(300)}`;
+    const r = renderItemArticle({ ...input([blog]), links: [{ url: "https://s.example/item/1", caption: "" }, { url: long, caption: "" }] }, draft);
+    const p = planAppend({
+      existingBody: "本文。\n\n- [別の商品](https://s.example/item/12)\n",
+      parts: r.parts,
+      sources: r.sources,
+      existingSources: [{ sourceNo: 1, assetId: "blog", url: BLOG_URL }],
+      layout: ITEM_TEMPLATE.appendLayout,
+    });
+    expect(p.added.links).toBe(2);
+    expect(exclusionKey("link", long).length).toBeLessThan(200);
   });
 });
 

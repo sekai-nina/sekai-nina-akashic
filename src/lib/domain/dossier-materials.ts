@@ -297,6 +297,18 @@ function toAssetInput(a: LoadedAsset, item: { excerpt?: string; caption?: string
 }
 
 /** ドシエのアイテムを組み立ての入力に振り分ける (純粋関数) */
+/**
+ * 購入リンクにする URL。入力は検証されていないので、後ろの書き添えは落とし、URL でない行は使わない
+ * (本文のカードに書くので、壊れた URL が記事の生成を止めたり公開されたりしないように)。
+ * `href` は `"` などをエスケープするので、カードの 1 行にそのまま書ける
+ */
+function linkUrl(raw: string): string | null {
+  const token = raw.split(/\s+/)[0];
+  if (!URL.canParse(token)) return null;
+  const url = new URL(token);
+  return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+}
+
 export function shapeDossierMaterials(dossier: DossierForMaterials): DossierMaterials {
   // アセットを 1 件にまとめる (同じアセットが抜粋ごとに複数 item になる)
   const assets = new Map<string, ArticleAssetInput>();
@@ -332,8 +344,8 @@ export function shapeDossierMaterials(dossier: DossierForMaterials): DossierMate
           continue;
         }
         if (/(?:x|twitter)\.com\//.test(u)) reports.push(u);
-        // 本文のカードに書くので、http(s) の URL だけ
-        if (/^https?:\/\/[^\s/]/.test(u)) links.push({ url: u, caption: item.caption });
+        const url = linkUrl(u);
+        if (url && !links.some((l) => l.url === url)) links.push({ url, caption: item.caption });
       }
       continue;
     }

@@ -88,12 +88,17 @@ describe("shapeDossierMaterials: 外部リンク・外部画像", () => {
         link("https://www.amazon.co.jp/dp/1\nhttps://shop.example/2", "販売ページ"),
         link("https://www.tiktok.com/@a/video/3"),
         link("メモだけ"),
+        link("https://shop.example:abc/x"),
+        link("ftp://shop.example/x"),
+        link("https://shop.example/3 ←公式"),
+        link("https://shop.example/2", "同じ URL"),
       ])
     );
     expect(m.links).toEqual([
       { url: "https://x.com/a/status/1", caption: "" },
       { url: "https://www.amazon.co.jp/dp/1", caption: "販売ページ" },
       { url: "https://shop.example/2", caption: "販売ページ" },
+      { url: "https://shop.example/3", caption: "" },
     ]);
     expect(m.reports).toEqual(["https://x.com/a/status/1"]);
     expect(m.tiktoks).toEqual(["https://www.tiktok.com/@a/video/3"]);
