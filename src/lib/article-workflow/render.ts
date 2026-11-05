@@ -199,15 +199,18 @@ export function isBlogAssetTitle(title: string): boolean {
   return /^.+?ブログ「.*」\s*$/.test(title);
 }
 
-/** 1 本のブログ (本文 + 画像 + 抜粋) */
+/** 1 本のブログ (本文 + 画像 + 抜粋)。同じ URL の番組・動画・音声もここにまとまる */
 export interface BlogGroup {
   url: string | null;
   title: string;
   date: string;
   staff: boolean;
   excerpts: string[];
-  /** 出典が指すアセット (本文 text。無ければ先頭画像) */
+  /** 動画・音声など、ブログでない素材の抜粋。AI には渡すが「本人の感想」の引用にはしない */
+  mediaExcerpts: string[];
+  /** 出典が指すアセット (本文 text。無ければ先頭の素材) */
   ref: string | null;
+  /** 本文以外の素材。ほとんどはブログ画像だが、URL 付きの番組・動画・音声 (Lemino / YouTube 等) も入る */
   images: ArticleAssetInput[];
   /** `numberSources` が振る。それまでは 0 */
   sourceNo: number;
@@ -233,6 +236,7 @@ export function classifyMaterials(assets: ArticleAssetInput[]): {
       date: (a.source?.publishedAt ?? a.canonicalDate ?? "").slice(0, 10),
       staff: isStaffBlog(a.source?.url),
       excerpts: [],
+      mediaExcerpts: [],
       ref: null,
       images: [],
       sourceNo: 0,
@@ -247,6 +251,11 @@ export function classifyMaterials(assets: ArticleAssetInput[]): {
       for (const ex of a.excerpts) if (ex && !group.excerpts.includes(ex)) group.excerpts.push(ex);
     } else {
       group.images.push(a);
+      if (a.kind !== "image") {
+        // 本文を持ちうるので画像より先に出典の宛先にする (本文 text があればそちらが勝つ)
+        group.ref ??= a.id;
+        for (const ex of a.excerpts) if (ex && !group.mediaExcerpts.includes(ex)) group.mediaExcerpts.push(ex);
+      }
     }
     blogs.set(url, group);
   }
@@ -348,8 +357,9 @@ function talkLine(a: ArticleAssetInput, sourceNo: number | undefined): string {
   return `- 【トーク・${mediaLabel(a.kind)}】${a.title}^[${sourceNo}]`;
 }
 
-/** ブログ画像の行 (関連メディア) */
+/** ブログ画像の行 (関連メディア)。URL 付きの番組・動画・音声はブログではないので種別だけ出す */
 function blogImageLine(b: BlogGroup, a: ArticleAssetInput): string {
+  if (a.kind !== "image") return `- 【${mediaLabel(a.kind)}】${a.title}^[${b.sourceNo}]`;
   return `- 【${b.staff ? STAFF_BLOG_NAME : "ブログ"}・画像】${a.title}^[${b.sourceNo}]`;
 }
 
@@ -406,12 +416,15 @@ export function renderRelatedMediaSection(input: {
   }
   if (blogsWithImages.length > 0) {
     body.push("### ブログ（画像）", "");
-    body.push(
-      blogsWithImages.some((b) => !b.staff)
-        ? "坂井新奈のブログには、当日前後の写真が掲載されている。"
-        : `${STAFF_BLOG_NAME}に、当日前後の写真が掲載されている。`
-    );
-    body.push("");
+    const photoBlogs = blogsWithImages.filter((b) => b.images.some((a) => a.kind === "image"));
+    if (photoBlogs.length > 0) {
+      body.push(
+        photoBlogs.some((b) => !b.staff)
+          ? "坂井新奈のブログには、当日前後の写真が掲載されている。"
+          : `${STAFF_BLOG_NAME}に、当日前後の写真が掲載されている。`
+      );
+      body.push("");
+    }
     for (const b of blogsWithImages) {
       for (const a of b.images) body.push(blogImageLine(b, a));
     }

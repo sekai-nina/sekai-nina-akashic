@@ -5,13 +5,14 @@
  * (`numberSources`) と同じ番号**を付けて並べる。AI は本文の `^[n]` にこの番号を使うので、
  * ここと `render` の採番がずれると脚注が宛先を失う。
  *
- * 渡すもの: 本文全文 (ブログ / トーク)、人が選んだ抜粋 (重要箇所として明示)、メディアの
+ * 渡すもの: 本文全文 (ブログ / トーク / 番組・動画・音声)、人が選んだ抜粋 (重要箇所として明示)、メディアの
  * キャプション、人物エンティティ。長すぎる本文は切って件数を返す (画面に出す)。
  */
 
 import {
   classifyMaterials,
   numberSources,
+  mediaLabel,
   type ArticleAssetInput,
   type BlogGroup,
 } from "./render";
@@ -73,7 +74,7 @@ function section(
     for (const n of parts.notes) lines.push(quoteLines(n));
   }
   if (parts.captions.length > 0) {
-    lines.push("", "画像のキャプション:");
+    lines.push("", "メディアのキャプション:");
     for (const c of parts.captions) lines.push(`- ${c}`);
   }
   let cut = false;
@@ -95,17 +96,24 @@ function section(
 function blogSection(b: BlogGroup, textAsset: ArticleAssetInput | undefined, budget: number): Section {
   const header = [`### ^[${b.sourceNo}] ${b.title}${b.date ? `（${b.date}）` : ""}`];
   if (b.url) header.push(`URL: ${b.url}`);
-  const people = joinPeople(textAsset ? [textAsset, ...b.images] : b.images);
+  // 番組・動画は本文の持ち主と素材が同じアセットなので、メモが二重にならないよう 1 件にする
+  const assets = [...new Set(textAsset ? [textAsset, ...b.images] : b.images)];
+  const people = joinPeople(assets);
   if (people.length > 0) header.push(`登場人物: ${people.join("、")}`);
   return section(
     header,
     {
-      excerpts: b.excerpts,
-      notes: [textAsset, ...b.images].flatMap((a) => a?.notes ?? []),
+      excerpts: [...b.excerpts, ...b.mediaExcerpts],
+      notes: assets.flatMap((a) => a.notes ?? []),
       captions: b.images.map((i) => i.caption?.trim()).filter((c): c is string => !!c),
-      body: textAsset?.text ?? null,
+      // 同じ URL に本文と動画や、前編と後編が入っていることがある。どれの本文も落とさない
+      body: assets.flatMap((a) => (a.kind !== "image" && a.text?.trim() ? [a.text] : [])).join("\n\n") || null,
       // 雑誌などは本文のアセットはあっても本文が無く、人のメモにだけ中身がある
-      noBodyNote: textAsset ? "(本文なし)" : "(本文なし。画像だけのブログ)",
+      noBodyNote: !textAsset
+        ? "(本文なし。画像だけのブログ)"
+        : textAsset.kind === "text"
+          ? "(本文なし)"
+          : `(本文なし。${mediaLabel(textAsset.kind)}の素材)`,
     },
     budget
   );
@@ -147,7 +155,8 @@ export function buildMaterialsText(
 ): MaterialsText {
   const { blogs, talks } = classifyMaterials(input.assets);
   const { talkSourceNo } = numberSources(blogs, talks);
-  const textAssetById = new Map(input.assets.filter((a) => a.kind === "text").map((a) => [a.id, a]));
+  // 本文を持つのは text のほか、URL 付きの番組・動画・音声 (文字起こし・説明)。画像は本文を持たない
+  const textAssetById = new Map(input.assets.filter((a) => a.kind !== "image").map((a) => [a.id, a]));
 
   const parts: string[] = [`# ドシエ「${input.dossier.title}」の素材`, ""];
   let remaining = MAX_CHARS_TOTAL;
