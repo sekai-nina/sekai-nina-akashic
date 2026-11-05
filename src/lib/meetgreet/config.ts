@@ -38,15 +38,18 @@ export const REPORT_WINDOW_DAYS = 1;
 export function reportTagGroups(format: MeetGreetFormat): HashtagGroup[] {
   const base: HashtagGroup[] = [
     { tags: [MEETGREET_PERSON_NAME, "ミーグリ"], op: "and" },
+    { tags: [MEETGREET_PERSON_NAME, "ミーグリレポ"], op: "and" },
     { tags: ["にぃぐり"], op: "and" },
   ];
   if (format === "real") {
     return [
       base[0],
+      base[1],
       { tags: [MEETGREET_PERSON_NAME, "リアルミーグリ"], op: "and" },
       { tags: [MEETGREET_PERSON_NAME, "リアルレポ"], op: "and" },
+      { tags: [MEETGREET_PERSON_NAME, "リアミレポ"], op: "and" },
       { tags: [MEETGREET_PERSON_NAME], op: "and" },
-      base[1],
+      base[2],
     ];
   }
   return base;
