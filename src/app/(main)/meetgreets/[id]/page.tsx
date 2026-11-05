@@ -15,6 +15,12 @@ import { ARTICLE_WORKFLOW_LABELS as L, formatDate, todayJst } from "@/lib/utils"
 import { MetaForm } from "./meta-form";
 import { PreviewForm } from "./preview-form";
 import { FeaturedReports } from "./featured-reports";
+import { ReportCollectionLink } from "./report-collection-link";
+import { ReportSearchForm } from "./report-search-form";
+import { listLinkableCollections } from "@/lib/domain/meetgreet-import";
+import { getCollection } from "@/lib/domain/repo";
+import { listRepoPresets } from "@/lib/domain/repo-presets";
+import { storedGroups } from "@/lib/meetgreet/report-query";
 import { listArticleReports } from "@/lib/domain/meetgreet-featured";
 import { getPreviewSources } from "@/lib/domain/meetgreet-preview";
 import { MaterialsStep } from "@/components/materials-step";
@@ -54,13 +60,26 @@ export default async function MeetGreetDetailPage({ params, searchParams }: Prop
   const mg = await getMeetGreet(session.user, id);
   if (!mg) notFound();
 
-  const [candidates, sketchSources, keeps, sketchSetting, previewSources, articleReports] = await Promise.all([
+  const [
+    candidates,
+    sketchSources,
+    keeps,
+    sketchSetting,
+    previewSources,
+    articleReports,
+    linkableCollections,
+    reportPresets,
+    collection,
+  ] = await Promise.all([
     listMaterialCandidates(session.user, mg),
     listSketchSources(session.user, mg),
     listMeetGreetKeeps(session.user, mg, mg.reports?.keep ?? 0),
     getSketchSetting(),
     getPreviewSources(session.user.clearance, mg.previewSourceAssetIds),
     listArticleReports(session.user, mg.articleId),
+    listLinkableCollections(session.user, mg.date),
+    listRepoPresets(session.user.clearance),
+    mg.repoCollectionId ? getCollection(mg.repoCollectionId, session.user.clearance) : null,
   ]);
   // 新しい候補を先に出す (作り直すほど古いものが上に溜まらないように)
   const sketchCandidates = jsonStringArray(mg.sketchCandidates)
@@ -171,6 +190,24 @@ export default async function MeetGreetDetailPage({ params, searchParams }: Prop
             : "まだ収集していません。X の recent search は直近 7 日までなので、開催から日が経っている回は取得できません。"}
           採用にしたツイートは記事生成がそのまま読みます。
         </p>
+        <ReportCollectionLink
+          id={mg.id}
+          date={mg.date}
+          hasReports={(mg.reports?.total ?? 0) > 0}
+          candidates={linkableCollections}
+        />
+        {collection && (
+          <ReportSearchForm
+            key={collection.id}
+            id={mg.id}
+            groups={storedGroups(collection.groups)}
+            extra={collection.extra}
+            query={collection.query}
+            excludeRetweets={collection.excludeRetweets}
+            langJa={collection.langJa}
+            presets={reportPresets}
+          />
+        )}
         <ReportsStep
           kind="meetgreet"
           onRefetch={refetchReportsAction.bind(null, mg.id)}

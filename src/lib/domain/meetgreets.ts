@@ -24,7 +24,9 @@ import {
   MEETGREET_FORMAT_SHORT_LABELS,
 } from "@/lib/utils";
 import { buildQuery } from "@/lib/twitter/x-search";
+import type { ReportSearch } from "@/lib/meetgreet/report-query";
 import { logAudit } from "./audit";
+import { updateCollectionSearch } from "./repo";
 import {
   applyMaterialsToDossier,
   assertContainersFree,
@@ -495,6 +497,80 @@ export async function applyMaterials(
     metadata: { ...result, requested: ids.length, dossierId: meetGreet.dossierId },
   });
   return result;
+}
+
+/**
+ * 既にある収集をこの回に結びつける。`/repo` で先に集めていたぶんを拾うのに使う。
+ *
+ * 今の収集は、取得 0 件なら消す (自動で作られた空の収集が `/repo` に残らないように)。
+ * ツイートが入っていれば紐づけだけ外して残す。判定の結果を捨てないため
+ */
+export async function linkReportCollection(
+  user: ActingUser,
+  meetGreetId: string,
+  collectionId: string
+): Promise<{ removedEmpty: boolean }> {
+  let result: { previousId: string | null; removedEmpty: boolean };
+  try {
+    result = await withSession(user, async (tx) => {
+      const mg = await tx.meetGreet.findUnique({
+        where: { id: meetGreetId },
+        select: { repoCollectionId: true },
+      });
+      if (!mg) throw new MeetGreetInputError("ミーグリが見つかりません");
+      const previousId = mg.repoCollectionId;
+      if (previousId === collectionId) return { previousId, removedEmpty: false };
+
+      await assertContainersFree(tx, { repoCollectionId: collectionId });
+      await tx.meetGreet.update({
+        where: { id: meetGreetId },
+        data: { repoCollectionId: collectionId },
+      });
+
+      const previous = previousId
+        ? await tx.repoCollection.findUnique({
+            where: { id: previousId },
+            select: { live: { select: { id: true } }, _count: { select: { tweets: true } } },
+          })
+        : null;
+      const removedEmpty = !!previous && !previous.live && previous._count.tweets === 0;
+      if (removedEmpty) await tx.repoCollection.delete({ where: { id: previousId! } });
+      return { previousId, removedEmpty };
+    });
+  } catch (e) {
+    if (e instanceof WorkflowInputError) throw new MeetGreetInputError(e.message);
+    // 見えない回 (上位機密) に使われている収集。何に使われているかは言わない
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      throw new MeetGreetInputError("その収集は結びつけられません");
+    }
+    throw e;
+  }
+
+  await logAudit({
+    actorId: user.id,
+    action: "meetgreet.report_collection.link",
+    targetType: "MeetGreet",
+    targetId: meetGreetId,
+    metadata: { collectionId, ...result },
+  });
+  return { removedEmpty: result.removedEmpty };
+}
+
+/** この回の収集の検索条件を差し替える */
+export async function updateReportSearch(
+  user: ActingUser,
+  meetGreet: { id: string; repoCollectionId: string | null },
+  search: ReportSearch
+): Promise<void> {
+  if (!meetGreet.repoCollectionId) throw new MeetGreetInputError("X レポ収集が紐づいていません");
+  const updated = await updateCollectionSearch(meetGreet.repoCollectionId, search, user.clearance);
+  await logAudit({
+    actorId: user.id,
+    action: "meetgreet.report_search.update",
+    targetType: "MeetGreet",
+    targetId: meetGreet.id,
+    metadata: { collectionId: updated.id, query: updated.query },
+  });
 }
 
 /** X レポを再収集する (作成時に失敗したときや、翌日に投稿されたぶんを拾うとき) */

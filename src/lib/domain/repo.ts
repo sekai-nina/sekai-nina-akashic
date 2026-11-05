@@ -109,6 +109,35 @@ export async function renameCollection(id: string, name: string, clearance: stri
   );
 }
 
+/**
+ * 検索条件だけを差し替える。RT 除外・日本語の設定と期間は収集のものを保つ。
+ * 取得済みのツイートは消さない (次の収集から新しい条件で足される)。
+ * グループ間は OR に揃える (画面の入力欄は OR しか書けない。保存前にクエリを下見できる)
+ */
+export async function updateCollectionSearch(
+  id: string,
+  search: { groups: HashtagGroup[]; extra: string },
+  clearance: string
+) {
+  return withClearance(clearance, async (tx) => {
+    const collection = await tx.repoCollection.findUnique({
+      where: { id },
+      select: { excludeRetweets: true, langJa: true },
+    });
+    if (!collection) throw new Error("X レポ収集が見つかりません");
+    return tx.repoCollection.update({
+      where: { id },
+      data: {
+        groups: search.groups as unknown as Prisma.InputJsonValue,
+        groupOp: "or",
+        extra: search.extra,
+        query: buildQuery(search.groups, "or", collection.excludeRetweets, collection.langJa, search.extra),
+      },
+      select: { id: true, query: true },
+    });
+  });
+}
+
 /** 収集を削除（ツイート/メディアは cascade）。R2 上の画像も best-effort で削除。 */
 export async function deleteCollection(id: string, clearance: string) {
   const imageKeys = await withClearance(clearance, async (tx) => {

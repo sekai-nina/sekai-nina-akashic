@@ -12,6 +12,7 @@ import { assertClearance } from "@/lib/classification";
 import { parseDossierTitle, parseSingleFromCollectionName } from "@/lib/meetgreet/import";
 import type { MeetGreetFormat } from "@prisma/client";
 import { logAudit } from "./audit";
+import { keepCounts } from "./article-workflow";
 import { createMeetGreet, type ActingUser } from "./meetgreets";
 import { NOT_CLIP_POOL } from "./dossiers";
 
@@ -101,6 +102,43 @@ export async function listLinkableDossiers(user: ActingUser): Promise<LinkableDo
     })
   );
   return rows.map((d) => ({ id: d.id, title: d.title, itemCount: d._count.items }));
+}
+
+export interface LinkableCollection {
+  id: string;
+  name: string;
+  startDate: string | null;
+  endDate: string | null;
+  query: string;
+  tweetCount: number;
+  keepCount: number;
+}
+
+/**
+ * どの回 (ミーグリ / ライブ) にも使われていない X レポ収集。`/repo` で先に集めていたものを
+ * 回に結びつけるときの候補で、開催日と同じ日に始まるものを先に出す
+ */
+export async function listLinkableCollections(
+  user: ActingUser,
+  date: string
+): Promise<LinkableCollection[]> {
+  const { rows, counts } = await withClearance(user.clearance, async (tx) => {
+    const rows = await tx.repoCollection.findMany({
+      where: { meetGreet: null, live: null },
+      orderBy: { startDate: { sort: "desc", nulls: "last" } },
+      take: 100,
+      select: { id: true, name: true, startDate: true, endDate: true, query: true },
+    });
+    return { rows, counts: await keepCounts(tx, rows.map((r) => r.id)) };
+  });
+  const collections = rows.map((r) => {
+    const n = counts.get(r.id) ?? { keep: 0, total: 0 };
+    return { ...r, tweetCount: n.total, keepCount: n.keep };
+  });
+  return [
+    ...collections.filter((c) => c.startDate === date),
+    ...collections.filter((c) => c.startDate !== date),
+  ];
 }
 
 /**
