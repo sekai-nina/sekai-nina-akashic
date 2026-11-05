@@ -506,7 +506,7 @@ export function planAppend(input: {
         }
         sec.lines.splice(appendIndex(sec.lines), 0, ...tiktoks.map((u) => `![](${u})`));
         const beforeImages = () => {
-          const i = sec.lines.findIndex((l) => /^- 【[^】]*・(画像|動画|音声|メディア)】/.test(l) && !l.startsWith("- 【トーク"));
+          const i = sec.lines.findIndex((l) => /^- 【(?:[^】]*・)?(画像|動画|音声|メディア)】/.test(l) && !l.startsWith("- 【トーク"));
           return i >= 0 ? i : appendIndex(sec.lines);
         };
         insertTalks(sec, beforeImages, talks);

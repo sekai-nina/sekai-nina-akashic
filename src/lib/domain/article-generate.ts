@@ -37,6 +37,7 @@ import {
   groupFreshBySource,
   isFreshClip,
   mergePrompt,
+  hasWritableContent,
   renumberMaterials,
   unwrapFence,
   type FreshMaterial,
@@ -1222,13 +1223,13 @@ export async function proposeMerge(
   const template = resolved.template as ArticleTemplateDef & { needsAi: true };
   // 画像・動画だけのクリップ (ブログ画像・画像のトーク) は、機械で関連メディアの行を足して終わり。
   // AI には渡さない (渡すとブログ全文から本文に余計な行を書き足す)。
-  // 文章のアセット (ブログ本文・文章のトーク) を企画に入れた出典だけ、AI に本文へ組み込ませる
-  // (画像に合わせて補ったブログ本文 `supplement` は数えない)
+  // 文章のアセット (ブログ本文・文章のトーク) と、文字起こし・抜粋・メモのある番組・動画を企画に入れた
+  // 出典だけ、AI に本文へ組み込ませる (画像に合わせて補ったブログ本文 `supplement` は数えない)
   const planLines = plan.body.split("\n");
   const mechanicalNos = new Set(
     plan.changedLines.flatMap((i) => [...(planLines[i] ?? "").matchAll(/\^\[(\d+)\]/g)].map((m) => Number(m[1])))
   );
-  const textAssets = new Set(input.assets.filter((a) => a.kind === "text" && !a.supplement).map((a) => a.id));
+  const textAssets = new Set(input.assets.filter(hasWritableContent).map((a) => a.id));
   // 番号無しで記事に載っている出典 (`existingId`) は、行が参照するから番号を振るだけで本文には書かせない
   const writeSources = plan.newSources.filter(
     (s) => !s.existingId && (!mechanicalNos.has(s.sourceNo) || (s.assetId != null && textAssets.has(s.assetId)))
