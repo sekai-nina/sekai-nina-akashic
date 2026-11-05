@@ -26,24 +26,24 @@ CREATE UNIQUE INDEX "RepoQueryPreset_name_key" ON "RepoQueryPreset"("name");
 -- CreateIndex
 CREATE INDEX "RepoQueryPreset_classification_idx" ON "RepoQueryPreset"("classification");
 
+-- 初期データ (FORCE より前に入れる。ポリシーは app_runtime 宛てだけなので、適用ロールの属性に左右されないように)
+INSERT INTO "RepoQueryPreset" ("id", "name", "groups", "updatedAt") VALUES
+  ('preset_online', 'オンライン', '[{"tags":["坂井新奈","ミーグリ"],"op":"and"},{"tags":["坂井新奈","ミーグリレポ"],"op":"and"},{"tags":["にぃぐり"],"op":"and"}]', CURRENT_TIMESTAMP),
+  ('preset_real', 'リアル', '[{"tags":["坂井新奈","ミーグリ"],"op":"and"},{"tags":["坂井新奈","リアルミーグリ"],"op":"and"},{"tags":["坂井新奈","リアミレポ"],"op":"and"},{"tags":["坂井新奈","ミーグリレポ"],"op":"and"},{"tags":["にぃぐり"],"op":"and"}]', CURRENT_TIMESTAMP);
+
 -- RLS
 ALTER TABLE "RepoQueryPreset" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "RepoQueryPreset" FORCE ROW LEVEL SECURITY;
 
-CREATE POLICY repo_query_preset_select ON "RepoQueryPreset" FOR SELECT TO app_runtime USING (
+CREATE POLICY repoquerypreset_select ON "RepoQueryPreset" FOR SELECT TO app_runtime USING (
   clearance_rank(classification::text) <= clearance_rank(current_setting('app.clearance', true))
 );
-CREATE POLICY repo_query_preset_insert ON "RepoQueryPreset" FOR INSERT TO app_runtime WITH CHECK (
+CREATE POLICY repoquerypreset_insert ON "RepoQueryPreset" FOR INSERT TO app_runtime WITH CHECK (
   clearance_rank(classification::text) <= clearance_rank(current_setting('app.clearance', true))
 );
-CREATE POLICY repo_query_preset_update ON "RepoQueryPreset" FOR UPDATE TO app_runtime
+CREATE POLICY repoquerypreset_update ON "RepoQueryPreset" FOR UPDATE TO app_runtime
   USING (clearance_rank(classification::text) <= clearance_rank(current_setting('app.clearance', true)))
   WITH CHECK (clearance_rank(classification::text) <= clearance_rank(current_setting('app.clearance', true)));
-CREATE POLICY repo_query_preset_delete ON "RepoQueryPreset" FOR DELETE TO app_runtime USING (
+CREATE POLICY repoquerypreset_delete ON "RepoQueryPreset" FOR DELETE TO app_runtime USING (
   clearance_rank(classification::text) <= clearance_rank(current_setting('app.clearance', true))
 );
-
--- 初期データ
-INSERT INTO "RepoQueryPreset" ("id", "name", "groups", "updatedAt") VALUES
-  ('preset_online', 'オンライン', '[{"tags":["坂井新奈","ミーグリ"],"op":"and"},{"tags":["坂井新奈","ミーグリレポ"],"op":"and"},{"tags":["にぃぐり"],"op":"and"}]', CURRENT_TIMESTAMP),
-  ('preset_real', 'リアル', '[{"tags":["坂井新奈","ミーグリ"],"op":"and"},{"tags":["坂井新奈","リアルミーグリ"],"op":"and"},{"tags":["坂井新奈","リアミレポ"],"op":"and"},{"tags":["坂井新奈","ミーグリレポ"],"op":"and"},{"tags":["にぃぐり"],"op":"and"}]', CURRENT_TIMESTAMP);
