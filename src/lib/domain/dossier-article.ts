@@ -9,6 +9,7 @@ import type { ArticleTemplate, ArticleType, ClearanceLevel, DossierAccessMode, D
 import { prisma, withSession } from "@/lib/db";
 import { ARTICLE_TEMPLATE_LABELS, todayJst } from "@/lib/utils";
 import { canEditDossier } from "@/lib/auth/dossier-permissions";
+import { fetchPageTitle } from "@/lib/pages/page-title";
 import { MAX_ARTICLE_CLEARANCE, MAX_EXTERNAL_AI_CLEARANCE } from "@/lib/meetgreet/config";
 import type { RenderedArticle } from "@/lib/article-workflow/render";
 import {
@@ -35,6 +36,7 @@ import { getArticlePromptRules } from "./article-prompt-setting";
 import { logAudit } from "./audit";
 import {
   EXTERNAL_AI_OK,
+  linkUrl,
   loadDossierForArticle,
   PUBLISHABLE,
   resolveTiktoks,
@@ -231,6 +233,39 @@ export async function buildDossierArticle(
     ai,
     aiDraft: draft,
   };
+}
+
+/**
+ * 題の無い購入リンクに、リンク先のページのタイトルをキャプションとして書く。
+ *
+ * **組み立ての中で取らない。** 取るたびに結果が変わると、プレビューと保存の本文が食い違って保存が止まる。
+ * DB に書いておけば保存は同じ題を読み、人が企画でキャプションを直すこともできる。
+ * 1 アイテムに複数の URL があるものは題を 1 つに決められないので触らない。取れなければ空のまま (物の名前になる)
+ */
+export async function fillDossierLinkTitles(
+  user: ActingUser,
+  dossier: { id: string; classification: string }
+): Promise<void> {
+  // 記事にできない企画の URL は外に問い合わせない
+  if (!PUBLISHABLE.has(dossier.classification)) return;
+  const items = await withSession(user, (tx) =>
+    tx.dossierItem.findMany({
+      where: { dossierId: dossier.id, kind: "external_link", caption: "" },
+      select: { id: true, externalUrl: true },
+    })
+  );
+  const targets = items.flatMap((item) => {
+    const lines = (item.externalUrl ?? "").split("\n").filter((l) => l.trim());
+    const url = lines.length === 1 && !lines[0].includes("tiktok.com") ? linkUrl(lines[0].trim()) : null;
+    return url ? [{ id: item.id, url }] : [];
+  });
+  if (targets.length === 0) return;
+  const titled = await Promise.all(targets.map(async (t) => ({ id: t.id, title: await fetchPageTitle(t.url) })));
+  await withSession(user, async (tx) => {
+    for (const { id, title } of titled) {
+      if (title) await tx.dossierItem.updateMany({ where: { id, caption: "" }, data: { caption: title } });
+    }
+  });
 }
 
 /**

@@ -48,7 +48,7 @@ export interface PlaceVisitCertainty {
 
 export interface DossierLink {
   url: string;
-  /** アイテムのキャプション。無ければ空 */
+  /** アイテムのキャプション。組み立ての前にリンク先のページのタイトルで埋める。取れなければ空 */
   caption: string;
 }
 

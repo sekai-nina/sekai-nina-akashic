@@ -75,6 +75,7 @@ import {
   mergeSystemPrompt,
   requireRenderableTemplate,
   type DossierForArticle,
+  fillDossierLinkTitles,
 } from "./dossier-article";
 import { MeetGreetInputError } from "./meetgreets";
 import { logAudit } from "./audit";
@@ -389,6 +390,17 @@ async function buildOrThrow(resolved: ResolvedTarget, aiDraft?: AiDraft | null) 
  * 生成結果を見せる (DB には書かない)。
  * 既存記事があれば追記の差分、無ければ新規作成の本文を返す。
  */
+/** 物の記事の購入リンクの題を埋める。書けない人のプレビューでは何もしない (空なら物の名前で出る) */
+async function fillLinkTitles(user: ActingUser, target: ArticleTarget, resolved: ResolvedTarget): Promise<void> {
+  if (target.kind !== "dossier" || resolved.template.key !== "item") return;
+  try {
+    resolved.assertCanSave();
+  } catch {
+    return;
+  }
+  await fillDossierLinkTitles(user, target.dossier);
+}
+
 export async function previewArticle(
   user: ActingUser,
   target: ArticleTarget,
@@ -399,6 +411,7 @@ export async function previewArticle(
   // 本文を AI に書かせる新規作成は 1 回ごとに費用がかかる。見えるだけの人には押させない
   // (保存できないのに生成できる、を塞ぐ)
   if (resolved.template.needsAi && !resolved.articleId) resolved.assertCanSave();
+  await fillLinkTitles(user, target, resolved);
   // 追記では本文を AI に書かせない (地の文は人のもの)。新規作成のときだけ生成する
   const rendered = await buildOrThrow(resolved, resolved.articleId ? null : undefined);
 
@@ -1197,6 +1210,7 @@ export async function proposeMerge(
   target: ArticleTarget,
   options: { manual?: boolean } = {}
 ): Promise<MergeProposalResult> {
+  await fillLinkTitles(user, target, resolveTarget(user, target));
   const { resolved, dossierId, input, article, plan, excluded, fresh, strayFresh } = await prepareMerge(user, target);
   // 載っている出典の画像 (同じブログの別の画像など) は新しい出典にならず、関連メディアの行 (changedLines) だけが増える。
   // それも無いときだけ「足せる素材が無い」にする (行だけ増えるクリップを組み込めずに止めていた)
