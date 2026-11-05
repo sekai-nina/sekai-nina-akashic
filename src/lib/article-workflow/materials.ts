@@ -5,15 +5,15 @@
  * (`numberSources`) と同じ番号**を付けて並べる。AI は本文の `^[n]` にこの番号を使うので、
  * ここと `render` の採番がずれると脚注が宛先を失う。
  *
- * 渡すもの: 本文全文 (ブログ / トーク)、人が選んだ抜粋 (重要箇所として明示)、メディアの
+ * 渡すもの: 本文全文 (ブログ / トーク / 番組・動画・音声)、人が選んだ抜粋 (重要箇所として明示)、メディアの
  * キャプション、人物エンティティ。長すぎる本文は切って件数を返す (画面に出す)。
  */
 
 import {
   classifyMaterials,
   numberSources,
-  type ArticleAssetInput,
   mediaLabel,
+  type ArticleAssetInput,
   type BlogGroup,
 } from "./render";
 import type { DossierRenderInput } from "./templates/types";
@@ -74,7 +74,7 @@ function section(
     for (const n of parts.notes) lines.push(quoteLines(n));
   }
   if (parts.captions.length > 0) {
-    lines.push("", "画像のキャプション:");
+    lines.push("", "メディアのキャプション:");
     for (const c of parts.captions) lines.push(`- ${c}`);
   }
   let cut = false;

@@ -199,7 +199,7 @@ export function isBlogAssetTitle(title: string): boolean {
   return /^.+?ブログ「.*」\s*$/.test(title);
 }
 
-/** 1 本のブログ (本文 + 画像 + 抜粋) */
+/** 1 本のブログ (本文 + 画像 + 抜粋)。同じ URL の番組・動画・音声もここにまとまる */
 export interface BlogGroup {
   url: string | null;
   title: string;
