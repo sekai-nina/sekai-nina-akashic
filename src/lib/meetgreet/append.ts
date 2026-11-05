@@ -15,6 +15,8 @@ import {
   type RenderedSource,
 } from "./article";
 import {
+  LEGACY_NINA_MEDIA_HEADING,
+  LINKS_HEADING,
   NINA_MEDIA_HEADING,
   OTHER_MEDIA_HEADING,
   QUOTES_HEADING,
@@ -190,7 +192,7 @@ export interface AppendPlan {
   /** 追加する出典 (sourceNo は採番済み) */
   newSources: RenderedSource[];
   /** `bareSources` は本文の行を伴わない出典 (`AppendLayout.bareSources`) の数 */
-  added: { quotes: number; reports: number; talks: number; blogImages: number; tiktoks: number; bareSources: number };
+  added: { quotes: number; reports: number; links: number; talks: number; blogImages: number; tiktoks: number; bareSources: number };
   /** 足されるものの一覧。ここから外したものを除外リストに入れる */
   additions: AppendItem[];
   /** 毎回作り直す区間の中身が変わった (公演や曲を直した) */
@@ -242,6 +244,7 @@ export function exclusionKey(kind: ExclusionKind, value: string): string {
   // video ID が取れない短縮 URL は記事に載らない (resolveTiktokUrl が落とす) ので、
   // ここに来るのは本来 ID 付きだけ。念のため URL そのままで持つ
   if (kind === "tiktok") return `tiktok:${tiktokVideoId(value) ?? value}`;
+  if (kind === "link") return `link:${value}`;
   // 抜粋は**先頭行**で見る。重複判定も先頭行なので identity を揃える
   // (下の行を直しただけで別キーになると、除外したはずの引用が復活する)
   if (kind === "quote") return `quote:${fingerprint(quoteHead(value))}`;
@@ -299,7 +302,7 @@ export function planAppend(input: {
   // 既に本文にある行 (脚注番号を外したもの)。トーク / ブログ画像の重複判定に使う
   const bodyLines = new Set(existingBody.split("\n").map(lineCore).filter((l) => l.length > 0));
   const sections = parseSections(existingBody);
-  const added = { quotes: 0, reports: 0, talks: 0, blogImages: 0, tiktoks: 0, bareSources: 0 };
+  const added = { quotes: 0, reports: 0, links: 0, talks: 0, blogImages: 0, tiktoks: 0, bareSources: 0 };
 
   // --- 1. 何を足すか決める (ここで除外を効かせる) ---
 
@@ -319,6 +322,10 @@ export function planAppend(input: {
   );
   const freshReports = parts.reports.filter(
     (u) => !seenReports.has(normalizeTweetUrl(u)) && take("report", u, `レポ ${u}`)
+  );
+
+  const freshLinks = (parts.links ?? []).filter(
+    (l) => !existingBody.includes(l.url) && take("link", l.url, `購入リンク ${l.url}`)
   );
 
   // TikTok は **video ID で突き合わせる** (ドシエには短縮 URL、記事には解決済みの URL が
@@ -458,6 +465,14 @@ export function planAppend(input: {
     added.reports = freshReports.length;
   }
 
+  if (freshLinks.length > 0) {
+    const sec = ensureSection(sections, LINKS_HEADING, [H_MEDIA]);
+    const cards = freshLinks.flatMap((l, i) => [...(i > 0 ? [""] : []), ...l.card.split("\n")]);
+    if (sec.lines.every((l) => l.trim() === "")) sec.lines = ["", ...cards, ""];
+    else sec.lines.splice(appendIndex(sec.lines), 0, "", ...cards);
+    added.links = freshLinks.length;
+  }
+
   /**
    * トークを時系列の正しい位置に差し込む (脚注番号は飛んでよい。順序 > 番号の連続性)。
    * `fallback` は後ろに時刻の合う行が無いときの位置 (flat ではブログ画像の前、それ以外は末尾)
@@ -487,12 +502,14 @@ export function planAppend(input: {
 
   if (layout.media?.kind === "flat") {
     // おでかけ・物の記事: `## 関連メディア` の箇条書きに足す。坂井新奈が出ているものがあれば
-    // `### 坂井新奈が写っているもの` / `### そのほか` に分ける (フル生成と同じ)
+    // `### 坂井新奈が出ているもの` / `### そのほか` に分ける (フル生成と同じ)
     if (freshTiktoks.length > 0 || freshTalks.length > 0 || freshImages.length > 0) {
       ensureSection(sections, H_MEDIA, []);
       const shownTalks = freshTalks.filter((t) => t.ninaAppears);
       const shownImages = freshImages.filter((b) => b.ninaAppears);
-      const split = shownTalks.length > 0 || shownImages.length > 0 || !!findSection(sections, NINA_MEDIA_HEADING);
+      // 公開済みの記事は前の小見出しのまま。新しい小見出しを並べず、あるほうに足す
+      const ninaHeading = findSection(sections, LEGACY_NINA_MEDIA_HEADING) ? LEGACY_NINA_MEDIA_HEADING : NINA_MEDIA_HEADING;
+      const split = shownTalks.length > 0 || shownImages.length > 0 || !!findSection(sections, ninaHeading);
       /** 箇条書きに足す。トークはブログ画像より前 (フル生成の並び)、画像の行が無ければ末尾 */
       const fill = (sec: Section, tiktoks: string[], talks: typeof freshTalks, images: typeof freshImages) => {
         if (tiktoks.length + talks.length + images.length === 0) return;
@@ -520,7 +537,7 @@ export function planAppend(input: {
         const otherImages = freshImages.filter((b) => !b.ninaAppears);
         // 足すものがある小見出しだけ作る (先に作ると中身の無い見出しが本文に残る)
         if (shownTalks.length + shownImages.length > 0) {
-          fill(ensureSection(sections, NINA_MEDIA_HEADING, [OTHER_MEDIA_HEADING]), [], shownTalks, shownImages);
+          fill(ensureSection(sections, ninaHeading, [OTHER_MEDIA_HEADING]), [], shownTalks, shownImages);
         }
         if (freshTiktoks.length + otherTalks.length + otherImages.length > 0) {
           fill(ensureSection(sections, OTHER_MEDIA_HEADING, []), freshTiktoks, otherTalks, otherImages);
@@ -557,7 +574,7 @@ export function planAppend(input: {
   }
 
   // 出典だけの追加 (bareSources) は行を増やさないので数えない。`empty` は newSources で見る
-  const total = added.quotes + added.reports + added.talks + added.blogImages + added.tiktoks;
+  const total = added.quotes + added.reports + added.links + added.talks + added.blogImages + added.tiktoks;
   const body = toBody(sections);
   return {
     body,

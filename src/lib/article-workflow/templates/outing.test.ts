@@ -263,7 +263,7 @@ describe("outing の追記 (関連メディアは flat)", () => {
       existingSources: [{ sourceNo: 1, assetId: "blog", url: BLOG_URL }],
       layout: OUTING_TEMPLATE.appendLayout,
     });
-    expect(p.body).toContain("### 坂井新奈が写っているもの");
+    expect(p.body).toContain("### 坂井新奈が出ているもの");
     expect(p.body).not.toContain("### そのほか");
   });
 
@@ -279,6 +279,20 @@ describe("outing の追記 (関連メディアは flat)", () => {
     expect(p.body).toBe("本文だけ。\n\n## 関連メディア\n\n- 【トーク・画像】坂井新奈トーク 2025.8.18 20:31^[2]\n- 【動画】番組^[1]\n");
   });
 
+  it("前の小見出し「写っているもの」のある公開済みの記事には、そこへ足す", () => {
+    const r = renderOutingArticle(input([{ ...talk, ninaAppears: true }, blog]), draft);
+    const existing = "本文。\n\n## 関連メディア\n\n### 坂井新奈が写っているもの\n\n- 【ブログ・画像】前からある写真^[1]\n";
+    const p = planAppend({
+      existingBody: existing,
+      parts: r.parts,
+      sources: r.sources,
+      existingSources: [{ sourceNo: 1, assetId: "blog", url: BLOG_URL }],
+      layout: OUTING_TEMPLATE.appendLayout,
+    });
+    expect(p.body).toContain("### 坂井新奈が写っているもの\n\n- 【トーク・画像】");
+    expect(p.body).not.toContain("### 坂井新奈が出ているもの");
+  });
+
   it("坂井新奈が出ているものがあれば、新しい章を小見出しで分ける", () => {
     const r = renderOutingArticle(input([{ ...talk, ninaAppears: true }, blog]), draft);
     const p = planAppend({
@@ -289,7 +303,7 @@ describe("outing の追記 (関連メディアは flat)", () => {
       layout: OUTING_TEMPLATE.appendLayout,
     });
     expect(p.body).toBe(
-      "本文だけ。\n\n## 関連メディア\n\n### 坂井新奈が写っているもの\n\n- 【トーク・画像】坂井新奈トーク 2025.8.18 20:31^[2]\n\n### そのほか\n\n- 【ブログ・画像】別の写真^[1]\n"
+      "本文だけ。\n\n## 関連メディア\n\n### 坂井新奈が出ているもの\n\n- 【トーク・画像】坂井新奈トーク 2025.8.18 20:31^[2]\n\n### そのほか\n\n- 【ブログ・画像】別の写真^[1]\n"
     );
   });
 
@@ -313,7 +327,7 @@ describe("outing の追記 (関連メディアは flat)", () => {
     });
     expect(p.body).toBe(
       existing +
-        "\n### 坂井新奈が写っているもの\n\n- 【ブログ・画像】写っている^[1]\n\n### そのほか\n\n- 【ブログ・画像】写っていない^[1]\n"
+        "\n### 坂井新奈が出ているもの\n\n- 【ブログ・画像】写っている^[1]\n\n### そのほか\n\n- 【ブログ・画像】写っていない^[1]\n"
     );
     expect(isPureAppend(existing, p.body)).toBe(true);
   });
@@ -326,7 +340,7 @@ describe("renderOutingArticle (坂井新奈が出ているもの)", () => {
       [
         "## 関連メディア",
         "",
-        "### 坂井新奈が写っているもの",
+        "### 坂井新奈が出ているもの",
         "",
         "- 【トーク・画像】坂井新奈トーク 2025.8.18 20:31^[2]",
         "",

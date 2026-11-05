@@ -8,7 +8,7 @@ import { setAssetNinaAppearance } from "@/app/(main)/assets/[id]/nina-appearance
 
 /**
  * クリップに坂井新奈が出ているか (#261) を、記事にする画面から付け外しする。
- * おでかけ記事の関連メディアは「出ている」ものを「坂井新奈が写っているもの」に分ける
+ * おでかけ記事の関連メディアは「出ている」ものを「坂井新奈が出ているもの」に分ける
  */
 export function NinaAppearanceToggle({
   assetId,

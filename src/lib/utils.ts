@@ -304,6 +304,7 @@ export const EXCLUSION_KIND_LABELS: Record<ExclusionKind | "asset", string> = {
   quote: "引用",
   report: "レポ",
   tiktok: "TikTok",
+  link: "購入リンク",
   talk: "トーク",
   blogImage: "ブログ画像",
   /** 本文の行を伴わない出典 (#267)。キーは `asset:` なので画面の表記には出ない (型の網羅のため置く) */

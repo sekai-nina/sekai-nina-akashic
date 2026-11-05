@@ -75,3 +75,33 @@ describe("shapeDossierMaterials: 場所候補の確度 (#333)", () => {
     expect(m.placeCertainties).toEqual({});
   });
 });
+
+describe("shapeDossierMaterials: 外部リンク・外部画像", () => {
+  const withItems = (items: unknown[]) => ({ ...dossier([]), items }) as unknown as DossierForMaterials;
+  const link = (externalUrl: string, caption = "") => ({ kind: "external_link", externalUrl, caption });
+  const image = (externalImageKey: string, caption = "") => ({ kind: "external_image", externalImageKey, caption });
+
+  it("TikTok 以外のリンクを links に並べる。X はレポにも残す", () => {
+    const m = shapeDossierMaterials(
+      withItems([
+        link("https://x.com/a/status/1"),
+        link("https://www.amazon.co.jp/dp/1\nhttps://shop.example/2", "販売ページ"),
+        link("https://www.tiktok.com/@a/video/3"),
+        link("メモだけ"),
+      ])
+    );
+    expect(m.links).toEqual([
+      { url: "https://x.com/a/status/1", caption: "" },
+      { url: "https://www.amazon.co.jp/dp/1", caption: "販売ページ" },
+      { url: "https://shop.example/2", caption: "販売ページ" },
+    ]);
+    expect(m.reports).toEqual(["https://x.com/a/status/1"]);
+    expect(m.tiktoks).toEqual(["https://www.tiktok.com/@a/video/3"]);
+  });
+
+  it("firstImage はキャプションを問わず先頭、dossierThumb はキャプション「サムネ」だけ", () => {
+    const m = shapeDossierMaterials(withItems([image("a.webp"), image("b.webp", "サムネ")]));
+    expect(m.firstImage).toBe("https://r2/a.webp");
+    expect(m.dossierThumb).toBe("https://r2/b.webp");
+  });
+});

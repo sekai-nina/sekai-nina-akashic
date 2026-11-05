@@ -20,7 +20,9 @@ export interface DossierRenderInput {
   reports: string[];
   /** external_link の TikTok の URL (video ID 付きに解決済み) */
   tiktoks: string[];
-  /** ドシエの「サムネ」(external_image) の URL */
+  /** external_link のうち TikTok 以外の URL (X も含む)。物の記事の購入リンクになる */
+  links?: DossierLink[];
+  /** ドシエの「サムネ」(external_image) の URL。キャプション「サムネ」が無ければ先頭の画像 */
   thumbnailUrl: string | null;
   /**
    * 場所候補 (`DossierPlaceCandidate`、ドシエの並び順)。おでかけ記事の `locations` になる。
@@ -42,6 +44,12 @@ export interface DossierRenderInput {
 export interface PlaceVisitCertainty {
   certainty: PlaceCertainty;
   certaintyNote: string;
+}
+
+export interface DossierLink {
+  url: string;
+  /** アイテムのキャプション。無ければ空 */
+  caption: string;
 }
 
 export interface DossierPlace {

@@ -5,6 +5,9 @@
  * **事実の箇条書き**にまとめる `type: item` の記事。既存の手書き 2 本 (`src/content/articles/item/`) の形:
  *
  * - 本文 (AI): リード 1〜2 文 (どんな物か + 何をもとにまとめたか) → `- ` の箇条書き、各事実に `^[n]`。細部は tab でネスト
+ * - 冒頭の画像 (機械): 企画の外部画像 (キャプション「サムネ」、無ければ先頭の 1 枚)。frontmatter の `thumbnail` にも
+ *   入れ、公開サイトの「物」の一覧に出す
+ * - `## 購入リンク` (機械): 企画の外部リンクのカード。AI には渡さない。TikTok は関連メディアの埋め込みのまま
  * - `## 関連メディア` (機械): おでかけと同じ。画像・動画のトークとブログ画像をリンクで、TikTok を埋め込みで、
  *   1 つの箇条書きに (flat)。文章のトークは出典にだけ使う
  * - `date` / `date_display` / tags は AI の提案 (その物が話に出た時期、関係するメンバー + カテゴリ)
@@ -19,7 +22,9 @@ import {
   classifyMaterials,
   dossierSnapshot,
   joinBody,
+  linkCard,
   numberSources,
+  renderLinksSection,
   renderRelatedMediaSection,
   type RelatedMediaStyle,
   type RenderedArticle,
@@ -145,9 +150,15 @@ export function renderItemArticle(input: DossierRenderInput, draft?: AiDraft | n
   // 本文が空なら「下書き無し」と同じ (骨組みだけにする)。AI が関連メディアしか書かなかったときも空になる
   const written = draft ? stripRelatedMedia(normalizeAiBody(draft.body, sources.length)).trimEnd() : "";
   const used = written ? draft : null;
+  const links = (input.links ?? []).map((l) => ({
+    url: l.url,
+    card: linkCard(l.url, l.caption.trim() || input.dossier.title),
+  }));
   const body: string[] = [
+    ...(input.thumbnailUrl ? [`<img src="${input.thumbnailUrl}" alt="${input.dossier.title.replace(/"/g, "”")} サムネイル" width="600">`, ""] : []),
     written || ITEM_BODY_PLACEHOLDER,
     "",
+    ...renderLinksSection(links.map((l) => l.card)),
     ...renderRelatedMediaSection({ talks: mediaTalks, blogs, tiktoks: input.tiktoks, talkSourceNo, style: ITEM_MEDIA_STYLE }),
   ];
 
@@ -156,15 +167,21 @@ export function renderItemArticle(input: DossierRenderInput, draft?: AiDraft | n
     tags: used ? normalizeAiTags(used.tags) : [],
     body: joinBody(body),
     sources,
-    // 引用の章は無い (地の文は AI / 人が持つ)。関連メディアだけ追記の対象
-    parts: buildParts({ quoted: [], reports: [], tiktoks: input.tiktoks, talks: mediaTalks, blogs, talkSourceNo }),
+    // 引用の章は無い (地の文は AI / 人が持つ)。購入リンクと関連メディアだけ追記の対象
+    parts: {
+      ...buildParts({ quoted: [], reports: [], tiktoks: input.tiktoks, talks: mediaTalks, blogs, talkSourceNo }),
+      links,
+    },
     dates: {
       date: used?.date ?? null,
       dateDisplay: used?.dateDisplay ?? null,
       dateMode: null,
     },
     draft: true,
-    frontmatterExtra: { dossier: dossierSnapshot(input.dossier, input.today) },
+    frontmatterExtra: {
+      dossier: dossierSnapshot(input.dossier, input.today),
+      ...(input.thumbnailUrl ? { thumbnail: input.thumbnailUrl } : {}),
+    },
   };
 }
 
