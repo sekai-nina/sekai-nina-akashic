@@ -516,18 +516,15 @@ export function planAppend(input: {
         // 章を作ったばかりなら、見出しの直後の空行は 1 つ (小見出しが続く。フル生成と同じ形)
         const media = findSection(sections, H_MEDIA)!;
         if (media.lines.every((l) => l.trim() === "")) media.lines = [""];
-        fill(
-          ensureSection(sections, NINA_MEDIA_HEADING, [OTHER_MEDIA_HEADING]),
-          [],
-          shownTalks,
-          shownImages
-        );
-        fill(
-          ensureSection(sections, OTHER_MEDIA_HEADING, []),
-          freshTiktoks,
-          freshTalks.filter((t) => !t.ninaAppears),
-          freshImages.filter((b) => !b.ninaAppears)
-        );
+        const otherTalks = freshTalks.filter((t) => !t.ninaAppears);
+        const otherImages = freshImages.filter((b) => !b.ninaAppears);
+        // 足すものがある小見出しだけ作る (先に作ると中身の無い見出しが本文に残る)
+        if (shownTalks.length + shownImages.length > 0) {
+          fill(ensureSection(sections, NINA_MEDIA_HEADING, [OTHER_MEDIA_HEADING]), [], shownTalks, shownImages);
+        }
+        if (freshTiktoks.length + otherTalks.length + otherImages.length > 0) {
+          fill(ensureSection(sections, OTHER_MEDIA_HEADING, []), freshTiktoks, otherTalks, otherImages);
+        }
       } else {
         fill(findSection(sections, H_MEDIA)!, freshTiktoks, freshTalks, freshImages);
       }
