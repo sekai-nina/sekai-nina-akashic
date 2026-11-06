@@ -2,7 +2,7 @@ import { unstable_cache } from "next/cache";
 import { DossierKind, Prisma, type AssetKind, type DataSource } from "@prisma/client";
 import { withClearance, withSession, type TransactionClient } from "@/lib/db";
 import { groupClipRows } from "@/lib/clips/group";
-import { adjacentTalkDays, isTalkDayKey, isWholeMessageItem, nextUnfinishedTalkDay, talkSpeaker, talkThread, type TalkDayScope } from "@/lib/clip-progress/talk-day";
+import { adjacentTalkDays, isMessageClipped, isTalkDayKey, nextUnfinishedTalkDay, talkSpeaker, talkThread, type TalkDayScope } from "@/lib/clip-progress/talk-day";
 import { jstDayString } from "@/lib/utils";
 import { NINA_ENTITY_ID } from "@/lib/nina";
 import { DERIVED_ITEMS_TAG, getDerivedItems, sourcePatternConds, TALK_DAY_SQL, toDateOnlyString } from "./coverage";
@@ -63,7 +63,7 @@ export interface TalkMessage {
   /** Drive のプレーヤー。動画・音声で Drive にあるときだけ */
   playerUrl: string | null;
   clips: TalkClip[];
-  /** メッセージ全体がクリップか企画に入っている。もう一度クリップさせない */
+  /** メッセージ全体がクリップ済。もう一度クリップさせない。判定は isMessageClipped */
   wholeClipped: boolean;
   /** プールから移した先の企画 (見える範囲) */
   dossiers: { id: string; title: string }[];
@@ -195,7 +195,7 @@ export async function getTalkDay(user: Actor, day: string, scope: TalkDayScope):
         playerUrl: (asset.kind === "video" || asset.kind === "audio") && fromDrive
           ? `https://drive.google.com/file/d/${encodeURIComponent(asset.storageKey!)}/preview` : null,
         clips,
-        wholeClipped: own.some((i) => isWholeMessageItem(body, i)),
+        wholeClipped: own.some((i) => isMessageClipped(body, { ...i, inPool: i.dossier.kind === DossierKind.clips })),
         dossiers: [...new Map(own.filter((i) => i.dossier.kind !== DossierKind.clips).map((i) => [i.dossier.id, { id: i.dossier.id, title: i.dossier.title }])).values()],
       };
     });

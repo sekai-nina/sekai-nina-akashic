@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { adjacentTalkDays, isTalkDayKey, isWholeMessageItem, nextUnfinishedTalkDay, talkSpeaker, talkThread } from "./talk-day";
+import { adjacentTalkDays, isMessageClipped, isTalkDayKey, isWholeMessageItem, nextUnfinishedTalkDay, talkSpeaker, talkThread } from "./talk-day";
 
 describe("isTalkDayKey", () => {
   it("実在する日付だけを通す", () => {
@@ -19,6 +19,23 @@ describe("isWholeMessageItem", () => {
     expect(isWholeMessageItem("おはよう", { excerpt: "", note: "メモ" })).toBe(false);
     expect(isWholeMessageItem("おはよう", { excerpt: "", note: "" })).toBe(true);
     expect(isWholeMessageItem("", { excerpt: "", note: "メモ" })).toBe(true);
+  });
+});
+
+describe("isMessageClipped", () => {
+  it("企画に素材として入れただけの行はクリップ済にしない", () => {
+    expect(isMessageClipped("おはよう", { excerpt: "", note: "", inPool: false })).toBe(false);
+    expect(isMessageClipped("", { excerpt: "", note: "", inPool: false })).toBe(false);
+  });
+
+  it("クリップから企画へ移した本文全体の行はクリップ済のまま", () => {
+    expect(isMessageClipped("おはよう", { excerpt: "おはよう", note: "", inPool: false })).toBe(true);
+    expect(isMessageClipped("おはよう", { excerpt: "おは", note: "", inPool: false })).toBe(false);
+  });
+
+  it("プールの行は本文の無いメッセージでもクリップ済にする", () => {
+    expect(isMessageClipped("", { excerpt: "", note: "", inPool: true })).toBe(true);
+    expect(isMessageClipped("おはよう", { excerpt: "おはよう", note: "", inPool: true })).toBe(true);
   });
 });
 
