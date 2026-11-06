@@ -19,6 +19,7 @@ vi.mock("./coverage", async () => {
     getDerivedItems: mocks.derived, deriveItems: mocks.derive,
     toDateOnlyString: (d: Date | null) => d?.toISOString().slice(0, 10) ?? null,
     TALK_DAY_SQL: Prisma.sql`(((a."canonicalDate" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Tokyo')::date)`,
+    talkDaysSql: () => Prisma.sql`TRUE`,
     sourcePatternConds: () => [],
   };
 });
