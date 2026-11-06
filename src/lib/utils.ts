@@ -650,6 +650,18 @@ export const MATERIAL_PROGRESS_LABELS = {
   authorFilter: "書き手で絞り込む",
 } as const;
 
+/** その日のトーク画面 (/progress/materials/talk/[day]) */
+export const TALK_DAY_LABELS = {
+  back: "← トーク一覧", previousDay: "← 前の日", nextDay: "次の日 →",
+  scopeFocus: "本人・言及", scopeAll: "全メンバー", scopeNav: "表示するトーク",
+  mention: "言及", clip: "クリップ", clipped: "クリップ済", remove: "外す", grouped: "まとめたクリップ",
+  addNote: "+ メモ", saveNote: "保存", cancel: "キャンセル", notePlaceholder: "メモ (任意)",
+  play: "再生", selectMessage: "このメッセージを選択", selected: "件選択", clearSelection: "選択を解除", clipTogether: "まとめてクリップ",
+  showBefore: "前のトークを見る", showAfter: "後のトークを見る",
+  clipSelection: "選択部分をクリップ", usedIn: "企画", transcript: "文字起こし", noText: "(本文なし)", empty: "この日に表示するトークはありません",
+  finishAndNext: "クリップ済にして次の日へ", finishOnly: "クリップ済にする", goNext: "次の未クリップの日へ", failed: "保存に失敗しました",
+} as const;
+
 /** ブログの書き手での絞り込み (/progress/materials/blog) */
 export const MATERIAL_AUTHOR_FILTER_LABELS = {
   all: "すべて", self: "本人のブログ", others: "他メンバーのブログ（言及あり）",

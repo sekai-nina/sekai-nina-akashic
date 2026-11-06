@@ -14,6 +14,7 @@
  * public クリアランスの人にはプール自体が RLS で見えない = `findClipPool` が null。
  */
 
+import { randomUUID } from "node:crypto";
 import { ClearanceLevel, DossierKind, Prisma, type TextType } from "@prisma/client";
 import { withSession } from "@/lib/db";
 import { isAboveClearance } from "@/lib/classification";
@@ -181,6 +182,78 @@ export async function createClip(user: ActingUser, input: CreateClipInput) {
   return item;
 }
 
+/** まとめてクリップできるメッセージ数の上限 */
+const MAX_MESSAGES_PER_CLIP = 50;
+
+/**
+ * メッセージ全体をクリップする (トーク画面)。メモも引用も要らない。
+ *
+ * 本文のあるメッセージは本文全体を抜粋にし、画像・動画・音声はアセットへの参照だけを持つ。
+ * 2 件以上なら `clipGroupId` で束ねて 1 つのクリップにする。出典はメッセージごとに要るので
+ * 行は分けたままにし、メモは先頭の行にだけ持たせる (全行に持たせると記事の素材で重複する)。
+ *
+ * 渡された順に並べる。プールより上の機密が 1 件でもあれば、全体を作らない。
+ */
+export async function createMessageClip(user: ActingUser, input: { assetIds: string[]; note?: string }) {
+  const assetIds = [...new Set(input.assetIds)];
+  if (assetIds.length === 0) throw new ClipInputError("メッセージが選ばれていません");
+  if (assetIds.length > MAX_MESSAGES_PER_CLIP) {
+    throw new ClipInputError(`一度にまとめられるのは ${MAX_MESSAGES_PER_CLIP} 件までです`);
+  }
+  const note = (input.note ?? "").trim();
+
+  const pool = await ensureClipPool(user);
+  if (!canEditDossier(user, pool)) throw new ClipForbiddenError("クリップを作る権限がありません");
+
+  const clipGroupId = assetIds.length > 1 ? randomUUID() : null;
+  const items = await withSession(user, async (tx) => {
+    const assets = await tx.asset.findMany({
+      where: { id: { in: assetIds } },
+      select: {
+        id: true,
+        title: true,
+        classification: true,
+        texts: { where: { textType: "message_body" }, orderBy: { createdAt: "asc" }, select: { textType: true, content: true } },
+      },
+    });
+    const byId = new Map(assets.map((a) => [a.id, a]));
+    const sortOrder = await nextSortOrder(tx, pool.id);
+    const data = assetIds.map((assetId, i) => {
+      const asset = byId.get(assetId);
+      if (!asset) throw new ClipAssetNotFoundError("アセットが見つかりません");
+      if (isAboveClearance(asset.classification, pool.classification)) {
+        throw new ClipInputError("このアセットの機密レベルはクリップのプールより上なので入れられません");
+      }
+      const body = asset.texts.find((t) => t.content.trim() !== "");
+      const located = body ? locateQuote([body], body.content.trim(), {}) : null;
+      return {
+        dossierId: pool.id,
+        kind: "asset_ref" as const,
+        assetId,
+        caption: asset.title || "",
+        note: i === 0 ? note : "",
+        excerpt: located?.excerpt ?? body?.content.trim() ?? "",
+        excerptType: located?.excerptType ?? null,
+        excerptStart: located?.start ?? null,
+        excerptEnd: located?.end ?? null,
+        clipGroupId,
+        createdById: user.id,
+        sortOrder: sortOrder + i,
+      };
+    });
+    return tx.dossierItem.createManyAndReturn({ data, select: { id: true } });
+  });
+
+  await logAudit({
+    actorId: user.id,
+    action: "clip.create",
+    targetType: "DossierItem",
+    targetId: items[0].id,
+    metadata: { assetIds, itemIds: items.map((i) => i.id), clipGroupId },
+  });
+  return { ids: items.map((i) => i.id), clipGroupId };
+}
+
 interface LocatedQuote {
   excerpt: string;
   excerptType: TextType;
@@ -259,6 +332,8 @@ const CLIP_SELECT = (clearance: string) =>
     excerptStart: true,
     excerptEnd: true,
     caption: true,
+    clipGroupId: true,
+    sortOrder: true,
     createdAt: true,
     createdById: true,
     createdBy: { select: { id: true, name: true } },

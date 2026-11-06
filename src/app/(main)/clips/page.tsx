@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { listClips, MAX_CLIPS_LISTED } from "@/lib/domain/clips";
 import { listEditableDossiers } from "@/lib/domain/dossiers";
+import { groupClipRows } from "@/lib/clips/group";
 import { ClipsBoard, type ClipCard } from "./clips-board";
 
 /**
@@ -21,11 +22,12 @@ export default async function ClipsPage() {
     canEdit ? listEditableDossiers(session.user, { withArticles: true }) : Promise.resolve([]),
   ]);
 
-  const cards: ClipCard[] = clips.map((c) => ({
+  const cards: ClipCard[] = groupClipRows(clips).map(({ head: c, members }) => ({
     id: c.id,
-    excerpt: c.excerpt,
+    memberIds: members.map((m) => m.id),
+    excerpt: members.map((m) => m.excerpt).filter(Boolean).join("\n\n"),
     note: c.note,
-    located: c.excerptStart != null,
+    located: members.every((m) => !m.excerpt || m.excerptStart != null),
     createdAt: c.createdAt.toISOString(),
     createdById: c.createdById,
     createdBy: c.createdBy?.name ?? null,
@@ -36,11 +38,14 @@ export default async function ClipsPage() {
           title: c.asset.title || c.caption || "(無題)",
           date: c.asset.canonicalDate?.toISOString() ?? null,
           thumbnailUrl: c.asset.thumbnailUrl,
-          entities: c.asset.entities.map((ae) => ({
-            id: ae.entity.id,
-            type: ae.entity.type,
-            name: ae.entity.canonicalName,
-          })),
+          entities: [
+            ...new Map(
+              members.flatMap((m) => m.asset?.entities ?? []).map((ae) => [
+                ae.entity.id,
+                { id: ae.entity.id, type: ae.entity.type, name: ae.entity.canonicalName },
+              ])
+            ).values(),
+          ],
         }
       : // アセットが消された (Cascade で行ごと消えるので通常は来ない) か、RLS で見えない
         null,

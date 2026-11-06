@@ -52,7 +52,8 @@ export default async function MaterialProgressPage({ params, searchParams }: {
           <li key={item.itemKey} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
             <div className="min-w-0 flex-1">
               <div className="break-words text-sm font-medium">
-                {item.assetId ? <Link className="text-indigo-700 hover:underline" href={`/assets/${item.assetId}`}>{item.itemTitle || item.itemKey}</Link>
+                {sourceKey === "talk" ? <Link className="text-indigo-700 hover:underline" href={`/progress/materials/talk/${item.itemKey}`}>{item.itemTitle || item.itemKey}</Link>
+                  : item.assetId ? <Link className="text-indigo-700 hover:underline" href={`/assets/${item.assetId}`}>{item.itemTitle || item.itemKey}</Link>
                   : item.articleShortId ? <Link className="text-indigo-700 hover:underline" href={`/articles/${item.articleShortId}`}>{item.itemTitle}</Link>
                     : <a className="text-indigo-700 hover:underline" href={/^https?:\/\//.test(item.itemKey) ? item.itemKey : undefined} target="_blank" rel="noreferrer">{item.itemTitle || item.itemKey}</a>}
               </div>

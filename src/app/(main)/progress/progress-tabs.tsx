@@ -19,7 +19,7 @@ export function ProgressTabs() {
       <nav className="mt-1 flex flex-wrap gap-1 border-b border-slate-200" aria-label={L.clipProgress}>
         {MATERIAL_SOURCE_KEYS.map((key) => (
           <Link key={key} href={`/progress/materials/${key}`}
-            className={cn("border-b-2 px-3 py-2 text-sm -mb-px", pathname === `/progress/materials/${key}`
+            className={cn("border-b-2 px-3 py-2 text-sm -mb-px", pathname === `/progress/materials/${key}` || pathname.startsWith(`/progress/materials/${key}/`)
               ? "border-slate-900 font-medium text-slate-900" : "border-transparent text-slate-500 hover:text-slate-800")}>
             {MATERIAL_SOURCE_LABELS[key]}
           </Link>
