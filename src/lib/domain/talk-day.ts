@@ -153,6 +153,8 @@ export async function getTalkDay(user: Actor, day: string, scope: TalkDayScope):
       }),
       tx.dossierItem.findMany({
         where: { assetId: { in: ids }, kind: "asset_ref" },
+        // 1 つのメッセージのクリップは作った順。メモの保存で並びが変わらないように固定する
+        orderBy: { createdAt: "asc" },
         select: {
           id: true, assetId: true, note: true, excerpt: true, clipGroupId: true, sortOrder: true,
           dossier: { select: { id: true, title: true, kind: true } },
