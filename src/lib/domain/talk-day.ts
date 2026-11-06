@@ -2,10 +2,10 @@ import { unstable_cache } from "next/cache";
 import { DossierKind, Prisma, type AssetKind, type DataSource } from "@prisma/client";
 import { withClearance, withSession, type TransactionClient } from "@/lib/db";
 import { groupClipRows } from "@/lib/clips/group";
-import { adjacentTalkDays, isTalkDayKey, nextUnfinishedTalkDay, talkSpeaker, talkThread, type TalkDayScope } from "@/lib/clip-progress/talk-day";
+import { adjacentTalkDays, isTalkDayKey, isWholeMessageItem, nextUnfinishedTalkDay, talkSpeaker, talkThread, type TalkDayScope } from "@/lib/clip-progress/talk-day";
 import { jstDayString } from "@/lib/utils";
 import { NINA_ENTITY_ID } from "@/lib/nina";
-import { getDerivedItems, sourcePatternConds, TALK_DAY_SQL, toDateOnlyString } from "./coverage";
+import { DERIVED_ITEMS_TAG, getDerivedItems, sourcePatternConds, TALK_DAY_SQL, toDateOnlyString } from "./coverage";
 
 interface Actor { id: string; clearance: string }
 
@@ -49,6 +49,8 @@ export interface TalkMessage {
   assetId: string;
   kind: AssetKind;
   speaker: string;
+  /** 本人の投稿 */
+  self: boolean;
   /** 本人でない話し手の言及 */
   mention: boolean;
   /** 時刻順に並べるための ISO 文字列 */
@@ -61,7 +63,7 @@ export interface TalkMessage {
   /** Drive のプレーヤー。動画・音声で Drive にあるときだけ */
   playerUrl: string | null;
   clips: TalkClip[];
-  /** メッセージ全体のクリップがある */
+  /** メッセージ全体がクリップか企画に入っている。もう一度クリップさせない */
   wholeClipped: boolean;
   /** プールから移した先の企画 (見える範囲) */
   dossiers: { id: string; title: string }[];
@@ -85,7 +87,7 @@ async function getTalkSource(tx: TransactionClient): Promise<DataSource | null> 
   return tx.dataSource.findUnique({ where: { key: TALK_SOURCE_KEY } });
 }
 
-/** 本人か言及のトークがある日。全日の導出と同じ寿命・タグ */
+/** 本人か言及のトークがある日。日付の集合はほとんど変わらないので長めに持つ */
 function getFocusDays(clearance: string): Promise<string[]> {
   return unstable_cache(async () => {
     return withClearance(clearance, async (tx) => {
@@ -99,7 +101,7 @@ function getFocusDays(clearance: string): Promise<string[]> {
       `;
       return rows.map((r) => r.day);
     }, { timeout: 30_000 });
-  }, ["talk-focus-days", clearance], { revalidate: 90, tags: ["coverage-derived-items"] })();
+  }, ["talk-focus-days", clearance], { revalidate: 600, tags: [DERIVED_ITEMS_TAG] })();
 }
 
 const timeFormat = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "numeric", minute: "2-digit" });
@@ -110,7 +112,11 @@ export async function getTalkDay(user: Actor, day: string, scope: TalkDayScope):
   if (!isTalkDayKey(day)) return null;
   const [derived, focusDays] = await Promise.all([
     getDerivedItems(TALK_SOURCE_KEY, user.clearance),
-    getFocusDays(user.clearance),
+    // 全期間の集計は「次の日」にしか使わない。失敗しても画面は出す
+    getFocusDays(user.clearance).catch((error: unknown) => {
+      console.error("talk focus days failed", error instanceof Error ? error.name : "unknown");
+      return [] as string[];
+    }),
   ]);
   const allDays = derived.map((d) => toDateOnlyString(d.itemDate)).filter((d): d is string => !!d);
 
@@ -180,7 +186,7 @@ export async function getTalkDay(user: Actor, day: string, scope: TalkDayScope):
       const speaker = speakerOf(asset.title);
       const fromDrive = asset.storageProvider === "gdrive" && asset.storageKey;
       return {
-        assetId: asset.id, kind: asset.kind, speaker, mention: speaker !== NINA_NAME && focusIds.has(asset.id),
+        assetId: asset.id, kind: asset.kind, speaker, self: speaker === NINA_NAME, mention: speaker !== NINA_NAME && focusIds.has(asset.id),
         at: asset.canonicalDate?.toISOString() ?? "",
         time: !asset.canonicalDate ? "" : (jstDayString(asset.canonicalDate) === day ? timeFormat : dateTimeFormat).format(asset.canonicalDate),
         body,
@@ -189,7 +195,7 @@ export async function getTalkDay(user: Actor, day: string, scope: TalkDayScope):
         playerUrl: (asset.kind === "video" || asset.kind === "audio") && fromDrive
           ? `https://drive.google.com/file/d/${encodeURIComponent(asset.storageKey!)}/preview` : null,
         clips,
-        wholeClipped: clips.some((c) => !c.excerpt.trim() || c.excerpt.trim() === body.trim()),
+        wholeClipped: own.some((i) => isWholeMessageItem(body, i)),
         dossiers: [...new Map(own.filter((i) => i.dossier.kind !== DossierKind.clips).map((i) => [i.dossier.id, { id: i.dossier.id, title: i.dossier.title }])).values()],
       };
     });
@@ -201,7 +207,7 @@ export async function getTalkDay(user: Actor, day: string, scope: TalkDayScope):
       messages, threads, focusCount: focusIds.size, totalCount: found.length,
       doneDays: new Set(statuses.map((s) => s.itemKey)),
     };
-  }, { timeout: 30_000 });
+  });
   if (!result) return null;
 
   const { newer, older } = adjacentTalkDays(allDays, day);

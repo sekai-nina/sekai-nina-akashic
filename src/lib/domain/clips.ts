@@ -453,7 +453,7 @@ export async function moveClips(
   const result = await withSession(user, async (tx) => {
     const found = await tx.dossierItem.findMany({
       where: { id: { in: ids }, dossierId: pool.id },
-      select: { id: true, asset: { select: { classification: true } } },
+      select: { id: true, clipGroupId: true, sortOrder: true, asset: { select: { classification: true } } },
     });
     if (found.length !== ids.length) {
       throw new ClipInputError("選んだクリップの一部が既に無くなっています。再読み込みしてください");
@@ -488,6 +488,11 @@ export async function moveClips(
     if (count !== ids.length) {
       throw new ClipInputError("一部のクリップを移せませんでした (権限が変わった可能性があります)");
     }
+    // まとめたクリップは同じ時刻に作るので、createdAt では並びが決まらない
+    const grouped = found.filter((f) => f.clipGroupId).sort((a, b) => a.sortOrder - b.sortOrder);
+    for (const [i, row] of grouped.entries()) {
+      await tx.dossierItem.update({ where: { id: row.id }, data: { sortOrder: sortOrder + i } });
+    }
     return { dossierId, moved: count };
   });
 
@@ -521,9 +526,23 @@ export async function deleteClips(user: ActingUser, itemIds: string[]): Promise<
   if (!pool) return 0;
   if (!canEditDossier(user, pool)) throw new ClipInputError("クリップを消す権限がありません");
 
-  const { count } = await withSession(user, (tx) =>
-    tx.dossierItem.deleteMany({ where: { id: { in: ids }, dossierId: pool.id } })
-  );
+  const count = await withSession(user, async (tx) => {
+    // まとめたクリップのメモは 1 行にしか無いので、一部だけ消すときは残る行へ移す
+    const notes = await tx.dossierItem.findMany({
+      where: { id: { in: ids }, dossierId: pool.id, clipGroupId: { not: null }, note: { not: "" } },
+      select: { note: true, clipGroupId: true },
+    });
+    for (const { note, clipGroupId } of notes) {
+      const heir = await tx.dossierItem.findFirst({
+        where: { clipGroupId, dossierId: pool.id, id: { notIn: ids } },
+        orderBy: { sortOrder: "asc" },
+        select: { id: true },
+      });
+      if (heir) await tx.dossierItem.update({ where: { id: heir.id }, data: { note } });
+    }
+    const deleted = await tx.dossierItem.deleteMany({ where: { id: { in: ids }, dossierId: pool.id } });
+    return deleted.count;
+  });
   if (count > 0) {
     await logAudit({
       actorId: user.id,

@@ -657,6 +657,7 @@ export const TALK_DAY_LABELS = {
   mention: "言及", clip: "クリップ", clipped: "クリップ済", remove: "外す", grouped: "まとめたクリップ",
   addNote: "+ メモ", saveNote: "保存", cancel: "キャンセル", notePlaceholder: "メモ (任意)",
   play: "再生", selectMessage: "このメッセージを選択", selected: "件選択", clearSelection: "選択を解除", clipTogether: "まとめてクリップ",
+  confirmRemove: "まとめたクリップとメモも消えます。外しますか？",
   showBefore: "前のトークを見る", showAfter: "後のトークを見る",
   clipSelection: "選択部分をクリップ", usedIn: "企画", transcript: "文字起こし", noText: "(本文なし)", empty: "この日に表示するトークはありません",
   finishAndNext: "クリップ済にして次の日へ", finishOnly: "クリップ済にする", goNext: "次の未クリップの日へ", failed: "保存に失敗しました",

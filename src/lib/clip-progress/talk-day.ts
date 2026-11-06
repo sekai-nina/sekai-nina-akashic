@@ -13,6 +13,16 @@ export function talkSpeaker(title: string): string | null {
   return /^(.+?)トーク\s/.exec(title)?.[1] ?? null;
 }
 
+/**
+ * そのメッセージ全体を指す行か。範囲の抜粋やメモだけの行は全体ではない。
+ * 抜粋もメモも無い行は、メッセージごと企画へ入れたもの。
+ */
+export function isWholeMessageItem(body: string, item: { excerpt: string; note: string }): boolean {
+  const excerpt = item.excerpt.trim();
+  if (excerpt) return excerpt === body.trim();
+  return !body.trim() || !item.note.trim();
+}
+
 /** 全日の中で隣り合う日。`older` は一覧で下の行にあたる。 */
 export function adjacentTalkDays(days: string[], day: string): { newer: string | null; older: string | null } {
   const sorted = [...new Set(days)].sort();

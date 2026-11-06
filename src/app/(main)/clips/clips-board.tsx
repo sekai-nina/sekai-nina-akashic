@@ -155,7 +155,7 @@ export function ClipsBoard({ clips, dossiers, currentUserId, canEdit }: ClipsBoa
   const removeSelected = () => {
     const ids = selectedItemIds;
     if (ids.length === 0) return;
-    if (!confirm(`${ids.length} 件のクリップを削除しますか？`)) return;
+    if (!confirm(`${selected.size} 件のクリップを削除しますか？`)) return;
     setError(null);
     startDelete(async () => {
       const result = await deleteClipsAction(ids);

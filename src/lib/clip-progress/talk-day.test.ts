@@ -1,11 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { adjacentTalkDays, isTalkDayKey, nextUnfinishedTalkDay, talkSpeaker, talkThread } from "./talk-day";
+import { adjacentTalkDays, isTalkDayKey, isWholeMessageItem, nextUnfinishedTalkDay, talkSpeaker, talkThread } from "./talk-day";
 
 describe("isTalkDayKey", () => {
   it("実在する日付だけを通す", () => {
     expect(isTalkDayKey("2026-11-05")).toBe(true);
     expect(isTalkDayKey("2026-02-30")).toBe(false);
     expect(isTalkDayKey("2026-11-5")).toBe(false);
+  });
+});
+
+describe("isWholeMessageItem", () => {
+  it("本文全体の抜粋は全体、一部の抜粋は全体でない", () => {
+    expect(isWholeMessageItem("おはよう\n", { excerpt: "おはよう", note: "" })).toBe(true);
+    expect(isWholeMessageItem("おはよう", { excerpt: "おは", note: "" })).toBe(false);
+  });
+
+  it("本文のあるメッセージのメモだけの行は全体でない", () => {
+    expect(isWholeMessageItem("おはよう", { excerpt: "", note: "メモ" })).toBe(false);
+    expect(isWholeMessageItem("おはよう", { excerpt: "", note: "" })).toBe(true);
+    expect(isWholeMessageItem("", { excerpt: "", note: "メモ" })).toBe(true);
   });
 });
 
