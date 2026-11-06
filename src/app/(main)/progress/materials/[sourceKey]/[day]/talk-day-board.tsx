@@ -23,6 +23,8 @@ export function TalkDayBoard({ talk, editable }: { talk: TalkDay; editable: bool
   const [pick, setPick] = useState<TextPick | null>(null);
   const [dialog, setDialog] = useState<{ assetId: string; draft: ClipDraft } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // ハサミで作った直後のクリップ。すぐメモを書けるように入力欄を開く
+  const [freshClipId, setFreshClipId] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   // スマホではボタンに触れた時点で選択が外れることがある。押している間は消さない
   const pressingPick = useRef(false);
@@ -80,7 +82,12 @@ export function TalkDayBoard({ talk, editable }: { talk: TalkDay; editable: bool
         if (!next.delete(message.assetId)) next.add(message.assetId);
         return next;
       })}
-      onClip={() => run(() => createMessageClipAction({ assetIds: [message.assetId] }))}
+      freshClipId={freshClipId}
+      onClip={() => run(async () => {
+        const result = await createMessageClipAction({ assetIds: [message.assetId] });
+        if (result.ok) setFreshClipId(result.ids[0]);
+        return result;
+      })}
       onRemove={(clip) => run(() => deleteClipsAction(clip.itemIds))} />
   );
 
@@ -169,8 +176,8 @@ function MentionThread({ message, thread, renderRow }: {
   );
 }
 
-function MessageRow({ message, editable, pending, checked, onCheck, onClip, onRemove }: {
-  message: TalkMessage; editable: boolean; pending: boolean; checked: boolean;
+function MessageRow({ message, editable, pending, checked, freshClipId, onCheck, onClip, onRemove }: {
+  message: TalkMessage; editable: boolean; pending: boolean; checked: boolean; freshClipId: string | null;
   onCheck: () => void; onClip: () => void; onRemove: (clip: TalkClip) => void;
 }) {
   const [playing, setPlaying] = useState(false);
@@ -222,7 +229,7 @@ function MessageRow({ message, editable, pending, checked, onCheck, onClip, onRe
           )}
         </div>
         {message.clips.map((clip) => (
-          <ClipRow key={clip.id} clip={clip} editable={editable} pending={pending} onRemove={() => onRemove(clip)} />
+          <ClipRow key={clip.id} clip={clip} editable={editable} pending={pending} fresh={clip.id === freshClipId} onRemove={() => onRemove(clip)} />
         ))}
         {message.dossiers.length > 0 && (
           <p className="mt-1 text-xs text-slate-500">
@@ -242,11 +249,15 @@ function MessageRow({ message, editable, pending, checked, onCheck, onClip, onRe
   );
 }
 
-function ClipRow({ clip, editable, pending, onRemove }: { clip: TalkClip; editable: boolean; pending: boolean; onRemove: () => void }) {
+function ClipRow({ clip, editable, pending, fresh, onRemove }: { clip: TalkClip; editable: boolean; pending: boolean; fresh: boolean; onRemove: () => void }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(clip.note);
   const [error, setError] = useState<string | null>(null);
   const [saving, startSave] = useTransition();
+  // 行が先に描かれることも、印が先に付くこともあるので、初期値ではなく effect で開く
+  useEffect(() => {
+    if (fresh && editable) setEditing(true);
+  }, [fresh, editable]);
   const save = () => {
     setError(null);
     startSave(async () => {
