@@ -22,27 +22,6 @@ export function talkSpeaker(title: string): string | null {
   return /^(.+?)トーク\s/.exec(title)?.[1] ?? null;
 }
 
-/**
- * そのメッセージ全体を指す行か。範囲の抜粋やメモだけの行は全体ではない。
- * 抜粋もメモも無い行は、メッセージごと入れたもの。
- */
-export function isWholeMessageItem(body: string, item: { excerpt: string; note: string }): boolean {
-  const excerpt = item.excerpt.trim();
-  if (excerpt) return excerpt === body.trim();
-  return !body.trim() || !item.note.trim();
-}
-
-/**
- * もう一度クリップさせないメッセージか。
- * 企画の行は、抜粋が本文全体のもの (クリップから移した行) だけを数える。
- * 抜粋の無い行は素材として企画へ入れただけで、クリップしたことにはならない。
- * 本文の無いメッセージをクリップから移した行もここに入るが、見分ける列が無いので受け入れる。
- */
-export function isMessageClipped(body: string, item: { excerpt: string; note: string; inPool: boolean }): boolean {
-  if (!item.inPool && !item.excerpt.trim()) return false;
-  return isWholeMessageItem(body, item);
-}
-
 /** 全日の中で隣り合う日。`older` は一覧で下の行にあたる。 */
 export function adjacentTalkDays(days: string[], day: string): { newer: string | null; older: string | null } {
   const sorted = [...new Set(days)].sort();
