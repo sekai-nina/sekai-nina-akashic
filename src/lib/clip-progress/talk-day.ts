@@ -8,6 +8,15 @@ export function isTalkDayKey(day: string): boolean {
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === day;
 }
 
+/** JST の日付の集合を覆う UTC の範囲。形式の違うキーは無視し、1 件も無ければ null。 */
+export function talkDaysBounds(days: string[]): { start: Date; end: Date } | null {
+  const valid = days.filter(isTalkDayKey).sort();
+  if (!valid.length) return null;
+  const start = new Date(`${valid[0]}T00:00:00+09:00`);
+  const last = new Date(`${valid[valid.length - 1]}T00:00:00+09:00`);
+  return { start, end: new Date(last.getTime() + 24 * 60 * 60 * 1000) };
+}
+
 /** 話し手。アセットのタイトルは `大田美月トーク 2026.11.5 7:06` の形。 */
 export function talkSpeaker(title: string): string | null {
   return /^(.+?)トーク\s/.exec(title)?.[1] ?? null;

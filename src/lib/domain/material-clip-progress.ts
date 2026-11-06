@@ -2,7 +2,7 @@ import { unstable_cache } from "next/cache";
 import { Prisma, type DataSource } from "@prisma/client";
 import { withClearance, withSession, type TransactionClient } from "@/lib/db";
 import { assertClearance, isAboveClearance } from "@/lib/classification";
-import { deriveItems, getDerivedItems, sourcePatternConds, TALK_DAY_SQL, toDateOnlyString, type DerivedItem } from "./coverage";
+import { deriveItems, getDerivedItems, sourcePatternConds, TALK_DAY_SQL, talkDaysSql, toDateOnlyString, type DerivedItem } from "./coverage";
 import { getSourceAuthorKeys, getSourceMentionKeys } from "./coverage-items";
 import { logAudit } from "./audit";
 import {
@@ -102,7 +102,7 @@ async function assetsForItems(tx: TransactionClient, source: DataSource, items: 
   } else {
     const keys = items.map((i) => i.itemKey);
     const match = source.itemRule === "talk_date"
-      ? Prisma.sql`${TALK_DAY_SQL}::text = ANY(${keys})`
+      ? talkDaysSql(keys)
       : Prisma.sql`sr.url = ANY(${keys})`;
     ids = await tx.$queryRaw<{ id: string }[]>`
       SELECT DISTINCT a.id FROM "Asset" a JOIN "SourceRecord" sr ON sr."assetId" = a.id

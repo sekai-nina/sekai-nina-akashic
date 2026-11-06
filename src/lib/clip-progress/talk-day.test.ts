@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { adjacentTalkDays, isMessageClipped, isTalkDayKey, isWholeMessageItem, nextUnfinishedTalkDay, talkSpeaker, talkThread } from "./talk-day";
+import { adjacentTalkDays, isMessageClipped, isTalkDayKey, talkDaysBounds, isWholeMessageItem, nextUnfinishedTalkDay, talkSpeaker, talkThread } from "./talk-day";
 
 describe("isTalkDayKey", () => {
   it("実在する日付だけを通す", () => {
@@ -36,6 +36,20 @@ describe("isMessageClipped", () => {
   it("プールの行は本文の無いメッセージでもクリップ済にする", () => {
     expect(isMessageClipped("", { excerpt: "", note: "", inPool: true })).toBe(true);
     expect(isMessageClipped("おはよう", { excerpt: "おはよう", note: "", inPool: true })).toBe(true);
+  });
+});
+
+describe("talkDaysBounds", () => {
+  it("JST の 0 時から最後の日の翌 0 時までを UTC で返す", () => {
+    expect(talkDaysBounds(["2026-11-02", "2026-11-01"])).toEqual({
+      start: new Date("2026-10-31T15:00:00.000Z"),
+      end: new Date("2026-11-02T15:00:00.000Z"),
+    });
+  });
+
+  it("形式の違うキーは無視し、残らなければ null", () => {
+    expect(talkDaysBounds(["bad", "2026-11-01"])?.end).toEqual(new Date("2026-11-01T15:00:00.000Z"));
+    expect(talkDaysBounds(["bad"])).toBeNull();
   });
 });
 

@@ -6,6 +6,7 @@
  * Lens / Coverage / LensItemCheck のテーブルと行は残すが、アプリから読み書きするコードは無い（シード CLI だけが Lens を作る）。
  */
 
+import { talkDaysBounds } from "@/lib/clip-progress/talk-day";
 import { ClearanceLevel, DataSourceKind, ItemRule, Prisma } from "@prisma/client";
 import { unstable_cache } from "next/cache";
 import { withClearance, type TransactionClient } from "@/lib/db";
@@ -226,6 +227,18 @@ export function sourcePatternConds(ds: {
 export const TALK_DAY_SQL = Prisma.sql`(((a."canonicalDate" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Tokyo')::date)`;
 
 /**
+ * 日付キーでトークを絞る条件。`TALK_DAY_SQL` との文字列比較は索引が効かず 1 回 5 秒かかるので、
+ * `canonicalDate` の範囲を足して索引で先に絞る (実測 4〜5 秒 → 50〜150ms)。
+ */
+export function talkDaysSql(days: string[]): Prisma.Sql {
+  const bounds = talkDaysBounds(days);
+  if (!bounds) return Prisma.sql`FALSE`;
+  return Prisma.sql`a."canonicalDate" >= ${bounds.start.toISOString()}::text::timestamp
+    AND a."canonicalDate" < ${bounds.end.toISOString()}::text::timestamp
+    AND ${TALK_DAY_SQL}::text = ANY(${days})`;
+}
+
+/**
  * DataSource のアイテムを導出する（itemRule 別）。withClearance の tx 経由で呼ぶこと
  * （Asset/SourceRecord の RLS が効く）。返り値は itemDate 昇順（null は末尾）でソート済み。
  *
@@ -252,10 +265,7 @@ export async function deriveItems(
   // （実測: トーク26,794件中1,515件≒5.7%がずれる）。AT TIME ZONE で JST の壁時計に直してから date 化する。
   if (ds.itemRule === "talk_date") {
     const conds: Prisma.Sql[] = [Prisma.sql`a."canonicalDate" IS NOT NULL`, ...sourcePatternConds(ds)];
-    if (onlyKeys)
-      conds.push(
-        Prisma.sql`(((a."canonicalDate" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Tokyo')::date)::text = ANY(${onlyKeys})`
-      );
+    if (onlyKeys) conds.push(talkDaysSql(onlyKeys));
     rows = await tx.$queryRaw<DerivedItem[]>`
       SELECT (((a."canonicalDate" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Tokyo')::date)::text AS "itemKey",
              ((a."canonicalDate" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Tokyo')::date         AS "itemDate",
