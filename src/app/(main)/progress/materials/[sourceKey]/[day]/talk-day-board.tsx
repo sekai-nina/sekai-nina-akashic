@@ -80,7 +80,11 @@ export function TalkDayBoard({ talk, editable }: { talk: TalkDay; editable: bool
         if (!next.delete(message.assetId)) next.add(message.assetId);
         return next;
       })}
-      onClip={() => run(() => createMessageClipAction({ assetIds: [message.assetId] }))}
+      onClip={(onCreated) => run(async () => {
+        const result = await createMessageClipAction({ assetIds: [message.assetId] });
+        if (result.ok) onCreated(result.ids[0]);
+        return result;
+      })}
       onRemove={(clip) => run(() => deleteClipsAction(clip.itemIds))} />
   );
 
@@ -171,9 +175,11 @@ function MentionThread({ message, thread, renderRow }: {
 
 function MessageRow({ message, editable, pending, checked, onCheck, onClip, onRemove }: {
   message: TalkMessage; editable: boolean; pending: boolean; checked: boolean;
-  onCheck: () => void; onClip: () => void; onRemove: (clip: TalkClip) => void;
+  onCheck: () => void; onClip: (onCreated: (clipId: string) => void) => void; onRemove: (clip: TalkClip) => void;
 }) {
   const [playing, setPlaying] = useState(false);
+  // ハサミで作った直後のクリップ。同じメッセージが前後の展開にも出るので、押した行だけで持つ
+  const [freshClipId, setFreshClipId] = useState<string | null>(null);
   const label = `${message.speaker} ${message.time}`;
   return (
     <li className="flex items-start gap-2">
@@ -222,7 +228,7 @@ function MessageRow({ message, editable, pending, checked, onCheck, onClip, onRe
           )}
         </div>
         {message.clips.map((clip) => (
-          <ClipRow key={clip.id} clip={clip} editable={editable} pending={pending} onRemove={() => onRemove(clip)} />
+          <ClipRow key={clip.id} clip={clip} editable={editable} pending={pending} fresh={clip.id === freshClipId} onOpened={() => setFreshClipId(null)} onRemove={() => onRemove(clip)} />
         ))}
         {message.dossiers.length > 0 && (
           <p className="mt-1 text-xs text-slate-500">
@@ -233,7 +239,7 @@ function MessageRow({ message, editable, pending, checked, onCheck, onClip, onRe
         )}
       </div>
       {editable && !message.wholeClipped && (
-        <button type="button" disabled={pending} onClick={onClip} aria-label={`${label} ${L.clip}`} title={L.clip}
+        <button type="button" disabled={pending} onClick={() => onClip(setFreshClipId)} aria-label={`${label} ${L.clip}`} title={L.clip}
           className="mt-5 shrink-0 rounded-full border border-sky-300 bg-white p-2 text-sky-700 hover:bg-sky-50 disabled:opacity-50">
           <Scissors className="h-4 w-4" />
         </button>
@@ -242,11 +248,19 @@ function MessageRow({ message, editable, pending, checked, onCheck, onClip, onRe
   );
 }
 
-function ClipRow({ clip, editable, pending, onRemove }: { clip: TalkClip; editable: boolean; pending: boolean; onRemove: () => void }) {
+function ClipRow({ clip, editable, pending, fresh, onOpened, onRemove }: {
+  clip: TalkClip; editable: boolean; pending: boolean; fresh: boolean; onOpened: () => void; onRemove: () => void;
+}) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(clip.note);
   const [error, setError] = useState<string | null>(null);
   const [saving, startSave] = useTransition();
+  // 行が先に描かれることも、印が先に付くこともあるので、初期値ではなく effect で開く
+  useEffect(() => {
+    if (!fresh || !editable) return;
+    setEditing(true);
+    onOpened();
+  }, [fresh, editable, onOpened]);
   const save = () => {
     setError(null);
     startSave(async () => {
