@@ -6,6 +6,7 @@ import { invalidateDossiers } from "@/lib/cache";
 import {
   ClipInputError,
   createClip,
+  createMessageClip,
   deleteClips,
   moveClips,
   updateClipNote,
@@ -60,6 +61,23 @@ export async function createClipAction(input: {
     return { id: item.id, located: item.excerptStart != null };
   });
   if (result.ok) revalidateClips(input.assetId);
+  return result;
+}
+
+/** トーク画面の 1 タップ・まとめてクリップ。進捗の一覧のクリップ数も変わる */
+export async function createMessageClipAction(input: {
+  assetIds: string[];
+  note?: string;
+}): Promise<ClipActionResult<{ ids: string[] }>> {
+  const user = await requireRole(["admin", "member"]);
+  const result = await guard(async () => {
+    const { ids } = await createMessageClip(user, input);
+    return { ids };
+  });
+  if (result.ok) {
+    revalidateClips();
+    revalidatePath("/progress", "layout");
+  }
   return result;
 }
 

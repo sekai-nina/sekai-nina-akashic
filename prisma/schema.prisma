@@ -486,6 +486,10 @@ model DossierItem {
   createdById String?
   createdBy   User?   @relation("DossierItemCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
+  /// 複数のメッセージをまとめた 1 つのクリップ。同じ値の行が 1 枚のカードになる。
+  /// 出典はメッセージごとに残すので、行は分けたまま束ねる。1 件だけのクリップは null
+  clipGroupId String?
+
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -495,6 +499,7 @@ model DossierItem {
   @@index([dossierId])
   @@index([assetId])
   @@index([createdById])
+  @@index([clipGroupId])
 }
 
 model DossierPlaceCandidate {

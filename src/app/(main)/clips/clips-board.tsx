@@ -22,6 +22,8 @@ import { ARTICLE_WORKFLOW_LABELS as L, ASSET_KIND_LABELS, ENTITY_TYPE_BADGE, ENT
 
 export interface ClipCard {
   id: string;
+  /** このカードの DossierItem すべて。まとめたクリップなら 2 件以上 */
+  memberIds: string[];
   excerpt: string;
   note: string;
   located: boolean;
@@ -125,6 +127,11 @@ export function ClipsBoard({ clips, dossiers, currentUserId, canEdit }: ClipsBoa
     return filtered;
   }, [clips, query, entityId, mineOnly, sort, currentUserId]);
 
+  // 選択はカード単位、移動・削除は束ねた行すべてに効かせる
+  const selectedItemIds = useMemo(
+    () => clips.filter((c) => selected.has(c.id)).flatMap((c) => c.memberIds),
+    [clips, selected]
+  );
   const visibleIds = useMemo(() => new Set(visible.map((c) => c.id)), [visible]);
   const selectedVisible = [...selected].filter((id) => visibleIds.has(id));
   const allVisibleSelected = visible.length > 0 && selectedVisible.length === visible.length;
@@ -146,9 +153,9 @@ export function ClipsBoard({ clips, dossiers, currentUserId, canEdit }: ClipsBoa
     });
 
   const removeSelected = () => {
-    const ids = [...selected];
+    const ids = selectedItemIds;
     if (ids.length === 0) return;
-    if (!confirm(`${ids.length} 件のクリップを削除しますか？`)) return;
+    if (!confirm(`${selected.size} 件のクリップを削除しますか？`)) return;
     setError(null);
     startDelete(async () => {
       const result = await deleteClipsAction(ids);
@@ -313,7 +320,7 @@ export function ClipsBoard({ clips, dossiers, currentUserId, canEdit }: ClipsBoa
       <MoveDialog
         open={moveOpen}
         onOpenChange={setMoveOpen}
-        itemIds={[...selected]}
+        itemIds={selectedItemIds}
         dossiers={dossiers}
         onMoved={() => {
           setSelected(new Set());
@@ -490,6 +497,7 @@ function ClipCardView({
             <div className="text-[11px] text-slate-400 mt-0.5">
               {clip.asset && <>{ASSET_KIND_LABELS[clip.asset.kind] ?? clip.asset.kind}</>}
               {clip.asset?.date && <> ・ {formatDate(clip.asset.date)}</>}
+              {clip.memberIds.length > 1 && <> ・ {clip.memberIds.length} 件をまとめたクリップ</>}
             </div>
             {clip.asset && clip.asset.entities.length > 0 && (
               <div className="flex flex-wrap gap-1 mt-1.5">
