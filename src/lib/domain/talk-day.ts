@@ -92,31 +92,42 @@ interface TalkDayIndex {
   focusDays: string[];
 }
 
+/** 作り直し中の集計。キャッシュの重複防止はリクエスト単位なので、同時の移動で接続を埋めないよう共有する */
+const buildingIndexes = new Map<string, Promise<TalkDayIndex>>();
+
+async function buildTalkDayIndex(clearance: string): Promise<TalkDayIndex> {
+  return withClearance(clearance, async (tx) => {
+    const source = await getTalkSource(tx);
+    if (!source) return { days: [], focusDays: [] };
+    const conds = [Prisma.sql`a."canonicalDate" IS NOT NULL`, ...sourcePatternConds(source)];
+    const daysWhere = (extra: Prisma.Sql[]) => Prisma.join([...conds, ...extra], " AND ");
+    const days = await tx.$queryRaw<{ day: string }[]>`
+      SELECT DISTINCT ${TALK_DAY_SQL}::text AS day
+      FROM "Asset" a JOIN "SourceRecord" sr ON sr."assetId" = a.id
+      WHERE ${daysWhere([])}
+    `;
+    const focusDays = await tx.$queryRaw<{ day: string }[]>`
+      SELECT DISTINCT ${TALK_DAY_SQL}::text AS day
+      FROM "Asset" a JOIN "SourceRecord" sr ON sr."assetId" = a.id
+      WHERE ${daysWhere([FOCUS_IDS_SQL])}
+    `;
+    return { days: days.map((r) => r.day), focusDays: focusDays.map((r) => r.day) };
+  }, { timeout: 60_000 }); // DB が冷えていると 1 本目だけで 20 秒を超える
+}
+
 /**
  * 日の移動に使う全期間の集計。合わせて 10 秒ほど接続を持つ。
  * 接続は 1 インスタンス 3 本なので、1 本のトランザクションにまとめ、作り直しも 1 時間に 1 回にする。
  * 短くすると作業中に作り直しが重なり、画面の読み込みが接続待ちで落ちる (P2024)。
- * 新しい日の反映は最大 1 時間遅れるが、前後の日へのリンクにしか使わない。
+ * 新しい日の反映は最大 1 時間遅れるが、前後の日と次の未クリップの日を決めるだけなので画面の中身には響かない。
  */
 function getTalkDayIndex(clearance: string): Promise<TalkDayIndex> {
-  return unstable_cache(async () => {
-    return withClearance(clearance, async (tx) => {
-      const source = await getTalkSource(tx);
-      if (!source) return { days: [], focusDays: [] };
-      const conds = [Prisma.sql`a."canonicalDate" IS NOT NULL`, ...sourcePatternConds(source)];
-      const daysWhere = (extra: Prisma.Sql[]) => Prisma.join([...conds, ...extra], " AND ");
-      const days = await tx.$queryRaw<{ day: string }[]>`
-        SELECT DISTINCT ${TALK_DAY_SQL}::text AS day
-        FROM "Asset" a JOIN "SourceRecord" sr ON sr."assetId" = a.id
-        WHERE ${daysWhere([])}
-      `;
-      const focusDays = await tx.$queryRaw<{ day: string }[]>`
-        SELECT DISTINCT ${TALK_DAY_SQL}::text AS day
-        FROM "Asset" a JOIN "SourceRecord" sr ON sr."assetId" = a.id
-        WHERE ${daysWhere([FOCUS_IDS_SQL])}
-      `;
-      return { days: days.map((r) => r.day), focusDays: focusDays.map((r) => r.day) };
-    }, { timeout: 30_000 });
+  return unstable_cache(() => {
+    const building = buildingIndexes.get(clearance);
+    if (building) return building;
+    const started = buildTalkDayIndex(clearance).finally(() => buildingIndexes.delete(clearance));
+    buildingIndexes.set(clearance, started);
+    return started;
   }, ["talk-day-index", clearance], { revalidate: 3600, tags: [DERIVED_ITEMS_TAG] })();
 }
 
