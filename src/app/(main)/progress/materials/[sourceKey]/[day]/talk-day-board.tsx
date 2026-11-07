@@ -184,9 +184,8 @@ function MessageRow({ message, editable, pending, checked, onCheck, onClip, onRe
   return (
     <li className="flex items-start gap-2">
       {editable && (
-        // 全体がクリップ済のメッセージは、まとめても同じ抜粋が増えるだけなので選ばせない
-        <label className={cn("-ml-1 shrink-0 p-1 pt-6", message.wholeClipped ? "invisible" : "cursor-pointer")}>
-          <input type="checkbox" checked={checked} disabled={message.wholeClipped} onChange={onCheck} aria-label={`${label} ${L.selectMessage}`} className="h-4 w-4" />
+        <label className="-ml-1 shrink-0 cursor-pointer p-1 pt-6">
+          <input type="checkbox" checked={checked} onChange={onCheck} aria-label={`${label} ${L.selectMessage}`} className="h-4 w-4" />
         </label>
       )}
       <div className="min-w-0 max-w-[85%] sm:max-w-[75%]">
@@ -238,7 +237,7 @@ function MessageRow({ message, editable, pending, checked, onCheck, onClip, onRe
           </p>
         )}
       </div>
-      {editable && !message.wholeClipped && (
+      {editable && (
         <button type="button" disabled={pending} onClick={() => onClip(setFreshClipId)} aria-label={`${label} ${L.clip}`} title={L.clip}
           className="mt-5 shrink-0 rounded-full border border-sky-300 bg-white p-2 text-sky-700 hover:bg-sky-50 disabled:opacity-50">
           <Scissors className="h-4 w-4" />
