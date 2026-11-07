@@ -5,7 +5,7 @@ import { groupClipRows } from "@/lib/clips/group";
 import { adjacentTalkDays, isTalkDayKey, nextUnfinishedTalkDay, talkSpeaker, talkThread, type TalkDayScope } from "@/lib/clip-progress/talk-day";
 import { jstDayString } from "@/lib/utils";
 import { NINA_ENTITY_ID } from "@/lib/nina";
-import { DERIVED_ITEMS_TAG, getDerivedItems, sourcePatternConds, TALK_DAY_SQL, toDateOnlyString } from "./coverage";
+import { DERIVED_ITEMS_TAG, sourcePatternConds, TALK_DAY_SQL } from "./coverage";
 
 interface Actor { id: string; clearance: string }
 
@@ -85,21 +85,39 @@ async function getTalkSource(tx: TransactionClient): Promise<DataSource | null> 
   return tx.dataSource.findUnique({ where: { key: TALK_SOURCE_KEY } });
 }
 
-/** 本人か言及のトークがある日。日付の集合はほとんど変わらないので長めに持つ */
-function getFocusDays(clearance: string): Promise<string[]> {
+interface TalkDayIndex {
+  /** トークがある日 */
+  days: string[];
+  /** 本人か言及のトークがある日 */
+  focusDays: string[];
+}
+
+/**
+ * 日の移動に使う全期間の集計。合わせて 10 秒ほど接続を持つ。
+ * 接続は 1 インスタンス 3 本なので、1 本のトランザクションにまとめ、作り直しも 1 時間に 1 回にする。
+ * 短くすると作業中に作り直しが重なり、画面の読み込みが接続待ちで落ちる (P2024)。
+ * 新しい日の反映は最大 1 時間遅れるが、前後の日へのリンクにしか使わない。
+ */
+function getTalkDayIndex(clearance: string): Promise<TalkDayIndex> {
   return unstable_cache(async () => {
     return withClearance(clearance, async (tx) => {
       const source = await getTalkSource(tx);
-      if (!source) return [];
-      const conds = [Prisma.sql`a."canonicalDate" IS NOT NULL`, FOCUS_IDS_SQL, ...sourcePatternConds(source)];
-      const rows = await tx.$queryRaw<{ day: string }[]>`
+      if (!source) return { days: [], focusDays: [] };
+      const conds = [Prisma.sql`a."canonicalDate" IS NOT NULL`, ...sourcePatternConds(source)];
+      const daysWhere = (extra: Prisma.Sql[]) => Prisma.join([...conds, ...extra], " AND ");
+      const days = await tx.$queryRaw<{ day: string }[]>`
         SELECT DISTINCT ${TALK_DAY_SQL}::text AS day
         FROM "Asset" a JOIN "SourceRecord" sr ON sr."assetId" = a.id
-        WHERE ${Prisma.join(conds, " AND ")}
+        WHERE ${daysWhere([])}
       `;
-      return rows.map((r) => r.day);
+      const focusDays = await tx.$queryRaw<{ day: string }[]>`
+        SELECT DISTINCT ${TALK_DAY_SQL}::text AS day
+        FROM "Asset" a JOIN "SourceRecord" sr ON sr."assetId" = a.id
+        WHERE ${daysWhere([FOCUS_IDS_SQL])}
+      `;
+      return { days: days.map((r) => r.day), focusDays: focusDays.map((r) => r.day) };
     }, { timeout: 30_000 });
-  }, ["talk-focus-days", clearance], { revalidate: 600, tags: [DERIVED_ITEMS_TAG] })();
+  }, ["talk-day-index", clearance], { revalidate: 3600, tags: [DERIVED_ITEMS_TAG] })();
 }
 
 const timeFormat = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "numeric", minute: "2-digit" });
@@ -108,15 +126,11 @@ const dateTimeFormat = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo"
 /** その日のトークと、付いているクリップ。無い日は null。 */
 export async function getTalkDay(user: Actor, day: string, scope: TalkDayScope): Promise<TalkDay | null> {
   if (!isTalkDayKey(day)) return null;
-  const [derived, focusDays] = await Promise.all([
-    getDerivedItems(TALK_SOURCE_KEY, user.clearance),
-    // 全期間の集計は「次の日」にしか使わない。失敗しても画面は出す
-    getFocusDays(user.clearance).catch((error: unknown) => {
-      console.error("talk focus days failed", error instanceof Error ? error.name : "unknown");
-      return [] as string[];
-    }),
-  ]);
-  const allDays = derived.map((d) => toDateOnlyString(d.itemDate)).filter((d): d is string => !!d);
+  // 全期間の集計は日の移動にしか使わない。失敗しても画面は出す
+  const { days: allDays, focusDays } = await getTalkDayIndex(user.clearance).catch((error: unknown): TalkDayIndex => {
+    console.error("talk day index failed", error instanceof Error ? error.name : "unknown");
+    return { days: [], focusDays: [] };
+  });
 
   const result = await withSession(user, async (tx) => {
     const source = await getTalkSource(tx);
