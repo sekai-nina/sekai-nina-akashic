@@ -1,11 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { removeAssetRelation } from "@/lib/actions";
 import { ASSET_KIND_LABELS, RELATION_TYPE_LABELS } from "@/lib/utils";
 import { X } from "lucide-react";
 import type { NinaAppearance } from "@/lib/nina";
-import { ChildOcrButton } from "./child-ocr-button";
+import type { OcrState } from "@/lib/domain/ocr";
+import { ChildOcrToolbar, OcrSelectCheckbox, OcrStateBadge } from "./child-ocr-selection";
 import { ChildNinaSummary, ChildNinaToggle, ninaFrameClass, type ChildNinaState } from "./child-nina-toggle";
 
 interface RelatedAsset {
@@ -97,6 +99,7 @@ export function ChildAssets({
   relations,
   currentAssetId,
   ninaStates = {},
+  ocrStates = {},
   editable = false,
   embedded,
 }: {
@@ -104,13 +107,26 @@ export function ChildAssets({
   currentAssetId: string;
   /** 子アセット (画像・動画) の坂井新奈の出演。一覧から付け外しする (#377) */
   ninaStates?: Record<string, ChildNinaState>;
+  /** 子アセット (画像) の OCR の状態。まだのものを選んで OCR する (#379) */
+  ocrStates?: Record<string, OcrState>;
   editable?: boolean;
   embedded?: boolean;
 }) {
+  const [ocrSelected, setOcrSelected] = useState<Set<string>>(new Set());
   if (relations.length === 0) return null;
 
   const imageRelations = relations.filter((r) => r.asset.kind === "image" || r.asset.kind === "video");
   const otherRelations = relations.filter((r) => r.asset.kind !== "image" && r.asset.kind !== "video");
+
+  // 選べるのはまだ OCR していない画像だけ
+  const ocrSelectableIds = imageRelations.filter((r) => ocrStates[r.asset.id] === "none").map((r) => r.asset.id);
+  const toggleOcr = (assetId: string, on: boolean) =>
+    setOcrSelected((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(assetId);
+      else next.delete(assetId);
+      return next;
+    });
 
   const counts: Record<NinaAppearance, number> = { appears: 0, absent: 0, unchecked: 0 };
   for (const rel of imageRelations) {
@@ -123,25 +139,44 @@ export function ChildAssets({
       {imageRelations.length > 0 && (
         <ChildNinaSummary parentId={currentAssetId} counts={counts} editable={editable} />
       )}
-      {editable && imageRelations.some((r) => r.asset.kind === "image") && <ChildOcrButton parentId={currentAssetId} />}
+      {editable && (
+        <ChildOcrToolbar
+          parentId={currentAssetId}
+          selected={ocrSelected}
+          selectableIds={ocrSelectableIds}
+          onSelectAll={() => setOcrSelected(new Set(ocrSelectableIds))}
+          onClear={() => setOcrSelected(new Set())}
+        />
+      )}
       {imageRelations.length > 0 && (
         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2 mb-3">
           {imageRelations.map((rel) => (
             <div key={rel.id} className="relative group">
-              <Link href={`/assets/${rel.asset.id}`}>
-                {rel.asset.thumbnailUrl ? (
-                  <img
-                    src={rel.asset.thumbnailUrl}
-                    alt={rel.asset.title || ""}
-                    className={`w-full aspect-square object-cover rounded-lg border border-slate-200 hover:opacity-90 transition-opacity ${ninaFrameClass(ninaStates[rel.asset.id]?.appearance)}`}
-                    loading="lazy"
+              {/* 画像の上に重ねるもの (選択・OCR の状態) はこの枠を基準にする。下の出演ボタンに被らないように */}
+              <div className="relative">
+                <Link href={`/assets/${rel.asset.id}`}>
+                  {rel.asset.thumbnailUrl ? (
+                    <img
+                      src={rel.asset.thumbnailUrl}
+                      alt={rel.asset.title || ""}
+                      className={`w-full aspect-square object-cover rounded-lg border border-slate-200 hover:opacity-90 transition-opacity ${ninaFrameClass(ninaStates[rel.asset.id]?.appearance)}`}
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="w-full aspect-square bg-slate-100 rounded-lg border border-slate-200 flex items-center justify-center text-xs text-slate-400">
+                      {ASSET_KIND_LABELS[rel.asset.kind] ?? rel.asset.kind}
+                    </div>
+                  )}
+                </Link>
+                {editable && ocrStates[rel.asset.id] === "none" && (
+                  <OcrSelectCheckbox
+                    checked={ocrSelected.has(rel.asset.id)}
+                    onChange={(on) => toggleOcr(rel.asset.id, on)}
+                    label={rel.asset.title || "画像"}
                   />
-                ) : (
-                  <div className="w-full aspect-square bg-slate-100 rounded-lg border border-slate-200 flex items-center justify-center text-xs text-slate-400">
-                    {ASSET_KIND_LABELS[rel.asset.kind] ?? rel.asset.kind}
-                  </div>
                 )}
-              </Link>
+                <OcrStateBadge state={ocrStates[rel.asset.id]} />
+              </div>
               <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
                 <RemoveButton relationId={rel.id} assetId={currentAssetId} />
               </div>

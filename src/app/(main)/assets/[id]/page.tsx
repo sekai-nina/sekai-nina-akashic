@@ -26,7 +26,7 @@ import {
 import { getAssetRelations, getAssetGraph } from "@/lib/domain/relations";
 import { getClipMedia } from "@/lib/domain/nina-appearance";
 import { transcribeBlockedReason } from "@/lib/domain/transcribe";
-import { ocrBlockedReason } from "@/lib/domain/ocr";
+import { getOcrStates, ocrBlockedReason } from "@/lib/domain/ocr";
 import { getNinaTerms } from "@/lib/domain/coverage-items";
 import type { ClearanceLevel } from "@prisma/client";
 import { SubmitButton } from "@/components/submit-button";
@@ -258,6 +258,7 @@ export default async function AssetDetailPage({
     targetExcerptCount,
     [pickerArticles, clips, articleRefs],
     childMedia,
+    childOcr,
   ] = await Promise.all([
     hlNina ? getNinaTerms(userClearance) : Promise.resolve([] as string[]),
     findMaterialClipProgressForAsset(id, userClearance),
@@ -284,6 +285,8 @@ export default async function AssetDetailPage({
     ]),
     // 子アセット (雑誌のページ・ブログ画像) の出演。一覧から付け外しする (#377)
     getClipMedia(userClearance, relations.asSource.map((r) => r.targetId)),
+    // 子アセット (画像) の OCR の状態。まだのものを選んで OCR する (#379)
+    getOcrStates(userClearance, relations.asSource.map((r) => r.targetId)),
   ]);
   const highlightCount = hlNina
     ? countTermMatches(
@@ -557,6 +560,7 @@ export default async function AssetDetailPage({
                   ninaStates={Object.fromEntries(
                     [...childMedia].map(([childId, m]) => [childId, { appearance: m.appearance, author: m.author }])
                   )}
+                  ocrStates={Object.fromEntries(childOcr)}
                   editable={isEditor}
                   embedded
                 />

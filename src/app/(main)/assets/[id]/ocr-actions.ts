@@ -17,11 +17,17 @@ export async function ocrAsset(assetId: string): Promise<{ error?: string; empty
   return { empty: !res.text };
 }
 
-/** 子アセット一覧の「まとめて OCR」(#379)。待ちに入れるだけで、回すのは 15 分ごとの cron */
-export async function requestChildrenOcrAction(parentId: string): Promise<{ error?: string; count?: number }> {
+/** 子アセット一覧で選んだ画像の OCR (#379)。待ちに入れるだけで、回すのは 15 分ごとの cron */
+export async function requestChildrenOcrAction(
+  parentId: string,
+  assetIds: string[],
+): Promise<{ error?: string; count?: number }> {
   const user = await requireRole(["admin", "member"]);
   if (!isOcrConfigured()) return { error: "ANTHROPIC_API_KEY が未設定です" };
-  const count = await requestChildrenOcr(parentId, user);
+  if (!Array.isArray(assetIds) || assetIds.some((id) => typeof id !== "string") || assetIds.length > 500) {
+    return { error: "選択が不正です" };
+  }
+  const count = await requestChildrenOcr(parentId, assetIds, user);
   revalidatePath(`/assets/${parentId}`);
   return { count };
 }
