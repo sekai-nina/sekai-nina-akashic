@@ -226,6 +226,7 @@ model User {
   instaAccounts InstaAccount[] @relation("InstaAccountUpdatedBy")
   instaStoryJobs InstaStoryJob[] @relation("InstaStoryJobRequestedBy")
   tiktokWatchTargets TiktokWatchTarget[] @relation("TiktokWatchTargetUpdatedBy")
+  faceReviews        FaceDetection[]     @relation("FaceReviewedBy")
 }
 
 model Asset {
@@ -297,6 +298,8 @@ model Asset {
   relationsAsTarget AssetRelation[] @relation("RelationTarget")
   articleSources    ArticleSource[]
   anniversaries     Anniversary[]
+  faceDetections    FaceDetection[]
+  faceScans         FaceScan[]
   tiktokVideo       TiktokVideo?
 
   @@index([sha256])
@@ -372,6 +375,8 @@ model Entity {
   testimonials Testimonial[]
   place        Place?
   lives        Live[]
+  facePredicted FaceDetection[] @relation("FacePredicted")
+  faceConfirmed FaceDetection[] @relation("FaceConfirmed")
 
   @@unique([type, canonicalName])
 }
@@ -2081,4 +2086,71 @@ model MaterialClipStatus {
 
   @@unique([dataSourceKey, itemKey])
   @@index([classification])
+}
+
+/// 顔の判定の状態 (#384)
+enum FaceStatus {
+  /// 類似度が閾値以上で、AssetEntity (roleLabel = face) を自動で付けた
+  auto
+  /// 人の確認待ち。閾値に届かない顔と、閾値以上でも人の判断を優先して付けなかった顔
+  /// (ninaAbsent の画像の坂井新奈・同じアセットで却下済みのメンバー)
+  pending
+  /// 人が確定した。confirmedEntityId が正解 (null ならメンバー以外の人)
+  confirmed
+  /// 人が「predictedEntityId ではない」と却下した。正解が分かれば confirmedEntityId に入れる
+  rejected
+}
+
+/// 画像から検出した顔 1 つ (#384)。推論は sekai-nina-omokage のワーカーが行う。
+/// 保護テーブル。自前の classification は持たず、親 Asset の classification で RLS を効かせる (AssetEntity と同じ)。
+/// 推論し直すときは、人が見ていない行 (auto / pending) だけを置き換え、confirmed / rejected は残す
+model FaceDetection {
+  id                String     @id @default(cuid())
+  assetId           String
+  asset             Asset      @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  /// 推論したモデルのバージョン (例: buffalo_l@1)
+  modelVersion      String
+  /// 顔の枠。画像の幅・高さに対する 0〜1 の割合 (サムネイルでも元画像でも同じ値で描ける)
+  x1                Float
+  y1                Float
+  x2                Float
+  y2                Float
+  /// 顔検出の確からしさ (0〜1)
+  detScore          Float
+  /// 顔の特徴量。L2 正規化した float32 × 512 のリトルエンディアン (2,048 バイト)
+  embedding         Bytes
+  /// いちばん似ていたメンバー。参照が空なら null
+  predictedEntityId String?
+  predictedEntity   Entity?    @relation("FacePredicted", fields: [predictedEntityId], references: [id], onDelete: SetNull)
+  /// predictedEntity とのコサイン類似度
+  similarity        Float?
+  status            FaceStatus
+  confirmedEntityId String?
+  confirmedEntity   Entity?    @relation("FaceConfirmed", fields: [confirmedEntityId], references: [id], onDelete: SetNull)
+  reviewedById      String?
+  reviewedBy        User?      @relation("FaceReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt        DateTime?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  @@index([assetId])
+  @@index([status])
+  @@index([predictedEntityId])
+  @@index([confirmedEntityId])
+}
+
+/// どの画像をどのモデルで処理したか (#384)。顔が 0 個の画像・処理できなかった画像を何度も queue に出さないために持つ。
+/// 保護テーブル (親 Asset の classification で RLS)
+model FaceScan {
+  assetId      String
+  asset        Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  modelVersion String
+  faceCount    Int
+  /// 取り直しても直らない失敗の理由 (Drive に無い・大きすぎてサムネイルも無い・画像として読めない)。成功なら null。
+  /// 失敗も行を作って queue から外す (失敗が queue の先頭に居座らないように)。やり直すときは行を消す
+  error        String?
+  scannedAt    DateTime @default(now())
+
+  @@id([assetId, modelVersion])
+  @@index([modelVersion])
 }
