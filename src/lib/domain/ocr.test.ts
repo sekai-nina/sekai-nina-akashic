@@ -1,4 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// ocr.ts は db.ts を読み込む。CI には DIRECT_URL が無く、PrismaClient の生成で落ちるので差し替える
+vi.mock("@/lib/db", () => ({ prismaInternal: {}, withClearance: vi.fn() }));
+
 import { ocrBlockedReason } from "./ocr";
 
 const base = { kind: "image", storageProvider: "gdrive", storageKey: "drive-file-id", classification: "internal" } as const;
