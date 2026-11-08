@@ -9,6 +9,16 @@ import { z } from "zod";
 export const FACE_WORKER_PERMISSION = "face_worker";
 
 /**
+ * `face_worker` のキーで送れるハートビートのジョブ名 (`POST /api/v1/jobs/:key/runs`)。
+ * 他の bot のジョブ (`bot.*` など) を偽れないよう、omokage のジョブに限る
+ */
+export const FACE_WORKER_JOB_PREFIX = "omokage.";
+
+export function canFaceWorkerReportJob(key: string): boolean {
+  return key.startsWith(FACE_WORKER_JOB_PREFIX);
+}
+
+/**
  * これ以上の類似度なら自動で AssetEntity を付ける。#376 の評価で、現役の precision 98〜99%・
  * 坂井新奈 100% だった値。閾値はサーバーが持ち、ワーカーは類似度をそのまま送る
  */

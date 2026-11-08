@@ -87,7 +87,7 @@ APIキーは `pnpm cli:keygen <user-email> <key-name> [permissions]` で発行�
 | POST | `/articles/:shortId/sources/:sourceId/apply` | write | 紐づけを反映済みにする（公開判断。internal 以下のみ） |
 | POST | `/articles/:shortId/append` | write | 本文の置き換えと出典の追加を 1 トランザクションで（bot の一覧追記） |
 | POST | `/articles/:shortId/push` | article_push | この記事 1 本だけを公開リポジトリに push |
-| POST | `/jobs/:key/runs` | write | ハートビート（bot / ワーカーのジョブが実行結果を報告する） |
+| POST | `/jobs/:key/runs` | write（`omokage.*` は face_worker も可） | ハートビート（bot / ワーカーのジョブが実行結果を報告する） |
 | GET | `/faces/queue` | face_worker | 顔認識: まだこのモデルで処理していない画像の一覧 |
 | GET | `/faces/assets/:id/original` | face_worker | 顔認識: 元画像のバイナリ（4.4 MB まで） |
 | PUT | `/faces/assets/:id` | face_worker | 顔認識: 1 枚の推論結果を書き込む（閾値以上は人物タグを自動で付ける） |
