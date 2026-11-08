@@ -63,6 +63,9 @@ export const NINA_MENTIONS_JOB_KEY = "cron.nina_mentions";
 /** 坂井新奈のトークの文字起こし (`/api/cron/transcribe`、#282) */
 export const TRANSCRIBE_JOB_KEY = "cron.transcribe";
 
+/** 画像の OCR (`/api/cron/ocr`、#379) */
+export const OCR_JOB_KEY = "cron.ocr";
+
 /**
  * ハートビートを期待するジョブ。報告が一度も無ければ「未報告」(unknown) と出す。
  * 報告側の key と一致させる (sekai-nina-discord-bot#30)。
@@ -81,6 +84,7 @@ export const EXPECTED_JOBS: { key: string; name: string; group: CheckGroup }[] =
   { key: "bot.discovery", name: "bot: 今日の発見の抽出", group: "process" },
   { key: NINA_MENTIONS_JOB_KEY, name: "新奈への言及の付け直し (15 分)", group: "process" },
   { key: TRANSCRIBE_JOB_KEY, name: "トークの文字起こし (15 分)", group: "process" },
+  { key: OCR_JOB_KEY, name: "画像の OCR (15 分)", group: "process" },
   { key: "worker.stats", name: "stats-worker (ダッシュボード集計)", group: "workers" },
   { key: "worker.drive_backup", name: "Drive バックアップ", group: "workers" },
   { key: "worker.sync", name: "sekai-nina-sync", group: "workers" },

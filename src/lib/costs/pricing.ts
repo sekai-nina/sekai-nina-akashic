@@ -6,7 +6,7 @@ import type { LlmProvider } from "@prisma/client";
  *
  * 出典と確認日:
  *   - OpenAI:    https://developers.openai.com/api/docs/pricing (2026-09-19)
- *   - Anthropic: claude-api スキルの単価表 (2026-06-24 時点のキャッシュ)
+ *   - Anthropic: claude-api スキルの単価表 (2026-06-24 時点のキャッシュ。5.5 世代は 2026-10-06 時点)
  *   - Google:    https://ai.google.dev/gemini-api/docs/pricing (2026-09-19)
  *   - Groq:      https://groq.com/pricing (2026-10-27)
  *
@@ -57,6 +57,10 @@ export const PRICING: Record<LlmProvider, Record<string, ModelPricing>> = {
     "gpt-image-2.5-sunburst": { input: 8, cachedInput: 2, output: 30 },
   },
   anthropic: {
+    // 5.5 世代のキャッシュ読み出しは $0.20/MTok (Opus は 1/20、Sonnet は 1/10)
+    "claude-opus-5-5": anthropic(4, 20, 0.2),
+    "claude-sonnet-5-5": anthropic(2, 10, 0.2),
+    "claude-haiku-5-5": anthropic(0.1, 0.5),
     "claude-opus-5": anthropic(5, 25),
     "claude-opus-4-8": anthropic(5, 25),
     "claude-opus-4-7": anthropic(5, 25),

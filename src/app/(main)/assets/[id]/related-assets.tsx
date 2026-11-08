@@ -5,6 +5,7 @@ import { removeAssetRelation } from "@/lib/actions";
 import { ASSET_KIND_LABELS, RELATION_TYPE_LABELS } from "@/lib/utils";
 import { X } from "lucide-react";
 import type { NinaAppearance } from "@/lib/nina";
+import { ChildOcrButton } from "./child-ocr-button";
 import { ChildNinaSummary, ChildNinaToggle, ninaFrameClass, type ChildNinaState } from "./child-nina-toggle";
 
 interface RelatedAsset {
@@ -122,6 +123,7 @@ export function ChildAssets({
       {imageRelations.length > 0 && (
         <ChildNinaSummary parentId={currentAssetId} counts={counts} editable={editable} />
       )}
+      {editable && imageRelations.some((r) => r.asset.kind === "image") && <ChildOcrButton parentId={currentAssetId} />}
       {imageRelations.length > 0 && (
         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2 mb-3">
           {imageRelations.map((rel) => (

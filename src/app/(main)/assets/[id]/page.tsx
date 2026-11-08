@@ -26,6 +26,7 @@ import {
 import { getAssetRelations, getAssetGraph } from "@/lib/domain/relations";
 import { getClipMedia } from "@/lib/domain/nina-appearance";
 import { transcribeBlockedReason } from "@/lib/domain/transcribe";
+import { ocrBlockedReason } from "@/lib/domain/ocr";
 import { getNinaTerms } from "@/lib/domain/coverage-items";
 import type { ClearanceLevel } from "@prisma/client";
 import { SubmitButton } from "@/components/submit-button";
@@ -33,6 +34,7 @@ import { BackButton } from "@/components/back-button";
 import { StatusWorkflow } from "./status-workflow";
 import { NinaAppearancePanel } from "./nina-appearance-panel";
 import { TranscribePanel } from "./transcribe-panel";
+import { OcrPanel } from "./ocr-panel";
 import { ninaAppearanceOf } from "@/lib/nina";
 import { NinaHighlightBanner } from "./nina-highlight-banner";
 import { CopySourceRef } from "./copy-source-ref";
@@ -696,6 +698,16 @@ export default async function AssetDetailPage({
               transcribeError={asset.transcribeError}
               hasTranscript={asset.texts.some((t) => t.textType === "transcript")}
               blockedReason={transcribeBlockedReason(asset)}
+            />
+          )}
+          {isEditor && asset.kind === "image" && (
+            <OcrPanel
+              assetId={asset.id}
+              ocrAt={asset.ocrAt}
+              ocrError={asset.ocrError}
+              ocrRequestedAt={asset.ocrRequestedAt}
+              hasOcr={asset.texts.some((t) => t.textType === "ocr")}
+              blockedReason={ocrBlockedReason(asset)}
             />
           )}
 
