@@ -9,7 +9,7 @@ import { getAssetRelations } from "./relations";
 /**
  * 画像の OCR (#379)。作りは文字起こし (`./transcribe.ts`, #282) に揃える。
  *
- * - 15 分ごとの cron (`/api/cron/ocr`) が、「まとめて OCR」で頼まれた画像だけを回す (`autoOcrWhere`)。
+ * - 15 分ごとの cron (`/api/cron/ocr`) が、子アセット一覧の「選択して OCR」で頼まれた画像だけを回す (`autoOcrWhere`)。
  *   **頼まれていない画像は回さない** (費用がかかるので、何を OCR するかは人が決める)
  * - それ以外はアセット詳細の「OCR」ボタンで 1 件ずつ回す
  *
@@ -32,7 +32,7 @@ export function ocrBlockedReason(asset: {
   return null;
 }
 
-/** cron が拾う対象: 「まとめて OCR」で頼まれた画像のうち、まだ OCR していないもの */
+/** cron が拾う対象: 子アセット一覧の「選択して OCR」で頼まれた画像のうち、まだ OCR していないもの */
 export function autoOcrWhere(): Prisma.AssetWhereInput {
   return {
     kind: "image",
@@ -219,14 +219,45 @@ export async function ocrAssetForUser(
   return { text: outcome.text };
 }
 
+/** 子アセット一覧のサムネイルに出す OCR の状態 */
+export type OcrState = "none" | "queued" | "done" | "failed";
+
 /**
- * 子アセット一覧の「まとめて OCR」。子の画像のうち、まだ OCR していないものを OCR 待ちにする
- * (実際に回すのは cron)。対象はクライアントから受け取らず、親のリレーションから引き直す。
- * 待ちにした件数を返す
+ * 画像ごとの OCR の状態 (子アセット一覧の表示用)。見えないアセット (RLS) と画像以外は入らない。
+ * done = 本文がある・文字が無かった / failed = やり直しても直らない失敗 / queued = 頼まれて待ち / none = まだ
  */
-export async function requestChildrenOcr(parentId: string, user: { clearance: string }): Promise<number> {
+export async function getOcrStates(clearance: string, assetIds: string[]): Promise<Map<string, OcrState>> {
+  if (assetIds.length === 0) return new Map();
+  const rows = await withClearance(clearance, (tx) =>
+    tx.asset.findMany({
+      where: { id: { in: assetIds }, kind: "image" },
+      select: { id: true, ocrAt: true, ocrError: true, ocrRequestedAt: true, _count: { select: { texts: { where: { textType: "ocr" } } } } },
+    })
+  );
+  return new Map(
+    rows.map((a): [string, OcrState] => {
+      if (a.ocrAt) return [a.id, a.ocrError ? "failed" : "done"];
+      if (a._count.texts > 0) return [a.id, "done"];
+      return [a.id, a.ocrRequestedAt ? "queued" : "none"];
+    })
+  );
+}
+
+/**
+ * 子アセット一覧で選んだ画像を OCR 待ちにする (実際に回すのは cron)。
+ * 選んだ id はクライアント入力なので、**親の子のうち選ばれたものだけ**に絞ってから立てる
+ * (任意のアセットを OCR させて課金できないように)。待ちにした件数を返す
+ */
+export async function requestChildrenOcr(
+  parentId: string,
+  selectedIds: string[],
+  user: { clearance: string },
+): Promise<number> {
+  const selected = new Set(selectedIds);
   const relations = await getAssetRelations(parentId, user.clearance);
-  const childIds = relations.asSource.filter((r) => r.target.kind === "image").map((r) => r.targetId);
+  const childIds = relations.asSource
+    .filter((r) => r.target.kind === "image" && selected.has(r.targetId))
+    .map((r) => r.targetId);
   if (childIds.length === 0) return 0;
   // 生 SQL にするのは @updatedAt を動かさないため (「最近更新したアセット」に子が並んでしまう)。
   // withClearance の中なので RLS は効き、見えないアセットは 0 行になる

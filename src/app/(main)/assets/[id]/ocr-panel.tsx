@@ -7,7 +7,7 @@ import { ocrAsset } from "./ocr-actions";
 
 /**
  * 画像の OCR (#379)。1 件ずつ回すのと、やり直しのための入口。
- * まとめて回すときは親の子アセット一覧の「まとめて OCR」(cron が順に回す)
+ * まとめて回すときは親の子アセット一覧の子アセット一覧の「選択して OCR」(cron が順に回す)
  */
 export function OcrPanel({
   assetId,
