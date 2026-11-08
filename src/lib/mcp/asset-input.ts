@@ -8,8 +8,9 @@ import { entityResolutionHint, resolveEntityNames, type EntityResolution } from 
 import { fail } from "./result";
 
 /**
- * アセットを作る MCP ツールの共通入力。`akashic_create_asset` (tools.ts) と
- * `akashic_complete_upload` (tools-upload.ts) が同じ引数・同じ既定値で受ける。
+ * アセットを作る MCP ツールの共通入力。`akashic_create_asset` (tools.ts)・
+ * `akashic_complete_upload` (tools-upload.ts)・`akashic_import_images` (tools-import-images.ts) が
+ * 同じ引数・同じ既定値で受ける。
  */
 
 // 形式だけでなく暦日として存在するかも見る。new Date("2026-02-30") は例外にならず
@@ -158,7 +159,6 @@ export function createdAssetPayload(
   resolution: EntityResolution | null,
   baseUrl: string
 ) {
-  const hint = resolution ? entityResolutionHint(resolution) : undefined;
   return {
     id: asset.id,
     title: asset.title,
@@ -166,6 +166,14 @@ export function createdAssetPayload(
     status: asset.status,
     classification: asset.classification,
     url: `${baseUrl}/assets/${asset.id}`,
+    ...entityResolutionPayload(resolution),
+  };
+}
+
+/** エンティティ解決の結果と、AI 向けのヒント (アセット作成系ツールの返却に添える) */
+export function entityResolutionPayload(resolution: EntityResolution | null) {
+  const hint = resolution ? entityResolutionHint(resolution) : undefined;
+  return {
     linkedEntities: resolution?.resolved.map((e) => ({ id: e.id, name: e.name, type: e.type })) ?? [],
     ...(resolution?.created.length ? { createdEntities: resolution.created } : {}),
     ...(resolution?.unresolved.length ? { unresolvedEntities: resolution.unresolved } : {}),
