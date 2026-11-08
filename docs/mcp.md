@@ -54,6 +54,7 @@ pnpm cli:keygen <user-email> <key-name>
 | `akashic_create_clip` | write | アセットの一節をクリップに残す（中身は `POST /api/v1/clips` と同じ `createClip`。viewer は不可） |
 | `akashic_begin_upload` | write | ファイル本体の Drive アップロード URL を発行（重複なら発行せず既存 ID） |
 | `akashic_complete_upload` | write | Drive に上げたファイルをアセットとして登録（`status` は必ず `inbox`） |
+| `akashic_import_images` | write | 画像 URL（1 回 20 枚まで）をサーバーが取得してアセットにし、任意で親アセットの子につなぐ（#385） |
 | `akashic_create_place` | write | 聖地登録（Google Maps URL / 緯度経度） |
 | `akashic_update_place` | write | 聖地更新 |
 | `akashic_list_articles` | read | 記事一覧（`hasPending: true` で未反映の紐づけがある記事） |
@@ -167,6 +168,34 @@ MCP サーバーは Vercel 上のリモート HTTP なので、**エージェン
 - 既存がキーのクリアランスを超える場合は ID を返さない（「既に登録されている」とだけ伝える）
 - 画像は REST と同じく R2 のサムネイルを作る。ただし MIME が `image/*` かつ 50MB 以下のときだけ（`kind` は上書きできるので、大きな動画を画像扱いで丸ごと読まない）。失敗してもアセットは残る
 - `mimeType` は `type/subtype` の形に絞る。返す `command` に埋め込むので、シェルのメタ文字を通さない
+
+### 画像は URL を渡せばサーバーが取りに行く（#385）
+
+`akashic_begin_upload` / `complete_upload` は手元で curl を叩ける前提で、シェルを持たないふぃたんには使えない。`akashic_import_images` は URL を渡すだけで、取得 → Drive → アセット登録 → R2 サムネイル → 親の子としてつなぐ、までを **その場で（同期で）** 終え、1 枚ずつの成否を返す。
+
+```
+akashic_import_images {
+  images: [{ url: "https://…/01.jpg" }, { url: "https://…/02.jpg", title: "…" }],  // 1〜20 枚
+  parentAssetId: "cm…",          // 任意。渡した順に子として並ぶ (既存の子の後ろに続く)
+  title: "グラビアチャンピオン vol.10",  // 共通。images[].title が無ければ「title #番号」
+  sourceUrl: "https://…/article", // 画像が載っていたページ。無ければ画像 URL を出典にする
+  …                               // 残りは akashic_create_asset と同じ (全枚共通)
+}
+→ { parent, classification, summary: { created, duplicate, duplicateHidden, failed }, results: [{ index, url, status, id?, assetUrl?, error? }], … }
+```
+
+- **1 回 20 枚まで。** Vercel の関数は 300 秒で切れるので、それ以上は分けて呼ぶ。同時に 4 枚ずつ取りに行く
+- **sha256 が既存と一致したら作らず、既存を親の子としてつなぐ（`status: duplicate`）。** 既存の中身は書き換えない。既にその親の子なら何もしない（`linked: false`）ので、同じ引数で呼び直しても増えない。クリアランス外の既存は ID を返さず、つながない（`duplicate_hidden`）
+- `classification` を省略すると親の classification を引き継ぐ（親が無ければ `internal`）。上位機密の雑誌の子が `internal` で作られて漏れないようにするため
+- 中身は sharp で読んで JPEG / PNG / WebP / GIF / TIFF / HEIC / AVIF だけ通す。Content-Type は信じない（エラーページの HTML を画像として残さない）。**SVG は受けない**（スクリプトを含められる）
+- 取得は `User-Agent` をブラウザに寄せ、`sourceUrl` があれば `Referer` に載せる（直リンク対策のサイト向け）
+
+**SSRF 対策（`src/lib/net/safe-fetch.ts`）。** URL は LLM が組むので、プロンプトインジェクション 1 回でクラウドのメタデータ（`169.254.169.254`）や内部ホストを叩かせられる。そのため:
+
+- https・443 番・認証情報なしの URL だけ
+- 名前解決の結果が 1 つでも内部向け（プライベート・ループバック・リンクローカル・CGNAT・マルチキャスト・v4 射影 / NAT64 / 6to4 など）なら接続しない。接続は検査を通した IP に張る（`lookup` を差し替えるので、検査後に DNS が変わっても効く）
+- リダイレクトは自前で最大 5 回追い、毎回同じ検査を通す
+- 30MB を超えたら途中で切る。全体で 30 秒
 
 ### `sourceType` の決まり方
 
