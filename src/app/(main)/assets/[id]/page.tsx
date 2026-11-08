@@ -24,6 +24,7 @@ import {
   formatDate,
 } from "@/lib/utils";
 import { getAssetRelations, getAssetGraph } from "@/lib/domain/relations";
+import { getClipMedia } from "@/lib/domain/nina-appearance";
 import { transcribeBlockedReason } from "@/lib/domain/transcribe";
 import { getNinaTerms } from "@/lib/domain/coverage-items";
 import type { ClearanceLevel } from "@prisma/client";
@@ -254,6 +255,7 @@ export default async function AssetDetailPage({
     targetDossier,
     targetExcerptCount,
     [pickerArticles, clips, articleRefs],
+    childMedia,
   ] = await Promise.all([
     hlNina ? getNinaTerms(userClearance) : Promise.resolve([] as string[]),
     findMaterialClipProgressForAsset(id, userClearance),
@@ -278,6 +280,8 @@ export default async function AssetDetailPage({
       listClipsForAsset(session.user, id),
       listArticleReferencesForAsset(id, userClearance),
     ]),
+    // 子アセット (雑誌のページ・ブログ画像) の出演。一覧から付け外しする (#377)
+    getClipMedia(userClearance, relations.asSource.map((r) => r.targetId)),
   ]);
   const highlightCount = hlNina
     ? countTermMatches(
@@ -548,6 +552,10 @@ export default async function AssetDetailPage({
                     id: r.id, relationType: r.relationType, sortOrder: r.sortOrder, asset: r.target,
                   }))}
                   currentAssetId={id}
+                  ninaStates={Object.fromEntries(
+                    [...childMedia].map(([childId, m]) => [childId, { appearance: m.appearance, author: m.author }])
+                  )}
+                  editable={isEditor}
                   embedded
                 />
               </div>
