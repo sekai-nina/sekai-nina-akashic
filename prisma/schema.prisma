@@ -261,6 +261,13 @@ model Asset {
   transcribedAt      DateTime?
   /// 文字起こしできなかった理由。成功したら null に戻す
   transcribeError    String?
+  /// 画像の OCR (#379) を頼まれた時刻 (子アセット一覧の「まとめて OCR」)。cron が拾う。終わっても消さない
+  ocrRequestedAt     DateTime?
+  /// OCR を終えた時刻。成功 (文字が無くて空だったものも含む) と、やり直しても直らない失敗で立てる。
+  /// 一時的な失敗 (Drive・Claude の 5xx / 429) では立てないので、次の回に拾い直す
+  ocrAt              DateTime?
+  /// OCR できなかった理由。成功したら null に戻す
+  ocrError           String?
 
   // Discord metadata
   discordGuildId    String?
