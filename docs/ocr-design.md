@@ -6,12 +6,12 @@
 
 | 経路 | 対象 | 入口 |
 |---|---|---|
-| 自動 (15 分ごと) | タグ「雑誌」の画像と、「まとめて OCR」で頼まれた画像で、まだのもの | `GET /api/cron/ocr` (`vercel.json`、`CRON_SECRET` 必須) |
+| 自動 (15 分ごと) | 「まとめて OCR」で頼まれた画像で、まだのもの。**頼まれていない画像は回さない** (何を OCR するかは人が決める。タグ等で自動的に拾わない) | `GET /api/cron/ocr` (`vercel.json`、`CRON_SECRET` 必須) |
 | まとめて | 親アセットの子の画像をまとめて OCR 待ちにする (`Asset.ocrRequestedAt`)。回すのは cron | アセット詳細の子アセット一覧の「まとめて OCR」(admin / member) |
 | 手動 | 画像を 1 件ずつ。やり直しもここ | アセット詳細の「OCR」パネル (admin / member) |
 
 - **外部 (Anthropic, 米国) に送るのは `public` / `internal` だけ。** `confidential` / `restricted` は自動でも手動でも送らない。cron は RLS をバイパスする `prismaInternal` なので、`classification` を明示して絞っている。送る直前にもう一度 classification を読み直す
-- cron は頼まれた順 → 新しい順に 1 回 10 件まで (1 件 10〜40 秒)。雑誌 1 冊 (約 100 ページ) は数時間で片付く
+- cron は頼まれた順に 1 回 10 件まで (1 件 10〜40 秒)。雑誌 1 冊 (約 100 ページ) は数時間で片付く
 
 ## 流れ
 

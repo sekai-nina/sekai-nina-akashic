@@ -6,8 +6,8 @@ import { formatDate } from "@/lib/utils";
 import { ocrAsset } from "./ocr-actions";
 
 /**
- * 画像の OCR (#379)。タグ「雑誌」の画像と「まとめて OCR」で頼まれた画像は cron が回すので、
- * ここはそれ以外を 1 件ずつ回すのと、やり直しのための入口。
+ * 画像の OCR (#379)。1 件ずつ回すのと、やり直しのための入口。
+ * まとめて回すときは親の子アセット一覧の「まとめて OCR」(cron が順に回す)
  */
 export function OcrPanel({
   assetId,
