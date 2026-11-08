@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decideFace, decodeEmbedding, EMBEDDING_BYTES, EMBEDDING_DIM, FaceWriteBody } from "./policy";
+import { canFaceWorkerReportJob, decideFace, decodeEmbedding, EMBEDDING_BYTES, EMBEDDING_DIM, FaceWriteBody } from "./policy";
 
 /** L2 正規化した特徴量 (全要素 1/√512) */
 function unitEmbedding(): Buffer {
@@ -96,5 +96,13 @@ describe("FaceWriteBody", () => {
 
   it("知らないキーは弾く", () => {
     expect(FaceWriteBody.safeParse({ modelVersion: "v", faces: [{ ...face, extra: 1 }] }).success).toBe(false);
+  });
+});
+
+describe("canFaceWorkerReportJob", () => {
+  it("omokage のジョブだけ送れる", () => {
+    expect(canFaceWorkerReportJob("omokage.worker")).toBe(true);
+    expect(canFaceWorkerReportJob("bot.talk_monitor")).toBe(false);
+    expect(canFaceWorkerReportJob("omokage")).toBe(false);
   });
 });

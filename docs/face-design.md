@@ -93,6 +93,8 @@ pgvector は使わない。今は「似た顔を DB で検索する」場面が�
 | PUT | `/faces/assets/:id` | 1 枚の推論結果を書き込む |
 | GET | `/faces/references` | 参照に足す顔。**人が確定した顔だけ**（自動で付けた顔を返すと、間違いが参照に混ざって広がる） |
 
+ハートビート（`POST /api/v1/jobs/:key/runs`）も `face_worker` のキーで送れる。ただしジョブ名が `omokage.` で始まるものだけ（#389。他の bot のジョブを偽れないように）。
+
 ## 本番への適用
 
 migration `20261110000000_face_detection` は本番未適用。適用後に手動 GRANT が要る:
