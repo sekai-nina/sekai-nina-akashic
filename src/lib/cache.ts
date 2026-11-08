@@ -255,7 +255,7 @@ export const getCachedNinaStatsRecent = unstable_cache(
     // 「直近7日」は公開/放送日(canonicalDate)基準。createdAtだと一括インポート時刻を拾い実態と乖離する。
     const [blogPosts, talkMessages, media, lives] = await Promise.all([
       prismaInternal.asset.count({
-        where: { sourceType: "web", kind: "text", canonicalDate: { gte: since }, entities: { some: { entityId: ninaEntityId } } },
+        where: { sourceType: "web", kind: "text", canonicalDate: { gte: since }, entities: { some: { entityId: ninaEntityId, roleLabel: "author" } } },
       }),
       prismaInternal.asset.count({
         where: { sourceType: "import", kind: "text", canonicalDate: { gte: since }, entities: { some: { entityId: ninaEntityId } } },

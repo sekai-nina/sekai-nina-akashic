@@ -37,6 +37,13 @@ export interface DashboardStats {
 
 const NINA_ENTITY_ID = "cmmtp8vrg0004mo381neyztvn";
 
+/**
+ * ブログは「坂井新奈が書いた (`AssetEntity.roleLabel = 'author'`)」web のアセットだけを数える。
+ * 坂井新奈のエンティティだけで絞ると、写っている・出ている (`出演`) YouTube の動画・雑誌・
+ * 他メンバーのブログの写真まで数えてしまう (投稿 148 のうち 33 件がブログ以外だった)
+ */
+const AUTHOR_ROLE = "author";
+
 interface CountsRow {
   blog_posts: bigint;
   blog_images: bigint;
@@ -72,10 +79,12 @@ export async function getDashboardStats(): Promise<DashboardStats> {
         (SELECT COUNT(*) FROM "Asset" a
           JOIN "AssetEntity" ae ON ae."assetId" = a.id
           WHERE a."sourceType" = 'web' AND a.kind = 'text' AND ae."entityId" = ${NINA_ENTITY_ID}
+            AND ae."roleLabel" = ${AUTHOR_ROLE}
         ) AS blog_posts,
         (SELECT COUNT(*) FROM "Asset" a
           JOIN "AssetEntity" ae ON ae."assetId" = a.id
           WHERE a."sourceType" = 'web' AND a.kind = 'image' AND ae."entityId" = ${NINA_ENTITY_ID}
+            AND ae."roleLabel" = ${AUTHOR_ROLE}
         ) AS blog_images,
         (SELECT COUNT(*) FROM "Asset" a
           JOIN "AssetEntity" ae ON ae."assetId" = a.id
@@ -120,6 +129,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
           WHERE a."sourceType" = 'web' AND a.kind = 'text'
             AND t."textType" IN ('body', 'message_body')
             AND ae."entityId" = ${NINA_ENTITY_ID}
+            AND ae."roleLabel" = ${AUTHOR_ROLE}
         ) AS blog_chars,
         (SELECT COALESCE(SUM(LENGTH(t.content)), 0)
           FROM "AssetText" t
