@@ -1,4 +1,5 @@
 import { prismaInternal as prisma } from "@/lib/db";
+import { AUTHOR_ROLE_LABEL, NINA_ENTITY_ID } from "@/lib/nina";
 
 export interface DashboardStats {
   blog: {
@@ -35,7 +36,12 @@ export interface DashboardStats {
   };
 }
 
-const NINA_ENTITY_ID = "cmmtp8vrg0004mo381neyztvn";
+/**
+ * ブログは坂井新奈が書いた (`AUTHOR_ROLE_LABEL`) web のアセットだけを数える。
+ * 坂井新奈のエンティティだけで絞ると、出ているだけ (`出演`) の YouTube・雑誌・ライブレポートや
+ * 他メンバーのブログの写真まで「ブログ」に数えてしまう
+ */
+const AUTHOR_ROLE = AUTHOR_ROLE_LABEL;
 
 interface CountsRow {
   blog_posts: bigint;
@@ -72,10 +78,12 @@ export async function getDashboardStats(): Promise<DashboardStats> {
         (SELECT COUNT(*) FROM "Asset" a
           JOIN "AssetEntity" ae ON ae."assetId" = a.id
           WHERE a."sourceType" = 'web' AND a.kind = 'text' AND ae."entityId" = ${NINA_ENTITY_ID}
+            AND ae."roleLabel" = ${AUTHOR_ROLE}
         ) AS blog_posts,
         (SELECT COUNT(*) FROM "Asset" a
           JOIN "AssetEntity" ae ON ae."assetId" = a.id
           WHERE a."sourceType" = 'web' AND a.kind = 'image' AND ae."entityId" = ${NINA_ENTITY_ID}
+            AND ae."roleLabel" = ${AUTHOR_ROLE}
         ) AS blog_images,
         (SELECT COUNT(*) FROM "Asset" a
           JOIN "AssetEntity" ae ON ae."assetId" = a.id
@@ -120,6 +128,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
           WHERE a."sourceType" = 'web' AND a.kind = 'text'
             AND t."textType" IN ('body', 'message_body')
             AND ae."entityId" = ${NINA_ENTITY_ID}
+            AND ae."roleLabel" = ${AUTHOR_ROLE}
         ) AS blog_chars,
         (SELECT COALESCE(SUM(LENGTH(t.content)), 0)
           FROM "AssetText" t

@@ -1,6 +1,7 @@
 import { unstable_cache, revalidateTag, updateTag } from "next/cache";
 import { prismaInternal, withClearance } from "@/lib/db";
 import { getDashboardStats } from "@/lib/domain/stats";
+import { AUTHOR_ROLE_LABEL } from "@/lib/nina";
 import { entityClearanceWhere } from "@/lib/domain/entities";
 import { ClearanceLevel, Prisma } from "@prisma/client";
 import { accessibleClassifications, classificationFilterSql } from "@/lib/classification";
@@ -255,7 +256,7 @@ export const getCachedNinaStatsRecent = unstable_cache(
     // 「直近7日」は公開/放送日(canonicalDate)基準。createdAtだと一括インポート時刻を拾い実態と乖離する。
     const [blogPosts, talkMessages, media, lives] = await Promise.all([
       prismaInternal.asset.count({
-        where: { sourceType: "web", kind: "text", canonicalDate: { gte: since }, entities: { some: { entityId: ninaEntityId } } },
+        where: { sourceType: "web", kind: "text", canonicalDate: { gte: since }, entities: { some: { entityId: ninaEntityId, roleLabel: AUTHOR_ROLE_LABEL } } },
       }),
       prismaInternal.asset.count({
         where: { sourceType: "import", kind: "text", canonicalDate: { gte: since }, entities: { some: { entityId: ninaEntityId } } },

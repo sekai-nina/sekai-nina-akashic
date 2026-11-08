@@ -12,6 +12,9 @@
 /** 坂井新奈の entityId */
 export const NINA_ENTITY_ID = "cmmtp8vrg0004mo381neyztvn";
 
+/** 本人が書いた・投稿した (ブログ・トーク) ことを表す AssetEntity.roleLabel。写っている・出ている (`出演` 等) とは別 */
+export const AUTHOR_ROLE_LABEL = "author";
+
 export const NINA_APPEARANCES = ["appears", "absent", "unchecked"] as const;
 export type NinaAppearance = (typeof NINA_APPEARANCES)[number];
 
