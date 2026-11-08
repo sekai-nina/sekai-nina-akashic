@@ -1,5 +1,6 @@
 import { prismaInternal } from "@/lib/db";
 import { classificationFilter } from "@/lib/classification";
+import { AUTHOR_ROLE_LABEL, NINA_ENTITY_ID } from "@/lib/nina";
 import kuromoji from "kuromoji";
 import path from "path";
 
@@ -9,7 +10,6 @@ export interface WordFrequency {
 }
 
 // 坂井新奈の Entity ID
-const NINA_ENTITY_ID = "cmmtp8vrg0004mo381neyztvn";
 
 // ストップワード（助詞・助動詞・一般的すぎる語など）
 const STOPWORDS = new Set([
@@ -163,7 +163,8 @@ export async function getWordFrequencies(
         ...classificationFilter(clearance),
         sourceType: "web",
         kind: "text",
-        entities: { some: { entityId: NINA_ENTITY_ID } },
+        // 本人が書いたものだけ (出ているだけの YouTube・雑誌などを混ぜない)
+        entities: { some: { entityId: NINA_ENTITY_ID, roleLabel: AUTHOR_ROLE_LABEL } },
         ...dateFilter,
       },
     },

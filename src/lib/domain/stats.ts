@@ -1,4 +1,5 @@
 import { prismaInternal as prisma } from "@/lib/db";
+import { AUTHOR_ROLE_LABEL, NINA_ENTITY_ID } from "@/lib/nina";
 
 export interface DashboardStats {
   blog: {
@@ -35,14 +36,12 @@ export interface DashboardStats {
   };
 }
 
-const NINA_ENTITY_ID = "cmmtp8vrg0004mo381neyztvn";
-
 /**
- * ブログは「坂井新奈が書いた (`AssetEntity.roleLabel = 'author'`)」web のアセットだけを数える。
- * 坂井新奈のエンティティだけで絞ると、写っている・出ている (`出演`) YouTube の動画・雑誌・
- * 他メンバーのブログの写真まで数えてしまう (投稿 148 のうち 33 件がブログ以外だった)
+ * ブログは坂井新奈が書いた (`AUTHOR_ROLE_LABEL`) web のアセットだけを数える。
+ * 坂井新奈のエンティティだけで絞ると、出ているだけ (`出演`) の YouTube・雑誌・ライブレポートや
+ * 他メンバーのブログの写真まで「ブログ」に数えてしまう
  */
-const AUTHOR_ROLE = "author";
+const AUTHOR_ROLE = AUTHOR_ROLE_LABEL;
 
 interface CountsRow {
   blog_posts: bigint;
