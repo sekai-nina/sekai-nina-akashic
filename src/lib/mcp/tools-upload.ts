@@ -63,7 +63,7 @@ const SHA256 = z
  * sha256 が一致する既存アセットを探す。RLS をバイパスして全件から引くので、
  * キーのクリアランスを超えるものは ID を返さない (存在だけ伝える)。
  */
-async function findDuplicate(where: { sha256: string } | { storageKey: string }) {
+export async function findDuplicate(where: { sha256: string } | { storageKey: string }) {
   return prismaInternal.asset.findFirst({
     where,
     select: { id: true, title: true, classification: true, storageKey: true },
