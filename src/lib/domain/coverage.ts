@@ -20,6 +20,7 @@ import {
   heartbeatJobKey,
   parseCollectedUntil,
 } from "@/lib/coverage/collection";
+import { mapWithConcurrency } from "@/lib/async";
 
 // ============================================================
 // 日付正規化 (YYYY-MM-DD <-> Date(UTC 00:00))
@@ -467,19 +468,6 @@ export interface SourceItemStats {
 
 /** ソース導出の同時実行を接続プールの一部に制限する。 */
 const DERIVE_CONCURRENCY = 3;
-
-async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let next = 0;
-  const worker = async () => {
-    while (next < items.length) {
-      const i = next++;
-      results[i] = await fn(items[i]);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  return results;
-}
 
 /** 最新の取り込み日と件数（/coverage の参考表示）。導出はキャッシュ付きの getDerivedItems を使う。 */
 export async function getSourceItemStats(

@@ -3,7 +3,7 @@ import { $Enums } from "@prisma/client";
 import type { McpServer } from "@modelcontextprotocol/server";
 import type { ApiKeyUser } from "@/lib/api-auth";
 import { isAboveClearance } from "@/lib/classification";
-import { prismaInternal, withClearance } from "@/lib/db";
+import { prismaInternal } from "@/lib/db";
 import { intakeAsset } from "@/lib/domain/asset-intake";
 import {
   createResumableUploadSession,
@@ -14,8 +14,8 @@ import {
   trashDriveFile,
 } from "@/lib/drive";
 import { guessMimeKind } from "@/lib/mime";
-import { generateAndUploadThumbnails } from "@/lib/thumbnails";
 import { ASSET_DRAFT_FIELDS, createdAssetPayload, prepareAssetDraft } from "./asset-input";
+import { attachR2Thumbnail, findDuplicate } from "./asset-files";
 import { logMcpToolCall } from "./audit";
 import { fail, ok, toToolError } from "./result";
 import type { ToolContext } from "./tools";
@@ -58,17 +58,6 @@ const SHA256 = z
   .string()
   .regex(/^[0-9a-fA-F]{64}$/, "SHA-256 の 16 進 64 文字で指定してください")
   .transform((s) => s.toLowerCase());
-
-/**
- * sha256 が一致する既存アセットを探す。RLS をバイパスして全件から引くので、
- * キーのクリアランスを超えるものは ID を返さない (存在だけ伝える)。
- */
-async function findDuplicate(where: { sha256: string } | { storageKey: string }) {
-  return prismaInternal.asset.findFirst({
-    where,
-    select: { id: true, title: true, classification: true, storageKey: true },
-  });
-}
 
 function duplicatePayload(
   dup: { id: string; title: string; classification: string },
@@ -252,14 +241,9 @@ export function registerUploadTools(server: McpServer, { user, baseUrl }: ToolCo
         ) {
           try {
             const buffer = await downloadFromDrive(finalized.fileId);
-            const r2Url = buffer ? await generateAndUploadThumbnails(asset.id, buffer) : null;
-            if (r2Url) {
-              await withClearance(user.clearance, (tx) =>
-                tx.asset.update({ where: { id: asset.id }, data: { thumbnailUrl: r2Url } })
-              );
-            }
+            if (buffer) await attachR2Thumbnail(asset.id, buffer, user.clearance);
           } catch (err) {
-            console.error("[mcp] R2 サムネイル生成に失敗:", err);
+            console.error("[mcp] R2 サムネイル用の本体取得に失敗:", err);
           }
         }
 

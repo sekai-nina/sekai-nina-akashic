@@ -12,6 +12,9 @@ import { akashicMcpHandler, toAuthInfo } from "@/lib/mcp/server";
  * `read` は認証の最低条件。書き込みツールを出すかどうかは
  * registerAkashicTools がキーの permissions を見て決める。
  */
+/** akashic_import_images が 1 回で最大 20 枚を取りに行くので、既定に任せず明示する */
+export const maxDuration = 300;
+
 export async function POST(request: Request) {
   const auth = await requireApiAuth(request, "read");
   if (auth instanceof NextResponse) return auth;

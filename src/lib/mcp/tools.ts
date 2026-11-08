@@ -30,6 +30,7 @@ import { assetUrl, toAssetDetail, toEntitySummary, toPlaceSummary, toSearchItem 
 import { fail, ok, toToolError } from "./result";
 import { registerArticleReadTools, registerArticleWriteTools } from "./tools-articles";
 import { registerUploadTools } from "./tools-upload";
+import { registerImportImageTools } from "./tools-import-images";
 import { DiscordMemoInputSchema, isAllowedDiscordMemoChannel, parseDiscordMemoInput, toDiscordMemoAsset } from "./discord-memo";
 
 // ============================================================
@@ -112,6 +113,7 @@ export function registerAkashicTools(server: McpServer, ctx: ToolContext) {
     registerWriteTools(server, ctx);
     registerArticleWriteTools(server, ctx);
     registerUploadTools(server, ctx);
+    registerImportImageTools(server, ctx);
   }
 }
 

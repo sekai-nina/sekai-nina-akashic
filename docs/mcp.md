@@ -54,6 +54,7 @@ pnpm cli:keygen <user-email> <key-name>
 | `akashic_create_clip` | write | アセットの一節をクリップに残す（中身は `POST /api/v1/clips` と同じ `createClip`。viewer は不可） |
 | `akashic_begin_upload` | write | ファイル本体の Drive アップロード URL を発行（重複なら発行せず既存 ID） |
 | `akashic_complete_upload` | write | Drive に上げたファイルをアセットとして登録（`status` は必ず `inbox`） |
+| `akashic_import_images` | write | 画像 URL（1 回 20 枚まで）をサーバーが取得してアセットにし、任意で親アセットの子につなぐ（`status` は必ず `inbox`。#385） |
 | `akashic_create_place` | write | 聖地登録（Google Maps URL / 緯度経度） |
 | `akashic_update_place` | write | 聖地更新 |
 | `akashic_list_articles` | read | 記事一覧（`hasPending: true` で未反映の紐づけがある記事） |
@@ -167,6 +168,46 @@ MCP サーバーは Vercel 上のリモート HTTP なので、**エージェン
 - 既存がキーのクリアランスを超える場合は ID を返さない（「既に登録されている」とだけ伝える）
 - 画像は REST と同じく R2 のサムネイルを作る。ただし MIME が `image/*` かつ 50MB 以下のときだけ（`kind` は上書きできるので、大きな動画を画像扱いで丸ごと読まない）。失敗してもアセットは残る
 - `mimeType` は `type/subtype` の形に絞る。返す `command` に埋め込むので、シェルのメタ文字を通さない
+
+### 画像は URL を渡せばサーバーが取りに行く（#385）
+
+`akashic_begin_upload` / `complete_upload` は手元で curl を叩ける前提で、シェルを持たないふぃたんには使えない。`akashic_import_images` は URL を渡すだけで、取得 → Drive → アセット登録 → R2 サムネイル → 親の子としてつなぐ、までを **その場で（同期で）** 終え、1 枚ずつの成否を返す。
+
+```
+akashic_import_images {
+  images: [{ url: "https://…/01.jpg" }, { url: "https://…/02.jpg", title: "…", position: 2 }],  // 1〜20 枚
+  parentAssetId: "cm…",          // 任意
+  title: "グラビアチャンピオン vol.10",  // 共通。images[].title が無ければ「title #position」
+  sourceUrl: "https://…/article", // 画像が載っていたページ。無ければ画像 URL を出典にする
+  …                               // 残りは akashic_create_asset と同じ (全枚共通)
+}
+→ {
+  parent, classification,
+  summary: { created, duplicate, duplicateHidden, failed, skipped },
+  results: [{ index, imageUrl, position?, status, id?, title?, url?, link?, error? }],
+  linkedEntities, …, next?
+}
+```
+
+- `status`: `created`（作った）/ `duplicate`（同じ画像が既にあった）/ `duplicate_hidden`（あったがクリアランス外）/ `failed`（`error` に理由）/ `skipped`（時間切れで手を付けなかった）
+- `link`（親があるとき）: `linked` / `already_linked` / `cycle`（その画像が親の親で、つなぐと循環する）/ `link_failed`（アセットは作れたがつなげなかった。呼び直すと `duplicate` 経由でつながる）
+- **1 回 20 枚まで。同時に 4 枚ずつ。** `/api/mcp` は `maxDuration = 300`。200 秒を過ぎたら新しい画像には取りかからず `skipped` で返す（300 秒で切られると 1 枚分の結果も返らないため）。多いときは分けて、**前の呼び出しが返ってから**次を呼ぶ
+- **並び順（`sortOrder`）は `images[].position`（1 始まり）。** 省略すると既存の子の後ろに渡した順で続く。結果の `position` を取り直しのときに渡せば元の位置に戻る（省略すると末尾に付く）。続き番号は呼び出しの最初に 1 回だけ数えるので、同じ親に並行して呼ぶと番号が重なる
+- **sha256 が既存と一致したら作らず、既存を親の子としてつなぐ（`duplicate`）。** 既存の中身は書き換えない。既に子なら何もしない（`already_linked`）ので、同じ引数で呼び直しても増えない。同じ画像が見える所と見えない所の両方にあれば見える方を使う。見えない方しか無ければ ID を返さず、つながない（`duplicate_hidden`）
+- 同じ呼び出しの中に同じ画像が 2 回あったら、2 つ目は `failed`（`images[n] と同じ画像です`）
+- **`classification` を省略すると親の classification を引き継ぐ（親が無ければ `internal`）。親より下を明示したら拒否する。** 取り込み先のページに仕込まれた指示で、機密の雑誌のページを `public` で作らせないため（引き下げは画面から人間が行う、という MCP の原則と同じ）
+- 中身は sharp で読んで JPEG / PNG / WebP / GIF / TIFF / HEIC / AVIF だけ通す。Content-Type は信じない（エラーページの HTML を画像として残さない）。**SVG は受けない**（スクリプトを含められる）
+- 取得は `User-Agent` をブラウザに寄せ、`sourceUrl` があれば `Referer` に載せる（直リンク対策のサイト向け。日本語の URL はエスケープする）
+- 子との関係は `AssetRelation`（`parent_child`）。監査ログは `asset_relation.create`（domain の `createAssetRelation` と同じ action）と `mcp.import_images`（作ったとき・既存をつないだとき）
+- Drive のファイルは REST や `complete_upload` と同じく「リンクを知っていれば誰でも閲覧可」になる（classification によらない）
+
+**SSRF 対策（`src/lib/net/safe-fetch.ts`）。** URL は LLM が組むので、プロンプトインジェクション 1 回でクラウドのメタデータ（`169.254.169.254`）や内部ホストを叩かせられる。そのため:
+
+- https・443 番・認証情報なしの URL だけ。IP 直書きは名前解決を通らないので URL の段階で見る（`https://2130706433/` のような 10 進・8 進表記は URL パーサが `127.0.0.1` に直す）
+- 名前解決の結果が 1 つでも内部向け（プライベート・ループバック・リンクローカル・CGNAT・マルチキャスト・IPv4 互換 / 射影・NAT64・6to4 など）なら接続しない。接続は検査を通した IP に張る（専用の `https.Agent` の `lookup` を差し替えるので、検査後に DNS が変わっても効く。グローバルの keep-alive プールは使わない）
+- リダイレクトは自前で最大 5 回追い、毎回同じ検査を通す。3xx・エラー応答の本文は読まずに切る
+- 30MB を超えたら途中で切る。全体で 30 秒
+- 接続エラー（`ENOTFOUND`・TLS 証明書など）は理由つきの文言にする。内部に解決されたホスト名はエラーに載せない
 
 ### `sourceType` の決まり方
 
