@@ -4,6 +4,8 @@ import Link from "next/link";
 import { removeAssetRelation } from "@/lib/actions";
 import { ASSET_KIND_LABELS, RELATION_TYPE_LABELS } from "@/lib/utils";
 import { X } from "lucide-react";
+import type { NinaAppearance } from "@/lib/nina";
+import { ChildNinaSummary, ChildNinaToggle, ninaFrameClass, type ChildNinaState } from "./child-nina-toggle";
 
 interface RelatedAsset {
   id: string;
@@ -93,10 +95,15 @@ export function ParentAssets({
 export function ChildAssets({
   relations,
   currentAssetId,
+  ninaStates = {},
+  editable = false,
   embedded,
 }: {
   relations: Relation[];
   currentAssetId: string;
+  /** 子アセット (画像・動画) の坂井新奈の出演。一覧から付け外しする (#377) */
+  ninaStates?: Record<string, ChildNinaState>;
+  editable?: boolean;
   embedded?: boolean;
 }) {
   if (relations.length === 0) return null;
@@ -104,8 +111,17 @@ export function ChildAssets({
   const imageRelations = relations.filter((r) => r.asset.kind === "image" || r.asset.kind === "video");
   const otherRelations = relations.filter((r) => r.asset.kind !== "image" && r.asset.kind !== "video");
 
+  const counts: Record<NinaAppearance, number> = { appears: 0, absent: 0, unchecked: 0 };
+  for (const rel of imageRelations) {
+    const state = ninaStates[rel.asset.id];
+    if (state) counts[state.appearance]++;
+  }
+
   const content = (
     <>
+      {imageRelations.length > 0 && (
+        <ChildNinaSummary parentId={currentAssetId} counts={counts} editable={editable} />
+      )}
       {imageRelations.length > 0 && (
         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2 mb-3">
           {imageRelations.map((rel) => (
@@ -115,7 +131,7 @@ export function ChildAssets({
                   <img
                     src={rel.asset.thumbnailUrl}
                     alt={rel.asset.title || ""}
-                    className="w-full aspect-square object-cover rounded-lg border border-slate-200 hover:opacity-90 transition-opacity"
+                    className={`w-full aspect-square object-cover rounded-lg border border-slate-200 hover:opacity-90 transition-opacity ${ninaFrameClass(ninaStates[rel.asset.id]?.appearance)}`}
                     loading="lazy"
                   />
                 ) : (
@@ -127,6 +143,9 @@ export function ChildAssets({
               <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
                 <RemoveButton relationId={rel.id} assetId={currentAssetId} />
               </div>
+              {editable && ninaStates[rel.asset.id] && (
+                <ChildNinaToggle assetId={rel.asset.id} state={ninaStates[rel.asset.id]} />
+              )}
             </div>
           ))}
         </div>
