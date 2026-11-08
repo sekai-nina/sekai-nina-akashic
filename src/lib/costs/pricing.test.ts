@@ -15,6 +15,11 @@ describe("findPricing", () => {
     expect(findPricing("openai", "gpt-5.4-mini-2026-09-01")).toEqual({ input: 0.75, output: 4.5 });
   });
 
+  it("claude-opus-5-5 は claude-opus-5 の単価に落ちない", () => {
+    expect(findPricing("anthropic", "claude-opus-5-5")?.input).toBe(4);
+    expect(findPricing("anthropic", "claude-opus-5")?.input).toBe(5);
+  });
+
   it("知らないモデルは null", () => {
     expect(findPricing("openai", "gpt-9-imaginary")).toBeNull();
     expect(findPricing("anthropic", "")).toBeNull();
