@@ -16,7 +16,7 @@ const BATCH_LIMIT = 10;
 const BUDGET_MS = 120_000;
 
 /**
- * タグ「雑誌」の画像と「まとめて OCR」で頼まれた画像を Claude で OCR する (#379)。
+ * 「まとめて OCR」で頼まれた画像を Claude で OCR する (#379)。頼まれていない画像は回さない。
  * `vercel.json` の crons から 15 分ごと。`ANTHROPIC_API_KEY` が未設定なら何もしない。
  * `/status` に `cron.ocr` のハートビートを残す。
  */

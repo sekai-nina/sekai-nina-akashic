@@ -9,7 +9,8 @@ import { getAssetRelations } from "./relations";
 /**
  * 画像の OCR (#379)。作りは文字起こし (`./transcribe.ts`, #282) に揃える。
  *
- * - 15 分ごとの cron (`/api/cron/ocr`) が、タグ「雑誌」の画像と「まとめて OCR」で頼まれた画像を回す (`autoOcrWhere`)
+ * - 15 分ごとの cron (`/api/cron/ocr`) が、「まとめて OCR」で頼まれた画像だけを回す (`autoOcrWhere`)。
+ *   **頼まれていない画像は回さない** (費用がかかるので、何を OCR するかは人が決める)
  * - それ以外はアセット詳細の「OCR」ボタンで 1 件ずつ回す
  *
  * **外部 (Anthropic, 米国) に送るのは `public` / `internal` だけ。** `confidential` 以上は送らない。
@@ -17,9 +18,6 @@ import { getAssetRelations } from "./relations";
  */
 
 export const OCR_CLEARANCES: ClearanceLevel[] = ["public", "internal"];
-
-/** タグ「雑誌」の canonicalName。付いた画像は頼まれなくても cron が回す */
-const MAGAZINE_TAG = "雑誌";
 
 /** OCR できない理由。できるなら null。アセット詳細のボタンとサーバーアクションが同じ判定を使う */
 export function ocrBlockedReason(asset: {
@@ -34,7 +32,7 @@ export function ocrBlockedReason(asset: {
   return null;
 }
 
-/** cron が拾う対象: まだ OCR していない画像のうち、タグ「雑誌」付きか「まとめて OCR」で頼まれたもの */
+/** cron が拾う対象: 「まとめて OCR」で頼まれた画像のうち、まだ OCR していないもの */
 export function autoOcrWhere(): Prisma.AssetWhereInput {
   return {
     kind: "image",
@@ -44,10 +42,7 @@ export function autoOcrWhere(): Prisma.AssetWhereInput {
     ocrAt: null,
     // 人が入れた OCR は上書きしない
     texts: { none: { textType: "ocr" } },
-    OR: [
-      { ocrRequestedAt: { not: null } },
-      { entities: { some: { entity: { type: "tag", canonicalName: MAGAZINE_TAG } } } },
-    ],
+    ocrRequestedAt: { not: null },
   };
 }
 
@@ -159,7 +154,7 @@ export interface AutoOcrResult {
 }
 
 /**
- * cron 用。対象を頼まれた順 → 新しい順に、時間の許す限り 1 件ずつ回す。
+ * cron 用。対象を頼まれた順に、時間の許す限り 1 件ずつ回す。
  *
  * 選ぶのは RLS をバイパスする `prismaInternal` (classification を明示して絞る)。書き込みは対象の上限の
  * `internal` で `withClearance` を通すので、途中で機密に上げられたアセットには書かない。
@@ -171,7 +166,7 @@ export async function autoOcr(opts: { limit: number; budgetMs: number }): Promis
   const targets = await prismaInternal.asset.findMany({
     where,
     select: ASSET_SELECT,
-    orderBy: [{ ocrRequestedAt: { sort: "asc", nulls: "last" } }, { createdAt: "desc" }],
+    orderBy: [{ ocrRequestedAt: "asc" }, { createdAt: "asc" }],
     take: opts.limit,
   });
 
