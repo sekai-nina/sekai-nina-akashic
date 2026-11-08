@@ -62,7 +62,15 @@ export async function setNinaAppearance(
         await tx.assetEntity.deleteMany({ where: { assetId, entityId: NINA_ENTITY_ID } });
       }
     }
-    const ninaAbsent = status === "absent";
+    if (status !== "appears") {
+      // 顔認識 (#384) が坂井新奈として自動で付けた顔は、人が「出ていない」「未確認」にしたら確認待ちに戻す
+      // (タグは上で外れているのに auto のまま残ると、「自動で付けた = タグがある」が崩れる)
+      await tx.faceDetection.updateMany({
+        where: { assetId, predictedEntityId: NINA_ENTITY_ID, status: "auto" },
+        data: { status: "pending" },
+      });
+    }
+        const ninaAbsent = status === "absent";
     if (asset.ninaAbsent !== ninaAbsent) {
       await tx.asset.update({ where: { id: assetId }, data: { ninaAbsent, updatedById: userId } });
     }

@@ -88,6 +88,10 @@ APIキーは `pnpm cli:keygen <user-email> <key-name> [permissions]` で発行�
 | POST | `/articles/:shortId/append` | write | 本文の置き換えと出典の追加を 1 トランザクションで（bot の一覧追記） |
 | POST | `/articles/:shortId/push` | article_push | この記事 1 本だけを公開リポジトリに push |
 | POST | `/jobs/:key/runs` | write | ハートビート（bot / ワーカーのジョブが実行結果を報告する） |
+| GET | `/faces/queue` | face_worker | 顔認識: まだこのモデルで処理していない画像の一覧 |
+| GET | `/faces/assets/:id/original` | face_worker | 顔認識: 元画像のバイナリ（4.4 MB まで） |
+| PUT | `/faces/assets/:id` | face_worker | 顔認識: 1 枚の推論結果を書き込む（閾値以上は人物タグを自動で付ける） |
+| GET | `/faces/references` | face_worker | 顔認識: 参照に足す顔（人が確定した顔だけ） |
 | GET | `/insta/targets` | 有効なキー | insta-watch が見張るハンドルの一覧 |
 | GET / POST | `/insta/account` | 有効なキー / write | story 取得に使うアカウントの状態 |
 | GET | `/insta/jobs` | read | story ジョブ一覧（iPad ワーカー） |
@@ -1286,6 +1290,103 @@ body は省略可（`subject` を省くと既定のコミットメッセージ�
 | `item` | `item` | 冒頭に機械でサムネの `<img>`（企画の外部画像。キャプション「サムネ」、無ければ先頭の 1 枚。frontmatter の `thumbnail` にも入れ、公開サイトの「物」の一覧に出る）。**AI が書く**: リード 1〜2 文 + 事実の箇条書き `^[n]`。そのあとに機械で `## 購入リンク`（企画の外部リンクのうち TikTok 以外をリンクカードで。題はアイテムのキャプション。空ならプレビュー（`dryRun`）と組み込みの案を作るときにリンク先のページのタイトルを取ってキャプションに書く。取れなければ物の名前）と `## 関連メディア`（`outing` と同じ。画像・動画のトークとブログ画像をリンクで、TikTok を埋め込みで。文章のトークは出典にだけ。URL 付きの番組・動画・音声は `【動画】` のように種別だけで載る。AI が書いてしまった同名の章は落とす） | タイトル = ドシエのタイトル（= 物の名前）。`date` / `date_display` は AI の提案（その物が話に出た最も早い時期。分からなければ月の 1 日 + 「YYYY年M月頃」）。tags = 関係するメンバー + カテゴリ。場所候補は使わない。「AI 書きたて（未確認）」。追記は購入リンクと関連メディアを足し、文字起こし・抜粋・メモのある番組・動画だけ AI が本文に組み込む（サムネは追記で更新しない。外部リンク・外部画像は反映待ちには数えない） |
 
 （`meetgreet` / `live` は器側で組む: `POST /meetgreets/:id/article` / `POST /lives/:id/article`）
+
+## 顔認識 (Faces)
+
+推論ワーカー（[sekai-nina-omokage](https://github.com/sekai-nina/sekai-nina-omokage)）が叩く API（#384）。**`face_worker` だけを持つキー**で叩く（read / write は持たせない）。読める・書ける範囲はキーの持ち主のクリアランスで決まる（RLS）。設計は [face-design.md](./face-design.md)。
+
+### GET /faces/queue
+
+まだ `modelVersion` で処理していない画像（`kind = image`・Drive に実体がある）を新しい順に返す。
+
+| パラメータ | 型 | デフォルト | 説明 |
+|---|---|---|---|
+| `modelVersion` | string | （必須） | 推論したモデルのバージョン（例: `buffalo_l@1`）。英数字と `. _ @ : -` の 64 文字まで |
+| `limit` | number | 50 | 1〜200 |
+| `count` | `1` | - | 付けると `remaining`（残りの件数）を数えて返す。画像全体を数えるので、毎回のポーリングでは付けない（付けなければ `null`） |
+
+```json
+{
+  "items": [
+    { "id": "cm...", "mimeType": "image/jpeg", "fileSize": 812345, "thumbnailUrl": "https://r2.sekai-nina.com/thumbnails/cm.../gallery.webp", "createdAt": "2026-11-08T14:06:41.920Z" }
+  ],
+  "remaining": null
+}
+```
+
+### GET /faces/assets/:id/original
+
+元画像のバイナリ（`Content-Type` はアセットの `mimeType`）。`/api/drive-image` はログインのセッションが要るので、ワーカー用に別に持つ。
+
+| ステータス | 意味 |
+|---|---|
+| 404 | アセットが無い・見えない・画像ではない・Drive に実体が無い |
+| 413 | 4.4 MB を超える（Vercel の応答上限）。`thumbnailUrl` に落として処理する |
+| 502 | Drive からの取得に失敗（一時的なものとして後で取り直す） |
+
+### PUT /faces/assets/:id
+
+1 枚の画像の推論結果を書き込む。顔が 0 個でも `faces: []` で送る（`FaceScan` を記録して、次の queue に出さない）。
+
+取り直しても直らない失敗（元画像が 404・413 でサムネイルも無い・画像として読めない）は、`{"modelVersion": "...", "faces": [], "error": "<理由>"}` を送る。顔とタグには触らず、失敗として記録して queue から外す（送らないと、その画像が queue の先頭に居座る）。一時的な失敗（502 など）では送らず、次の回に取り直す。
+
+```json
+{
+  "modelVersion": "buffalo_l@1",
+  "faces": [
+    {
+      "bbox": [0.42, 0.23, 0.50, 0.38],
+      "detScore": 0.88,
+      "embedding": "<float32 × 512 のリトルエンディアンを base64 で>",
+      "predictedEntityId": "cmmtp8vrg0004mo381neyztvn",
+      "similarity": 0.61
+    }
+  ]
+}
+```
+
+| フィールド | 説明 |
+|---|---|
+| `bbox` | 顔の枠 `[x1, y1, x2, y2]`。画像の幅・高さに対する 0〜1 の割合 |
+| `detScore` | 顔検出の確からしさ（0〜1） |
+| `embedding` | L2 正規化した float32 × 512（2,048 バイト）の base64。NaN / Inf を含むもの・ノルムが 1 から 0.01 以上ずれるものは 400 |
+| `predictedEntityId` | いちばん似ていた person エンティティ。参照が空なら `null` |
+| `similarity` | そのメンバーとのコサイン類似度（-1〜1）。`null` 可 |
+
+- 1 枚あたり 100 顔まで
+- 同じ画像の、**人が見ていない結果（`auto` / `pending`）は置き換える**。人が確定・却下した顔は残す
+- 類似度が **0.40 以上**の顔は `AssetEntity`（`roleLabel = "face"`）を自動で付ける。閾値はサーバーが持つ。次の場合は付けずに `pending`（人の確認待ち）にする
+  - 「坂井新奈は出ていない」（`ninaAbsent`）の画像で坂井新奈と判定した顔
+  - 同じアセットで、人が却下済みのメンバー
+- 前回自動で付けたメンバーのうち、今回付かなくなったものの `face` タグは外す。人が付けたタグ（`author` / `subject` / `出演` など。手入力で `face` と書いたものも含む）と、人が確定した顔のメンバーのタグには触らない。同じメンバーのタグが既にあれば `roleLabel` は変えない
+- `error`（任意）: 取り直しても直らない失敗の理由（500 文字まで）。付けるなら `faces` は空にする
+- モデルは 1 つずつ動かす。新旧のワーカーが同じ画像に書くと、後から書いた方の結果が残る
+
+**レスポンス:**
+
+```json
+{ "auto": 1, "pending": 0, "tagsAdded": ["cmmtp8vrg0004mo381neyztvn"], "tagsRemoved": [] }
+```
+
+400: 形が不正・`predictedEntityId` が person のエンティティではない。404: アセットが無い・見えない・画像ではない・Drive に実体が無い（queue と同じ対象）。
+
+### GET /faces/references
+
+参照に足す顔。**人が確定した顔だけ**を返す（自動で付けた顔は返さない。間違いが参照に混ざって広がるのを防ぐ）。id の昇順で、`next` が `null` になるまで `after=<next>` で続きを取る。
+
+| パラメータ | 型 | デフォルト | 説明 |
+|---|---|---|---|
+| `after` | string | - | 前のページの `next` |
+| `limit` | number | 1000 | 1〜1000 |
+
+```json
+{
+  "items": [
+    { "id": "cm...", "assetId": "cm...", "entityId": "cm...", "modelVersion": "buffalo_l@1", "embedding": "<base64>", "reviewedAt": "2026-11-10T03:00:00.000Z" }
+  ],
+  "next": null
+}
+```
 
 ## クリップ (Clips)
 

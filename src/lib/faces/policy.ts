@@ -1,0 +1,109 @@
+/**
+ * 顔認識 (#384) の定数と、自動で付けるかどうかの判定。**DB を触らないモジュールに置く**
+ * (`src/lib/clips/errors.ts` と同じ理由: テストが `@/lib/db` を巻き込むと DATABASE_URL の無い CI で落ちる)。
+ * DB を触る側は `src/lib/domain/faces.ts`。設計は `docs/face-design.md`。
+ */
+import { z } from "zod";
+
+/** 推論ワーカー (sekai-nina-omokage) のキー。これだけを持たせ、read / write は持たせない */
+export const FACE_WORKER_PERMISSION = "face_worker";
+
+/**
+ * これ以上の類似度なら自動で AssetEntity を付ける。#376 の評価で、現役の precision 98〜99%・
+ * 坂井新奈 100% だった値。閾値はサーバーが持ち、ワーカーは類似度をそのまま送る
+ */
+export const FACE_AUTO_THRESHOLD = 0.4;
+
+/** 自動で付けた AssetEntity の roleLabel。人が付けたタグ (author / subject / 出演) と見分ける */
+export const FACE_ROLE_LABEL = "face";
+
+/** 特徴量: L2 正規化した float32 × 512 のリトルエンディアン */
+export const EMBEDDING_DIM = 512;
+export const EMBEDDING_BYTES = EMBEDDING_DIM * 4;
+
+/** 1 枚の画像に書き込める顔の上限 (集合写真でも 100 を超えることはまず無い) */
+export const MAX_FACES_PER_ASSET = 100;
+
+/** モデルのバージョン (例: buffalo_l@1)。queue と書き込みで食い違わないよう、空白や記号を許さない */
+export const MODEL_VERSION_PATTERN = /^[A-Za-z0-9._@:-]{1,64}$/;
+
+/** 特徴量の L2 ノルムの許容誤差 (float32 の丸めで 1 から少しずれる) */
+const EMBEDDING_NORM_TOLERANCE = 0.01;
+
+export type AutoDecision = "auto" | "pending";
+
+/**
+ * 推論した顔を自動で付けるか、人の確認に回すか。
+ * - 参照が無く推定できなかった・類似度が閾値未満 → pending
+ * - 「出ていない」(ninaAbsent) の画像で坂井新奈と判定 → pending (人の確認を優先する)
+ * - 同じアセットで人が却下済みのメンバー → pending
+ */
+export function decideFace(
+  face: { predictedEntityId: string | null; similarity: number | null },
+  ctx: { ninaEntityId: string; ninaAbsent: boolean; rejectedEntityIds: ReadonlySet<string> },
+  threshold = FACE_AUTO_THRESHOLD
+): AutoDecision {
+  const { predictedEntityId, similarity } = face;
+  if (!predictedEntityId || similarity == null || similarity < threshold) return "pending";
+  if (predictedEntityId === ctx.ninaEntityId && ctx.ninaAbsent) return "pending";
+  if (ctx.rejectedEntityIds.has(predictedEntityId)) return "pending";
+  return "auto";
+}
+
+/**
+ * base64 の特徴量を Buffer に戻す。長さが合わない・有限でない値 (NaN / Inf) を含む・
+ * L2 正規化されていなければ null (壊れた値が参照に混ざると類似度が全部狂う)
+ */
+export function decodeEmbedding(b64: string): Buffer | null {
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return null;
+  const buf = Buffer.from(b64, "base64");
+  if (buf.length !== EMBEDDING_BYTES) return null;
+  let sq = 0;
+  for (let i = 0; i < EMBEDDING_DIM; i++) {
+    const v = buf.readFloatLE(i * 4);
+    if (!Number.isFinite(v)) return null;
+    sq += v * v;
+  }
+  return Math.abs(Math.sqrt(sq) - 1) <= EMBEDDING_NORM_TOLERANCE ? buf : null;
+}
+
+const unit = z.number().min(0).max(1);
+
+export const FaceInput = z
+  .object({
+    bbox: z.tuple([unit, unit, unit, unit]).refine(([x1, y1, x2, y2]) => x1 < x2 && y1 < y2, {
+      message: "bbox は [x1, y1, x2, y2] で x1 < x2・y1 < y2 にする",
+    }),
+    detScore: unit,
+    // 検証と同時に Buffer へ戻す (書き込み側で decode し直さない)
+    embedding: z.string().transform((s, ctx) => {
+      const buf = decodeEmbedding(s);
+      if (!buf) {
+        ctx.addIssue({
+          code: "custom",
+          message: `embedding は L2 正規化した float32 × ${EMBEDDING_DIM} (${EMBEDDING_BYTES} バイト) の base64 にする`,
+        });
+        return z.NEVER;
+      }
+      return buf;
+    }),
+    predictedEntityId: z.string().min(1).max(64).nullable(),
+    similarity: z.number().min(-1).max(1).nullable(),
+  })
+  .strict();
+
+export const FaceWriteBody = z
+  .object({
+    modelVersion: z.string().regex(MODEL_VERSION_PATTERN, "modelVersion は英数字と . _ @ : - の 64 文字まで"),
+    faces: z.array(FaceInput).max(MAX_FACES_PER_ASSET),
+    /**
+     * 取り直しても直らない失敗 (Drive に無い・大きすぎてサムネイルも無い・画像として読めない) の理由。
+     * 付けると faces は空にして、その画像を queue から外す (失敗が queue の先頭に居座らないように)。
+     * 一時的な失敗 (Drive の 5xx など) では送らず、次の回に取り直す
+     */
+    error: z.string().trim().min(1).max(500).optional(),
+  })
+  .strict()
+  .refine((b) => !b.error || b.faces.length === 0, { message: "error を付けるときは faces を空にする", path: ["faces"] });
+
+export type FaceWriteInput = z.infer<typeof FaceWriteBody>;

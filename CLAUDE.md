@@ -114,7 +114,7 @@ withSession({ id, clearance }, tx => …)    // 上記 + app.user_id — Dossier
 
 ### 保護テーブル
 
-`Asset`, `AssetText`, `AssetTextRevision`, `AssetEntity`, `AssetRelation`, `SourceRecord`, `Annotation`, `Testimonial`, `Dossier`, `DossierItem`, `DossierPlaceCandidate`, `Place`, `RepoCollection`, `RepoTweet`, `RepoTweetMedia`, `RepoQueryPreset`, `Lens`, `DataSource`, `Coverage`, `LensItemCheck`, `ArticleSource`, `ArticlePlace`, `MeetGreet`, `InstaWatchTarget`, `InstaAccount`, `InstaStoryJob`, `SketchSetting`, `ArticlePromptSetting`, `Anniversary`, `XMentionWatch`, `XMentionSetting`, `XMentionHit`, `Live`, `LivePerformance`, `LiveSong`, `LiveSetlistItem`, `TiktokWatchTarget`, `TiktokVideo`, `ArticleProgress`, `MaterialClipStatus`
+`Asset`, `AssetText`, `AssetTextRevision`, `AssetEntity`, `AssetRelation`, `SourceRecord`, `Annotation`, `Testimonial`, `Dossier`, `DossierItem`, `DossierPlaceCandidate`, `Place`, `RepoCollection`, `RepoTweet`, `RepoTweetMedia`, `RepoQueryPreset`, `Lens`, `DataSource`, `Coverage`, `LensItemCheck`, `ArticleSource`, `ArticlePlace`, `MeetGreet`, `InstaWatchTarget`, `InstaAccount`, `InstaStoryJob`, `SketchSetting`, `ArticlePromptSetting`, `Anniversary`, `XMentionWatch`, `XMentionSetting`, `XMentionHit`, `Live`, `LivePerformance`, `LiveSong`, `LiveSetlistItem`, `TiktokWatchTarget`, `TiktokVideo`, `ArticleProgress`, `MaterialClipStatus`, `FaceDetection`, `FaceScan`
 
 RLS は `clearance_rank(classification::text) <= clearance_rank(current_setting('app.clearance', true))`。`clearance_rank()` は未知/未設定を `-1` にして **fail-closed**。全テーブル `ENABLE` + `FORCE ROW LEVEL SECURITY`。
 
@@ -217,6 +217,7 @@ src/
 | `docs/ipad-instagram-worker.md` | Instagram story を iPad（Pushcut + Shortcuts）で取る仕組みと、ラッパー Shortcut の作り方 |
 | `docs/transcribe-design.md` | 音声・動画の文字起こし（Groq・15 分 cron・アセット詳細のボタン・機密は送らない）設計書 |
 | `docs/ocr-design.md` | 画像の OCR（Claude・15 分 cron・アセット詳細のボタン・子アセットの子アセット一覧の「選択して OCR」・機密は送らない）設計書 |
+| `docs/face-design.md` | 顔認識（推論ワーカー sekai-nina-omokage・`/api/v1/faces/*`・閾値以上は `AssetEntity` を自動で付与・人の確認を優先する規則）設計書 |
 | `docs/tiktok-design.md` | TikTok 監視（`/admin/tiktok`・tiktok-watch bot・台帳 API・Discord 通知）設計書 |
 | `docs/costs-design.md` | LLM コスト管理（`/costs`・利用量の自己申告・プロバイダ取り込み・残クレジット判定）設計書 |
 | `docs/security.md` / `docs/security-admin.md` | 非エンジニア / 管理者向け |
