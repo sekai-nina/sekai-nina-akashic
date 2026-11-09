@@ -14,6 +14,24 @@ export function providedRoleLabel(roleLabel: string | null | undefined): string 
   return v ? v : undefined;
 }
 
+/**
+ * 既存の紐づきのうち roleLabel を書き換えるものを、値ごとに entityId をまとめて返す (updateMany 用)。
+ * 新規 (existingIds に無い) と、値を渡されなかったものは含めない
+ */
+export function groupRoleLabelUpdates(
+  entities: { entityId: string; roleLabel?: string | null }[],
+  existingIds: ReadonlySet<string>
+): Map<string, string[]> {
+  const byRole = new Map<string, string[]>();
+  for (const e of entities) {
+    if (!existingIds.has(e.entityId)) continue;
+    const key = providedRoleLabel(e.roleLabel);
+    if (key === undefined) continue;
+    byRole.set(key, [...(byRole.get(key) ?? []), e.entityId]);
+  }
+  return byRole;
+}
+
 /** upsert の `update` に渡すもの。値が無ければ空 (= roleLabel に触らない) */
 export function roleLabelUpdate(roleLabel: string | null | undefined): { roleLabel?: string } {
   const v = providedRoleLabel(roleLabel);
