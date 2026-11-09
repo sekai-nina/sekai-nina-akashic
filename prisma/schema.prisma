@@ -2124,6 +2124,8 @@ model FaceDetection {
   predictedEntity   Entity?    @relation("FacePredicted", fields: [predictedEntityId], references: [id], onDelete: SetNull)
   /// predictedEntity とのコサイン類似度
   similarity        Float?
+  /// 動画の何秒目の顔か (#403)。画像は null
+  frameSec          Float?
   status            FaceStatus
   confirmedEntityId String?
   confirmedEntity   Entity?    @relation("FaceConfirmed", fields: [confirmedEntityId], references: [id], onDelete: SetNull)
