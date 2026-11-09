@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import type { SongParticipation } from "@prisma/client";
 import { SONG_PARTICIPATION_LABELS } from "@/lib/utils";
@@ -21,7 +20,6 @@ export function SongEditForm({
   participation: SongParticipation;
   note: string;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [t, setT] = useState(title);
   const [p, setP] = useState<SongParticipation>(participation);
@@ -33,7 +31,6 @@ export function SongEditForm({
     startTransition(async () => {
       const res = await updateSongAction(id, { title: t, participation: p, note: n });
       setMsg(res.ok ? "保存しました" : `エラー: ${res.error}`);
-      if (res.ok) router.refresh();
     });
   }
 

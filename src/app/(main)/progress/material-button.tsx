@@ -1,7 +1,6 @@
 "use client";
 
 import { createContext, useContext, useState, useTransition, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
 import { MATERIAL_PROGRESS_LABELS as L, cn } from "@/lib/utils";
 import { setMaterialClipProgressAction } from "./material-actions";
 
@@ -22,7 +21,6 @@ export function MaterialProgressButton({ sourceKey, itemKey, field = "done", val
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [readOnly, setReadOnly] = useState(false);
-  const router = useRouter();
   return (
     <span className="inline-flex flex-col items-start gap-1">
       <button type="button" disabled={pending || !editable || readOnly || controls?.readOnly} aria-pressed={field === "done" ? !value : undefined}
@@ -40,7 +38,6 @@ export function MaterialProgressButton({ sourceKey, itemKey, field = "done", val
                   controls?.disable();
                 }
               }
-              else router.refresh();
             } catch { setError(L.failed); }
           });
         }}>

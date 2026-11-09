@@ -126,9 +126,8 @@ export function RepoCuration({
         "reject" as RepoTweetStatus
       );
       showToast("未選別を却下しました");
-      router.refresh();
     });
-  }, [collection.id, router, showToast]);
+  }, [collection.id, showToast]);
 
   // keyboard shortcuts
   useEffect(() => {

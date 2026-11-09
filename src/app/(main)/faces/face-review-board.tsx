@@ -102,9 +102,8 @@ export function FaceReviewBoard({
         return;
       }
       setMessage(`${r.result.updated} 顔を保存しました (タグ +${r.result.tagsAdded} / -${r.result.tagsRemoved})`);
-      router.refresh();
     });
-  }, [canEdit, saving, faces, choiceOf, router]);
+  }, [canEdit, saving, faces, choiceOf]);
 
   // キーボード
   useEffect(() => {

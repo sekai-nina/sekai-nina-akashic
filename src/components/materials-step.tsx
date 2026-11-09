@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { Check, ChevronDown, ChevronRight, Image as ImageIcon, Video } from "lucide-react";
 import type { CandidateAsset, CandidateGroup } from "@/lib/meetgreet/candidates";
@@ -38,7 +37,6 @@ export function MaterialsStep({
   topic: string;
   onApply: (assetIds: string[]) => Promise<ApplyMaterialsResult>;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
   const [expandedText, setExpandedText] = useState<Set<string>>(new Set());
@@ -159,7 +157,6 @@ export function MaterialsStep({
           ? `${res.added} 件を企画に追加しました${res.skipped > 0 ? ` (${res.skipped} 件は追加済み)` : ""}`
           : `エラー: ${res.error}`
       );
-      if (res.ok) router.refresh();
     });
   }
 

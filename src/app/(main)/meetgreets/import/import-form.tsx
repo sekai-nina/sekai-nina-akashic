@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Download } from "lucide-react";
 import type { ImportCandidate } from "@/lib/domain/meetgreet-import";
@@ -9,7 +8,6 @@ import { importMeetGreetsAction } from "../actions";
 
 /** 取り込む候補のチェックリスト。既定では全部チェック (人は外すだけで済む) */
 export function ImportForm({ candidates }: { candidates: ImportCandidate[] }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
   const [failed, setFailed] = useState<{ dossierTitle: string; error: string }[]>([]);
@@ -48,7 +46,6 @@ export function ImportForm({ candidates }: { candidates: ImportCandidate[] }) {
           ? `${res.imported} 件を取り込みました`
           : `${res.imported} 件を取り込み、${res.failed.length} 件は失敗しました`
       );
-      router.refresh();
     });
   }
 

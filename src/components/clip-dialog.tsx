@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useTransition, type KeyboardEvent } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Loader2, Scissors } from "lucide-react";
 import { createClipAction } from "@/app/(main)/clips/actions";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -34,14 +33,13 @@ interface ClipDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   draft?: ClipDraft;
-  /** 保存に成功したら呼ぶ (ページの再取得はダイアログ側で行う) */
+  /** 保存に成功したら呼ぶ (ページの描き直しは Action の revalidatePath が返すので、呼び出し側で再取得しない) */
   onCreated?: () => void;
 }
 
 const NOTE_PLACEHOLDER = "なぜ気になったか、あとで何に使えそうか (任意)";
 
 export function ClipDialog({ assetId, hasTexts, open, onOpenChange, draft, onCreated }: ClipDialogProps) {
-  const router = useRouter();
   const [excerpt, setExcerpt] = useState(draft?.excerpt ?? "");
   const [note, setNote] = useState("");
   // 引用欄を書き換えたら位置は信用できない
@@ -83,9 +81,8 @@ export function ClipDialog({ assetId, hasTexts, open, onOpenChange, draft, onCre
         setError(result.error);
         return;
       }
+      // アセット詳細の「クリップ」セクションと本文のハイライトは、Action の revalidatePath が返す描き直しで反映される
       setDone({ located: result.located });
-      // アセット詳細の「クリップ」セクションと本文のハイライトに反映する
-      router.refresh();
       onCreated?.();
     });
   };

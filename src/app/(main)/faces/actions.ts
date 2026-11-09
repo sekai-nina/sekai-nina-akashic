@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidateTag } from "next/cache";
+import { refresh, revalidateTag } from "next/cache";
 import { z } from "zod";
 import { requireRole } from "@/lib/auth/require-role";
 import { invalidateAssetList } from "@/lib/cache";
@@ -32,6 +32,9 @@ export async function submitFaceReview(input: unknown): Promise<ReviewActionResu
     if (result.tagsAdded > 0 || result.tagsRemoved > 0) invalidateAssetList();
     // メニューの数は古いものをすぐ返して裏で数え直す (確認のたびに数え直しを待たせない)
     revalidateTag(FACE_REVIEW_CACHE_TAG, "max");
+    // タグの "max" だけでは Action の応答に画面の描き直しが入らない。ここで頼んで 1 往復で済ませる
+    // (クライアントから描き直しを頼むと、もう 1 往復増える。docs/performance.md)
+    refresh();
     return { ok: true, result };
   } catch (err) {
     if (err instanceof FaceReviewInputError) return { ok: false, error: err.message };

@@ -1,7 +1,6 @@
 "use client";
 
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { LivePerformanceView, LiveSetlistItemView } from "@/lib/domain/lives";
 import { MAX_SETLIST_ITEMS, parseSetlistText, SETLIST_SECTIONS } from "@/lib/live/setlist";
@@ -97,7 +96,6 @@ function PerformanceEditor({
   participation: Record<string, string>;
   knownKeys: string[];
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [rows, setRows] = useState<Row[]>(() => toRows(performance.setlist));
   const [paste, setPaste] = useState("");
@@ -207,7 +205,6 @@ function PerformanceEditor({
       setMsg(`保存しました (${res.songs} 曲 · 参加 ${res.participated}${res.center > 0 ? ` · センター ${res.center}` : ""})`);
       dirtyRef.current = false;
       setDirty(false);
-      router.refresh();
     });
   }
 

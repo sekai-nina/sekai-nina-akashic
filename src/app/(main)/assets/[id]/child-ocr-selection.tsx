@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { ScanText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { OcrState } from "@/lib/domain/ocr";
@@ -69,7 +68,6 @@ export function ChildOcrToolbar({
   onSelectAll: () => void;
   onClear: () => void;
 }) {
-  const router = useRouter();
   const [message, setMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -87,7 +85,6 @@ export function ChildOcrToolbar({
               : "OCR 待ちにできる画像はありませんでした (済み・待ち・機密を除く)",
           );
           onClear();
-          router.refresh();
         }
       } catch {
         setMessage("失敗しました。時間をおいてもう一度試してください");

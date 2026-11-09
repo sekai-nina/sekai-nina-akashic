@@ -1,7 +1,6 @@
 "use client";
 
 import { useOptimistic, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Check, X } from "lucide-react";
 import { NINA_APPEARANCE_LABELS, cn } from "@/lib/utils";
 import type { NinaAppearance } from "@/lib/nina";
@@ -25,7 +24,6 @@ export function ninaFrameClass(appearance: NinaAppearance | undefined): string {
  * 押している方をもう一度押すと「未確認」に戻す (著者のアセットは戻せないので何もしない)
  */
 export function ChildNinaToggle({ assetId, state }: { assetId: string; state: ChildNinaState }) {
-  const router = useRouter();
   const [current, setCurrent] = useOptimistic(state.appearance);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -39,7 +37,6 @@ export function ChildNinaToggle({ assetId, state }: { assetId: string; state: Ch
       try {
         const res = await setAssetNinaAppearance(assetId, to);
         if (res.error) setError(res.error);
-        else router.refresh();
       } catch {
         setError("記録に失敗しました");
       }
@@ -97,7 +94,6 @@ export function ChildNinaSummary({
   counts: Record<NinaAppearance, number>;
   editable: boolean;
 }) {
-  const router = useRouter();
   const [message, setMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -108,7 +104,6 @@ export function ChildNinaSummary({
       try {
         const res = await markUncheckedChildrenAbsent(parentId);
         setMessage(res.error ?? `${res.count ?? 0} 件を「${NINA_APPEARANCE_LABELS.absent}」にしました`);
-        router.refresh();
       } catch {
         setMessage("記録に失敗しました。時間をおいてもう一度試してください");
       }

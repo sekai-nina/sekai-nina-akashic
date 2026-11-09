@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { ScanFace } from "lucide-react";
 import type { AssetFace, FaceDecision } from "@/lib/domain/face-review";
 import { submitFaceReview } from "../../faces/actions";
@@ -43,7 +42,6 @@ export function FacesPanel({
   members: { id: string; name: string; generation: number }[];
   editable: boolean;
 }) {
-  const router = useRouter();
   const [busy, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -57,7 +55,6 @@ export function FacesPanel({
     startTransition(async () => {
       const r = await submitFaceReview([decision]);
       if (!r.ok) setError(r.error);
-      else router.refresh();
     });
   };
 

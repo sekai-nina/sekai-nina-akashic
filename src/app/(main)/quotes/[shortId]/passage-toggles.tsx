@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import type { QuotePassage } from "@/lib/quotes/featured-passages";
 import { cn } from "@/lib/utils";
@@ -16,7 +15,6 @@ export function PassageToggles({
   passages: QuotePassage[];
   editable: boolean;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [busy, setBusy] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -28,7 +26,6 @@ export function PassageToggles({
       const res = await setQuotePassageAction(shortId, p.index, !p.quoted, p.text);
       setBusy(null);
       if (!res.ok) setError(res.error);
-      else router.refresh();
     });
   }
 

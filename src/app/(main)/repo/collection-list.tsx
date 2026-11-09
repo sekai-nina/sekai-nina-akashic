@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { renameCollectionAction, deleteCollectionAction } from "./actions";
 
@@ -19,7 +18,6 @@ interface CollectionItem {
 }
 
 export function CollectionList({ items }: { items: CollectionItem[] }) {
-  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -30,7 +28,6 @@ export function CollectionList({ items }: { items: CollectionItem[] }) {
     startTransition(async () => {
       await renameCollectionAction(item.id, name);
       setBusyId(null);
-      router.refresh();
     });
   }
 
@@ -40,7 +37,6 @@ export function CollectionList({ items }: { items: CollectionItem[] }) {
     startTransition(async () => {
       await deleteCollectionAction(item.id);
       setBusyId(null);
-      router.refresh();
     });
   }
 

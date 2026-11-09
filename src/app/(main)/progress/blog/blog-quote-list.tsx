@@ -74,7 +74,6 @@ function BlogRow({ row, editable }: { row: BlogQuoteRow; editable: boolean }) {
       if (!res.ok) return setError(res.error);
       setExcluding(false);
       if (res.href) router.push(res.href);
-      else router.refresh();
     });
   }
 

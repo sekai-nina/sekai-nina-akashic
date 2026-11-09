@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Wand2 } from "lucide-react";
 import type { ApplyExcerptInput, BlogExcerptProposals } from "@/lib/meetgreet/types";
@@ -23,7 +22,6 @@ export function ExcerptStep({
   onPropose: () => Promise<ProposeExcerptsResult>;
   onApply: (inputs: ApplyExcerptInput[]) => Promise<ApplyExcerptsResult>;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
   const [blogs, setBlogs] = useState<BlogExcerptProposals[] | null>(null);
@@ -88,7 +86,6 @@ export function ExcerptStep({
       // 入ったぶんだけチェックを外す。見送られたものは選び直せるよう候補は残す
       setPicked(new Set());
       if (res.skipped === 0) setBlogs(null);
-      router.refresh();
     });
   }
 

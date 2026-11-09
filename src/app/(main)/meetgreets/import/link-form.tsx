@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Link2 } from "lucide-react";
 import type { ArticleLinkCandidate } from "@/lib/domain/meetgreet-import";
@@ -12,7 +11,6 @@ import { linkArticlesAction } from "../actions";
  * それで機械的に突き合わせられる。紐づけると、以降は差分を追記できるようになる。
  */
 export function ArticleLinkForm({ candidates }: { candidates: ArticleLinkCandidate[] }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
   const [picked, setPicked] = useState<Set<string>>(
@@ -47,7 +45,6 @@ export function ArticleLinkForm({ candidates }: { candidates: ArticleLinkCandida
           ? `${res.linked} 件を紐づけました`
           : `${res.linked} 件を紐づけ、${res.failed.length} 件は失敗しました`
       );
-      router.refresh();
     });
   }
 

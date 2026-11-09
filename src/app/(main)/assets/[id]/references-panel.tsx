@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { FileText, FolderSearch, Loader2, Scissors, Trash2, X } from "lucide-react";
 import { deleteClipsAction } from "@/app/(main)/clips/actions";
 import { removeAssetFromDossierAction } from "@/app/(main)/dossiers/actions";
@@ -134,7 +133,6 @@ export function AssetReferencesPanel({ assetId, references, dossiers, clips, can
 }
 
 function DossierRow({ dossier, assetId }: { dossier: DossierView; assetId: string }) {
-  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -145,7 +143,6 @@ function DossierRow({ dossier, assetId }: { dossier: DossierView; assetId: strin
     startTransition(async () => {
       try {
         await removeAssetFromDossierAction(dossier.id, assetId);
-        router.refresh();
       } catch (e) {
         setError(e instanceof Error ? e.message : "外せませんでした");
       }
@@ -181,7 +178,6 @@ function DossierRow({ dossier, assetId }: { dossier: DossierView; assetId: strin
 }
 
 function ClipRow({ clip, canEdit }: { clip: ClipView; canEdit: boolean }) {
-  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -194,7 +190,6 @@ function ClipRow({ clip, canEdit }: { clip: ClipView; canEdit: boolean }) {
         setError(result.error);
         return;
       }
-      router.refresh();
     });
   };
 

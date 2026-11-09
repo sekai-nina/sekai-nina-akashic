@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import type { ArticleTemplate } from "@prisma/client";
 import { setTemplateAction } from "./actions";
@@ -27,7 +26,6 @@ export function TemplatePicker({
   /** ドシエの編集権限。無ければ決められない (保存もできない) */
   editable: boolean;
 }) {
-  const router = useRouter();
   const [value, setValue] = useState<ArticleTemplate | "">(current ?? suggested ?? "");
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -45,7 +43,6 @@ export function TemplatePicker({
         return;
       }
       setMsg(null);
-      router.refresh();
     });
   }
 
