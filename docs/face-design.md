@@ -99,6 +99,14 @@ pgvector は使わない。今は「似た顔を DB で検索する」場面が�
 
 ふぃたんなどの AI からは MCP で読む。`akashic_get_asset` の `faces`（写っている人物・確認待ちの顔の数。ブログ本文などは子の画像の分もまとめる）と、`akashic_search` の `appearing`（顔で写っている人物での絞り込みと、結果の人物）。人物タグの `roleLabel` は書き手の `author` が先に付いていると `face` にならないので、写っているかは `FaceDetection` から返す。詳細は [mcp.md の「写っている人物」](./mcp.md)。
 
+## トークの動画（#403）
+
+タグ「トーク」の動画（200 MB まで）も queue に出す。番組・配信などの長い動画は対象にしない（#394）。
+
+- ワーカーは元ファイルを `Range` で 4.4 MB ずつ取ってつなぐ（Vercel の応答上限のため。sekai に Drive の鍵を置かずに済む）
+- 等間隔にコマを切り出して顔を判定し、**メンバーごとにいちばん似ていた顔**を 1 つずつ書き込む（同じ人の顔がコマの数だけ確認待ちに並ばないように）。`frameSec` に何秒目かを入れる。#394 のスクショ・切り抜きでも使う
+- 1 コマでも閾値以上なら、画像と同じ規則で `face` タグが付く。Discord への転送も画像と同じ経路に乗る
+
 ## Discord への転送（#395）
 
 他のメンバーのトーク・ブログに坂井新奈が写っていたら、discord bot（sekai-nina-discord-bot の `face_forward`）が世界新奈の talk / blog チャンネルに流す。bot は `GET /faces/appearances` を数分おきに叩き、流した画像を自分で覚える。坂井新奈が書き手の画像は API が除く。画像は `GET /faces/assets/:id/original`（`read` のキーで取れる）。

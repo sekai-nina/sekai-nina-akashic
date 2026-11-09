@@ -99,6 +99,8 @@ export const FaceInput = z
     }),
     predictedEntityId: z.string().min(1).max(64).nullable(),
     similarity: z.number().min(-1).max(1).nullable(),
+    /** 動画の何秒目の顔か (#403)。画像は省く */
+    frameSec: z.number().min(0).max(24 * 3600).nullable().optional(),
   })
   .strict();
 

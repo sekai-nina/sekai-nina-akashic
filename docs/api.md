@@ -1298,7 +1298,7 @@ body は省略可（`subject` を省くと既定のコミットメッセージ�
 
 ### GET /faces/queue
 
-まだ `modelVersion` で処理していない画像（`kind = image`・Drive に実体がある）を新しい順に返す。
+まだ `modelVersion` で処理していない画像（`kind = image`・Drive に実体がある）と、タグ「トーク」の動画（200 MB まで。#403）を新しい順に返す。`kind` で見分ける。
 
 | パラメータ | 型 | デフォルト | 説明 |
 |---|---|---|---|
@@ -1309,7 +1309,7 @@ body は省略可（`subject` を省くと既定のコミットメッセージ�
 ```json
 {
   "items": [
-    { "id": "cm...", "mimeType": "image/jpeg", "fileSize": 812345, "thumbnailUrl": "https://r2.sekai-nina.com/thumbnails/cm.../gallery.webp", "createdAt": "2026-11-08T14:06:41.920Z" }
+    { "id": "cm...", "kind": "image", "mimeType": "image/jpeg", "fileSize": 812345, "thumbnailUrl": "https://r2.sekai-nina.com/thumbnails/cm.../gallery.webp", "createdAt": "2026-11-08T14:06:41.920Z" }
   ],
   "remaining": null
 }
@@ -1322,7 +1322,9 @@ body は省略可（`subject` を省くと既定のコミットメッセージ�
 | ステータス | 意味 |
 |---|---|
 | 404 | アセットが無い・見えない・画像ではない・Drive に実体が無い |
-| 413 | 4.4 MB を超える（Vercel の応答上限）。`thumbnailUrl` に落として処理する |
+| 206 | `Range: bytes=<start>-<end>` を付けたとき。その範囲だけを返し、`Content-Range: bytes <start>-<end>/<全体>` を付ける。範囲は 4.4 MB まで（`end` を省くと 4.4 MB 分）。動画はこれで小分けに取る（#403） |
+| 413 | 4.4 MB を超える（Vercel の応答上限）。画像は `thumbnailUrl` に落として処理する。動画は `Range` で取る |
+| 416 | `Range` の形が違う・ファイルの大きさを超える |
 | 502 | Drive からの取得に失敗（一時的なものとして後で取り直す） |
 
 ### PUT /faces/assets/:id
@@ -1353,6 +1355,7 @@ body は省略可（`subject` を省くと既定のコミットメッセージ�
 | `embedding` | L2 正規化した float32 × 512（2,048 バイト）の base64。NaN / Inf を含むもの・ノルムが 1 から 0.01 以上ずれるものは 400 |
 | `predictedEntityId` | いちばん似ていた person エンティティ。参照が空なら `null` |
 | `similarity` | そのメンバーとのコサイン類似度（-1〜1）。`null` 可 |
+| `frameSec` | 動画の何秒目の顔か（0 以上。#403）。画像は省くか `null`。動画では、切り出したコマの顔からメンバーごとにいちばん似ていた顔を送る |
 
 - 1 枚あたり 100 顔まで
 - 同じ画像の、**人が見ていない結果（`auto` / `pending`）は置き換える**。人が確定・却下した顔は残す

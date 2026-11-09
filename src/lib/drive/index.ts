@@ -183,6 +183,34 @@ export async function downloadFromDrive(fileId: string, opts: { timeoutMs?: numb
   return Buffer.from(res.data as ArrayBuffer);
 }
 
+/**
+ * Drive のファイルの一部 (start〜end バイト目、両端を含む) をダウンロードする (#403)。
+ * Vercel の応答上限 (4.5 MB) を超える動画を、顔認識のワーカーが小分けに取るために使う。
+ * `total` は Content-Range から読んだファイル全体の大きさ (読めなければ null)
+ */
+export async function downloadRangeFromDrive(
+  fileId: string,
+  start: number,
+  end: number,
+  opts: { timeoutMs?: number } = {}
+): Promise<{ body: Buffer; total: number | null } | null> {
+  const auth = getAuth();
+  if (!auth) return null;
+
+  const drive = google.drive({ version: "v3", auth: auth as Parameters<typeof google.drive>[0]["auth"] });
+  const res = await drive.files.get(
+    { fileId, alt: "media", supportsAllDrives: true },
+    {
+      responseType: "arraybuffer",
+      headers: { Range: `bytes=${start}-${end}` },
+      ...(opts.timeoutMs ? { timeout: opts.timeoutMs } : {}),
+    }
+  );
+  const contentRange = String((res.headers as Record<string, unknown>)?.["content-range"] ?? "");
+  const total = /\/(\d+)$/.exec(contentRange)?.[1];
+  return { body: Buffer.from(res.data as ArrayBuffer), total: total ? Number(total) : null };
+}
+
 /** R2 のギャラリーサムネイル幅 (src/lib/thumbnails の GALLERY_WIDTH) に合わせている */
 const GALLERY_THUMBNAIL_WIDTH = 640;
 
