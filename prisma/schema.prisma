@@ -393,6 +393,8 @@ model AssetEntity {
   @@unique([assetId, entityId])
   @@index([assetId])
   @@index([entityId])
+  /// エンティティ詳細の「最新の紐づき 20 件」用 (entityId で絞って createdAt 降順)
+  @@index([entityId, createdAt])
 }
 
 model SourceRecord {
