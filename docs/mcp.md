@@ -237,7 +237,7 @@ MCP のツール引数はもともと zod で検証されるが、REST の `POST
 - `akashic_search` の結果の `appearing`: その画像に写っている人物
 - `akashic_get_asset` の `faces`: `appearing`（人物・顔の数・人が確定したか）と `pendingFaces`（確認待ちの顔の数）。ブログ本文・トークのように子アセット（`parent_child`）を持つものは、子の画像に写っている人物を `appearingInChildren` にまとめ、写っている子アセットの `id` / `url` を付ける。顔が 1 つも無ければ `faces` を省く
 - 数えるのは自動（`auto`）の推定と、人が見た顔（`confirmed` / `rejected`）の正解。確認待ち（`pending`）は写っている人に入れない
-- 顔認識は画像だけが対象。動画・本文には当たらない（#394）
+- 顔認識は画像とトークの動画（#403）が対象。それ以外の動画・本文には当たらない（#394）
 
 出演一覧を更新するときは `akashic_search` に `kinds: ["video"]`・`entityNames`（チャンネル名など）・日付と `ninaAppearance: "unchecked"` を渡し、確認が要るものだけを出す。ツールの説明で「実際に確認した結果だけを記録し、推測で absent にしない」と AI に伝えている。坂井新奈が著者（author）のアセットは `unchecked` にできない（著者の紐づけは外さない）。本人の投稿でも写っていなければ `absent` にできる。
 

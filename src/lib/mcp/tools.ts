@@ -162,7 +162,7 @@ function registerReadTools(server: McpServer, { user, baseUrl }: ToolContext) {
           .optional()
           .describe(
             "顔認識でこの人物 (メンバー) が写っている画像に絞る。複数指定すると全員が同じ画像に写っているものだけ (「坂井新奈と X が一緒に写っている」)。" +
-              "entityNames と違い、ブログの書き手などのタグでは当たらない。顔認識は画像だけが対象 (動画・本文は当たらない)"
+              "entityNames と違い、ブログの書き手などのタグでは当たらない。顔認識は画像とトークの動画が対象 (それ以外の動画・本文は当たらない)"
           ),
         dateFrom: DATE_ONLY.optional().describe("公開日/放送日の下限 (JST)"),
         dateTo: DATE_ONLY.optional().describe("公開日/放送日の上限 (JST)"),

@@ -5,8 +5,9 @@
  * FaceDetection / FaceScan は保護テーブル (親 Asset の classification で RLS) なので、
  * すべて withClearance の中で触る。キーの持ち主のクリアランスより上の画像は見えない。
  */
+import type { Prisma } from "@prisma/client";
 import { withClearance } from "@/lib/db";
-import { downloadFromDrive } from "@/lib/drive";
+import { downloadFromDrive, downloadRangeFromDrive } from "@/lib/drive";
 import { decideFace, FACE_ROLE_LABEL, type FaceWriteInput } from "@/lib/faces/policy";
 import { NINA_ENTITY_ID } from "@/lib/nina";
 
@@ -24,8 +25,24 @@ export const ORIGINAL_MAX_BYTES = 4_400_000;
 /** 元画像を Drive から取る時間の上限。route の maxDuration (30 秒) に収める */
 const DRIVE_DOWNLOAD_TIMEOUT_MS = 20_000;
 
-/** 顔認識の対象: Drive に実体がある画像 */
-const targetWhere = { kind: "image", storageProvider: "gdrive", storageKey: { not: null } } as const;
+/** 動画は、タグがこれのものだけを対象にする (#403)。番組・配信などの長い動画は対象にしない (#394) */
+export const FACE_VIDEO_TAG = "トーク";
+/** 対象にする動画の大きさの上限。2026-11 時点でトークの動画は最大 65 MB */
+export const FACE_VIDEO_MAX_BYTES = 200_000_000;
+
+/** 顔認識の対象: Drive に実体がある画像と、トークの動画 (#403) */
+const targetWhere = {
+  storageProvider: "gdrive",
+  storageKey: { not: null },
+  OR: [
+    { kind: "image" },
+    {
+      kind: "video",
+      fileSize: { lte: FACE_VIDEO_MAX_BYTES },
+      entities: { some: { entity: { type: "tag", canonicalName: FACE_VIDEO_TAG } } },
+    },
+  ],
+} satisfies Prisma.AssetWhereInput;
 
 /**
  * まだこのモデルで処理していない画像。新しいものから返す。
@@ -39,7 +56,7 @@ export async function listFaceQueue(clearance: string, modelVersion: string, lim
         where,
         orderBy: { createdAt: "desc" },
         take: limit,
-        select: { id: true, mimeType: true, fileSize: true, thumbnailUrl: true, createdAt: true },
+        select: { id: true, kind: true, mimeType: true, fileSize: true, thumbnailUrl: true, createdAt: true },
       }),
       withCount ? tx.asset.count({ where }) : Promise.resolve(null),
     ]);
@@ -51,18 +68,34 @@ export class FaceAssetNotFoundError extends Error {}
 export class FaceOriginalTooLargeError extends Error {}
 export class FaceInputError extends Error {}
 
-/** 元画像のバイナリ。見えない・対象外なら FaceAssetNotFoundError */
-export async function fetchFaceOriginal(clearance: string, assetId: string) {
+export class FaceRangeError extends Error {}
+
+/**
+ * 元ファイルのバイナリ。見えない・対象外なら FaceAssetNotFoundError。
+ * `range` を渡すとその範囲だけを Drive から取る (#403。Vercel の応答上限を超える動画を小分けに取るため)。
+ * 範囲は ORIGINAL_MAX_BYTES まで。`total` はファイル全体の大きさ (分からなければ null)
+ */
+export async function fetchFaceOriginal(clearance: string, assetId: string, range?: { start: number; end: number | null }) {
   const asset = await withClearance(clearance, (tx) =>
     tx.asset.findFirst({ where: { id: assetId, ...targetWhere }, select: { storageKey: true, mimeType: true, fileSize: true } })
   );
   if (!asset?.storageKey) throw new FaceAssetNotFoundError();
+  if (range) {
+    const total = asset.fileSize ?? null;
+    if (total != null && range.start >= total) throw new FaceRangeError();
+    let end = range.end ?? range.start + ORIGINAL_MAX_BYTES - 1;
+    if (end - range.start + 1 > ORIGINAL_MAX_BYTES) throw new FaceOriginalTooLargeError();
+    if (total != null) end = Math.min(end, total - 1);
+    const chunk = await downloadRangeFromDrive(asset.storageKey, range.start, end, { timeoutMs: DRIVE_DOWNLOAD_TIMEOUT_MS });
+    if (!chunk) throw new Error("Drive の認証情報がありません");
+    return { body: chunk.body, mimeType: asset.mimeType ?? "application/octet-stream", range: { start: range.start, end: range.start + chunk.body.length - 1, total: chunk.total ?? total } };
+  }
   if (asset.fileSize != null && asset.fileSize > ORIGINAL_MAX_BYTES) throw new FaceOriginalTooLargeError();
   // fileSize が無い古いアセットは、落としてみないと大きさが分からない (落としてから 413 にする)
   const body = await downloadFromDrive(asset.storageKey, { timeoutMs: DRIVE_DOWNLOAD_TIMEOUT_MS });
   if (!body) throw new Error("Drive の認証情報がありません");
   if (body.length > ORIGINAL_MAX_BYTES) throw new FaceOriginalTooLargeError();
-  return { body, mimeType: asset.mimeType ?? "application/octet-stream" };
+  return { body, mimeType: asset.mimeType ?? "application/octet-stream", range: null };
 }
 
 export type FaceWriteResult = {
@@ -89,12 +122,13 @@ export async function writeFaceResults(clearance: string, assetId: string, input
   return withClearance(clearance, async (tx) => {
     // 同じ画像への書き込みが重なっても、タグの付け外しが食い違わないよう Asset の行をロックする。
     // RLS 下なので見えない行は 0 件になる (FOR UPDATE は UPDATE のポリシーも見るが、条件は SELECT と同じクリアランス。
-    // 見えない行は 404 にするのが正しいので、prismaInternal に替えない)。対象は queue と同じ (Drive に実体がある画像)
+    // 見えない行は 404 にするのが正しいので、prismaInternal に替えない)。対象は queue と同じ (Drive に実体がある画像とトークの動画。動画の条件はタグを見るので下で確かめる)
     const locked = await tx.$queryRaw<{ id: string; ninaAbsent: boolean }[]>`
       SELECT id, "ninaAbsent" FROM "Asset"
-      WHERE id = ${assetId} AND kind = 'image' AND "storageProvider" = 'gdrive' AND "storageKey" IS NOT NULL
+      WHERE id = ${assetId} AND kind IN ('image', 'video') AND "storageProvider" = 'gdrive' AND "storageKey" IS NOT NULL
       FOR UPDATE`;
     if (locked.length === 0) throw new FaceAssetNotFoundError();
+    if ((await tx.asset.count({ where: { id: assetId, ...targetWhere } })) === 0) throw new FaceAssetNotFoundError();
     const { ninaAbsent } = locked[0];
 
     const recordScan = (faceCount: number, error: string | null) =>
@@ -153,6 +187,7 @@ export async function writeFaceResults(clearance: string, assetId: string, input
         embedding: new Uint8Array(f.embedding),
         predictedEntityId: f.predictedEntityId,
         similarity: f.similarity,
+        frameSec: f.frameSec ?? null,
         status,
       };
     });

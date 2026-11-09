@@ -74,6 +74,12 @@ describe("FaceWriteBody", () => {
     expect(FaceWriteBody.safeParse({ modelVersion: "buffalo_l@1", faces: [] }).success).toBe(true);
   });
 
+  it("動画の何秒目か (frameSec) は 0 以上の数か null (#403)", () => {
+    expect(FaceWriteBody.safeParse({ modelVersion: "v", faces: [{ ...face, frameSec: 12.5 }] }).success).toBe(true);
+    expect(FaceWriteBody.safeParse({ modelVersion: "v", faces: [{ ...face, frameSec: null }] }).success).toBe(true);
+    expect(FaceWriteBody.safeParse({ modelVersion: "v", faces: [{ ...face, frameSec: -1 }] }).success).toBe(false);
+  });
+
   it("枠が逆向き・範囲外なら弾く", () => {
     expect(FaceWriteBody.safeParse({ modelVersion: "v", faces: [{ ...face, bbox: [0.3, 0.2, 0.1, 0.4] }] }).success).toBe(false);
     expect(FaceWriteBody.safeParse({ modelVersion: "v", faces: [{ ...face, bbox: [0.1, 0.2, 1.3, 0.4] }] }).success).toBe(false);
