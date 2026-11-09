@@ -140,11 +140,16 @@ export const getCachedClipCount = (clearance: ClearanceLevel) =>
 /**
  * エンティティごとの紐づきアセット数 (そのクリアランスで見える分)。`{ [entityId]: 件数 }`
  *
- * `_count: { assets }` は AssetEntity (約 37 万行) の 1 行ずつに RLS (親 Asset の区分) を当てるので、
+ * `_count: { assets }` は AssetEntity (約 39 万行) の 1 行ずつに RLS (親 Asset の区分) を当てるので、
  * 全エンティティ分で本番 4〜12 秒かかっていた。RLS をバイパスし、区分で明示的に絞ってまとめて数える
  * (CLAUDE.md「生 SQL・重い集計は prismaInternal + classificationFilterSql」)。
  * それでも 0.5 秒以上かかるので、表示用の件数として 10 分のずれは許してキャッシュする
  * (アセットの区分を上げた直後は、下のクリアランスにも上げる前の件数が最長 10 分見える。件数だけで中身は出ない)
+ *
+ * **タグは付けない。** Next の実装上は `revalidateTag(tag, "max")` なら古い値を返すはずだが、本番 (Vercel) では
+ * タグを付けていた頃、revalidate の 10 分より短い間隔で毎回ミスになり、この集計 (本番 4〜6 秒) を開いた人が待っていた
+ * (/entities の初回が 6 秒・直後は 0.25 秒。bot がアセットを書くたびに invalidateAssets が飛ぶ)。
+ * 時間切れなら古い値を返して裏で数え直すので、10 分ごとの更新だけにする
  */
 export const getCachedEntityAssetCounts = (clearance: ClearanceLevel) =>
   unstable_cache(
@@ -158,8 +163,9 @@ export const getCachedEntityAssetCounts = (clearance: ClearanceLevel) =>
         GROUP BY ae."entityId"`);
       return Object.fromEntries(rows.map((r) => [r.entityId, Number(r.n)])) as Record<string, number>;
     },
-    [`entity-asset-counts-${clearance}`],
-    { tags: [CACHE_TAGS.assets, CACHE_TAGS.entities], revalidate: 600 }
+    // タグを外したので鍵を変える (Vercel のデータキャッシュはデプロイをまたいで残る)
+    [`entity-asset-counts-v2-${clearance}`],
+    { revalidate: 600 }
   )();
 
 /** `_count.assets` を getCachedEntityAssetCounts の件数で埋める (呼び出し側の形を変えないため) */
