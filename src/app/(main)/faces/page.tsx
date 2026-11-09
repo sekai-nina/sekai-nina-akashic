@@ -1,9 +1,10 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ScanFace } from "lucide-react";
 import { auth } from "@/lib/auth";
 import { getCachedEntityList } from "@/lib/cache";
-import { countReviewFacesByEntity, listReviewFaces, REVIEW_PAGE_SIZE, type ReviewMode } from "@/lib/domain/face-review";
+import { getCachedReviewCounts, listReviewFaces, REVIEW_PAGE_SIZE, type ReviewMode } from "@/lib/domain/face-review";
 import { NINA_ENTITY_ID } from "@/lib/nina";
 import { FaceReviewBoard } from "./face-review-board";
 import { MemberSelect } from "./member-select";
@@ -23,9 +24,9 @@ export default async function FacesPage({ searchParams }: { searchParams: Promis
   const entityId = params.entity === "all" ? null : params.entity || NINA_ENTITY_ID;
   const page = Math.max(1, Number(params.page) || 1);
 
-  const [entities, counts, { faces, total }] = await Promise.all([
+  // メンバーごとの数は重いので待たない (メニューだけ後から出す)。一覧は先に出す
+  const [entities, faces] = await Promise.all([
     getCachedEntityList(session.user.clearance as ClearanceLevel),
-    countReviewFacesByEntity(session.user.clearance, mode),
     listReviewFaces(session.user.clearance, mode, entityId, page),
   ]);
   // メンバー = 期のある人物 (卒業生を含む)
@@ -34,7 +35,6 @@ export default async function FacesPage({ searchParams }: { searchParams: Promis
     .sort((a, b) => (a.generation ?? 0) - (b.generation ?? 0) || (a.reading ?? a.canonicalName).localeCompare(b.reading ?? b.canonicalName, "ja"))
     .map((e) => ({ id: e.id, name: e.canonicalName, generation: e.generation as number }));
   const nameOf = new Map(members.map((m) => [m.id, m.name]));
-  const allCount = [...counts.values()].reduce((a, b) => a + b, 0);
   const href = (p: Record<string, string>) => `/faces?${new URLSearchParams({ mode, entity: entityId ?? "all", ...p })}`;
 
   return (
@@ -66,17 +66,21 @@ export default async function FacesPage({ searchParams }: { searchParams: Promis
             </Link>
           ))}
         </div>
-        <MemberSelect
-          mode={mode}
-          value={entityId ?? "all"}
-          options={[
-            { id: "all", label: `全員 (${allCount.toLocaleString()})` },
-            ...members.map((m) => ({ id: m.id, label: `${m.generation}期 ${m.name} (${(counts.get(m.id) ?? 0).toLocaleString()})` })),
-          ]}
-        />
-        <span className="text-sm text-slate-500">
-          {mode === "pending" ? "似ている順" : "似ていない順 (間違いが多そうな順)"}・{total.toLocaleString()} 顔
-        </span>
+        <Suspense
+          fallback={
+            <MemberSelect
+              mode={mode}
+              value={entityId ?? "all"}
+              options={[
+                { id: "all", label: "全員" },
+                ...members.map((m) => ({ id: m.id, label: `${m.generation}期 ${m.name}` })),
+              ]}
+            />
+          }
+        >
+          <MemberMenu clearance={session.user.clearance} mode={mode} entityId={entityId} members={members} />
+        </Suspense>
+        <span className="text-sm text-slate-500">{mode === "pending" ? "似ている順" : "似ていない順 (間違いが多そうな順)"}</span>
       </div>
 
       {faces.length === 0 ? (
@@ -91,13 +95,13 @@ export default async function FacesPage({ searchParams }: { searchParams: Promis
         />
       )}
 
-      {total > REVIEW_PAGE_SIZE && (
+      {(page > 1 || faces.length === REVIEW_PAGE_SIZE) && (
         <div className="flex justify-between items-center mt-4 text-sm">
           {page > 1 ? <Link href={href({ page: String(page - 1) })} className="text-sky-700 hover:underline">← 前の {REVIEW_PAGE_SIZE} 顔</Link> : <span />}
           <span className="text-slate-500">
-            {(page - 1) * REVIEW_PAGE_SIZE + 1}〜{Math.min(page * REVIEW_PAGE_SIZE, total)} / {total.toLocaleString()}
+            {(page - 1) * REVIEW_PAGE_SIZE + 1}〜{(page - 1) * REVIEW_PAGE_SIZE + faces.length} 顔目
           </span>
-          {page * REVIEW_PAGE_SIZE < total ? (
+          {faces.length === REVIEW_PAGE_SIZE ? (
             <Link href={href({ page: String(page + 1) })} className="text-sky-700 hover:underline">飛ばして次の {REVIEW_PAGE_SIZE} 顔 →</Link>
           ) : (
             <span />
@@ -105,5 +109,31 @@ export default async function FacesPage({ searchParams }: { searchParams: Promis
         </div>
       )}
     </div>
+  );
+}
+
+/** メンバーごとの数つきのメニュー (数は 5 分キャッシュ。最初の 1 回は数えるのを待つので Suspense の中) */
+async function MemberMenu({
+  clearance,
+  mode,
+  entityId,
+  members,
+}: {
+  clearance: string;
+  mode: ReviewMode;
+  entityId: string | null;
+  members: { id: string; name: string; generation: number }[];
+}) {
+  const counts = await getCachedReviewCounts(clearance, mode);
+  const all = Object.values(counts).reduce((a, b) => a + b, 0);
+  return (
+    <MemberSelect
+      mode={mode}
+      value={entityId ?? "all"}
+      options={[
+        { id: "all", label: `全員 (${all.toLocaleString()})` },
+        ...members.map((m) => ({ id: m.id, label: `${m.generation}期 ${m.name} (${(counts[m.id] ?? 0).toLocaleString()})` })),
+      ]}
+    />
   );
 }

@@ -4,8 +4,10 @@
  *
  * FaceDetection / AssetEntity / Asset は保護テーブルなので withClearance の中で触る。
  */
-import type { Prisma } from "@prisma/client";
-import { withClearance } from "@/lib/db";
+import { unstable_cache } from "next/cache";
+import { Prisma } from "@prisma/client";
+import { classificationFilterSql } from "@/lib/classification";
+import { prismaInternal, withClearance } from "@/lib/db";
 import { FACE_ROLE_LABEL } from "@/lib/faces/policy";
 import { NINA_ENTITY_ID } from "@/lib/nina";
 
@@ -38,17 +40,19 @@ export type ReviewFace = {
   predictedEntityId: string | null;
 };
 
-/** 確認の画面の 1 ページ分 */
+/**
+ * 確認の画面の 1 ページ分。件数は数えない (確認待ち約 3 万顔を RLS 下で数えると 10 秒かかった。
+ * 件数はメンバーごとの数 (getCachedReviewCounts) から出す)
+ */
 export async function listReviewFaces(
   clearance: string,
   mode: ReviewMode,
   entityId: string | null,
   page: number
-): Promise<{ faces: ReviewFace[]; total: number }> {
+): Promise<ReviewFace[]> {
   return withClearance(clearance, async (tx) => {
     const where = reviewWhere(mode, entityId);
-    const [rows, total] = await Promise.all([
-      tx.faceDetection.findMany({
+    const rows = await tx.faceDetection.findMany({
         where,
         orderBy: [{ similarity: mode === "pending" ? "desc" : "asc" }, { id: "asc" }],
         skip: (page - 1) * REVIEW_PAGE_SIZE,
@@ -64,12 +68,8 @@ export async function listReviewFaces(
           predictedEntityId: true,
           asset: { select: { title: true, thumbnailUrl: true } },
         },
-      }),
-      tx.faceDetection.count({ where }),
-    ]);
-    return {
-      total,
-      faces: rows.map((r) => ({
+      });
+    return rows.map((r) => ({
         id: r.id,
         assetId: r.assetId,
         assetTitle: r.asset.title,
@@ -77,22 +77,36 @@ export async function listReviewFaces(
         bbox: [r.x1, r.y1, r.x2, r.y2],
         similarity: r.similarity,
         predictedEntityId: r.predictedEntityId,
-      })),
-    };
+      }));
   });
 }
 
-/** 推定したメンバーごとの顔の数 (メニュー用) */
-export async function countReviewFacesByEntity(clearance: string, mode: ReviewMode): Promise<Map<string, number>> {
-  return withClearance(clearance, async (tx) => {
-    const rows = await tx.faceDetection.groupBy({
-      by: ["predictedEntityId"],
-      where: reviewWhere(mode, null),
-      _count: { _all: true },
-    });
-    return new Map(rows.filter((r) => r.predictedEntityId).map((r) => [r.predictedEntityId as string, r._count._all]));
-  });
+export const FACE_REVIEW_CACHE_TAG = "face-review";
+
+/**
+ * 推定したメンバーごとの顔の数 (メニュー用)。reviewWhere と同じ条件。
+ * RLS 下の groupBy は行ごとに親 Asset の classification を引くので 10 秒かかった。
+ * RLS をバイパスして classification を明示で絞る (CLAUDE.md の「重い集計は prismaInternal + classificationFilterSql」)
+ */
+export async function countReviewFacesByEntity(clearance: string, mode: ReviewMode): Promise<Record<string, number>> {
+  const rows = await prismaInternal.$queryRaw<{ id: string; n: number }[]>(Prisma.sql`
+    SELECT f."predictedEntityId" AS id, count(*)::int AS n
+    FROM "FaceDetection" f JOIN "Asset" a ON a.id = f."assetId"
+    WHERE f.status = ${mode}::"FaceStatus" AND f."frameSec" IS NULL AND f."predictedEntityId" IS NOT NULL
+      AND a.kind = 'image' AND ${classificationFilterSql(clearance)}
+    GROUP BY 1`);
+  return Object.fromEntries(rows.map((r) => [r.id, r.n]));
 }
+
+/**
+ * countReviewFacesByEntity を 5 分キャッシュする。確定・却下したら FACE_REVIEW_CACHE_TAG を
+ * stale-while-revalidate で捨てる (次に開いた人は古い数をすぐ見て、裏で数え直される)
+ */
+export const getCachedReviewCounts = (clearance: string, mode: ReviewMode) =>
+  unstable_cache(() => countReviewFacesByEntity(clearance, mode), ["face-review-counts", clearance, mode], {
+    revalidate: 300,
+    tags: [FACE_REVIEW_CACHE_TAG],
+  })();
 
 /**
  * 1 顔分の判断。
