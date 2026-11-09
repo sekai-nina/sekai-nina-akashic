@@ -16,6 +16,7 @@ import { assertClearance } from "@/lib/classification";
 import { requireRole } from "@/lib/auth/require-role";
 import { normalizeTrait } from "@/lib/domain/testimonial-traits";
 import { clearNinaAbsentIfLinking } from "@/lib/domain/nina-appearance";
+import { roleLabelUpdate } from "@/lib/role-label";
 
 /** Verify the calling user has clearance to access the given asset. */
 async function requireClearanceForAsset(assetId: string, user: { clearance: string }) {
@@ -223,7 +224,8 @@ export async function addEntityToAsset(assetId: string, formData: FormData) {
     await tx.assetEntity.upsert({
       where: { assetId_entityId: { assetId, entityId: entity.id } },
       create: { assetId, entityId: entity.id, roleLabel },
-      update: { roleLabel },
+      // 役割欄が空なら既存の roleLabel (本人の author 等) を残す (#392)
+      update: roleLabelUpdate(roleLabel),
     });
     // 坂井新奈を付けたら「出ていない」を外す (#261)
     await clearNinaAbsentIfLinking(tx, assetId, [entity.id]);

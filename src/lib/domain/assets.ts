@@ -16,6 +16,7 @@ import { backupAssetToDrive } from "@/lib/drive";
 import { assertClearance } from "@/lib/classification";
 import { entityClearanceWhere } from "./entities";
 import { clearNinaAbsentIfLinking } from "./nina-appearance";
+import { providedRoleLabel } from "@/lib/role-label";
 
 export interface CreateAssetData {
   kind: AssetKind;
@@ -282,11 +283,14 @@ export async function updateAsset(
         });
       }
 
-      // roleLabel の更新が要るものだけ。値ごとにまとめて updateMany で撃つ
-      const toUpdate = entities.filter((e) => existingIds.has(e.entityId));
-      const byRole = new Map<string | null, string[]>();
-      for (const e of toUpdate) {
-        const key = e.roleLabel ?? null;
+      // roleLabel の更新が要るものだけ。値ごとにまとめて updateMany で撃つ。
+      // roleLabel を渡されなかった既存の紐づきは触らない (MCP の update_asset 等が
+      // entityId だけで呼ぶと、本人の author が null に上書きされていた。#392)
+      const byRole = new Map<string, string[]>();
+      for (const e of entities) {
+        if (!existingIds.has(e.entityId)) continue;
+        const key = providedRoleLabel(e.roleLabel);
+        if (key === undefined) continue;
         byRole.set(key, [...(byRole.get(key) ?? []), e.entityId]);
       }
       for (const [roleLabel, ids] of byRole) {
