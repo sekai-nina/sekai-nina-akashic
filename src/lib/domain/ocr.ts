@@ -228,16 +228,26 @@ export type OcrState = "none" | "queued" | "done" | "failed";
  */
 export async function getOcrStates(clearance: string, assetIds: string[]): Promise<Map<string, OcrState>> {
   if (assetIds.length === 0) return new Map();
-  const rows = await withClearance(clearance, (tx) =>
-    tx.asset.findMany({
-      where: { id: { in: assetIds }, kind: "image" },
-      select: { id: true, ocrAt: true, ocrError: true, ocrRequestedAt: true, _count: { select: { texts: { where: { textType: "ocr" } } } } },
-    })
+  // OCR テキストの有無は別クエリで assetId を絞って引く。`_count: { texts: { where } }` にすると
+  // Prisma が AssetText 全体を GROUP BY してから JOIN する SQL を出し、RLS 下で全件走査になり、
+  // 15 秒の上限 (P2028) を超えて詳細ページごと落ちた
+  const [rows, ocrTexts] = await withClearance(clearance, (tx) =>
+    Promise.all([
+      tx.asset.findMany({
+        where: { id: { in: assetIds }, kind: "image" },
+        select: { id: true, ocrAt: true, ocrError: true, ocrRequestedAt: true },
+      }),
+      tx.assetText.findMany({
+        where: { assetId: { in: assetIds }, textType: "ocr" },
+        select: { assetId: true },
+      }),
+    ])
   );
+  const hasOcrText = new Set(ocrTexts.map((t) => t.assetId));
   return new Map(
     rows.map((a): [string, OcrState] => {
       if (a.ocrAt) return [a.id, a.ocrError ? "failed" : "done"];
-      if (a._count.texts > 0) return [a.id, "done"];
+      if (hasOcrText.has(a.id)) return [a.id, "done"];
       return [a.id, a.ocrRequestedAt ? "queued" : "none"];
     })
   );
