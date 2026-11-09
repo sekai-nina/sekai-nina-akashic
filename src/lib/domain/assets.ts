@@ -16,6 +16,7 @@ import { backupAssetToDrive } from "@/lib/drive";
 import { assertClearance } from "@/lib/classification";
 import { entityClearanceWhere } from "./entities";
 import { clearNinaAbsentIfLinking } from "./nina-appearance";
+import { groupRoleLabelUpdates } from "@/lib/role-label";
 
 export interface CreateAssetData {
   kind: AssetKind;
@@ -257,7 +258,7 @@ export async function updateAsset(
       });
     }
 
-    // entities: upsert（既存は roleLabel を更新、新規は追加）
+    // entities: upsert（既存は roleLabel を渡されたときだけ更新、新規は追加）
     // 1 件ずつ upsert するとトランザクション内で N 往復になるので、
     // 既存を 1 回引いてから「更新分」と「新規分」に分けて撃つ (最大 3 往復)
     if (entities && entities.length > 0) {
@@ -282,13 +283,10 @@ export async function updateAsset(
         });
       }
 
-      // roleLabel の更新が要るものだけ。値ごとにまとめて updateMany で撃つ
-      const toUpdate = entities.filter((e) => existingIds.has(e.entityId));
-      const byRole = new Map<string | null, string[]>();
-      for (const e of toUpdate) {
-        const key = e.roleLabel ?? null;
-        byRole.set(key, [...(byRole.get(key) ?? []), e.entityId]);
-      }
+      // roleLabel の更新が要るものだけ。値ごとにまとめて updateMany で撃つ。
+      // roleLabel を渡されなかった既存の紐づきは触らない (MCP の update_asset 等が
+      // entityId だけで呼ぶと、本人の author が null に上書きされていた。#392)
+      const byRole = groupRoleLabelUpdates(entities, existingIds);
       for (const [roleLabel, ids] of byRole) {
         await tx.assetEntity.updateMany({
           where: { assetId: id, entityId: { in: ids } },

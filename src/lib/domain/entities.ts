@@ -4,6 +4,7 @@ import { accessibleClassifications } from "@/lib/classification";
 import { normalizeText } from "@/lib/utils";
 import { logAudit } from "./audit";
 import { clearNinaAbsentIfLinking } from "./nina-appearance";
+import { roleLabelUpdate } from "@/lib/role-label";
 
 /**
  * クリアランスで参照できない place エンティティを除くための WHERE 断片。
@@ -139,9 +140,8 @@ export async function addEntityToAsset(
       where: {
         assetId_entityId: { assetId, entityId },
       },
-      update: {
-        roleLabel: roleLabel ?? null,
-      },
+      // 渡されなければ既存の roleLabel (本人の author 等) を残す (#392)
+      update: roleLabelUpdate(roleLabel),
       create: {
         assetId,
         entityId,
