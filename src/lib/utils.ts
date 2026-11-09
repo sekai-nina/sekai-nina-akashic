@@ -50,6 +50,14 @@ export function normalizeText(text: string): string {
 }
 
 /**
+ * 空白を無視した比較用のキー (エンティティ名の表記ゆれ「上村 ひなの」/「上村ひなの」を同じものとみなす)。
+ * normalizeText で大文字小文字・全角半角・空白の種類を揃えたうえで空白を全部落とす
+ */
+export function spacelessKey(text: string): string {
+  return normalizeText(text).replace(/ /g, "");
+}
+
+/**
  * 日時を **JST 壁時計の "YYYY-MM-DD"** にする。
  *
  * このプロダクトの日付ドメインは日本時間。ところが DB には 2 つの規約が

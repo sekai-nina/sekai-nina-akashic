@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatDate, jstDayString } from "./utils";
+import { formatDate, jstDayString, spacelessKey } from "./utils";
 
 /**
  * 日付の表示と比較は **JST 固定**。
@@ -56,5 +56,21 @@ describe("jstDayString", () => {
     const asset = new Date("2026-03-13T15:00:00.000Z"); // Asset.canonicalDate
     const article = new Date("2026-03-14T00:00:00.000Z"); // ArticleSource.date
     expect(jstDayString(asset)).toBe(jstDayString(article));
+  });
+});
+
+describe("spacelessKey", () => {
+  it("空白の有無・種類を無視する", () => {
+    expect(spacelessKey("上村 ひなの")).toBe(spacelessKey("上村ひなの"));
+    expect(spacelessKey("坂井　新奈")).toBe(spacelessKey("坂井新奈"));
+    expect(spacelessKey(" コロンバン 原宿サロン ")).toBe(spacelessKey("コロンバン原宿サロン"));
+  });
+
+  it("全角半角・大文字小文字も揃える", () => {
+    expect(spacelessKey("ＨＩＮＡＴＡ Ｓａｋａ")).toBe(spacelessKey("hinatasaka"));
+  });
+
+  it("違う名前は違うキーになる", () => {
+    expect(spacelessKey("上村ひなの")).not.toBe(spacelessKey("上村ひな"));
   });
 });
