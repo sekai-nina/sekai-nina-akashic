@@ -89,9 +89,10 @@ APIキーは `pnpm cli:keygen <user-email> <key-name> [permissions]` で発行�
 | POST | `/articles/:shortId/push` | article_push | この記事 1 本だけを公開リポジトリに push |
 | POST | `/jobs/:key/runs` | write（`omokage.*` は face_worker も可） | ハートビート（bot / ワーカーのジョブが実行結果を報告する） |
 | GET | `/faces/queue` | face_worker | 顔認識: まだこのモデルで処理していない画像の一覧 |
-| GET | `/faces/assets/:id/original` | face_worker | 顔認識: 元画像のバイナリ（4.4 MB まで） |
+| GET | `/faces/assets/:id/original` | face_worker / read | 顔認識: 元画像のバイナリ（4.4 MB まで） |
 | PUT | `/faces/assets/:id` | face_worker | 顔認識: 1 枚の推論結果を書き込む（閾値以上は人物タグを自動で付ける） |
 | GET | `/faces/references` | face_worker | 顔認識: 参照に足す顔（人が確定した顔だけ） |
+| GET | `/faces/appearances` | read | 顔認識: その人物が写っている画像のうち、指定時刻以降に登録されたもの（書き手が本人のものは除く） |
 | GET | `/insta/targets` | 有効なキー | insta-watch が見張るハンドルの一覧 |
 | GET / POST | `/insta/account` | 有効なキー / write | story 取得に使うアカウントの状態 |
 | GET | `/insta/jobs` | read | story ジョブ一覧（iPad ワーカー） |
@@ -1293,7 +1294,7 @@ body は省略可（`subject` を省くと既定のコミットメッセージ�
 
 ## 顔認識 (Faces)
 
-推論ワーカー（[sekai-nina-omokage](https://github.com/sekai-nina/sekai-nina-omokage)）が叩く API（#384）。**`face_worker` だけを持つキー**で叩く（read / write は持たせない）。読める・書ける範囲はキーの持ち主のクリアランスで決まる（RLS）。設計は [face-design.md](./face-design.md)。
+推論ワーカー（[sekai-nina-omokage](https://github.com/sekai-nina/sekai-nina-omokage)）が叩く API（#384）。ワーカーは **`face_worker` だけを持つキー**で叩く（read / write は持たせない）。`GET /faces/appearances` と `GET /faces/assets/:id/original` は `read` のキーでも叩ける（#395。discord bot 用）。読める・書ける範囲はキーの持ち主のクリアランスで決まる（RLS）。設計は [face-design.md](./face-design.md)。
 
 ### GET /faces/queue
 
@@ -1316,7 +1317,7 @@ body は省略可（`subject` を省くと既定のコミットメッセージ�
 
 ### GET /faces/assets/:id/original
 
-元画像のバイナリ（`Content-Type` はアセットの `mimeType`）。`/api/drive-image` はログインのセッションが要るので、ワーカー用に別に持つ。
+元画像のバイナリ（`Content-Type` はアセットの `mimeType`）。`/api/drive-image` はログインのセッションが要るので、ワーカー用に別に持つ。権限は `face_worker` か `read`。
 
 | ステータス | 意味 |
 |---|---|
@@ -1387,6 +1388,38 @@ body は省略可（`subject` を省くと既定のコミットメッセージ�
   "next": null
 }
 ```
+
+### GET /faces/appearances
+
+顔認識で、その人物が写っている画像のうち `createdAfter` 以降に登録されたもの（登録の古い順。#395）。権限は `read`。discord bot が「他のメンバーのトーク・ブログに坂井新奈が写っていたら流す」ために数分おきに叩く。
+
+- 写っている = 自動（`auto`）の推定か、人が見た顔（`confirmed` / `rejected`）の正解がその人物。確認待ち（`pending`）は入れない
+- **その人物が書き手（`author`）の画像は除く。** 親（ブログ本文など、`parent_child` の元）の書き手も見る
+- 顔認識は登録の数分後に付くので、呼ぶ側は少し前からの範囲を毎回聞き直し、流したかどうかは自分で覚える。登録時刻で切るので、モデルの版を上げて全画像を処理し直しても古い画像は出てこない
+
+| パラメータ | 型 | デフォルト | 説明 |
+|---|---|---|---|
+| `entityId` | string | （必須） | 人物のエンティティ。人物でなければ 404 |
+| `createdAfter` | ISO8601 | （必須） | この時刻以降に登録された画像。14 日前まで |
+| `limit` | number | 50 | 1〜200 |
+
+```json
+{
+  "items": [
+    {
+      "id": "cm...", "title": "上村ひなのトーク 2026.11.8 18:09", "createdAt": "2026-11-08T09:19:37.403Z",
+      "canonicalDate": "2026-11-08T09:09:22.000Z", "mimeType": "image/jpeg", "fileSize": 161884,
+      "thumbnailUrl": "https://r2.sekai-nina.com/thumbnails/cm.../gallery.webp",
+      "authors": ["上村ひなの"], "tags": ["トーク"], "faces": 1, "confirmed": false, "maxSimilarity": 0.67,
+      "text": "本文の先頭 500 文字 (message_body か body)",
+      "sources": [{ "sourceKind": "other", "url": null, "publishedAt": "2026-11-08T09:09:22.000Z", "metadata": { "talk_message_id": 484879 } }],
+      "parent": { "id": "cm...", "title": "…ブログ「…」", "url": "https://www.hinatazaka46.com/s/official/diary/detail/71734", "text": "…" }
+    }
+  ]
+}
+```
+
+`parent` は `parent_child` の親（ブログ本文など）。無ければ `null`。
 
 ## クリップ (Clips)
 

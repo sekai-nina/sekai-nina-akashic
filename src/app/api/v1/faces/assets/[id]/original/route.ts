@@ -5,13 +5,14 @@ import { FACE_WORKER_PERMISSION } from "@/lib/faces/policy";
 
 /**
  * 顔認識 (#384): 元画像のバイナリ。`/api/drive-image` はログインのセッションが要るので、ワーカー用に別に持つ。
- * 4.4 MB を超える画像は 413 (Vercel の応答上限)。ワーカーはサムネイルに落として処理する
+ * 4.4 MB を超える画像は 413 (Vercel の応答上限)。ワーカーはサムネイルに落として処理する。
+ * `read` のキーでも取れる (#395。discord bot が写っている画像を流すため)。見えるのはキーのクリアランス以下の画像だけ
  */
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await requireApiAuth(request, FACE_WORKER_PERMISSION);
+  const auth = await requireApiAuth(request, [FACE_WORKER_PERMISSION, "read"]);
   if (auth instanceof NextResponse) return auth;
   const { id } = await params;
 

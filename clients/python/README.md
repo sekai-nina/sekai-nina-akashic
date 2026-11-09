@@ -68,6 +68,10 @@ mg = client.create_meetgreet(
 )
 # 同じ (date, format, label) が既にあれば、新しく作らずそれが返る
 client.fetch_meetgreet_reports(mg["id"])  # 数十秒かかる
+
+# 顔認識: 坂井新奈が写っている画像 (本人が書き手のものは除く。read 権限)
+for item in client.face_appearances(nina_entity_id, "2026-11-10T00:00:00Z"):
+    data = client.face_original(item["id"])  # 4.4 MB 超は None (thumbnailUrl を使う)
 ```
 
 素材の反映・スケッチ・記事の生成は Akashic の画面（`/meetgreets/<id>`）で行う。

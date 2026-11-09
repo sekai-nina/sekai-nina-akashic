@@ -812,6 +812,39 @@ class AkashicClient:
         )
 
     # ------------------------------------------------------------------
+    # Faces (顔認識)
+    # ------------------------------------------------------------------
+
+    def face_appearances(
+        self,
+        entity_id: str,
+        created_after: str,
+        *,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """顔認識でその人物が写っている画像のうち、created_after (ISO8601) 以降に登録されたもの。
+
+        登録の古い順。その人物が書き手 (author) の画像は除かれる。権限は read。
+        """
+        body = self._request(
+            "GET",
+            "/faces/appearances",
+            params={"entityId": entity_id, "createdAfter": created_after, "limit": limit},
+        )
+        return list(body["items"])
+
+    def face_original(self, asset_id: str) -> bytes | None:
+        """画像の元ファイル。4.4 MB を超える (413) と None (サムネイルを使う)。権限は read か face_worker。"""
+        resp = self._session.get(
+            f"{self._api_url}/faces/assets/{asset_id}/original", timeout=self._timeout
+        )
+        if resp.status_code == 413:
+            return None
+        if resp.status_code >= 400:
+            raise AkashicError(resp.status_code, resp.json() if resp.content else None)
+        return resp.content
+
+    # ------------------------------------------------------------------
     # File URL helper
     # ------------------------------------------------------------------
 

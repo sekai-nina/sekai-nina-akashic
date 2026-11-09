@@ -283,3 +283,105 @@ export async function getFaceSummary(clearance: string, assetId: string) {
     };
   });
 }
+
+export const APPEARANCES_DEFAULT_LIMIT = 50;
+export const APPEARANCES_MAX_LIMIT = 200;
+/** 本文のプレビューの長さ (Discord に流すとき用) */
+const APPEARANCE_TEXT_MAX = 500;
+const TEXT_TYPES_FOR_PREVIEW = ["message_body", "body"] as const;
+
+/** 顔認識で「この人物が写っている」とみなす顔 (auto の推定と、人が見た顔の正解。pending は入れない) */
+function appearingFaceWhere(entityId: string) {
+  return {
+    OR: [
+      { status: "auto" as const, predictedEntityId: entityId },
+      { status: { in: ["confirmed" as const, "rejected" as const] }, confirmedEntityId: entityId },
+    ],
+  };
+}
+
+/**
+ * 顔認識でこの人物が写っている画像のうち、`createdAfter` 以降に登録されたもの (#395)。登録の古い順。
+ * discord bot が「他のメンバーのトーク・ブログに坂井新奈が写っていたら流す」ために数分おきに叩く。
+ *
+ * - その人物が書き手 (`author`) の画像は除く (本人のトーク・ブログ)。親 (ブログ本文など) の書き手も見る
+ * - 顔認識は登録の数分後に付くので、bot は少し前からの範囲を毎回聞き直し、流したかどうかは自分で覚える
+ * - 登録時刻で切るので、モデルの版を上げて全画像を処理し直しても古い画像は出てこない
+ */
+export async function listFaceAppearances(clearance: string, entityId: string, createdAfter: Date, limit: number) {
+  return withClearance(clearance, async (tx) => {
+    const notAuthor = { entities: { none: { entityId, roleLabel: "author" } } };
+    const assets = await tx.asset.findMany({
+      where: {
+        ...targetWhere,
+        createdAt: { gte: createdAfter },
+        faceDetections: { some: appearingFaceWhere(entityId) },
+        ...notAuthor,
+        relationsAsTarget: { none: { relationType: "parent_child", source: { entities: { some: { entityId, roleLabel: "author" } } } } },
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      take: limit,
+      select: {
+        id: true,
+        title: true,
+        createdAt: true,
+        mimeType: true,
+        fileSize: true,
+        thumbnailUrl: true,
+        canonicalDate: true,
+        entities: {
+          where: { entity: { type: { in: ["person", "tag"] } } },
+          select: { roleLabel: true, entity: { select: { canonicalName: true, type: true } } },
+        },
+        sourceRecords: { select: { sourceKind: true, url: true, publishedAt: true, metadata: true } },
+        texts: { where: { textType: { in: [...TEXT_TYPES_FOR_PREVIEW] } }, select: { textType: true, content: true } },
+        faceDetections: { where: appearingFaceWhere(entityId), select: { similarity: true, status: true } },
+        relationsAsTarget: {
+          where: { relationType: "parent_child" },
+          take: 1,
+          select: {
+            source: {
+              select: {
+                id: true,
+                title: true,
+                sourceRecords: { select: { url: true }, take: 1 },
+                texts: { where: { textType: { in: [...TEXT_TYPES_FOR_PREVIEW] } }, select: { textType: true, content: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const preview = (texts: { textType: string; content: string }[]) => {
+      const t = texts.find((x) => x.textType === "message_body") ?? texts.find((x) => x.textType === "body");
+      if (!t) return null;
+      const cleaned = t.content.replace(/\{\{IMG:[a-zA-Z0-9_-]+\}\}/g, "").trim();
+      if (!cleaned) return null;
+      return cleaned.length > APPEARANCE_TEXT_MAX ? `${cleaned.slice(0, APPEARANCE_TEXT_MAX)}…` : cleaned;
+    };
+
+    return assets.map((a) => {
+      const parent = a.relationsAsTarget[0]?.source ?? null;
+      return {
+        id: a.id,
+        title: a.title,
+        createdAt: a.createdAt,
+        canonicalDate: a.canonicalDate,
+        mimeType: a.mimeType,
+        fileSize: a.fileSize,
+        thumbnailUrl: a.thumbnailUrl,
+        authors: a.entities.filter((e) => e.roleLabel === "author" && e.entity.type === "person").map((e) => e.entity.canonicalName),
+        tags: a.entities.filter((e) => e.entity.type === "tag").map((e) => e.entity.canonicalName),
+        faces: a.faceDetections.length,
+        confirmed: a.faceDetections.some((f) => f.status !== "auto"),
+        maxSimilarity: Math.max(...a.faceDetections.map((f) => f.similarity ?? 0)),
+        text: preview(a.texts),
+        sources: a.sourceRecords.map((s) => ({ sourceKind: s.sourceKind, url: s.url, publishedAt: s.publishedAt, metadata: s.metadata })),
+        parent: parent
+          ? { id: parent.id, title: parent.title, url: parent.sourceRecords[0]?.url ?? null, text: preview(parent.texts) }
+          : null,
+      };
+    });
+  });
+}

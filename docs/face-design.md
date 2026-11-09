@@ -99,6 +99,10 @@ pgvector は使わない。今は「似た顔を DB で検索する」場面が�
 
 ふぃたんなどの AI からは MCP で読む。`akashic_get_asset` の `faces`（写っている人物・確認待ちの顔の数。ブログ本文などは子の画像の分もまとめる）と、`akashic_search` の `appearing`（顔で写っている人物での絞り込みと、結果の人物）。人物タグの `roleLabel` は書き手の `author` が先に付いていると `face` にならないので、写っているかは `FaceDetection` から返す。詳細は [mcp.md の「写っている人物」](./mcp.md)。
 
+## Discord への転送（#395）
+
+他のメンバーのトーク・ブログに坂井新奈が写っていたら、discord bot（sekai-nina-discord-bot の `face_forward`）が世界新奈の talk / blog チャンネルに流す。bot は `GET /faces/appearances` を数分おきに叩き、流した画像を自分で覚える。坂井新奈が書き手の画像は API が除く。画像は `GET /faces/assets/:id/original`（`read` のキーで取れる）。
+
 ## 本番への適用
 
 migration `20261110000000_face_detection` は本番未適用。適用後に手動 GRANT が要る:
