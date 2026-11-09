@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { toDateOnlyString } from "@/lib/domain/coverage";
 import { ninaAppearanceOf } from "@/lib/nina";
+import type { getFaceSummary } from "@/lib/domain/faces";
 import type { SearchResultItem } from "@/lib/search";
 // `canonicalDate` (UTC 00:00 規約) は toDateOnlyString、`publishedAt` (実時刻) は toJstDateOnly で切る
 import { toJstDateOnly } from "@/lib/utils";
@@ -96,13 +97,40 @@ export function toSearchItem(item: SearchResultItem, baseUrl: string) {
     snippets: item.snippets,
     bodyPreview: item.bodyPreview,
     persons: item.personNames,
+    // 顔認識で写っている人物。persons (人物タグ) にはブログの書き手なども混ざる
+    appearing: item.appearingNames,
     tags: item.tagNames,
     url: assetUrl(baseUrl, item.assetId),
   };
 }
 
 
-export function toAssetDetail(asset: AssetDetailInput, baseUrl: string) {
+type FaceSummary = Awaited<ReturnType<typeof getFaceSummary>>;
+
+/**
+ * 顔認識の結果 (#396)。entities の role は「写っている」とは限らない (書き手の author が先に付いていると face にならない) ので、
+ * 写っている人物はこちらで返す。顔が 1 つも無ければ省く (コンテキストを食わないように)
+ */
+function toFaces(faces: FaceSummary, baseUrl: string) {
+  if (faces.appearing.length === 0 && faces.pendingFaces === 0 && faces.appearingInChildren.length === 0) return undefined;
+  return {
+    appearing: faces.appearing.map(({ name, faces: n, confirmed }) => ({ name, faces: n, confirmed })),
+    pendingFaces: faces.pendingFaces,
+    ...(faces.appearingInChildren.length > 0
+      ? {
+          appearingInChildren: faces.appearingInChildren.map(({ name, faces: n, confirmed, assetIds }) => ({
+            name,
+            faces: n,
+            confirmed,
+            assets: assetIds.map((id) => ({ id, url: assetUrl(baseUrl, id) })),
+          })),
+        }
+      : {}),
+  };
+}
+
+export function toAssetDetail(asset: AssetDetailInput, baseUrl: string, faces?: FaceSummary) {
+  const faceInfo = faces ? toFaces(faces, baseUrl) : undefined;
   return {
     id: asset.id,
     kind: asset.kind,
@@ -129,6 +157,7 @@ export function toAssetDetail(asset: AssetDetailInput, baseUrl: string) {
         role: ae.roleLabel,
       })) ?? [],
     ninaAppearance: ninaAppearanceOf(asset),
+    ...(faceInfo ? { faces: faceInfo } : {}),
     sources:
       asset.sourceRecords?.map((s) => ({
         sourceKind: s.sourceKind,

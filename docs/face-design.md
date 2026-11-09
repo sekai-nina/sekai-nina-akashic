@@ -95,6 +95,10 @@ pgvector は使わない。今は「似た顔を DB で検索する」場面が�
 
 ハートビート（`POST /api/v1/jobs/:key/runs`）も `face_worker` のキーで送れる。ただしジョブ名が `omokage.` で始まるものだけ（#389。他の bot のジョブを偽れないように）。
 
+## 読み出し（MCP。#396）
+
+ふぃたんなどの AI からは MCP で読む。`akashic_get_asset` の `faces`（写っている人物・確認待ちの顔の数。ブログ本文などは子の画像の分もまとめる）と、`akashic_search` の `appearing`（顔で写っている人物での絞り込みと、結果の人物）。人物タグの `roleLabel` は書き手の `author` が先に付いていると `face` にならないので、写っているかは `FaceDetection` から返す。詳細は [mcp.md の「写っている人物」](./mcp.md)。
+
 ## 本番への適用
 
 migration `20261110000000_face_detection` は本番未適用。適用後に手動 GRANT が要る:

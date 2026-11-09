@@ -209,3 +209,77 @@ export async function listFaceReferences(clearance: string, after: string | unde
     reviewedAt: r.reviewedAt,
   }));
 }
+
+/** アセット詳細で子アセットの顔をまとめるときの上限 (ブログ 1 記事の画像は多くて数十枚) */
+const FACE_SUMMARY_MAX_CHILDREN = 200;
+
+export type FaceAppearance = {
+  entityId: string;
+  name: string;
+  /** 写っている顔の数 */
+  faces: number;
+  /** 人が確定した顔があるか (無ければすべて自動の推定) */
+  confirmed: boolean;
+};
+
+/**
+ * 1 枚のアセットに顔認識で写っている人物 (#396)。MCP の akashic_get_asset が返す。
+ * - 自動 (auto) は推定のメンバー、人が見た顔 (confirmed / rejected) は人が付けた正解で数える。確認待ち (pending) は数だけ返す
+ * - ブログ本文・トークなど子アセット (parent_child) を持つアセットは、子の画像に写っている人物もまとめる
+ *   (人物ごとに、写っている子アセットの id を返す)
+ */
+export async function getFaceSummary(clearance: string, assetId: string) {
+  return withClearance(clearance, async (tx) => {
+    const children = await tx.assetRelation.findMany({
+      where: { sourceId: assetId, relationType: "parent_child" },
+      select: { targetId: true },
+      orderBy: { sortOrder: "asc" },
+      take: FACE_SUMMARY_MAX_CHILDREN,
+    });
+    const ids = [assetId, ...children.map((c) => c.targetId)];
+    const rows = await tx.faceDetection.findMany({
+      where: { assetId: { in: ids } },
+      select: {
+        assetId: true,
+        status: true,
+        predictedEntityId: true,
+        confirmedEntityId: true,
+        predictedEntity: { select: { canonicalName: true, type: true } },
+        confirmedEntity: { select: { canonicalName: true, type: true } },
+      },
+    });
+
+    const self = new Map<string, FaceAppearance>();
+    const inChildren = new Map<string, FaceAppearance & { assetIds: string[] }>();
+    let pendingFaces = 0;
+    for (const r of rows) {
+      if (r.status === "pending") {
+        if (r.assetId === assetId) pendingFaces++;
+        continue;
+      }
+      const human = r.status !== "auto";
+      const entityId = human ? r.confirmedEntityId : r.predictedEntityId;
+      const entity = human ? r.confirmedEntity : r.predictedEntity;
+      // confirmed で正解が無い = メンバー以外の人
+      if (!entityId || !entity || entity.type !== "person") continue;
+      if (r.assetId === assetId) {
+        const a = self.get(entityId) ?? { entityId, name: entity.canonicalName, faces: 0, confirmed: false };
+        a.faces++;
+        a.confirmed ||= human;
+        self.set(entityId, a);
+      } else {
+        const a = inChildren.get(entityId) ?? { entityId, name: entity.canonicalName, faces: 0, confirmed: false, assetIds: [] };
+        a.faces++;
+        a.confirmed ||= human;
+        if (!a.assetIds.includes(r.assetId)) a.assetIds.push(r.assetId);
+        inChildren.set(entityId, a);
+      }
+    }
+    const byFaces = <T extends FaceAppearance>(list: Iterable<T>) => [...list].sort((a, b) => b.faces - a.faces);
+    return {
+      appearing: byFaces(self.values()),
+      pendingFaces,
+      appearingInChildren: byFaces(inChildren.values()),
+    };
+  });
+}
