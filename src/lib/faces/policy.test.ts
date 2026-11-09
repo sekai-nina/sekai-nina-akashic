@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { canFaceWorkerReportJob, decideFace, decodeEmbedding, EMBEDDING_BYTES, EMBEDDING_DIM, FaceWriteBody } from "./policy";
+import {
+  canFaceWorkerReportJob,
+  decideFace,
+  decodeEmbedding,
+  EMBEDDING_BYTES,
+  EMBEDDING_DIM,
+  FaceWriteBody,
+  iou,
+  matchReviewedFaces,
+  type NewFace,
+  type ReviewedFace,
+} from "./policy";
 
 /** L2 正規化した特徴量 (全要素 1/√512) */
 function unitEmbedding(): Buffer {
@@ -110,5 +121,64 @@ describe("canFaceWorkerReportJob", () => {
     expect(canFaceWorkerReportJob("omokage.worker")).toBe(true);
     expect(canFaceWorkerReportJob("bot.talk_monitor")).toBe(false);
     expect(canFaceWorkerReportJob("omokage")).toBe(false);
+  });
+});
+
+describe("matchReviewedFaces (#386)", () => {
+  const box = (x1: number, y1: number, x2: number, y2: number) => ({ x1, y1, x2, y2 });
+  const reviewed = (id: string, b: ReturnType<typeof box>, over: Partial<ReviewedFace> = {}): ReviewedFace => ({
+    id,
+    status: "confirmed",
+    frameSec: null,
+    predictedEntityId: "a",
+    confirmedEntityId: "a",
+    ...b,
+    ...over,
+  });
+  const face = (b: ReturnType<typeof box>, over: Partial<NewFace> = {}): NewFace => ({ frameSec: null, predictedEntityId: "a", ...b, ...over });
+
+  it("iou は重なりの割合", () => {
+    expect(iou(box(0, 0, 1, 1), box(0, 0, 1, 1))).toBe(1);
+    expect(iou(box(0, 0, 0.5, 1), box(0.5, 0, 1, 1))).toBe(0);
+    expect(iou(box(0, 0, 1, 1), box(0, 0, 0.5, 1))).toBeCloseTo(0.5);
+  });
+
+  it("枠が重なる確定済みの顔を引き継ぐ。重ならない顔は新しい顔のまま", () => {
+    const m = matchReviewedFaces(
+      [face(box(0.1, 0.1, 0.3, 0.3)), face(box(0.6, 0.6, 0.8, 0.8))],
+      [reviewed("r1", box(0.11, 0.1, 0.31, 0.3))]
+    );
+    expect([...m]).toEqual([[0, "r1"]]);
+  });
+
+  it("1 つの確定済みの顔は 1 つの新しい顔にだけ引き継ぐ (重なりの大きい方)", () => {
+    const m = matchReviewedFaces(
+      [face(box(0.1, 0.1, 0.3, 0.3)), face(box(0.12, 0.1, 0.32, 0.3))],
+      [reviewed("r1", box(0.12, 0.1, 0.32, 0.3))]
+    );
+    expect([...m]).toEqual([[1, "r1"]]);
+  });
+
+  it("却下だけで正解の無い顔は、新しい推定が却下したメンバーと同じときだけ引き継ぐ", () => {
+    const r = reviewed("r1", box(0.1, 0.1, 0.3, 0.3), { status: "rejected", predictedEntityId: "x", confirmedEntityId: null });
+    expect(matchReviewedFaces([face(box(0.1, 0.1, 0.3, 0.3), { predictedEntityId: "x" })], [r]).size).toBe(1);
+    expect(matchReviewedFaces([face(box(0.1, 0.1, 0.3, 0.3), { predictedEntityId: "y" })], [r]).size).toBe(0);
+  });
+
+  it("却下でも正解が付いていれば、推定が違っても引き継ぐ", () => {
+    const r = reviewed("r1", box(0.1, 0.1, 0.3, 0.3), { status: "rejected", predictedEntityId: "x", confirmedEntityId: "b" });
+    expect(matchReviewedFaces([face(box(0.1, 0.1, 0.3, 0.3), { predictedEntityId: "y" })], [r]).size).toBe(1);
+  });
+
+  it("動画: 同じコマなら枠で、コマがずれても確定したメンバーと同じ推定なら引き継ぐ", () => {
+    const r = reviewed("r1", box(0.1, 0.1, 0.3, 0.3), { frameSec: 2.5 });
+    expect(matchReviewedFaces([face(box(0.1, 0.1, 0.3, 0.3), { frameSec: 2.7 })], [r]).size).toBe(1);
+    expect(matchReviewedFaces([face(box(0.6, 0.6, 0.8, 0.8), { frameSec: 9 })], [r]).size).toBe(1);
+    expect(matchReviewedFaces([face(box(0.6, 0.6, 0.8, 0.8), { frameSec: 9, predictedEntityId: "b" })], [r]).size).toBe(0);
+  });
+
+  it("画像の顔と動画の顔は混ぜない", () => {
+    const r = reviewed("r1", box(0.1, 0.1, 0.3, 0.3), { frameSec: 1 });
+    expect(matchReviewedFaces([face(box(0.1, 0.1, 0.3, 0.3))], [r]).size).toBe(0);
   });
 });
