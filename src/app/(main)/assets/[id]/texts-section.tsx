@@ -319,20 +319,24 @@ function groupByOwner(texts: AssetText[]): { owner?: TextOwner; texts: AssetText
   return groups;
 }
 
-/** 子アセット (ページ画像など) のサムネイル。画像を見ながら本文を選べるように横に出す */
+/**
+ * 子アセット (ページ画像など) のサムネイル。画像を見ながら本文を選べるように横に出す。
+ * 横のタイトルと同じリンクなので、タブ移動と読み上げからは外す (二重にしない)
+ */
 function OwnerThumbnail({ owner }: { owner: TextOwner }) {
   return (
     <Link
       href={`/assets/${owner.id}`}
       className="shrink-0 w-20 sm:w-28 select-none"
-      title={owner.title || "(無題)"}
+      tabIndex={-1}
+      aria-hidden
     >
       {owner.thumbnailUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={owner.thumbnailUrl}
-          alt={owner.title || ""}
-          className="w-full rounded border border-slate-200 hover:opacity-90 transition-opacity"
+          alt=""
+          className="w-full aspect-[3/4] object-cover object-top rounded border border-slate-200 hover:opacity-90 transition-opacity"
           loading="lazy"
         />
       ) : (

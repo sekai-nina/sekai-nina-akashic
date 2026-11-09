@@ -244,7 +244,7 @@ export default async function AssetDetailPage({
   // ピッカーの「追加済み」は後者のうち編集できるもの
   const editableDossiersPromise = listEditableDossiers(session.user);
   // 子アセット (雑誌のページなど) の本文。親の画面で読んでクリップできるようにする (#405)。
-  // 並びは子アセット一覧と同じ (sortOrder 順)
+  // 並びは parent_child の sortOrder 順 (子アセット一覧は種類で分けて並べるので、番号はそれと一致しないことがある)
   const childOwners = relations.asSource
     .filter((r) => r.relationType === "parent_child")
     .map((r, i) => ({ id: r.target.id, title: r.target.title, thumbnailUrl: r.target.thumbnailUrl, position: i + 1 }));
@@ -306,7 +306,8 @@ export default async function AssetDetailPage({
   ]);
   const highlightCount = hlNina
     ? countTermMatches(
-        asset.texts.map((t) => t.content),
+        // 子アセットの本文の欄 (#405) にも色を付けるので、件数にも含める
+        [...asset.texts.map((t) => t.content), ...childTexts.map((t) => t.content)],
         ninaTerms
       )
     : 0;
@@ -575,6 +576,7 @@ export default async function AssetDetailPage({
               canClip={canClip}
               clipRanges={clipRanges}
               highlightTerms={hlNina ? ninaTerms : []}
+              targetDossier={targetDossier}
             />
           )}
 
