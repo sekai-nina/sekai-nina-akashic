@@ -243,6 +243,12 @@ export default async function AssetDetailPage({
   // 編集できるドシエ (ピッカー) と、このアセットを含むドシエ (見えるもの全部)。
   // ピッカーの「追加済み」は後者のうち編集できるもの
   const editableDossiersPromise = listEditableDossiers(session.user);
+  // 子アセット (雑誌のページなど) の本文。親の画面で読んでクリップできるようにする (#405)。
+  // 並びは parent_child の sortOrder 順 (子アセット一覧は種類で分けて並べるので、番号はそれと一致しないことがある)
+  const childOwners = relations.asSource
+    .filter((r) => r.relationType === "parent_child")
+    .map((r, i) => ({ id: r.target.id, title: r.target.title, thumbnailUrl: r.target.thumbnailUrl, position: i + 1 }));
+  const childIds = childOwners.map((c) => c.id);
   // `?dossier=` は抜粋の追加先 (/progress/blog の「記事を作る」から来たとき, #206)。編集できるドシエだけ
   const targetDossierPromise = editableDossiersPromise.then((ds) =>
     sp.dossier ? (ds.find((d) => d.id === sp.dossier) ?? null) : null
@@ -259,6 +265,7 @@ export default async function AssetDetailPage({
     [pickerArticles, clips, articleRefs],
     childMedia,
     childOcr,
+    childTexts,
   ] = await Promise.all([
     hlNina ? getNinaTerms(userClearance) : Promise.resolve([] as string[]),
     findMaterialClipProgressForAsset(id, userClearance),
@@ -280,17 +287,27 @@ export default async function AssetDetailPage({
     // クリップ (#41) と「記事での参照」もここで引く
     Promise.all([
       listArticlesForPicker(),
-      listClipsForAsset(session.user, id),
+      listClipsForAsset(session.user, [id, ...childIds]),
       listArticleReferencesForAsset(id, userClearance),
     ]),
     // 子アセット (雑誌のページ・ブログ画像) の出演。一覧から付け外しする (#377)
     getClipMedia(userClearance, relations.asSource.map((r) => r.targetId)),
     // 子アセット (画像) の OCR の状態。まだのものを選んで OCR する (#379)
     getOcrStates(userClearance, relations.asSource.map((r) => r.targetId)),
+    childIds.length > 0
+      ? withClearance(userClearance, (tx) =>
+          tx.assetText.findMany({
+            where: { assetId: { in: childIds } },
+            orderBy: { createdAt: "asc" },
+            select: { id: true, assetId: true, textType: true, content: true },
+          })
+        )
+      : Promise.resolve([]),
   ]);
   const highlightCount = hlNina
     ? countTermMatches(
-        asset.texts.map((t) => t.content),
+        // 子アセットの本文の欄 (#405) にも色を付けるので、件数にも含める
+        [...asset.texts.map((t) => t.content), ...childTexts.map((t) => t.content)],
         ninaTerms
       )
     : 0;
@@ -300,16 +317,29 @@ export default async function AssetDetailPage({
   // クリップ済みの範囲を本文上に色付けする。DossierItem は textType しか持たないので、
   // 同じ type のテキストのうち抜粋と実際に一致するものに当てる (本文が編集されて
   // 一致しなくなったものは出さず、「位置未確定」扱いにする)
+  // 子アセットのクリップは、その子の本文に当てる (#405)
+  const clipTexts = [
+    ...asset.texts.map((t) => ({ id: t.id, assetId: asset.id, textType: t.textType, content: t.content })),
+    ...childTexts,
+  ];
   const clipRanges: Record<string, TextRange[]> = {};
   const locatedClipIds = new Set<string>();
   for (const c of clips) {
     const { excerptStart: start, excerptEnd: end, excerptType } = c;
     if (start == null || end == null || !excerptType) continue;
-    const text = asset.texts.find((t) => t.textType === excerptType && excerptOf(t.content, start, end) === c.excerpt);
+    const text = clipTexts.find(
+      (t) => t.assetId === c.assetId && t.textType === excerptType && excerptOf(t.content, start, end) === c.excerpt
+    );
     if (!text) continue;
     (clipRanges[text.id] ??= []).push({ id: c.id, start, end });
     locatedClipIds.add(c.id);
   }
+
+  // 子アセットの本文を、子アセット一覧の順に並べる (同じ子のテキストは登録順のまま)
+  const childOwnerById = new Map(childOwners.map((o) => [o.id, o]));
+  const childTextsOrdered = childTexts
+    .map((t) => ({ ...t, owner: childOwnerById.get(t.assetId)! }))
+    .sort((a, b) => a.owner.position - b.owner.position);
 
   const isImage = asset.kind === "image";
   let previewUrl = asset.thumbnailUrl;
@@ -527,6 +557,29 @@ export default async function AssetDetailPage({
             </>
           )}
 
+          {/* 子アセットの本文 (#405): 雑誌などは OCR が子 (ページ) 側にあるので、親から読んで
+              そのままクリップ・引用できるようにする。宛先は選択したテキストの子アセット */}
+          {childTextsOrdered.length > 0 && (
+            <TextsSection
+              assetId={asset.id}
+              assetTitle={asset.title || "(無題)"}
+              heading={`子アセットの本文 (${new Set(childTextsOrdered.map((t) => t.assetId)).size})`}
+              texts={childTextsOrdered.map((t) => ({
+                id: t.id,
+                textType: t.textType,
+                content: t.content,
+                owner: t.owner,
+              }))}
+              embeddedImages={{}}
+              editableDossiers={editableDossiers}
+              articles={pickerArticles}
+              canClip={canClip}
+              clipRanges={clipRanges}
+              highlightTerms={hlNina ? ninaTerms : []}
+              targetDossier={targetDossier}
+            />
+          )}
+
           {/* Relations + Graph */}
           <div className="bg-white border border-slate-200 rounded-lg p-5">
             <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
@@ -729,6 +782,8 @@ export default async function AssetDetailPage({
               }))}
               clips={clips.map((c) => ({
                 id: c.id,
+                // 子アセットのクリップ (#405) はどの子のものかを出す
+                owner: c.assetId === asset.id ? null : (childOwnerById.get(c.assetId!) ?? null),
                 note: c.note,
                 excerpt: c.excerpt,
                 located: locatedClipIds.has(c.id),

@@ -29,10 +29,21 @@ interface EmbeddedImage {
   title: string;
 }
 
+/** テキストの持ち主のアセット。親の画面に子アセットの本文を並べるとき (#405) に付ける */
+export interface TextOwner {
+  id: string;
+  title: string;
+  thumbnailUrl: string | null;
+  /** 見出しに出す番号 (雑誌のページ順など)。1 始まり */
+  position: number;
+}
+
 interface AssetText {
   id: string;
   textType: string;
   content: string;
+  /** 省略時は `assetId` のアセットのテキスト。付いていれば引用・クリップの宛先はこのアセット */
+  owner?: TextOwner;
 }
 
 interface EditableDossier {
@@ -50,6 +61,8 @@ export interface TextRange {
 interface TextsSectionProps {
   assetId: string;
   assetTitle: string;
+  /** 見出し。既定は「テキスト」 */
+  heading?: string;
   texts: AssetText[];
   /** 抜粋の紐づけ先候補。空配列なら記事ボタンを出さない */
   articles?: PickerArticle[];
@@ -68,6 +81,9 @@ interface TextsSectionProps {
 }
 
 type Selection = {
+  /** 引用・クリップの宛先 (選択したテキストの持ち主) */
+  assetId: string;
+  assetTitle: string;
   text: string;
   textType: string;
   /** content 内の位置。DOM から復元できなかったときは undefined (文字列だけ渡す) */
@@ -79,6 +95,7 @@ type Selection = {
 export function TextsSection({
   assetId,
   assetTitle,
+  heading = "テキスト",
   texts,
   embeddedImages,
   editableDossiers,
@@ -93,15 +110,22 @@ export function TextsSection({
   const [activeSelection, setActiveSelection] = useState<Selection>(null);
   // クリップのフォームはフローターの外 (このコンポーネント) で持つ。フローターは選択が
   // 解除されると消えるので、その中にダイアログを置くと入力中に巻き添えで閉じる
-  const [clipDraft, setClipDraft] = useState<ClipDraft | null>(null);
+  const [clipDraft, setClipDraft] = useState<(ClipDraft & { assetId: string }) | null>(null);
   // 親が毎回新しい配列を渡してくるので、mouseup ハンドラの購読し直しを避けるため ref で持つ
   const textsRef = useRef(texts);
+  const assetIdRef = useRef(assetId);
+  const assetTitleRef = useRef(assetTitle);
   useEffect(() => {
     textsRef.current = texts;
-  }, [texts]);
+    assetIdRef.current = assetId;
+    assetTitleRef.current = assetTitle;
+  }, [texts, assetId, assetTitle]);
 
-  // 本文中の画像から戻ってきたときに、元のスクロール位置に復帰させる
-  useRestoreScroll(assetId, containerRef);
+  // 本文中の画像から戻ってきたときに、元のスクロール位置に復帰させる。
+  // 子アセットの本文の欄 (#405) は本文中の画像を持たないので復帰はしない (同じページの
+  // 本文の欄と取り合いになり、戻り先を先に消費してしまう)
+  const hasOwners = texts.some((t) => t.owner);
+  useRestoreScroll(hasOwners ? null : assetId, containerRef);
 
   useEffect(() => {
     if (!canClip && editableDossiers.length === 0 && articles.length === 0) return;
@@ -142,11 +166,15 @@ export function TextsSection({
 
       // 選択範囲を content の文字添字に直す (クリップの位置と本文ハイライトに使う)
       const source = textsRef.current.find((t) => t.id === startPanel.dataset.textId);
+      // 子アセットの本文なら、引用・クリップはその子アセットに付ける (#405)
+      const owner = source?.owner
+        ? { assetId: source.owner.id, assetTitle: source.owner.title || "(無題)" }
+        : { assetId: assetIdRef.current, assetTitle: assetTitleRef.current };
       const contentEl = startPanel.querySelector<HTMLElement>("[data-text-content]");
       const located =
         source && contentEl ? locateSelection(range, contentEl, source.content) : null;
       if (located) {
-        setActiveSelection({ text: located.text, textType, start: located.start, end: located.end, rect });
+        setActiveSelection({ ...owner, text: located.text, textType, start: located.start, end: located.end, rect });
         return;
       }
       const text = sel.toString().trim();
@@ -154,7 +182,7 @@ export function TextsSection({
         setActiveSelection(null);
         return;
       }
-      setActiveSelection({ text, textType, rect });
+      setActiveSelection({ ...owner, text, textType, rect });
     }
 
     function handleDown(e: MouseEvent) {
@@ -175,7 +203,7 @@ export function TextsSection({
   return (
     <div className="bg-white border border-slate-200 rounded-lg p-5">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">テキスト</h2>
+        <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{heading}</h2>
         {(canClip || editableDossiers.length > 0) && (
           <span className="text-[10px] text-slate-400">
             本文を選択すると{canClip ? "クリップや" : ""}企画への引用追加ができます
@@ -185,29 +213,47 @@ export function TextsSection({
 
       <div ref={containerRef}>
         <ul className="space-y-3">
-          {texts.map((text) => (
-            <li
-              key={text.id}
-              data-text-id={text.id}
-              data-text-type={text.textType}
-              className="border border-slate-100 rounded-lg p-3"
-            >
-              <div className="mb-1.5">
-                <span className="text-xs font-medium bg-teal-100 text-teal-700 px-2 py-0.5 rounded">
-                  {TEXT_TYPE_LABELS[text.textType] ?? text.textType}
-                </span>
-              </div>
-              <RichTextContent
-                content={text.content}
-                embeddedImages={embeddedImages}
-                highlightTerms={highlightTerms}
-                ranges={clipRanges[text.id] ?? []}
-                onImageNavigate={(imageAssetId, imageEl) =>
-                  rememberScroll(assetId, imageAssetId, imageEl)
-                }
-              />
-            </li>
-          ))}
+          {groupByOwner(texts).map((group) => {
+            const items = group.texts.map((text) => (
+              <li
+                key={text.id}
+                data-text-id={text.id}
+                data-text-type={text.textType}
+                className="border border-slate-100 rounded-lg p-3"
+              >
+                <div className="mb-1.5">
+                  <span className="text-xs font-medium bg-teal-100 text-teal-700 px-2 py-0.5 rounded">
+                    {TEXT_TYPE_LABELS[text.textType] ?? text.textType}
+                  </span>
+                </div>
+                <RichTextContent
+                  content={text.content}
+                  embeddedImages={embeddedImages}
+                  highlightTerms={highlightTerms}
+                  ranges={clipRanges[text.id] ?? []}
+                  onImageNavigate={(imageAssetId, imageEl) =>
+                    rememberScroll(assetId, imageAssetId, imageEl)
+                  }
+                />
+              </li>
+            ));
+            if (!group.owner) return items;
+            return (
+              <li key={`owner-${group.owner.id}`} className="flex gap-3 items-start">
+                <OwnerThumbnail owner={group.owner} />
+                <div className="min-w-0 flex-1">
+                  <Link
+                    href={`/assets/${group.owner.id}`}
+                    className="inline-block mb-1.5 text-xs text-slate-500 hover:text-indigo-600 hover:underline select-none"
+                  >
+                    <span className="tabular-nums text-slate-400 mr-1">{group.owner.position}.</span>
+                    {group.owner.title || "(無題)"}
+                  </Link>
+                  <ul className="space-y-2">{items}</ul>
+                </div>
+              </li>
+            );
+          })}
         </ul>
       </div>
 
@@ -227,14 +273,15 @@ export function TextsSection({
       {activeSelection && (
         <ExcerptFloater
           selection={activeSelection}
-          assetId={assetId}
-          assetTitle={assetTitle}
+          assetId={activeSelection.assetId}
+          assetTitle={activeSelection.assetTitle}
           editableDossiers={editableDossiers}
           targetDossier={targetDossier}
           articles={articles}
           canClip={canClip}
           onClip={() => {
             setClipDraft({
+              assetId: activeSelection.assetId,
               excerpt: activeSelection.text,
               excerptType: activeSelection.textType,
               excerptStart: activeSelection.start,
@@ -248,7 +295,7 @@ export function TextsSection({
 
       {canClip && (
         <ClipDialog
-          assetId={assetId}
+          assetId={clipDraft?.assetId ?? assetId}
           hasTexts
           open={clipDraft !== null}
           onOpenChange={(open) => {
@@ -258,6 +305,44 @@ export function TextsSection({
         />
       )}
     </div>
+  );
+}
+
+/** 続けて並んだ同じ持ち主のテキストをまとめる。持ち主の無いテキストは owner: undefined の 1 群 */
+function groupByOwner(texts: AssetText[]): { owner?: TextOwner; texts: AssetText[] }[] {
+  const groups: { owner?: TextOwner; texts: AssetText[] }[] = [];
+  for (const t of texts) {
+    const last = groups.at(-1);
+    if (last && last.owner?.id === t.owner?.id) last.texts.push(t);
+    else groups.push({ owner: t.owner, texts: [t] });
+  }
+  return groups;
+}
+
+/**
+ * 子アセット (ページ画像など) のサムネイル。画像を見ながら本文を選べるように横に出す。
+ * 横のタイトルと同じリンクなので、タブ移動と読み上げからは外す (二重にしない)
+ */
+function OwnerThumbnail({ owner }: { owner: TextOwner }) {
+  return (
+    <Link
+      href={`/assets/${owner.id}`}
+      className="shrink-0 w-20 sm:w-28 select-none"
+      tabIndex={-1}
+      aria-hidden
+    >
+      {owner.thumbnailUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={owner.thumbnailUrl}
+          alt=""
+          className="w-full aspect-[3/4] object-cover object-top rounded border border-slate-200 hover:opacity-90 transition-opacity"
+          loading="lazy"
+        />
+      ) : (
+        <div className="w-full aspect-[3/4] rounded border border-dashed border-slate-200 bg-slate-50" />
+      )}
+    </Link>
   );
 }
 
