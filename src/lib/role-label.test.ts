@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupRoleLabelUpdates, providedRoleLabel, roleLabelUpdate } from "./role-label";
+import { groupRoleLabelUpdates, mergedRoleLabel, providedRoleLabel, roleLabelUpdate } from "./role-label";
 
 describe("roleLabelUpdate", () => {
   it("値が無ければ roleLabel に触らない (既存の author を消さない)", () => {
@@ -39,5 +39,24 @@ describe("groupRoleLabelUpdates", () => {
       existing
     );
     expect([...got.entries()]).toEqual([["出演", ["kawata", "tag"]]]);
+  });
+});
+
+describe("mergedRoleLabel", () => {
+  it("残す側が顔認識の自動付与か空なら、人が付けた値に置き換える", () => {
+    expect(mergedRoleLabel("face", "subject")).toBe("subject");
+    expect(mergedRoleLabel(null, "author")).toBe("author");
+    expect(mergedRoleLabel("", "出演")).toBe("出演");
+  });
+
+  it("残す側に人が付けた値があれば変えない", () => {
+    expect(mergedRoleLabel("author", "subject")).toBeUndefined();
+    expect(mergedRoleLabel("subject", "face")).toBeUndefined();
+  });
+
+  it("統合される側が空か face なら変えない", () => {
+    expect(mergedRoleLabel("face", null)).toBeUndefined();
+    expect(mergedRoleLabel(null, "face")).toBeUndefined();
+    expect(mergedRoleLabel("face", "  ")).toBeUndefined();
   });
 });
