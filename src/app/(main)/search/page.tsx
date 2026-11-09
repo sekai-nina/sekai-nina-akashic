@@ -185,8 +185,10 @@ async function SearchResults({
     : [];
 
   const ninaAppearance = isNinaAppearance(params.nina) ? params.nina : undefined;
+  // 顔認識で写っている人 (#409)。全員が同じ画像に写っているもの
+  const appearingIds: string[] = params.appearingIds ? params.appearingIds.split(",").filter(Boolean) : [];
 
-  const hasFilters = !!(effectiveKinds.length > 0 || effectiveSourceType || params.dateFrom || params.dateTo || effectiveEntityIds.length > 0 || selectedAuthorIds.length > 0 || ninaAppearance);
+  const hasFilters = !!(effectiveKinds.length > 0 || effectiveSourceType || params.dateFrom || params.dateTo || effectiveEntityIds.length > 0 || selectedAuthorIds.length > 0 || ninaAppearance || appearingIds.length > 0);
 
   // ギャラリーは画像・動画だけを並べる。件数とページ送りが合うよう、表示側ではなく検索条件で絞る
   const isGallery = effectiveView === "gallery";
@@ -217,6 +219,7 @@ async function SearchResults({
         entityIds: effectiveEntityIds.length > 0 ? effectiveEntityIds : undefined,
         entityMatch: effectiveEntityMatch,
         authorIds: selectedAuthorIds.length > 0 ? selectedAuthorIds : undefined,
+        appearingIds: appearingIds.length > 0 ? appearingIds : undefined,
         dateFrom: params.dateFrom ? new Date(params.dateFrom) : undefined,
         dateTo: params.dateTo ? new Date(params.dateTo) : undefined,
         ninaAppearance,
@@ -425,7 +428,9 @@ export default async function SearchPage({
     ? params.authorIds.split(",").filter(Boolean)
     : [];
 
-  const hasQuery = !!(q.trim() || selectedKinds.length > 0 || params.dateFrom || params.dateTo || selectedEntityIds.length > 0 || selectedAuthorIds.length > 0 || isNinaAppearance(params.nina));
+  const selectedAppearingIds: string[] = params.appearingIds ? params.appearingIds.split(",").filter(Boolean) : [];
+
+  const hasQuery = !!(q.trim() || selectedKinds.length > 0 || params.dateFrom || params.dateTo || selectedEntityIds.length > 0 || selectedAuthorIds.length > 0 || selectedAppearingIds.length > 0 || isNinaAppearance(params.nina));
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -440,6 +445,7 @@ export default async function SearchPage({
           initialEntityIds={selectedEntityIds}
           initialEntityMatch={params.entityMatch === "all" ? "all" : "any"}
           initialAuthorIds={selectedAuthorIds}
+          initialAppearingIds={selectedAppearingIds}
           entities={entities}
         />
       </Suspense>

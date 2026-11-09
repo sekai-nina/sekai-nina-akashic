@@ -33,6 +33,9 @@ import { SubmitButton } from "@/components/submit-button";
 import { BackButton } from "@/components/back-button";
 import { StatusWorkflow } from "./status-workflow";
 import { NinaAppearancePanel } from "./nina-appearance-panel";
+import { FacesPanel } from "./faces-panel";
+import { getCachedEntityList } from "@/lib/cache";
+import { listAssetFaces } from "@/lib/domain/face-review";
 import { TranscribePanel } from "./transcribe-panel";
 import { OcrPanel } from "./ocr-panel";
 import { ninaAppearanceOf } from "@/lib/nina";
@@ -266,6 +269,7 @@ export default async function AssetDetailPage({
     childMedia,
     childOcr,
     childTexts,
+    faces,
   ] = await Promise.all([
     hlNina ? getNinaTerms(userClearance) : Promise.resolve([] as string[]),
     findMaterialClipProgressForAsset(id, userClearance),
@@ -303,7 +307,17 @@ export default async function AssetDetailPage({
           })
         )
       : Promise.resolve([]),
+    // 顔認識の顔 (#409)
+    asset.kind === "image" || asset.kind === "video" ? listAssetFaces(userClearance, id) : Promise.resolve([]),
   ]);
+  // 顔を直すときのメンバーの選択肢 (期のある人物。卒業生を含む)
+  const faceMembers =
+    faces.length > 0
+      ? (await getCachedEntityList(userClearance as ClearanceLevel))
+          .filter((e) => e.type === "person" && e.generation != null)
+          .sort((a, b) => (a.generation ?? 0) - (b.generation ?? 0) || (a.reading ?? a.canonicalName).localeCompare(b.reading ?? b.canonicalName, "ja"))
+          .map((e) => ({ id: e.id, name: e.canonicalName, generation: e.generation as number }))
+      : [];
   const highlightCount = hlNina
     ? countTermMatches(
         // 子アセットの本文の欄 (#405) にも色を付けるので、件数にも含める
@@ -748,6 +762,14 @@ export default async function AssetDetailPage({
           {/* Status */}
           <StatusWorkflow assetId={id} initialStatus={asset.status} />
           <NinaAppearancePanel assetId={asset.id} initial={ninaAppearanceOf(asset)} editable={isEditor} />
+          {faces.length > 0 && (
+            <FacesPanel
+              faces={faces}
+              imageUrl={asset.thumbnailUrl}
+              members={faceMembers}
+              editable={isEditor}
+            />
+          )}
           {isEditor && (asset.kind === "audio" || asset.kind === "video") && (
             <TranscribePanel
               assetId={asset.id}

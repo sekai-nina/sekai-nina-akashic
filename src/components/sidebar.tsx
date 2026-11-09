@@ -40,6 +40,7 @@ import {
   Instagram,
   Megaphone,
   Clapperboard,
+  ScanFace,
 } from "lucide-react";
 import { QuickCreateModal } from "@/components/quick-create-modal";
 
@@ -55,6 +56,7 @@ const navItems = [
   { href: "/assets", label: "Assets", icon: Archive },
   { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/entities", label: "エンティティ", icon: Tag },
+  { href: "/faces", label: "顔の確認", icon: ScanFace },
   { href: "/places", label: "聖地マップ", icon: MapPin },
   { href: "/anniversaries", label: "記念日", icon: CalendarHeart },
   { href: "/announcements", label: "お知らせ", icon: Megaphone },

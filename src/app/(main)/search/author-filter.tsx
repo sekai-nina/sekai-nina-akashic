@@ -13,6 +13,14 @@ interface AuthorFilterProps {
   persons: Person[];
   selected: Set<string>;
   onToggle: (id: string) => void;
+  /** 隠しフィールドの名前 (既定は authorIds) */
+  name?: string;
+  /** 見出し (既定は「著者」) */
+  label?: string;
+  /** 見出しの横の注記 (既定は「複数選択でOR」) */
+  hint?: string;
+  /** 選ぶメニューの先頭の文言 (既定は「著者を追加...」) */
+  placeholder?: string;
 }
 
 /** 期別 → 五十音順。期が未設定の人は最後にまとめる。 */
@@ -51,17 +59,25 @@ function groupByGeneration(persons: Person[]) {
   return ordered;
 }
 
-export function AuthorFilter({ persons, selected, onToggle }: AuthorFilterProps) {
+export function AuthorFilter({
+  persons,
+  selected,
+  onToggle,
+  name = "authorIds",
+  label = "著者",
+  hint = "複数選択でOR",
+  placeholder = "著者を追加...",
+}: AuthorFilterProps) {
   const personMap = new Map(persons.map((p) => [p.id, p]));
   const value = [...selected].join(",");
   const groups = groupByGeneration(persons);
 
   return (
     <>
-      <input type="hidden" name="authorIds" value={value} />
+      <input type="hidden" name={name} value={value} />
       <div>
         <label className="block text-xs text-slate-500 mb-1">
-          著者 <span className="text-[10px] text-slate-400">(複数選択でOR)</span>
+          {label} <span className="text-[10px] text-slate-400">({hint})</span>
         </label>
 
         {selected.size > 0 && (
@@ -92,7 +108,7 @@ export function AuthorFilter({ persons, selected, onToggle }: AuthorFilterProps)
           className="border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
         >
           <option value="">
-            {selected.size > 0 ? `${selected.size}名選択中` : "著者を追加..."}
+            {selected.size > 0 ? `${selected.size}名選択中` : placeholder}
           </option>
           {groups.map((group) => {
             const options = group.members.filter((p) => !selected.has(p.id));
