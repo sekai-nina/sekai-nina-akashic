@@ -1,3 +1,5 @@
+import { FACE_ROLE_LABEL } from "@/lib/faces/policy";
+
 /**
  * 既存の AssetEntity に対する roleLabel の書き込み方 (#392)。
  *
@@ -36,4 +38,20 @@ export function groupRoleLabelUpdates(
 export function roleLabelUpdate(roleLabel: string | null | undefined): { roleLabel?: string } {
   const v = providedRoleLabel(roleLabel);
   return v === undefined ? {} : { roleLabel: v };
+}
+
+/**
+ * エンティティの統合で、同じアセットに両方の紐づきがあったとき、残す側 (target) の roleLabel を
+ * 何に書き換えるか。書き換えないなら undefined。
+ *
+ * 人が付けた値 (`author` / `subject` / `出演` 等) を、空か顔認識の自動付与 (`face`) より優先する。
+ * 両方とも人が付けた値なら残す側を変えない。例: 2026-09-30 に「上村 ひなの」形式で重複が作られ、
+ * 空白なし側は `face`、空白あり側は `subject` だった
+ */
+export function mergedRoleLabel(target: string | null | undefined, source: string | null | undefined): string | undefined {
+  const src = providedRoleLabel(source);
+  if (src === undefined || src === FACE_ROLE_LABEL) return undefined;
+  const tgt = providedRoleLabel(target);
+  if (tgt !== undefined && tgt !== FACE_ROLE_LABEL) return undefined;
+  return src;
 }

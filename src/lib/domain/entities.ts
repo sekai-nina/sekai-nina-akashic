@@ -1,7 +1,7 @@
 import { EntityType, Prisma, type ClearanceLevel } from "@prisma/client";
 import { prisma, withClearance } from "@/lib/db";
 import { accessibleClassifications } from "@/lib/classification";
-import { normalizeText } from "@/lib/utils";
+import { normalizeText, spacelessKey } from "@/lib/utils";
 import { logAudit } from "./audit";
 import { clearNinaAbsentIfLinking } from "./nina-appearance";
 import { roleLabelUpdate } from "@/lib/role-label";
@@ -50,6 +50,16 @@ export async function findOrCreateEntity(type: EntityType, canonicalName: string
     );
   }
   const normalizedName = normalizeText(canonicalName);
+
+  // 空白だけが違う既存のエンティティに寄せる。canonicalName の完全一致だけだと、
+  // 2026-09-30 に外部クライアントが「上村 ひなの」形式で送ってきた 26 人分が別のエンティティになった。
+  // Entity は 500 行ほどなので、同じ type を全部引いて比べる
+  const key = spacelessKey(canonicalName);
+  // 古いものを優先する (空白違いが複数残っていても毎回同じものに寄る)
+  const sameType = await prisma.entity.findMany({ where: { type }, orderBy: { createdAt: "asc" } });
+  const existing =
+    sameType.find((e) => e.canonicalName === canonicalName) ?? sameType.find((e) => spacelessKey(e.canonicalName) === key);
+  if (existing) return existing;
 
   return prisma.entity.upsert({
     where: {
