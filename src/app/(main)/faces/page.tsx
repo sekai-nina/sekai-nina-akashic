@@ -35,6 +35,15 @@ export default async function FacesPage({ searchParams }: { searchParams: Promis
     .sort((a, b) => (a.generation ?? 0) - (b.generation ?? 0) || (a.reading ?? a.canonicalName).localeCompare(b.reading ?? b.canonicalName, "ja"))
     .map((e) => ({ id: e.id, name: e.canonicalName, generation: e.generation as number }));
   const nameOf = new Map(members.map((m) => [m.id, m.name]));
+  // [ ] で前後のメンバーに移る (メニューと同じ順。先頭は「全員」)
+  const order = ["all", ...members.map((m) => m.id)];
+  const at = order.indexOf(entityId ?? "all");
+  const memberHref = (id: string | undefined) => (id ? `/faces?${new URLSearchParams({ mode, entity: id })}` : null);
+  const nav = {
+    prevMember: memberHref(order[at - 1]),
+    nextMember: memberHref(order[at + 1]),
+    otherMode: `/faces?${new URLSearchParams({ mode: mode === "pending" ? "auto" : "pending", entity: entityId ?? "all" })}`,
+  };
   const href = (p: Record<string, string>) => `/faces?${new URLSearchParams({ mode, entity: entityId ?? "all", ...p })}`;
 
   return (
@@ -45,7 +54,7 @@ export default async function FacesPage({ searchParams }: { searchParams: Promis
           顔の確認
         </h1>
         <p className="text-sm text-slate-500 mt-1">
-          顔認識の結果を人が確かめます。違う顔だけクリックで外し、残りをまとめて確定します。確定した顔は次からの判定の手本になります。
+          顔認識の結果を人が確かめます。キーボードだけで回せます (右のキー一覧)。確定した顔は次からの判定の手本になります。
         </p>
       </div>
 
@@ -92,6 +101,7 @@ export default async function FacesPage({ searchParams }: { searchParams: Promis
           members={members}
           mode={mode}
           canEdit={canEdit}
+          nav={nav}
         />
       )}
 

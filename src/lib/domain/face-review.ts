@@ -165,6 +165,8 @@ export async function reviewFaces(
     const lostAuto = new Set<string>(); // `${assetId}\t${entityId}`
     const gained = new Set<string>();
     const ninaConfirmedAssets = new Set<string>();
+    // 同じ書き込み (status と正解) の顔をまとめて 1 回で更新する。1 顔ずつ update すると、40 顔で 40 往復して保存が遅かった
+    const groups = new Map<string, { status: "confirmed" | "rejected"; confirmedEntityId: string | null; ids: string[] }>();
     for (const d of decisions) {
       const f = byId.get(d.faceId)!;
       let status: "confirmed" | "rejected";
@@ -189,29 +191,40 @@ export async function reviewFaces(
       if (confirmedEntityId) gained.add(`${f.assetId}\t${confirmedEntityId}`);
       if (confirmedEntityId === NINA_ENTITY_ID) ninaConfirmedAssets.add(f.assetId);
 
-      await tx.faceDetection.update({
-        where: { id: f.id },
-        data: { status, confirmedEntityId, reviewedById: user.id, reviewedAt: now },
+      const gk = `${status}\t${confirmedEntityId ?? ""}`;
+      const g = groups.get(gk) ?? { status, confirmedEntityId, ids: [] };
+      g.ids.push(f.id);
+      groups.set(gk, g);
+    }
+    for (const g of groups.values()) {
+      await tx.faceDetection.updateMany({
+        where: { id: { in: g.ids } },
+        data: { status: g.status, confirmedEntityId: g.confirmedEntityId, reviewedById: user.id, reviewedAt: now },
       });
     }
 
-    // タグを外す: 同じアセットに、そのメンバーの自動・確定の顔がもう無いときだけ。外すのは face タグだけ
+    // タグを外す: 同じアセットに、そのメンバーの自動・確定の顔がもう無いときだけ。外すのは face タグだけ。
+    // 対象のアセットの顔を 1 回で引いて、残っているかを手元で判定する
     let tagsRemoved = 0;
-    for (const key of lostAuto) {
-      if (gained.has(key)) continue;
-      const [assetId, entityId] = key.split("\t");
-      const still = await tx.faceDetection.count({
-        where: {
-          assetId,
-          OR: [
-            { status: "auto", predictedEntityId: entityId },
-            { status: { in: ["confirmed", "rejected"] }, confirmedEntityId: entityId },
-          ],
-        },
+    const lost = [...lostAuto].filter((k) => !gained.has(k)).map((k) => k.split("\t") as [string, string]);
+    if (lost.length > 0) {
+      const rest = await tx.faceDetection.findMany({
+        where: { assetId: { in: [...new Set(lost.map(([a]) => a))] }, status: { in: ["auto", "confirmed", "rejected"] } },
+        select: { assetId: true, status: true, predictedEntityId: true, confirmedEntityId: true },
       });
-      if (still > 0) continue;
-      const r = await tx.assetEntity.deleteMany({ where: { assetId, entityId, roleLabel: FACE_ROLE_LABEL } });
-      tagsRemoved += r.count;
+      const still = new Set(
+        rest.flatMap((r) => {
+          const e = r.status === "auto" ? r.predictedEntityId : r.confirmedEntityId;
+          return e ? [`${r.assetId}\t${e}`] : [];
+        })
+      );
+      const gone = lost.filter(([a, e]) => !still.has(`${a}\t${e}`));
+      if (gone.length > 0) {
+        const r = await tx.assetEntity.deleteMany({
+          where: { roleLabel: FACE_ROLE_LABEL, OR: gone.map(([assetId, entityId]) => ({ assetId, entityId })) },
+        });
+        tagsRemoved = r.count;
+      }
     }
 
     // タグを付ける: 同じメンバーのタグが無いときだけ (author などを face で潰さない)
