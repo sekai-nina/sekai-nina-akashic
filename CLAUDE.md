@@ -146,7 +146,7 @@ src/
 └── middleware.ts
 ```
 
-主要ページ: `/search`（既定）, `/gallery`, `/assets`, `/inbox`, `/entities`, `/places`（聖地マップ）, `/anniversaries`（記念日）, `/announcements`（お知らせ。公開サイトのトップ / `/news` の正）, `/dossiers`（企画）, `/testimonials`, `/repo`, `/mentions`（X 言及監視）, `/meetgreets`（ミーグリ記事ワークフロー）, `/lives`（ライブ記事ワークフロー）, `/progress`（記事化の進捗。ブログ → 言葉記事・ひなあい・まだまだ・ひななり）, `/songs`（曲マスタ）, `/coverage`, `/graph`, `/analysis`, `/dashboard`, `/status`（パイプライン監視）, `/costs`（LLM コスト・admin のみ）, `/admin/*`（`/admin/article-prompts` は企画 → 記事の AI のルール文）
+主要ページ: `/search`（既定）, `/gallery`, `/assets`, `/inbox`, `/entities`, `/faces`（顔の確認。顔認識の確認待ちを人が確定・却下）, `/places`（聖地マップ）, `/anniversaries`（記念日）, `/announcements`（お知らせ。公開サイトのトップ / `/news` の正）, `/dossiers`（企画）, `/testimonials`, `/repo`, `/mentions`（X 言及監視）, `/meetgreets`（ミーグリ記事ワークフロー）, `/lives`（ライブ記事ワークフロー）, `/progress`（記事化の進捗。ブログ → 言葉記事・ひなあい・まだまだ・ひななり）, `/songs`（曲マスタ）, `/coverage`, `/graph`, `/analysis`, `/dashboard`, `/status`（パイプライン監視）, `/costs`（LLM コスト・admin のみ）, `/admin/*`（`/admin/article-prompts` は企画 → 記事の AI のルール文）
 
 ## コード規約
 

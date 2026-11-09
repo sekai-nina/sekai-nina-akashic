@@ -26,6 +26,8 @@ interface SearchFormProps {
   initialEntityIds: string[];
   initialEntityMatch: "any" | "all";
   initialAuthorIds: string[];
+  /** 顔認識で写っている人 (#409) */
+  initialAppearingIds: string[];
   entities: {
     id: string;
     canonicalName: string;
@@ -42,6 +44,7 @@ export function SearchForm({
   initialEntityIds,
   initialEntityMatch,
   initialAuthorIds,
+  initialAppearingIds,
   entities,
 }: SearchFormProps) {
   const router = useRouter();
@@ -58,6 +61,7 @@ export function SearchForm({
   const [filterAuthorIds, setFilterAuthorIds] = useState<Set<string>>(
     new Set(initialAuthorIds)
   );
+  const [filterAppearingIds, setFilterAppearingIds] = useState<Set<string>>(new Set(initialAppearingIds));
   const qInputRef = useRef<HTMLInputElement>(null);
   const dateFromRef = useRef<HTMLInputElement>(null);
   const dateToRef = useRef<HTMLInputElement>(null);
@@ -103,6 +107,7 @@ export function SearchForm({
     setNinaOnly(false);
     setFilterEntityIds(new Set());
     setFilterAuthorIds(new Set());
+    setFilterAppearingIds(new Set());
     setEntityMatch("any");
     // 日付は非制御 input なので、明示的に消さないと次の検索に持ち越される
     for (const ref of [qInputRef, dateFromRef, dateToRef]) {
@@ -231,6 +236,9 @@ export function SearchForm({
     }
     if (filterAuthorIds.size > 0) {
       p.set("authorIds", [...filterAuthorIds].join(","));
+    }
+    if (filterAppearingIds.size > 0) {
+      p.set("appearingIds", [...filterAppearingIds].join(","));
     }
 
     const dateFrom = formData.get("dateFrom") as string;
@@ -422,6 +430,22 @@ export function SearchForm({
             persons={entities.filter((e) => e.type === "person")}
             selected={filterAuthorIds}
             onToggle={toggleFilterAuthor}
+          />
+          <AuthorFilter
+            persons={entities.filter((e) => e.type === "person" && e.generation != null)}
+            selected={filterAppearingIds}
+            onToggle={(id) =>
+              setFilterAppearingIds((prev) => {
+                const next = new Set(prev);
+                if (next.has(id)) next.delete(id);
+                else next.add(id);
+                return next;
+              })
+            }
+            name="appearingIds"
+            label="写っている人 (顔認識)"
+            hint="複数選択で全員が同じ画像に写っているもの"
+            placeholder="写っている人を追加..."
           />
           <EntityFilter
             entities={entities}
