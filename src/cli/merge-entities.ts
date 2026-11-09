@@ -41,6 +41,12 @@ async function main() {
     process.exitCode = 1;
     return;
   }
+  // コードが ID で参照しているので、統合で消すと動かなくなる
+  if (fromId === NINA_ENTITY_ID) {
+    console.error("坂井新奈 (NINA_ENTITY_ID) は --from にできません。--to にしてください");
+    process.exitCode = 1;
+    return;
+  }
   if (fromId === toId) {
     console.error("--from と --to が同じです");
     process.exitCode = 1;

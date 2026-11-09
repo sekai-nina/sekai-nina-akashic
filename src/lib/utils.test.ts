@@ -66,8 +66,9 @@ describe("spacelessKey", () => {
     expect(spacelessKey(" コロンバン 原宿サロン ")).toBe(spacelessKey("コロンバン原宿サロン"));
   });
 
-  it("全角半角・大文字小文字も揃える", () => {
-    expect(spacelessKey("ＨＩＮＡＴＡ Ｓａｋａ")).toBe(spacelessKey("hinatasaka"));
+  it("全角英数は揃えるが、大文字小文字は区別する", () => {
+    expect(spacelessKey("ＨＩＮＡＴＡ Ｓａｋａ")).toBe(spacelessKey("HINATASaka"));
+    expect(spacelessKey("Kiss Me")).not.toBe(spacelessKey("kissme"));
   });
 
   it("違う名前は違うキーになる", () => {

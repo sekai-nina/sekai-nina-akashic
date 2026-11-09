@@ -50,11 +50,12 @@ export function normalizeText(text: string): string {
 }
 
 /**
- * 空白を無視した比較用のキー (エンティティ名の表記ゆれ「上村 ひなの」/「上村ひなの」を同じものとみなす)。
- * normalizeText で大文字小文字・全角半角・空白の種類を揃えたうえで空白を全部落とす
+ * 空白だけを無視した比較用のキー (エンティティ名の表記ゆれ「上村 ひなの」/「上村ひなの」を同じものとみなす)。
+ * NFKC で全角空白なども揃えてから空白を全部落とす。**大文字小文字は区別したまま**
+ * (英字のタグを寄せすぎないように)
  */
 export function spacelessKey(text: string): string {
-  return normalizeText(text).replace(/ /g, "");
+  return text.normalize("NFKC").replace(/\s+/g, "");
 }
 
 /**

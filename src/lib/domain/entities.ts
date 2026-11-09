@@ -55,7 +55,8 @@ export async function findOrCreateEntity(type: EntityType, canonicalName: string
   // 2026-09-30 に外部クライアントが「上村 ひなの」形式で送ってきた 26 人分が別のエンティティになった。
   // Entity は 500 行ほどなので、同じ type を全部引いて比べる
   const key = spacelessKey(canonicalName);
-  const sameType = await prisma.entity.findMany({ where: { type } });
+  // 古いものを優先する (空白違いが複数残っていても毎回同じものに寄る)
+  const sameType = await prisma.entity.findMany({ where: { type }, orderBy: { createdAt: "asc" } });
   const existing =
     sameType.find((e) => e.canonicalName === canonicalName) ?? sameType.find((e) => spacelessKey(e.canonicalName) === key);
   if (existing) return existing;
