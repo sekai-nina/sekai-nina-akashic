@@ -21,6 +21,17 @@
 2. **静的ゲートは `pnpm typecheck` と `pnpm test` の 2 つ。** lint 設定は無く、`next.config.ts` は `typescript.ignoreBuildErrors: true`。**ビルドが通っても型は壊れうる**。テストは記事の frontmatter 往復 (`src/lib/articles/`) しか無いので、それ以外は依然として実 DB で確かめるしかない
 3. **`pnpm db:migrate` は必ず失敗する。** マイグレーションは `/db-migration` スキルの手順で行う
 
+## パフォーマンス
+
+**画面・ボタンを重くするコードを書かない。ルールの正は `docs/performance.md`。** 特に次の 4 つ:
+
+- Server Action で `revalidatePath` しているなら、クライアントで `router.refresh()` を重ねない (同じ画面を 2 回描く)。`invalidate*()` (タグの `"max"`) だけなら描き直しは返らないので、Action の中で `updateTag` (保存した値をすぐ見せる) か `refresh()` (`next/cache`) を呼ぶ
+- `withClearance` / `withSession` を `await` で縦に並べない・ループの中で `await` しない。独立なら `Promise.all`、まとめられるなら 1 トランザクション・`in` / `createMany` / `updateMany`
+- RLS 越しに大きな表を `_count` / `count` / `groupBy` しない。`prismaInternal` + `classificationFilterSql` + `unstable_cache`
+- 脇のパネルは `<Suspense>` で後から出す。詳細ページには自前の `loading.tsx`
+
+直す前後は本番の Vercel metrics (GET / POST を分けて p90) と `[slow-tx]` ログで計る (手順は同じ文書)。
+
 ## 開発フロー
 
 実装は **Issue → worktree → 設計合意 → 実装 → レビュー → PR** の順で進む。各段階にスキルがある。
@@ -209,6 +220,7 @@ src/
 | ファイル | 内容 |
 |---|---|
 | `docs/security-dev.md` | **開発者向け鉄則。認可まわりはこれが正** |
+| `docs/performance.md` | **表示・操作を遅くしないための鉄則と計り方** |
 | `docs/api.md` | REST API v1 の完全仕様 |
 | `docs/mcp.md` | MCP サーバー（`/api/mcp`）の仕様と設計判断 |
 | `docs/coverage-design.md` | 収集カバレッジ設計書 |

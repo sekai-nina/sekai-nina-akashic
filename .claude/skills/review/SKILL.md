@@ -33,7 +33,7 @@ akashic 専用のエージェント定義ファイルは無いので、`Explore`
 | `src/**/*.ts(x)` に変更 | **clearance-rls** | 後述の最重要チェックリスト |
 | `src/**/*.ts(x)` に変更 | **bug-hunter** | ロジック誤り・null 安全性・境界値・**JST/UTC のズレ** |
 | `src/**/*.ts(x)` に変更 | **code-quality** | TS 規約 (`strict`)・kebab-case ファイル名・`@/` エイリアス・重複・マジックナンバー |
-| `src/lib/domain/**`, `src/lib/search/**`, `src/app/api/**` | **performance** | N+1・不要な全件取得・`unstable_cache` の revalidate/タグ設計・トランザクション時間 |
+| `src/**/*.ts(x)` に変更 | **performance** | 後述のパフォーマンスチェックリスト (`docs/performance.md` が正) |
 | `src/app/**` | **architecture** | Server/Client 境界・Server Actions の置き場所 (汎用=`src/lib/actions.ts` / ページ固有=コロケーション)・`loading.tsx` の有無 |
 | `src/app/api/v1/**` | **api-contract** | `requireApiAuth` の返り値が `NextResponse` かの分岐・zod 検証・`docs/api.md` の更新漏れ |
 | `prisma/schema.prisma`, `prisma/migrations/**` | **db-migration** | 後述の DB チェックリスト |
@@ -53,6 +53,20 @@ akashic 専用のエージェント定義ファイルは無いので、`Explore`
 - [ ] トランザクションが重い場合、既定 15,000ms を超えないか (= 超えると P2028)
 
 判断に迷ったら `docs/security-dev.md` を正とする (`docs/architecture.md` は陳腐化しているので参照しない)。
+
+### 3.5. パフォーマンスチェックリスト
+
+ルールの正は `docs/performance.md`。performance のエージェントにはこの文書を読ませてから見させる。
+
+- [ ] Server Action が `revalidatePath` / `updateTag` / `refresh()` を呼んでいるのに、呼び出し側で `router.refresh()` を重ねていないか (= 同じ画面を 2 回描く)
+- [ ] `invalidate*()` だけの Action の後で画面を更新したいなら、クライアントの `router.refresh()` ではなく Action の中の `refresh()` か
+- [ ] `withClearance` / `withSession` を `await` で縦に並べていないか。依存しないなら `Promise.all`、軽いものは 1 トランザクションに
+- [ ] ループの中で `await` していないか (N+1)。`in` / `createMany` / `updateMany` / `groupBy` でまとめられないか
+- [ ] 書き込み前の確認 (`requireClearanceForAsset` 等) で別のトランザクションを増やしていないか
+- [ ] RLS 越しに大きな表を `_count` / `count` / `groupBy` していないか。重い集計のキャッシュに bot の取り込みで消えるタグを付けていないか
+- [ ] 一覧・Client Component の props に本文・全版などの大きい列を載せていないか。`findMany` に `take` があるか
+- [ ] 脇のパネルの問い合わせを本体と一緒に待っていないか (`<Suspense>` で後から出せないか)。詳細ページに `loading.tsx` があるか
+- [ ] 重いクライアントライブラリを `next/dynamic` で読んでいるか。全ページで読む部品からサーバー向けモジュールを値として import していないか
 
 ### 4. DB マイグレーションチェックリスト
 
