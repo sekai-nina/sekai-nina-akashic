@@ -91,6 +91,12 @@ describe("renderItemArticle", () => {
     expect(r.parts.talks.map((t) => t.assetId)).toEqual(["talk-image"]);
   });
 
+  it("坂井新奈が出ているものは「着用・使用しているところ」の小見出しに分ける", () => {
+    const r = renderItemArticle(input([blog, { ...imageTalk, ninaAppears: true }, blogImage]), draft);
+    expect(r.body).toContain("## 関連メディア\n\n### 坂井新奈が着用・使用しているところ\n\n- 【トーク・画像】");
+    expect(r.body).toContain("### そのほか\n\n- 【ブログ・画像】");
+  });
+
   it("AI が書いた関連メディアの章は落とす (機械の章と二重にしない)", () => {
     const r = renderItemArticle(input([blog, imageTalk]), { ...draft, body: `${draft.body}\n\n## 関連メディア\n\n- AI の行` });
     expect(r.body).not.toContain("AI の行");
@@ -147,6 +153,34 @@ describe("追記", () => {
     expect(plan.newSources.map((s) => s.assetId)).toEqual(["talk-image"]);
     expect(plan.body).toContain("坂井新奈トーク 2025.6.29 20:31");
     expect(isPureAppend(before.body, plan.body)).toBe(true);
+  });
+
+  it("坂井新奈が出ているものは「着用・使用しているところ」の小見出しに足す", () => {
+    const before = renderItemArticle(input([blog]), draft);
+    const after = renderItemArticle(input([blog, { ...imageTalk, ninaAppears: true }]), draft);
+    const plan = planAppend({
+      existingBody: before.body,
+      parts: after.parts,
+      sources: after.sources,
+      existingSources: [{ sourceNo: 1, assetId: "blog", url: BLOG_URL }],
+      layout: ITEM_TEMPLATE.appendLayout,
+    });
+    expect(plan.body).toContain("### 坂井新奈が着用・使用しているところ\n\n- 【トーク・画像】坂井新奈トーク 2025.6.29 20:31");
+    expect(plan.body).not.toContain("出ているもの");
+  });
+
+  it("前の小見出し「出ているもの」のある記事には、新しい小見出しを並べずそこへ足す", () => {
+    const after = renderItemArticle(input([blog, { ...imageTalk, ninaAppears: true }]), draft);
+    const plan = planAppend({
+      existingBody: "本文。\n\n## 関連メディア\n\n### 坂井新奈が出ているもの\n\n- 【ブログ・画像】前からある写真^[1]\n",
+      parts: after.parts,
+      sources: after.sources,
+      existingSources: [{ sourceNo: 1, assetId: "blog", url: BLOG_URL }],
+      layout: ITEM_TEMPLATE.appendLayout,
+    });
+    // トークはブログ画像より前 (フル生成の並び)
+    expect(plan.body).toContain("### 坂井新奈が出ているもの\n\n- 【トーク・画像】坂井新奈トーク 2025.6.29 20:31^[2]\n- 【ブログ・画像】前からある写真^[1]\n");
+    expect(plan.body).not.toContain("着用・使用");
   });
 });
 

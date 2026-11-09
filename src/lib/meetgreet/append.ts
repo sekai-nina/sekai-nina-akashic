@@ -507,13 +507,15 @@ export function planAppend(input: {
 
   if (layout.media?.kind === "flat") {
     // おでかけ・物の記事: `## 関連メディア` の箇条書きに足す。坂井新奈が出ているものがあれば
-    // `### 坂井新奈が出ているもの` / `### そのほか` に分ける (フル生成と同じ)
+    // `### 坂井新奈が出ているもの` (物は「着用・使用しているところ」) / `### そのほか` に分ける (フル生成と同じ)
     if (freshTiktoks.length > 0 || freshTalks.length > 0 || freshImages.length > 0) {
       ensureSection(sections, H_MEDIA, []);
       const shownTalks = freshTalks.filter((t) => t.ninaAppears);
       const shownImages = freshImages.filter((b) => b.ninaAppears);
       // 公開済みの記事は前の小見出しのまま。新しい小見出しを並べず、あるほうに足す
-      const ninaHeading = findSection(sections, LEGACY_NINA_MEDIA_HEADING) ? LEGACY_NINA_MEDIA_HEADING : NINA_MEDIA_HEADING;
+      const current = layout.media.ninaHeading ?? NINA_MEDIA_HEADING;
+      const ninaHeading =
+        [current, NINA_MEDIA_HEADING, LEGACY_NINA_MEDIA_HEADING].find((h) => findSection(sections, h)) ?? current;
       const split = shownTalks.length > 0 || shownImages.length > 0 || !!findSection(sections, ninaHeading);
       /** 箇条書きに足す。トークはブログ画像より前 (フル生成の並び)、画像の行が無ければ末尾 */
       const fill = (sec: Section, tiktoks: string[], talks: typeof freshTalks, images: typeof freshImages) => {
