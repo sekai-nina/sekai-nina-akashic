@@ -370,12 +370,15 @@ function blogImageLine(b: BlogGroup, a: ArticleAssetInput): string {
  * - `sections`: ミーグリ記事の形。`### TikTok` / `### トーク` / `### ブログ（画像）` に分ける
  * - `flat`: おでかけ・物の記事の形。トーク → ブログ画像を 1 つの箇条書きに並べる。坂井新奈が出ているものが
  *   あれば `### 坂井新奈が出ているもの` と `### そのほか` に分ける (導入文で「写っている」と書くと
- *   写っていない画像のぶん嘘になるため。音声も入るので見出しも「出ている」)
+ *   写っていない画像のぶん嘘になるため。音声も入るので見出しも「出ている」)。`ninaHeading` で小見出しを差し替える
+ *   (物の記事は「着用・使用しているところ」)
  */
-export type RelatedMediaStyle = { kind: "sections" } | { kind: "flat" };
+export type RelatedMediaStyle = { kind: "sections" } | { kind: "flat"; ninaHeading?: string };
 
 /** おでかけ・物の記事の関連メディアで、坂井新奈が出ているものの小見出し */
 export const NINA_MEDIA_HEADING = "### 坂井新奈が出ているもの";
+/** 物の記事の小見出し。「出ている」だと、その物を着けている・使っているところだと伝わらない */
+export const ITEM_NINA_MEDIA_HEADING = "### 坂井新奈が着用・使用しているところ";
 /** 音声が入ると変なので改めた前の小見出し。公開済みの記事に残っているので、追記はこちらにも足す */
 export const LEGACY_NINA_MEDIA_HEADING = "### 坂井新奈が写っているもの";
 /** おでかけ・物の記事の関連メディアで、それ以外の小見出し (出ているものがあるときだけ作る) */
@@ -418,7 +421,7 @@ export function renderRelatedMediaSection(input: {
     const shown = lines(true);
     const rest = lines(false);
     if (shown.length === 0) return ["## 関連メディア", "", ...rest, ""];
-    const body = ["## 関連メディア", "", NINA_MEDIA_HEADING, "", ...shown, ""];
+    const body = ["## 関連メディア", "", style.ninaHeading ?? NINA_MEDIA_HEADING, "", ...shown, ""];
     if (rest.length > 0) body.push(OTHER_MEDIA_HEADING, "", ...rest, "");
     return body;
   }

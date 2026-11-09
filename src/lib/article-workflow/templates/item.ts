@@ -21,6 +21,7 @@ import {
   buildParts,
   classifyMaterials,
   dossierSnapshot,
+  ITEM_NINA_MEDIA_HEADING,
   joinBody,
   linkCard,
   numberSources,
@@ -43,7 +44,7 @@ import type { AiContext, AiDraft, AiPrompt, ArticleTemplateDef, DossierRenderInp
 export const ITEM_BODY_PLACEHOLDER =
   "<!-- 本文: AI が使えなかったので、素材を読んで書いてください。リード 1〜2 文 + 事実の箇条書き、各事実に ^[n] で出典 -->";
 
-const ITEM_MEDIA_STYLE: RelatedMediaStyle = { kind: "flat" };
+const ITEM_MEDIA_STYLE: RelatedMediaStyle = { kind: "flat", ninaHeading: ITEM_NINA_MEDIA_HEADING };
 
 /** 見本にする既存記事 (公開済み)。文体・粒度・出典の付け方を揃えるために丸ごと見せる */
 const SAMPLES = [
