@@ -77,9 +77,12 @@ function takePendingAnchor(assetId: string): Anchor | undefined {
  * そこで一定時間、毎フレーム「その画像が指定の位置に来るように」補正し続ける。
  * ユーザーが自分でスクロールしたら邪魔になるのでその時点で打ち切る。
  */
-export function useRestoreScroll(assetId: string, ref: RefObject<HTMLElement | null>) {
+export function useRestoreScroll(assetId: string | null, ref: RefObject<HTMLElement | null>) {
   useEffect(() => {
-    const anchor = takePendingAnchor(assetId);
+    // null: 復帰しない (戻り先を消費しない)
+    if (assetId == null) return;
+    const key = assetId;
+    const anchor = takePendingAnchor(key);
     if (!anchor) return;
 
     const container = ref.current;
@@ -99,7 +102,7 @@ export function useRestoreScroll(assetId: string, ref: RefObject<HTMLElement | n
     /** 復元を完了・中止した。もう戻さない。 */
     function finish() {
       cancel();
-      pendingAnchors.delete(assetId);
+      pendingAnchors.delete(key);
     }
 
     function attempt() {

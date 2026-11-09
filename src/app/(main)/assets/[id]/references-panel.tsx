@@ -20,6 +20,8 @@ import { ARTICLE_SOURCE_STATUS_LABELS, formatDate } from "@/lib/utils";
 
 interface ClipView {
   id: string;
+  /** 子アセットのクリップ (#405) なら、その子アセット。このアセット自身のものは null */
+  owner: { id: string; title: string; position: number } | null;
   note: string;
   excerpt: string;
   /** 本文上に色が付いているか (= 位置が今の本文と一致している) */
@@ -198,6 +200,15 @@ function ClipRow({ clip, canEdit }: { clip: ClipView; canEdit: boolean }) {
 
   return (
     <li className="text-xs border border-sky-100 bg-sky-50/40 rounded-md px-2.5 py-2">
+      {clip.owner && (
+        <Link
+          href={`/assets/${clip.owner.id}`}
+          className="block mb-1 text-[10px] text-slate-500 hover:text-indigo-600 hover:underline truncate"
+        >
+          <span className="tabular-nums text-slate-400 mr-1">{clip.owner.position}.</span>
+          {clip.owner.title || "(無題)"}
+        </Link>
+      )}
       {clip.excerpt && (
         <>
           <blockquote className="text-slate-700 whitespace-pre-wrap line-clamp-4">{clip.excerpt}</blockquote>

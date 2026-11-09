@@ -376,14 +376,20 @@ export async function listClips(user: ActingUser): Promise<{ clips: ClipListRow[
   return { clips: rows.slice(0, MAX_CLIPS_LISTED), hasMore: rows.length > MAX_CLIPS_LISTED };
 }
 
-/** あるアセットのクリップ (アセット詳細の「クリップ」セクションと本文のハイライト用) */
-export async function listClipsForAsset(user: ActingUser, assetId: string) {
+/**
+ * あるアセットのクリップ (アセット詳細の「クリップ」セクションと本文のハイライト用)。
+ * 配列を渡すと、それらのアセットのクリップをまとめて返す (親の画面に子アセットのクリップも出す。#405)
+ */
+export async function listClipsForAsset(user: ActingUser, assetIds: string | string[]) {
+  const ids = typeof assetIds === "string" ? [assetIds] : assetIds;
+  if (ids.length === 0) return [];
   return withSession(user, (tx) =>
     tx.dossierItem.findMany({
-      where: { ...IN_CLIP_POOL, assetId },
+      where: { ...IN_CLIP_POOL, assetId: { in: ids } },
       orderBy: { createdAt: "asc" },
       select: {
         id: true,
+        assetId: true,
         note: true,
         excerpt: true,
         excerptType: true,
