@@ -23,6 +23,8 @@ const INSTRUCTIONS = [
   "- 発言の引用は akashic_create_clip でアセットのクリップとして残す (引用元のアセットを先に akashic_search で探す)。",
   "- 画像・動画などのファイル本体は akashic_begin_upload → 手元で curl -X PUT → akashic_complete_upload の順で登録する。",
   "  ファイルパスやバイト列をツール引数で渡すことはできない。",
+  "- 画像に誰が写っているかは顔認識の結果で見る: akashic_get_asset の faces、akashic_search の appearing (絞り込みと結果)。",
+  "  entities / persons は書き手 (author) なども混ざるので、写っているとは限らない。「A と B が一緒に写っている画像」は appearing: [A, B]。",
   "- 日付は JST 基準。canonicalDate は投稿日ではなく「内容の公開日・放送日」を入れる。",
   "- 記事 (公開サイトの世界新奈) は akashic_list_articles { hasPending: true } で未反映の紐づけがある記事を探し、",
   "  akashic_get_article で本文と sources (pending の excerpt) を読む。反映は akashic_apply_article_source で",

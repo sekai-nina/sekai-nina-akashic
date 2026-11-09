@@ -7,6 +7,7 @@ import { isClassificationDowngrade } from "@/lib/classification";
 import { invalidateAssets, invalidateDossiers, invalidatePlaces } from "@/lib/cache";
 import { parseDateOnly } from "@/lib/domain/coverage";
 import { getAsset, getAssetClassification, updateAsset } from "@/lib/domain/assets";
+import { getFaceSummary } from "@/lib/domain/faces";
 import { intakeAsset } from "@/lib/domain/asset-intake";
 import { NinaAuthorConflictError, setNinaAppearance } from "@/lib/domain/nina-appearance";
 import { createClip } from "@/lib/domain/clips";
@@ -156,6 +157,13 @@ function registerReadTools(server: McpServer, { user, baseUrl }: ToolContext) {
           .enum(["any", "all"])
           .optional()
           .describe("entityNames の結合方法。既定は any (いずれかを含む)"),
+        appearing: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "顔認識でこの人物 (メンバー) が写っている画像に絞る。複数指定すると全員が同じ画像に写っているものだけ (「坂井新奈と X が一緒に写っている」)。" +
+              "entityNames と違い、ブログの書き手などのタグでは当たらない。顔認識は画像だけが対象 (動画・本文は当たらない)"
+          ),
         dateFrom: DATE_ONLY.optional().describe("公開日/放送日の下限 (JST)"),
         dateTo: DATE_ONLY.optional().describe("公開日/放送日の上限 (JST)"),
         ninaAppearance: z
@@ -172,6 +180,7 @@ function registerReadTools(server: McpServer, { user, baseUrl }: ToolContext) {
     },
     async (args) => {
       let entityIds: string[] | undefined;
+      let appearingIds: string[] | undefined;
       let hint: string | undefined;
 
       if (args.entityNames && args.entityNames.length > 0) {
@@ -197,6 +206,34 @@ function registerReadTools(server: McpServer, { user, baseUrl }: ToolContext) {
         }
       }
 
+      if (args.appearing && args.appearing.length > 0) {
+        const resolution = await resolveEntityNames(args.appearing, { clearance: user.clearance });
+        // 顔認識は人物だけ。同名のタグがあって曖昧なときは人物の候補を採る
+        const persons = [
+          ...resolution.resolved.filter((e) => e.type === "person"),
+          ...resolution.ambiguous.flatMap((a) => a.candidates.filter((c) => c.type === "person").slice(0, 1)),
+        ];
+        const notPersons = [
+          ...resolution.unresolved,
+          ...resolution.resolved.filter((e) => e.type !== "person").map((e) => e.inputName),
+          ...resolution.ambiguous.filter((a) => !a.candidates.some((c) => c.type === "person")).map((a) => a.inputName),
+        ];
+        appearingIds = [...new Set(persons.map((e) => e.id))];
+        // 1 人でも解決できなければ「全員が写っている」は成り立たないので、絞り込みを外さずに空で返す
+        if (notPersons.length > 0 || appearingIds.length === 0) {
+          return ok({
+            total: 0,
+            page: args.page ?? 1,
+            perPage: args.perPage ?? 20,
+            items: [],
+            hint:
+              notPersons.length > 0
+                ? `appearing の「${notPersons.join("」「")}」に一致するメンバーがいません。akashic_list_entities (type: person) で名前を確かめてください。`
+                : "appearing に有効な人物名がありません。",
+          });
+        }
+      }
+
       const query: SearchQuery = {
         q: args.q,
         target: args.target ?? "all",
@@ -206,6 +243,7 @@ function registerReadTools(server: McpServer, { user, baseUrl }: ToolContext) {
         sourceType: args.sourceType,
         entityIds,
         entityMatch: args.entityMatch,
+        appearingIds,
         dateFrom: args.dateFrom ? parseDateOnly(args.dateFrom) ?? undefined : undefined,
         dateTo: args.dateTo ? parseDateOnly(args.dateTo) ?? undefined : undefined,
         ninaAppearance: args.ninaAppearance,
@@ -235,6 +273,8 @@ function registerReadTools(server: McpServer, { user, baseUrl }: ToolContext) {
       title: "アセット詳細取得",
       description:
         "アセット 1 件の詳細を取得する。本文 (テキスト)、紐づくエンティティ、出典レコードを含む。" +
+        "画像に顔認識の結果があれば faces に写っている人物を返す (ブログ本文・トークは子の画像の分を appearingInChildren にまとめる)。" +
+        "entities の role は写っているとは限らない (author = 書き手) ので、写っている人は faces を見る。" +
         "本文が長い場合は先頭 4000 文字までに切り詰められる。",
       inputSchema: z.object({
         id: z.string().describe("アセット ID (akashic_search が返す id)"),
@@ -242,14 +282,14 @@ function registerReadTools(server: McpServer, { user, baseUrl }: ToolContext) {
       annotations: { readOnlyHint: true },
     },
     async ({ id }) => {
-      const asset = await getAsset(id, user.clearance);
+      const [asset, faces] = await Promise.all([getAsset(id, user.clearance), getFaceSummary(user.clearance, id)]);
       if (!asset) {
         return fail(
           "アセットが見つかりません。ID が誤っているか、クリアランスが足りず参照できません。",
           { id }
         );
       }
-      return ok(toAssetDetail(asset, baseUrl));
+      return ok(toAssetDetail(asset, baseUrl, faces));
     }
   );
 

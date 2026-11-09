@@ -22,6 +22,11 @@ export interface SearchQuery {
   entityMatch?: "any" | "all";
   /** Match assets where any of these entities is linked with roleLabel='author' (OR semantics). */
   authorIds?: string[];
+  /**
+   * 顔認識で写っている人物 (#396)。すべてが同じアセットに写っているものに絞る (AND)。
+   * 人物タグ (AssetEntity) ではなく FaceDetection を見るので、ブログの書き手のタグでは当たらない
+   */
+  appearingIds?: string[];
   /** 坂井新奈が出ているか (#261)。unchecked = 坂井新奈が紐づかず「出ていない」も付いていない */
   ninaAppearance?: NinaAppearance;
   dateFrom?: Date;
@@ -49,6 +54,17 @@ export interface SearchResultItem {
   canonicalDate: Date | null;
   personNames: string[];
   tagNames: string[];
+  /** 顔認識で写っている人物 (自動で付いた顔と人が確定した顔)。#396 */
+  appearingNames: string[];
+}
+
+/**
+ * 顔認識で「この人物が写っている」とみなす FaceDetection の条件。
+ * 自動 (auto) は推定、人が見た顔 (confirmed / rejected) は人が付けた正解を使う。確認待ち (pending) は数えない
+ */
+function faceOf(entityId: Prisma.Sql) {
+  return Prisma.sql`((f."status" = 'auto' AND f."predictedEntityId" = ${entityId})
+    OR (f."status" IN ('confirmed', 'rejected') AND f."confirmedEntityId" = ${entityId}))`;
 }
 
 /** R2サムネイルがあればそれを使い、なければDriveプロキシにフォールバック */
@@ -105,6 +121,25 @@ async function getEntityNames(
     map.set(row.assetId, names);
   }
   return { persons, tags };
+}
+
+/** 顔認識で写っている人物の名前 (#396) */
+async function getAppearingNames(
+  assetIds: string[],
+  tx: Parameters<Parameters<typeof withClearance>[1]>[0]
+): Promise<Map<string, string[]>> {
+  if (assetIds.length === 0) return new Map();
+  const rows = await tx.$queryRaw<Array<{ assetId: string; name: string }>>`
+    SELECT DISTINCT f."assetId", e."canonicalName" AS name
+    FROM "FaceDetection" f
+    JOIN "Entity" e ON e.id = CASE WHEN f."status" = 'auto' THEN f."predictedEntityId" ELSE f."confirmedEntityId" END
+    WHERE f."assetId" = ANY(${assetIds})
+      AND f."status" IN ('auto', 'confirmed', 'rejected')
+      AND e.type = 'person'
+  `;
+  const map = new Map<string, string[]>();
+  for (const row of rows) map.set(row.assetId, [...(map.get(row.assetId) ?? []), row.name]);
+  return map;
 }
 
 /**
@@ -391,8 +426,22 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
       )`
     : Prisma.empty;
 
+  // 顔認識で写っている人物 (#396)。人物ごとに EXISTS を重ねる (すべてが同じアセットに写っている)
+  const appearingIds = query.appearingIds ?? [];
+  const appearingFilter = appearingIds.length > 0
+    ? Prisma.sql`${Prisma.join(
+        appearingIds.map(
+          (eid) => Prisma.sql`AND EXISTS (
+            SELECT 1 FROM "FaceDetection" f WHERE f."assetId" = a."id" AND ${faceOf(Prisma.sql`${eid}`)}
+          )`
+        ),
+        " "
+      )}`
+    : Prisma.empty;
+
   // キーワードなし＋フィルタもなし → 空結果
-  const hasFilters = assetWhereConditions.length > 0 || allEntityIds.length > 0 || authorIds.length > 0;
+  const hasFilters =
+    assetWhereConditions.length > 0 || allEntityIds.length > 0 || authorIds.length > 0 || appearingIds.length > 0;
   if (!hasKeyword && !hasFilters) {
     return { items: [], total: 0, page, perPage };
   }
@@ -426,12 +475,12 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
   const searchAssetFields = target === "all" || target === "assets";
   const searchTextContent = target === "all" || target === "texts";
 
-  const assetFilters = Prisma.sql`${baseFilter} ${entityFilter} ${authorFilter}`;
+  const assetFilters = Prisma.sql`${baseFilter} ${entityFilter} ${authorFilter} ${appearingFilter}`;
   // Asset 側の絞り込みが無いなら、AssetText / AssetEntity から引くブランチで
   // Asset を JOIN する必要がない (RLS は各テーブル側でも親の分類を見ている)。
   // 無駄な JOIN を外すと素のキーワード検索が 1810ms → 1354ms になる。
   const hasAssetFilters =
-    assetWhereConditions.length > 0 || allEntityIds.length > 0 || authorIds.length > 0;
+    assetWhereConditions.length > 0 || allEntityIds.length > 0 || authorIds.length > 0 || appearingIds.length > 0;
   const joinAssetForFilters = hasAssetFilters
     ? Prisma.sql`JOIN "Asset" a ON a."id" = ae."assetId"`
     : Prisma.empty;
@@ -554,11 +603,12 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
   const lookupIds = needsLookup.map((row) => row.id);
   const assetIds = rows.map((row) => row.id);
 
-  const { persons, tags, textMatches, entityNameHits, bodyPreviews } = await withClearance(
+  const { persons, tags, appearing, textMatches, entityNameHits, bodyPreviews } = await withClearance(
     clearance,
     async (tx) => {
-      const [names, texts, entityHits] = await Promise.all([
+      const [names, appearingNames, texts, entityHits] = await Promise.all([
         getEntityNames(assetIds, tx),
+        getAppearingNames(assetIds, tx),
         searchTextContent
           ? getTextMatches(lookupIds, tx, terms, likePatterns, normalizedLikePatterns)
           : Promise.resolve(new Map<string, { textType: string; content: string }>()),
@@ -574,6 +624,7 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
       return {
         persons: names.persons,
         tags: names.tags,
+        appearing: appearingNames,
         textMatches: texts,
         entityNameHits: entityHits,
         bodyPreviews: previews,
@@ -647,6 +698,7 @@ export async function search(query: SearchQuery, clearance: string): Promise<Sea
       canonicalDate: row.canonicalDate,
       personNames: persons.get(row.id) ?? [],
       tagNames: tags.get(row.id) ?? [],
+      appearingNames: appearing.get(row.id) ?? [],
     };
   });
 

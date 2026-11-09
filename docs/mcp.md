@@ -43,8 +43,8 @@ pnpm cli:keygen <user-email> <key-name>
 
 | ツール | 権限 | 用途 |
 |---|---|---|
-| `akashic_search` | read | アセットの全文検索（本文・タイトル・OCR・書き起こし）。`ninaAppearance` で坂井新奈の出演（出ている / 出ていない / 未確認）を絞れる |
-| `akashic_get_asset` | read | アセット 1 件の詳細（本文・エンティティ・出典・`ninaAppearance`） |
+| `akashic_search` | read | アセットの全文検索（本文・タイトル・OCR・書き起こし）。`ninaAppearance` で坂井新奈の出演（出ている / 出ていない / 未確認）、`appearing` で顔認識で写っている人物（全員が同じ画像に写っている）を絞れる。結果の `appearing` に写っている人物 |
+| `akashic_get_asset` | read | アセット 1 件の詳細（本文・エンティティ・出典・`ninaAppearance`・顔認識の `faces`） |
 | `akashic_list_entities` | read | 人物・聖地・タグ・番組の検索 |
 | `akashic_list_places` | read | 聖地一覧（緯度経度・住所・種類・エリアつき） |
 | `akashic_create_asset` | write | アセットの下書き登録（`status` は必ず `inbox`） |
@@ -228,6 +228,16 @@ MCP のツール引数はもともと zod で検証されるが、REST の `POST
 ### 坂井新奈の出演は 3 状態（#261）
 
 アセットに坂井新奈が出ているかは `ninaAppearance` で読み、`akashic_set_nina_appearance` で置く。`appears` = 坂井新奈のエンティティが紐づいている / `absent` = 確認して出ていない（`Asset.ninaAbsent`） / `unchecked` = どちらも無い。「出ていない」を `AssetEntity` に混ぜると `entityNames: ["坂井新奈"]` の絞り込みが壊れるので、列を分けて持つ。
+
+### 写っている人物（顔認識。#396）
+
+画像に誰が写っているかは顔認識（`docs/face-design.md`）の結果から返す。**`entities` の `role` では判断しない。** 1 つのアセットに同じエンティティは 1 行しか付かないので、ブログの書き手として `author` が先に付いていると、顔認識は `face` を付けない（`role` が `author` のまま写っていることがある）。
+
+- `akashic_search` の `appearing: ["坂井新奈", "X"]`: `FaceDetection` で全員が同じ画像に写っているものに絞る（人物ごとに `EXISTS`）。`entityNames` と違い書き手のタグでは当たらない。名前が 1 人でもメンバーに一致しなければ、絞り込みを外さずに 0 件と `hint` を返す
+- `akashic_search` の結果の `appearing`: その画像に写っている人物
+- `akashic_get_asset` の `faces`: `appearing`（人物・顔の数・人が確定したか）と `pendingFaces`（確認待ちの顔の数）。ブログ本文・トークのように子アセット（`parent_child`）を持つものは、子の画像に写っている人物を `appearingInChildren` にまとめ、写っている子アセットの `id` / `url` を付ける。顔が 1 つも無ければ `faces` を省く
+- 数えるのは自動（`auto`）の推定と、人が見た顔（`confirmed` / `rejected`）の正解。確認待ち（`pending`）は写っている人に入れない
+- 顔認識は画像だけが対象。動画・本文には当たらない（#394）
 
 出演一覧を更新するときは `akashic_search` に `kinds: ["video"]`・`entityNames`（チャンネル名など）・日付と `ninaAppearance: "unchecked"` を渡し、確認が要るものだけを出す。ツールの説明で「実際に確認した結果だけを記録し、推測で absent にしない」と AI に伝えている。坂井新奈が著者（author）のアセットは `unchecked` にできない（著者の紐づけは外さない）。本人の投稿でも写っていなければ `absent` にできる。
 
