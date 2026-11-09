@@ -60,6 +60,82 @@ export function decideFace(
   return "auto";
 }
 
+/** 人の判断を引き継ぐとみなす、枠の重なり (IoU) の下限 (#386) */
+export const FACE_INHERIT_IOU = 0.5;
+/** 動画で「同じコマ」とみなす秒の差 */
+const SAME_FRAME_SEC = 0.5;
+
+type Box = { x1: number; y1: number; x2: number; y2: number };
+
+/** 2 つの枠の重なり (Intersection over Union)。0〜1 */
+export function iou(a: Box, b: Box): number {
+  const w = Math.min(a.x2, b.x2) - Math.max(a.x1, b.x1);
+  const h = Math.min(a.y2, b.y2) - Math.max(a.y1, b.y1);
+  if (w <= 0 || h <= 0) return 0;
+  const inter = w * h;
+  const union = (a.x2 - a.x1) * (a.y2 - a.y1) + (b.x2 - b.x1) * (b.y2 - b.y1) - inter;
+  return union > 0 ? inter / union : 0;
+}
+
+export type ReviewedFace = Box & {
+  id: string;
+  status: "confirmed" | "rejected";
+  frameSec: number | null;
+  predictedEntityId: string | null;
+  confirmedEntityId: string | null;
+};
+export type NewFace = Box & { frameSec: number | null; predictedEntityId: string | null };
+
+/**
+ * 推論し直した顔のうち、人がもう見た顔と同じものを探す (#386)。新しい顔の添字 → 人が見た行の id。
+ * 引き継いだ顔は確認待ちに出さず、人が見た行の枠・特徴量を新しいモデルの値に差し替える。
+ *
+ * 同じ顔とみなす条件:
+ * - 同じコマ (画像どうし、または動画で秒の差が 0.5 秒以内) で枠の重なりが FACE_INHERIT_IOU 以上 (大きい順に 1 対 1)
+ * - 動画で、コマが違っても、人が確定したメンバー (confirmedEntityId) と新しい推定が同じ。
+ *   動画はメンバーごとにいちばん似ていた 1 コマだけを書くので、モデルを変えるとコマがずれる
+ *
+ * ただし、人の答えが新しい推定を覆っていないものは引き継がない (新しい問いとして確認待ちに出す):
+ * 却下だけで正解の無い行は、新しい推定が却下したメンバーと同じときだけ引き継ぐ
+ */
+export function matchReviewedFaces(faces: NewFace[], reviewed: ReviewedFace[]): Map<number, string> {
+  const covers = (r: ReviewedFace, f: NewFace) =>
+    r.status === "confirmed" || r.confirmedEntityId != null || r.predictedEntityId === f.predictedEntityId;
+  const sameFrame = (r: ReviewedFace, f: NewFace) =>
+    (r.frameSec == null && f.frameSec == null) ||
+    (r.frameSec != null && f.frameSec != null && Math.abs(r.frameSec - f.frameSec) <= SAME_FRAME_SEC);
+
+  const pairs: { i: number; r: ReviewedFace; score: number }[] = [];
+  faces.forEach((f, i) => {
+    for (const r of reviewed) {
+      if (!sameFrame(r, f) || !covers(r, f)) continue;
+      const score = iou(r, f);
+      if (score >= FACE_INHERIT_IOU) pairs.push({ i, r, score });
+    }
+  });
+  pairs.sort((a, b) => b.score - a.score);
+
+  const matched = new Map<number, string>();
+  const used = new Set<string>();
+  for (const { i, r } of pairs) {
+    if (matched.has(i) || used.has(r.id)) continue;
+    matched.set(i, r.id);
+    used.add(r.id);
+  }
+  // 動画: コマがずれても、人が確定したメンバーと同じ推定なら同じ人の顔とみなす
+  faces.forEach((f, i) => {
+    if (matched.has(i) || f.frameSec == null || !f.predictedEntityId) return;
+    const r = reviewed.find(
+      (x) => !used.has(x.id) && x.frameSec != null && x.confirmedEntityId === f.predictedEntityId
+    );
+    if (r) {
+      matched.set(i, r.id);
+      used.add(r.id);
+    }
+  });
+  return matched;
+}
+
 /**
  * base64 の特徴量を Buffer に戻す。長さが合わない・有限でない値 (NaN / Inf) を含む・
  * L2 正規化されていなければ null (壊れた値が参照に混ざると類似度が全部狂う)

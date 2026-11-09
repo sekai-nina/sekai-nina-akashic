@@ -8,7 +8,7 @@
 import type { Prisma } from "@prisma/client";
 import { withClearance } from "@/lib/db";
 import { downloadFromDrive, downloadRangeFromDrive } from "@/lib/drive";
-import { decideFace, FACE_ROLE_LABEL, type FaceWriteInput } from "@/lib/faces/policy";
+import { decideFace, FACE_ROLE_LABEL, matchReviewedFaces, type FaceWriteInput, type ReviewedFace } from "@/lib/faces/policy";
 import { NINA_ENTITY_ID } from "@/lib/nina";
 
 export const QUEUE_DEFAULT_LIMIT = 50;
@@ -101,6 +101,8 @@ export async function fetchFaceOriginal(clearance: string, assetId: string, rang
 export type FaceWriteResult = {
   auto: number;
   pending: number;
+  /** 人がもう見た顔と同じで、人の判断を引き継いだ顔の数 (#386) */
+  inherited: number;
   /** 付けた face タグのメンバー */
   tagsAdded: string[];
   /** 外した face タグのメンバー */
@@ -140,7 +142,7 @@ export async function writeFaceResults(clearance: string, assetId: string, input
 
     if (input.error) {
       await recordScan(0, input.error);
-      return { auto: 0, pending: 0, tagsAdded: [], tagsRemoved: [] };
+      return { auto: 0, pending: 0, inherited: 0, tagsAdded: [], tagsRemoved: [] };
     }
 
     const predictedIds = [...new Set(input.faces.map((f) => f.predictedEntityId).filter((id): id is string => !!id))];
@@ -156,7 +158,17 @@ export async function writeFaceResults(clearance: string, assetId: string, input
     const [previous, tags] = await Promise.all([
       tx.faceDetection.findMany({
         where: { assetId },
-        select: { status: true, predictedEntityId: true, confirmedEntityId: true },
+        select: {
+          id: true,
+          status: true,
+          predictedEntityId: true,
+          confirmedEntityId: true,
+          x1: true,
+          y1: true,
+          x2: true,
+          y2: true,
+          frameSec: true,
+        },
       }),
       tx.assetEntity.findMany({ where: { assetId }, select: { entityId: true, roleLabel: true } }),
     ]);
@@ -173,7 +185,45 @@ export async function writeFaceResults(clearance: string, assetId: string, input
 
     await tx.faceDetection.deleteMany({ where: { assetId, status: { in: ["auto", "pending"] } } });
 
-    const rows = input.faces.map((f) => {
+    // 人がもう見た顔と同じ顔は、確認待ちに出さずに人の判断を引き継ぐ (#386)。
+    // 人が見た行の枠・特徴量を新しいモデルの値に差し替える (参照に返す特徴量も新しいモデルのものになる)
+    const reviewed: ReviewedFace[] = previous.flatMap((r) =>
+      r.status === "confirmed" || r.status === "rejected" ? [{ ...r, status: r.status }] : []
+    );
+    const inherited = matchReviewedFaces(
+      input.faces.map((f) => ({
+        x1: f.bbox[0],
+        y1: f.bbox[1],
+        x2: f.bbox[2],
+        y2: f.bbox[3],
+        frameSec: f.frameSec ?? null,
+        predictedEntityId: f.predictedEntityId,
+      })),
+      reviewed
+    );
+    for (const [i, reviewedId] of inherited) {
+      const f = input.faces[i];
+      const r = reviewed.find((x) => x.id === reviewedId);
+      const [x1, y1, x2, y2] = f.bbox;
+      await tx.faceDetection.update({
+        where: { id: reviewedId },
+        data: {
+          modelVersion: input.modelVersion,
+          x1,
+          y1,
+          x2,
+          y2,
+          detScore: f.detScore,
+          embedding: new Uint8Array(f.embedding),
+          frameSec: f.frameSec ?? null,
+          // 却下の行は「この推定は違う」という判断なので、推定を差し替えない (差し替えると別のメンバーを却下したことになる)
+          ...(r?.status === "confirmed" ? { predictedEntityId: f.predictedEntityId, similarity: f.similarity } : {}),
+        },
+      });
+    }
+
+    const rows = input.faces.flatMap((f, i) => {
+      if (inherited.has(i)) return [];
       const [x1, y1, x2, y2] = f.bbox;
       const status = decideFace(f, { ninaEntityId: NINA_ENTITY_ID, ninaAbsent, rejectedEntityIds });
       return {
@@ -211,11 +261,12 @@ export async function writeFaceResults(clearance: string, assetId: string, input
       });
     }
 
-    await recordScan(rows.length, null);
+    await recordScan(input.faces.length, null);
 
     return {
       auto: rows.filter((r) => r.status === "auto").length,
       pending: rows.filter((r) => r.status === "pending").length,
+      inherited: inherited.size,
       tagsAdded,
       tagsRemoved,
     };
