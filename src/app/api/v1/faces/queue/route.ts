@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
+import { prismaInternal } from "@/lib/db";
 import { listFaceQueue, QUEUE_DEFAULT_LIMIT, QUEUE_MAX_LIMIT } from "@/lib/domain/faces";
 import { FACE_WORKER_PERMISSION, MODEL_VERSION_PATTERN } from "@/lib/faces/policy";
 
@@ -27,12 +28,16 @@ export async function GET(request: Request) {
   }
 
   const withCount = searchParams.get("count") === "1";
+  // 接続の空き待ち (ping) と問い合わせそのものを分けて計る。原因が分かったら外す (#416)
+  const pingStarted = performance.now();
+  await prismaInternal.$queryRaw`SELECT 1`;
+  const pingMs = performance.now() - pingStarted;
   const queryStarted = performance.now();
   const { items, remaining } = await listFaceQueue(auth.clearance, modelVersion, limit, withCount);
   // ワーカーが 30 秒ごとに叩くので、遅いときだけどこで待ったかを残す (#416。問い合わせ単体は 0.2 秒以下なのに応答が 1 秒を超えていた)
   const queryMs = performance.now() - queryStarted;
-  if (authMs + queryMs >= 1_000) {
-    console.warn(`[slow-queue] auth ${Math.round(authMs)}ms query ${Math.round(queryMs)}ms limit ${limit} count ${withCount}`);
+  if (authMs + pingMs + queryMs >= 1_000) {
+    console.warn(`[slow-queue] auth ${Math.round(authMs)}ms ping ${Math.round(pingMs)}ms query ${Math.round(queryMs)}ms limit ${limit} count ${withCount}`);
   }
   return NextResponse.json({ items, remaining }, { headers: { "Cache-Control": "no-store" } });
 }
