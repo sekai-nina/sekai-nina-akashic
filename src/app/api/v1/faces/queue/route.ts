@@ -11,7 +11,9 @@ import { FACE_WORKER_PERMISSION, MODEL_VERSION_PATTERN } from "@/lib/faces/polic
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
+  const started = performance.now();
   const auth = await requireApiAuth(request, FACE_WORKER_PERMISSION);
+  const authMs = performance.now() - started;
   if (auth instanceof NextResponse) return auth;
 
   const { searchParams } = new URL(request.url);
@@ -25,6 +27,12 @@ export async function GET(request: Request) {
   }
 
   const withCount = searchParams.get("count") === "1";
+  const queryStarted = performance.now();
   const { items, remaining } = await listFaceQueue(auth.clearance, modelVersion, limit, withCount);
+  // ワーカーが 30 秒ごとに叩くので、遅いときだけどこで待ったかを残す (#416。問い合わせ単体は 0.2 秒以下なのに応答が 1 秒を超えていた)
+  const queryMs = performance.now() - queryStarted;
+  if (authMs + queryMs >= 1_000) {
+    console.warn(`[slow-queue] auth ${Math.round(authMs)}ms query ${Math.round(queryMs)}ms limit ${limit} count ${withCount}`);
+  }
   return NextResponse.json({ items, remaining }, { headers: { "Cache-Control": "no-store" } });
 }
