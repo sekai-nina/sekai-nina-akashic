@@ -83,6 +83,7 @@ pgvector は使わない。今は「似た顔を DB で検索する」場面が�
 - `face` タグの付け外しでは Drive のバックアップ（`backupAssetToDrive`）を回さない。初回は 7 万枚に付くので、1 枚ごとにバックアップを上げ直すと Drive の API を使い切る。`face` タグは `FaceDetection` から作り直せる
 - キャッシュは一覧だけを捨てる（`invalidateAssetList`）。ダッシュボードの統計（`stats`）まで捨てると、初回の約 7 万回の書き込みのたびに、次に開いた人が重い集計を待つことになる。統計は 60 秒で勝手に更新される
 - queue の残り件数は画像全体を数えるので、`count=1` を付けたときだけ返す
+- queue は RLS をバイパスし、`classificationFilterSql` で明示的に絞る（`listFaceQueue`）。RLS 越しの Prisma の問い合わせだと、トークのタグの AssetEntity 約 8 万行と処理済みの FaceScan の 1 行ずつに親 Asset の確認が走り、1 回 1.5〜12 秒かかって DB 全体を重くしていた（#416）
 
 ## API
 
