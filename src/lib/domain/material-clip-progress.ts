@@ -6,8 +6,8 @@ import { deriveItems, getDerivedItems, sourcePatternConds, TALK_DAY_SQL, talkDay
 import { getSourceAuthorKeys, getSourceMentionKeys } from "./coverage-items";
 import { logAudit } from "./audit";
 import {
-  MATERIAL_SOURCE_KEYS, deriveRadioItems, isMaterialSourceKey, isRelevantMaterial, itemKeysForAsset, radioItemMatchesAsset,
-  type MaterialAsset, type MaterialItem,
+  MATERIAL_SOURCE_KEYS, deriveRadioItems, isMaterialSourceKey, isRelevantMaterial, itemKeysForAsset, mergeUrlItems,
+  radioItemMatchesAsset, textAssetIdOfKey, textAssetKey, type MaterialAsset, type MaterialItem, type UrlMaterial,
 } from "@/lib/clip-progress/material-items";
 
 interface Actor { id: string; clearance: string }
@@ -59,6 +59,72 @@ async function getSource(key: string, clearance: string) {
 
 const toMaterial = (item: DerivedItem): MaterialItem => ({ ...item, itemDate: toDateOnlyString(item.itemDate) });
 
+const urlCond = Prisma.sql`sr.url IS NOT NULL AND sr.url <> ''`;
+
+/**
+ * URL → 所属する素材 (#429)。同じ URL の本文アセット (kind=text) のうち最も古いものに寄せ、無ければ URL のまま。
+ * RLS 越しに引くので、見えない本文アセットには寄せない。
+ */
+export async function urlMaterials(tx: TransactionClient, source: DataSource, urls: string[]): Promise<Map<string, UrlMaterial>> {
+  const result = new Map<string, UrlMaterial>();
+  if (!urls.length) return result;
+  const rows = await tx.$queryRaw<{ url: string; textId: string | null; textTitle: string | null }[]>`
+    SELECT sr.url AS url,
+           (array_agg(a.id ORDER BY a."createdAt", a.id) FILTER (WHERE a.kind = 'text'))[1] AS "textId",
+           (array_agg(a.title ORDER BY a."createdAt", a.id) FILTER (WHERE a.kind = 'text'))[1] AS "textTitle"
+    FROM "SourceRecord" sr JOIN "Asset" a ON a.id = sr."assetId"
+    WHERE ${Prisma.join([urlCond, Prisma.sql`sr.url = ANY(${urls})`, ...sourcePatternConds(source)], " AND ")}
+    GROUP BY sr.url
+  `;
+  for (const r of rows) {
+    result.set(r.url, r.textId ? { key: textAssetKey(r.textId), title: r.textTitle?.trim() || null } : { key: r.url, title: null });
+  }
+  return result;
+}
+
+/** 素材キー → そのキーに属しうる URL。本文アセットのキーはそのアセットの URL に展開する */
+async function urlsForKeys(tx: TransactionClient, source: DataSource, keys: string[]): Promise<string[]> {
+  const assetIds = keys.flatMap((k) => textAssetIdOfKey(k) ?? []);
+  const urls = keys.filter((k) => !textAssetIdOfKey(k));
+  if (assetIds.length) {
+    const rows = await tx.$queryRaw<{ url: string }[]>`
+      SELECT DISTINCT sr.url AS url FROM "SourceRecord" sr
+      WHERE ${Prisma.join([urlCond, Prisma.sql`sr."assetId" = ANY(${assetIds})`, ...sourcePatternConds(source)], " AND ")}
+    `;
+    urls.push(...rows.map((r) => r.url));
+  }
+  return [...new Set(urls)];
+}
+
+/**
+ * URL を起点に、本文アセットごとにまとめた素材を導出する。起点の URL と同じ本文アセットに属する
+ * 別の URL (雑誌の Amazon と X の告知など) も引き足し、日付をそろえる。
+ */
+async function deriveUrlMaterials(
+  tx: TransactionClient, source: DataSource, seedUrls: string[], { siblings: expand = true } = {},
+): Promise<{ items: MaterialItem[]; byUrl: Map<string, UrlMaterial> }> {
+  const byUrl = await urlMaterials(tx, source, seedUrls);
+  const keys = new Set([...byUrl.values()].map((g) => g.key));
+  const siblings = !expand ? [] : (await urlsForKeys(tx, source, [...keys].filter((k) => textAssetIdOfKey(k))))
+    .filter((u) => !byUrl.has(u));
+  if (siblings.length) {
+    for (const [url, group] of await urlMaterials(tx, source, siblings)) if (keys.has(group.key)) byUrl.set(url, group);
+  }
+  const derived = byUrl.size ? (await deriveItems(tx, source, { onlyKeys: [...byUrl.keys()] })).map(toMaterial) : [];
+  return { items: mergeUrlItems(derived, byUrl), byUrl };
+}
+
+/** 指定キーの素材だけを導出する (手動対象の引き足し・保存時の再導出)。ラジオは呼び出し側で扱う */
+async function deriveMaterialsByKeys(tx: TransactionClient, source: DataSource, keys: string[]): Promise<MaterialItem[]> {
+  if (!keys.length) return [];
+  if (source.itemRule === "talk_date") return (await deriveItems(tx, source, { onlyKeys: keys })).map(toMaterial);
+  const wanted = new Set(keys);
+  // urlsForKeys が本文アセットの URL を全部返すので、同じ本文アセットの別 URL を引き直さない。
+  // URL のキーが本文アセットに属する場合は、まとめた後のキーが違うので下で落ちる (2 重に数えない)
+  const { items } = await deriveUrlMaterials(tx, source, await urlsForKeys(tx, source, keys), { siblings: false });
+  return items.filter((i) => wanted.has(i.itemKey));
+}
+
 /**
  * 自動で分母に入る素材。トーク (全日本人) とラジオ (出演一覧の行) は全件。
  * それ以外はソース全体 (ブログなら全メンバー約 3,000 本) を導出せず、本人著 ∪ 言及の
@@ -81,10 +147,13 @@ async function getAutomaticMaterials(
     const [authors, mentions] = await Promise.all([
       getSourceAuthorKeys(source.key, clearance), getSourceMentionKeys(source.key, clearance),
     ]);
-    const automatic = [...new Set([...authors, ...mentions])];
-    const items = await withClearance(clearance, (tx) => deriveItems(tx, source, { onlyKeys: automatic }), { timeout: 30_000 });
-    return { items: items.map(toMaterial), automatic, authors };
-  }, ["material-automatic-items-v2", source.key, clearance], { revalidate: 90, tags: ["coverage-derived-items"] })();
+    const { items, byUrl } = await withClearance(
+      clearance, (tx) => deriveUrlMaterials(tx, source, [...new Set([...authors, ...mentions])]), { timeout: 30_000 },
+    );
+    // 本人著・言及は URL で判定するので、所属する本文アセットのキーに読み替える
+    const keyOf = (urls: string[]) => [...new Set(urls.flatMap((u) => byUrl.get(u)?.key ?? []))];
+    return { items, automatic: keyOf([...authors, ...mentions]), authors: keyOf(authors) };
+  }, ["material-automatic-items-v3", source.key, clearance], { revalidate: 90, tags: ["coverage-derived-items"] })();
 }
 
 /** ページ分のアセットだけを一括取得する。URL の重複 SourceRecord でクリップを水増ししない。 */
@@ -92,6 +161,7 @@ async function assetsForItems(tx: TransactionClient, source: DataSource, items: 
   const result = new Map<string, MaterialAsset[]>();
   if (!items.length) return result;
   let ids: { id: string }[];
+  let urls: string[] | null = null;
   if (source.key === "radio") {
     const dates = [...new Set(items.flatMap((i) => i.itemDate ? [i.itemDate] : []))];
     const urls = [...new Set(items.flatMap((i) => i.sourceUrls ?? []))];
@@ -101,9 +171,12 @@ async function assetsForItems(tx: TransactionClient, source: DataSource, items: 
     `;
   } else {
     const keys = items.map((i) => i.itemKey);
-    const match = source.itemRule === "talk_date"
-      ? talkDaysSql(keys)
-      : Prisma.sql`sr.url = ANY(${keys})`;
+    let match: Prisma.Sql;
+    if (source.itemRule === "talk_date") match = talkDaysSql(keys);
+    else {
+      urls = await urlsForKeys(tx, source, keys);
+      match = Prisma.sql`sr.url = ANY(${urls})`;
+    }
     ids = await tx.$queryRaw<{ id: string }[]>`
       SELECT DISTINCT a.id FROM "Asset" a JOIN "SourceRecord" sr ON sr."assetId" = a.id
       WHERE ${Prisma.join([match, ...sourcePatternConds(source)], " AND ")}
@@ -117,10 +190,11 @@ async function assetsForItems(tx: TransactionClient, source: DataSource, items: 
     },
   }) : [];
   const byKey = new Map(items.map((i) => [i.itemKey, i]));
+  const byUrl = urls ? await urlMaterials(tx, source, urls) : null;
   for (const asset of assets) {
     const keys = source.key === "radio"
       ? items.filter((i) => radioItemMatchesAsset(i, asset)).map((i) => i.itemKey)
-      : itemKeysForAsset(source, asset);
+      : [...new Set(itemKeysForAsset(source, asset).map((k) => byUrl?.get(k)?.key ?? k))];
     for (const key of keys) {
       if (byKey.has(key)) result.set(key, [...(result.get(key) ?? []), asset]);
     }
@@ -142,7 +216,7 @@ export async function listMaterialClipProgress(
   // 自動判定に漏れて手で対象にした素材 (ふつうは 0 件) だけをその場で引き足す
   const extraKeys = statuses.filter((s) => (s.included || s.done) && !automatic.has(s.itemKey)).map((s) => s.itemKey);
   const extras = extraKeys.length && source.key !== "radio" && source.itemRule !== "talk_date"
-    ? (await withClearance(user.clearance, (tx) => deriveItems(tx, source, { onlyKeys: extraKeys }))).map(toMaterial)
+    ? await withClearance(user.clearance, (tx) => deriveMaterialsByKeys(tx, source, extraKeys))
     : [];
   const items = [...auto.items, ...extras];
   const relevant = items.filter((i) => isRelevantMaterial(i.itemKey, automatic, byKey.get(i.itemKey)));
@@ -193,8 +267,7 @@ export async function setMaterialClipProgress(
     // 同じ素材の並行更新を直列化し、既存 classification の読み取りと保存を一体にする。
     // 初回の行なしもロックできる。ハッシュ衝突は待機を増やすだけで状態を混ぜない。
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${JSON.stringify([sourceKey, itemKey])}, 0))`;
-    const items = source.key === "radio" ? await radioItems(tx)
-      : (await deriveItems(tx, source, { onlyKeys: [itemKey] })).map((i) => ({ ...i, itemDate: toDateOnlyString(i.itemDate) }));
+    const items = source.key === "radio" ? await radioItems(tx) : await deriveMaterialsByKeys(tx, source, [itemKey]);
     const item = items.find((i) => i.itemKey === itemKey);
     if (!item) throw new MaterialProgressInputError("素材が見つかりません。一覧を更新してください");
     const assets = (await assetsForItems(tx, source, [item])).get(itemKey) ?? [];
@@ -240,12 +313,16 @@ export async function findMaterialClipProgressForAsset(assetId: string, clearanc
     for (const source of sources) {
       if (source.key === "radio") {
         for (const item of await radioItems(tx)) if (radioItemMatchesAsset(item, asset)) found.push({ ...item, sourceKey: source.key });
-      } else {
+      } else if (source.itemRule === "talk_date") {
         for (const itemKey of itemKeysForAsset(source, asset)) found.push({
-          sourceKey: source.key, itemKey,
-          itemDate: source.itemRule === "talk_date" ? itemKey : null,
-          itemTitle: source.itemRule === "talk_date" ? `トーク ${itemKey}` : asset.title,
+          sourceKey: source.key, itemKey, itemDate: itemKey, itemTitle: `トーク ${itemKey}`,
         });
+      } else {
+        const urls = itemKeysForAsset(source, asset);
+        if (!urls.length) continue;
+        // 同じ本文アセットに属する URL は 1 件にまとめる (#429)
+        const groups = new Map([...(await urlMaterials(tx, source, urls)).values()].map((g) => [g.key, g]));
+        for (const g of groups.values()) found.push({ sourceKey: source.key, itemKey: g.key, itemDate: null, itemTitle: g.title ?? asset.title });
       }
     }
     const statuses = found.length ? await tx.materialClipStatus.findMany({

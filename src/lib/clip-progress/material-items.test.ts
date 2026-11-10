@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { deriveRadioItems, isRelevantMaterial, itemKeysForAsset, radioItemMatchesAsset, type MaterialAsset } from "./material-items";
+import {
+  deriveRadioItems, isRelevantMaterial, itemKeysForAsset, mergeUrlItems, radioItemMatchesAsset, textAssetIdOfKey, type MaterialAsset,
+} from "./material-items";
 
 const radio = (shortId = "year1", title = "【1年目】ラジオ出演一覧", body = [
   "本文中の | 9 | は数えない", "",
@@ -74,4 +76,23 @@ it("分母は本人著・言及・手動対象の和集合。済も対象で、�
   expect(isRelevantMaterial("other", automatic, { included: true, done: false })).toBe(true);
   expect(isRelevantMaterial("other", automatic, { included: false, done: true })).toBe(true);
   expect(isRelevantMaterial("other", automatic, { included: false, done: false })).toBe(false);
+});
+
+it("URL ごとの素材を本文アセットごとにまとめ、日付は早いほう・題名は本文アセットのものにする (#429)", () => {
+  const byUrl = new Map([
+    ["https://amazon.test/1", { key: "asset:t1", title: "EX大衆 7月号" }],
+    ["https://x.test/1", { key: "asset:t1", title: "EX大衆 7月号" }],
+    ["https://insta.test/1", { key: "https://insta.test/1", title: null }],
+  ]);
+  expect(mergeUrlItems([
+    { itemKey: "https://x.test/1", itemDate: "2026-06-17", itemTitle: "X 画像" },
+    { itemKey: "https://amazon.test/1", itemDate: "2026-06-15", itemTitle: "Amazon" },
+    { itemKey: "https://insta.test/1", itemDate: null, itemTitle: "投稿" },
+  ], byUrl)).toEqual([
+    { itemKey: "asset:t1", itemDate: "2026-06-15", itemTitle: "EX大衆 7月号" },
+    { itemKey: "https://insta.test/1", itemDate: null, itemTitle: "投稿" },
+  ]);
+  expect(textAssetIdOfKey("asset:t1")).toBe("t1");
+  expect(textAssetIdOfKey("asset:")).toBeNull();
+  expect(textAssetIdOfKey("https://x.test/1")).toBeNull();
 });
