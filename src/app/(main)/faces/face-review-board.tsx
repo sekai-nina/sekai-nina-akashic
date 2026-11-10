@@ -208,8 +208,7 @@ export function FaceReviewBoard({
                 data-index={i}
                 onClick={(e) => {
                   // キーボードの Space / Enter で押されたことにしない (detail が 0 = キー操作のクリック)。
-                  // マウスで押した顔にフォーカスが残り、その後の Space で上のキー操作とこの onClick の両方が走って、
-                  // 前に押した顔のチェックが勝手に外れていた
+                  // キー操作は上の window の keydown だけが受ける
                   if (e.detail === 0) return;
                   setCursor(i);
                   toggle(f.id);

@@ -18,9 +18,11 @@ akashic の遅さは、ほぼ次の 4 つから来ている (2026-11 の棚卸�
 Next 16 では、Server Action の中で `revalidatePath()` / `updateTag()` / `refresh()` (`next/cache`) を呼ぶと、**Action の応答に今の画面の描き直しが入って返ってくる**。クライアントでさらに `router.refresh()` を呼ぶと、同じ画面をもう一度最初から描く。
 
 - Action で `revalidatePath` しているなら、クライアントの `router.refresh()` は書かない
-- `invalidateAssets()` などの `revalidateTag(tag, "max")` は**描き直しを返さない** (古い値を返しつつ裏で更新する)。保存直後に画面へ反映したいときは、クライアントの `router.refresh()` ではなく Action の中で次のどちらかを呼ぶ。往復が 1 回で済む
+- `invalidateAssets()` などの `revalidateTag(tag, "max")` は**描き直しを応答に入れない**。ただし**クライアントは Action が終わった後に、今の画面を裏でもう 1 回取り直す** (応答の `x-action-revalidated` を見て、`server-action-reducer.js` が普通の遷移と同じ取り直しをする)。つまり描き直しは 2 往復目で必ず来る
+  - **裏の取り直しで部品が作り直されると、手元の状態が数秒後に消える。** Action の結果で手元の状態を差し替える画面では、ページ側の `key` に取り直しで変わる値 (一覧の id など) を入れない。前例: `/faces` の `FaceReviewBoard` (保存後に付けたチェックが数秒後に消えていた)
+  - 保存直後に画面へ反映したいときは、クライアントの `router.refresh()` ではなく Action の中で次のどちらかを呼ぶ。描き直しが Action の応答に入り、往復が 1 回で済む
   - 画面が**そのタグのキャッシュを読んでいて、保存した値をすぐ見せたい** → `updateTag(tag)` (すぐ捨てて描き直しも返す。前例: `src/lib/cache.ts` の `expireEntities`)。`"max"` + `refresh()` だと、描き直しはしても**キャッシュは古いまま**なので保存前の値が出る
-  - 画面がキャッシュを通さずに読んでいる (または件数バッジなど少し古くてよい) → `refresh()` (`next/cache`)。前例: `src/app/(main)/faces/actions.ts`
+  - 画面がキャッシュを通さずに読んでいる (または件数バッジなど少し古くてよい) → `refresh()` (`next/cache`)。前例: `src/app/(main)/faces/actions.ts` の `submitFaceReview`
 - 小さなトグル (チェック・既読など) は、Action が返した値で手元の状態を更新する (`useOptimistic` / `useState`)。画面全体の描き直しは要らない
 - **`src/lib/perf-rules.test.ts` が見張っている。** 許可した場所以外で `router.refresh()` を書くと `pnpm test` が落ちる。要るなら理由を添えて許可の表に足す
 - 根拠: `node_modules/next/dist/server/app-render/action-handler.js` (`pathWasRevalidated` が立っていると描き直しを返す)、`.../spec-extension/revalidate.js` (`revalidateTag` に `"max"` などの profile を渡すと立てない)
