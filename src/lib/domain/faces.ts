@@ -3,10 +3,12 @@
  * 判定の規則は `src/lib/faces/policy.ts`、設計は `docs/face-design.md`。
  *
  * FaceDetection / FaceScan は保護テーブル (親 Asset の classification で RLS) なので、
- * すべて withClearance の中で触る。キーの持ち主のクリアランスより上の画像は見えない。
+ * withClearance の中で触る。キーの持ち主のクリアランスより上の画像は見えない。
+ * 例外は queue (listFaceQueue) だけで、重いので RLS をバイパスして classification を明示で絞る。
  */
-import type { Prisma } from "@prisma/client";
-import { withClearance } from "@/lib/db";
+import { Prisma } from "@prisma/client";
+import { classificationFilterSql } from "@/lib/classification";
+import { prismaInternal, withClearance } from "@/lib/db";
 import { downloadFromDrive, downloadRangeFromDrive } from "@/lib/drive";
 import { decideFace, FACE_ROLE_LABEL, matchReviewedFaces, type FaceWriteInput, type ReviewedFace } from "@/lib/faces/policy";
 import { NINA_ENTITY_ID } from "@/lib/nina";
@@ -48,20 +50,52 @@ const targetWhere = {
  * まだこのモデルで処理していない画像。新しいものから返す。
  * 残りの件数は画像全体 (約 7 万枚) を数えるので、`withCount` のときだけ数える (毎回のポーリングでは数えない)
  */
+type QueueItem = {
+  id: string;
+  kind: "image" | "video";
+  mimeType: string | null;
+  fileSize: number | null;
+  thumbnailUrl: string | null;
+  createdAt: Date;
+};
+
+/**
+ * 推論ワーカーの queue: まだこのモデルで処理していない対象 (targetWhere と同じ条件)。新しい順。
+ *
+ * **RLS をバイパスして classification を明示で絞る** (CLAUDE.md の「重い集計は prismaInternal + classificationFilterSql」)。
+ * RLS 越しの Prisma の問い合わせだと、トークのタグの付いた AssetEntity 約 8 万行すべてと、処理済みの FaceScan
+ * 1 行ずつに親 Asset の classification の確認が走り、1 回 1.5〜12 秒かかっていた (#416)。ワーカーは 30 秒ごとに
+ * 叩くので、その間 DB が重くなって顔の確認の保存など他の画面まで遅くなっていた。
+ * 返すのは見えてよい (classification がキーの持ち主のクリアランス以下の) 画像のメタデータだけ。
+ * 条件を変えたら targetWhere も合わせる。
+ */
 export async function listFaceQueue(clearance: string, modelVersion: string, limit: number, withCount = false) {
-  const where = { ...targetWhere, faceScans: { none: { modelVersion } } };
-  return withClearance(clearance, async (tx) => {
-    const [items, remaining] = await Promise.all([
-      tx.asset.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        take: limit,
-        select: { id: true, kind: true, mimeType: true, fileSize: true, thumbnailUrl: true, createdAt: true },
-      }),
-      withCount ? tx.asset.count({ where }) : Promise.resolve(null),
-    ]);
-    return { items, remaining };
-  });
+  const where = Prisma.sql`
+    a."storageProvider" = 'gdrive' AND a."storageKey" IS NOT NULL
+    AND ${classificationFilterSql(clearance)}
+    AND (
+      a.kind = 'image'
+      OR (
+        a.kind = 'video' AND a."fileSize" <= ${FACE_VIDEO_MAX_BYTES}
+        AND EXISTS (
+          SELECT 1 FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId"
+          WHERE ae."assetId" = a.id AND e.type = 'tag' AND e."canonicalName" = ${FACE_VIDEO_TAG}
+        )
+      )
+    )
+    AND NOT EXISTS (SELECT 1 FROM "FaceScan" s WHERE s."assetId" = a.id AND s."modelVersion" = ${modelVersion})`;
+  const [items, remaining] = await Promise.all([
+    prismaInternal.$queryRaw<QueueItem[]>(Prisma.sql`
+      SELECT a.id, a.kind::text AS kind, a."mimeType", a."fileSize", a."thumbnailUrl", a."createdAt"
+      FROM "Asset" a WHERE ${where}
+      ORDER BY a."createdAt" DESC LIMIT ${limit}`),
+    withCount
+      ? prismaInternal
+          .$queryRaw<{ n: number }[]>(Prisma.sql`SELECT count(*)::int AS n FROM "Asset" a WHERE ${where}`)
+          .then((r) => r[0]?.n ?? 0)
+      : Promise.resolve(null),
+  ]);
+  return { items, remaining };
 }
 
 export class FaceAssetNotFoundError extends Error {}
