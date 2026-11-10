@@ -61,15 +61,38 @@ type QueueItem = {
  *
  * **RLS をバイパスして classification を明示で絞る** (CLAUDE.md の「重い集計は prismaInternal + classificationFilterSql」)。
  * RLS 越しの Prisma の問い合わせだと、トークのタグの付いた AssetEntity 約 8 万行すべてと、処理済みの FaceScan
- * 1 行ずつに親 Asset の classification の確認が走り、1 回 1.5〜12 秒かかっていた (#416)。ワーカーは 30 秒ごとに
- * 叩くので、その間 DB が重くなって顔の確認の保存など他の画面まで遅くなっていた。
+ * 1 行ずつに親 Asset の classification の確認が走り、1 回 1.5〜12 秒かかっていた (#416)。
  * 返すのは見えてよい (classification がキーの持ち主のクリアランス以下の) 画像のメタデータだけ。
  * 条件を変えたら targetWhere も合わせる。
+ *
+ * **候補をまとめて引いて 5 分使い回す。** 新しい順に処理済みの行を読み飛ばすので、1 回で約 6 万ページ (約 500 MB) を読む。
+ * DB の実行は 0.14 秒でも、ワーカーが 30 秒おきに叩く間に他の処理でページがメモリから追い出され、本番では毎回
+ * 2.5〜5 秒かかっていた (すぐもう 1 回流すと 0.12 秒)。候補を QUEUE_CANDIDATES 件引いておき、呼ばれるたびに
+ * 処理済みになったものだけを主キーで落として返す。重い問い合わせは候補を使い切ったときと 5 分ごとだけになる。
+ * 候補はインスタンスのメモリに置く (インスタンスごとに 1 回引く)。5 分の間に消された・上のクリアランスに変えられた
+ * 画像はワーカーの元画像の取得で 404 になり、ワーカーの読み飛ばしに入る。新しく入った画像は最長 5 分待つ。
  */
 export async function listFaceQueue(clearance: string, modelVersion: string, limit: number, withCount = false) {
   // 知らないクリアランスは RLS と同じく 0 件にする (classificationFilterSql が `IN ()` の構文エラーになるため先に返す)
   if (accessibleClassifications(clearance as ClearanceLevel).length === 0) return { items: [], remaining: withCount ? 0 : null };
-  const where = Prisma.sql`
+  const [items, remaining] = await Promise.all([
+    queueItems(clearance, modelVersion, limit),
+    withCount
+      ? prismaInternal
+          .$queryRaw<{ n: number }[]>(Prisma.sql`SELECT count(*)::int AS n FROM "Asset" a WHERE ${queueWhere(clearance, modelVersion)}`)
+          .then((r) => r[0]?.n ?? 0)
+      : Promise.resolve(null),
+  ]);
+  return { items, remaining };
+}
+
+/** 1 回に引いておく候補の数。ワーカーの limit (最大 QUEUE_MAX_LIMIT) より多くする */
+const QUEUE_CANDIDATES = 500;
+const QUEUE_CANDIDATES_TTL_MS = 5 * 60_000;
+const queueCandidates = new Map<string, { at: number; items: QueueItem[]; full: boolean }>();
+
+function queueWhere(clearance: string, modelVersion: string) {
+  return Prisma.sql`
     a."storageProvider" = 'gdrive' AND a."storageKey" IS NOT NULL
     AND ${classificationFilterSql(clearance)}
     AND (
@@ -83,35 +106,36 @@ export async function listFaceQueue(clearance: string, modelVersion: string, lim
       )
     )
     AND NOT EXISTS (SELECT 1 FROM "FaceScan" s WHERE s."assetId" = a.id AND s."modelVersion" = ${modelVersion})`;
-  const itemsSql = Prisma.sql`
-      SELECT a.id, a.kind::text AS kind, a."mimeType", a."fileSize", a."thumbnailUrl", a."createdAt"
-      FROM "Asset" a WHERE ${where}
-      ORDER BY a."createdAt" DESC LIMIT ${limit}`;
-  const started = performance.now();
-  const [items, remaining] = await Promise.all([
-    prismaInternal.$queryRaw<QueueItem[]>(itemsSql).then(async (rows) => {
-      // 本番だけ 1.5〜5 秒かかる (手元からは同じ SQL が 0.14 秒) 原因を見るため、遅いときだけ実行計画を残す。分かったら外す (#416)
-      if (performance.now() - started >= 1_000) {
-        const again = performance.now();
-        await prismaInternal.$queryRaw(itemsSql);
-        const againMs = Math.round(performance.now() - again);
-        const ping = performance.now();
-        await prismaInternal.$queryRaw`SELECT 1`;
-        console.warn(`[slow-queue-again] first ${Math.round(again - started)}ms again ${againMs}ms ping ${Math.round(performance.now() - ping)}ms`);
-        const plan = await prismaInternal
-          .$queryRaw<{ "QUERY PLAN": string }[]>(Prisma.sql`EXPLAIN (ANALYZE, BUFFERS) ${itemsSql}`)
-          .catch((e: unknown) => [{ "QUERY PLAN": String(e) }]);
-        console.warn(`[slow-queue-plan] ${Math.round(performance.now() - started)}ms\n${plan.map((r) => r["QUERY PLAN"]).join("\n")}`);
-      }
-      return rows;
-    }),
-    withCount
-      ? prismaInternal
-          .$queryRaw<{ n: number }[]>(Prisma.sql`SELECT count(*)::int AS n FROM "Asset" a WHERE ${where}`)
-          .then((r) => r[0]?.n ?? 0)
-      : Promise.resolve(null),
-  ]);
-  return { items, remaining };
+}
+
+async function fetchQueueCandidates(clearance: string, modelVersion: string) {
+  const items = await prismaInternal.$queryRaw<QueueItem[]>(Prisma.sql`
+    SELECT a.id, a.kind::text AS kind, a."mimeType", a."fileSize", a."thumbnailUrl", a."createdAt"
+    FROM "Asset" a WHERE ${queueWhere(clearance, modelVersion)}
+    ORDER BY a."createdAt" DESC LIMIT ${QUEUE_CANDIDATES}`);
+  return { at: Date.now(), items, full: items.length === QUEUE_CANDIDATES };
+}
+
+async function queueItems(clearance: string, modelVersion: string, limit: number): Promise<QueueItem[]> {
+  const key = `${clearance}\t${modelVersion}`;
+  let entry = queueCandidates.get(key);
+  let fresh = false;
+  if (!entry || Date.now() - entry.at > QUEUE_CANDIDATES_TTL_MS) {
+    entry = await fetchQueueCandidates(clearance, modelVersion);
+    fresh = true;
+  } else if (entry.items.length > 0) {
+    // 前に引いた候補から、その後に処理済みになったものを落とす (主キーで引くだけなので軽い)
+    const scanned = await prismaInternal.faceScan.findMany({
+      where: { modelVersion, assetId: { in: entry.items.map((i) => i.id) } },
+      select: { assetId: true },
+    });
+    const done = new Set(scanned.map((s) => s.assetId));
+    entry = { ...entry, items: entry.items.filter((i) => !done.has(i.id)) };
+  }
+  // 使い切りそうなら引き直す (候補が上限まであった = まだ後ろに残っているかもしれないとき)
+  if (!fresh && entry.full && entry.items.length < limit) entry = await fetchQueueCandidates(clearance, modelVersion);
+  queueCandidates.set(key, entry);
+  return entry.items.slice(0, limit);
 }
 
 export class FaceAssetNotFoundError extends Error {}
