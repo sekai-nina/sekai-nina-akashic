@@ -96,7 +96,10 @@ export default async function FacesPage({ searchParams }: { searchParams: Promis
         <p className="text-sm text-slate-500 py-12 text-center">この条件の顔はありません。</p>
       ) : (
         <FaceReviewBoard
-          key={`${mode}:${entityId}:${page}:${faces.map((f) => f.id).join(",")}`}
+          // 顔の id は key に入れない。保存の Action が revalidateTag するとクライアントが裏で今の画面を
+          // 取り直し、その一覧で作り直されて、保存後に付けたチェックが数秒後に消えていた。
+          // 保存後の顔はボードが Action から受け取って自分で差し替える
+          key={`${mode}:${entityId}:${page}`}
           faces={faces.map((f) => ({ ...f, predictedName: f.predictedEntityId ? nameOf.get(f.predictedEntityId) ?? "?" : "?" }))}
           members={members}
           mode={mode}
