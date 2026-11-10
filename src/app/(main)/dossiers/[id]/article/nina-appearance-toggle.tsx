@@ -1,7 +1,6 @@
 "use client";
 
 import { useOptimistic, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { NINA_APPEARANCE_LABELS, cn } from "@/lib/utils";
 import { NINA_APPEARANCES, type NinaAppearance } from "@/lib/nina";
 import { setAssetNinaAppearance } from "@/app/(main)/assets/[id]/nina-appearance-actions";
@@ -19,7 +18,6 @@ export function NinaAppearanceToggle({
   initial: NinaAppearance;
   author: boolean;
 }) {
-  const router = useRouter();
   const [current, setCurrent] = useOptimistic(initial);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -32,7 +30,6 @@ export function NinaAppearanceToggle({
       try {
         const res = await setAssetNinaAppearance(assetId, to);
         if (res.error) setError(res.error);
-        else router.refresh();
       } catch {
         setError("記録に失敗しました。時間をおいてもう一度試してください");
       }

@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { FileText } from "lucide-react";
 import { MAX_ARTICLE_CLEARANCE } from "@/lib/meetgreet/config";
@@ -47,7 +46,6 @@ export function ArticleStep({
   /** 「今後足さない」を取り消す */
   onRestore: (keys: string[]) => Promise<RestoreExclusionsResult>;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
   /** 出典だけ足したとき、本文に ^[n] を書きに行く先 (#267) */
@@ -132,7 +130,6 @@ export function ArticleStep({
       if (res.mode === "append" && res.added === 0 && res.sources > 0) setEditShortId(res.shortId);
       setPreview(null);
       setPreviewed([]);
-      router.refresh();
     });
   }
 

@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Pencil } from "lucide-react";
 import { setMeetGreetPreviewAction } from "../actions";
@@ -31,7 +30,6 @@ export function PreviewForm({
   /** 開催日が今日 (JST) 以降か。過去の回は予告と実際を比べる記録として残すだけ */
   upcoming: boolean;
 }) {
-  const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [pending, startTransition] = useTransition();
   const [o, setO] = useState(outfit);
@@ -47,7 +45,6 @@ export function PreviewForm({
       }
       setMsg(null);
       setEditing(false);
-      router.refresh();
     });
   }
 

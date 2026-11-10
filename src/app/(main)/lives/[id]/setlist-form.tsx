@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { LivePerformanceView } from "@/lib/domain/lives";
 import { replaceSetlistAction } from "../actions";
@@ -25,7 +24,6 @@ export function SetlistForm({
   /** 曲マスタの名寄せキー (SetlistEditor の注意書き用) */
   knownKeys: string[];
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
   const initial = useMemo(() => toDraft({ commonSongs, performances }), [commonSongs, performances]);
@@ -60,7 +58,6 @@ export function SetlistForm({
       setMsg(`保存しました (${res.performances} 公演${res.removed > 0 ? `、${res.removed} 件削除` : ""})`);
       dirtyRef.current = false;
       setDirty(false);
-      router.refresh();
     });
   }
 

@@ -2,7 +2,6 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import type { TextType } from "@prisma/client";
 import { Quote, Check, ExternalLink, Scissors, Loader2, Plus } from "lucide-react";
 import { addAssetToDossierAction } from "@/app/(main)/dossiers/actions";
@@ -577,7 +576,6 @@ function ExcerptFloater({
   const [articleConfirmation, setArticleConfirmation] = useState<string | null>(null);
   const [addingToTarget, startAddToTarget] = useTransition();
   const [targetError, setTargetError] = useState<string | null>(null);
-  const router = useRouter();
 
   function addToTarget() {
     if (!targetDossier) return;
@@ -591,9 +589,8 @@ function ExcerptFloater({
           excerptStart: selection.start,
           excerptEnd: selection.end,
         });
+        // 上の帯の抜粋数は Action の revalidatePath が返す描き直しで更新される (router.refresh() は要らない)
         setConfirmation(targetDossier);
-        // 上の帯の抜粋数を更新する
-        router.refresh();
       } catch {
         setTargetError("追加できませんでした");
       }

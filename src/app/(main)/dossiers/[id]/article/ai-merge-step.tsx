@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { PenLine, Sparkles } from "lucide-react";
 import type { MergeProposal } from "@/lib/domain/article-generate";
@@ -25,7 +24,6 @@ export function AiMergeStep({
   /** いまの記事の本文。案が出るまで、書き足す先として見せておく */
   currentBody: string;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
   const [proposal, setProposal] = useState<MergeProposal | null>(null);
@@ -88,7 +86,6 @@ export function AiMergeStep({
       setExcluded((list) => list.filter((e) => e.key !== key));
       setProposal(null);
       setMsg("戻しました。もう一度 AI に組み込ませるか手で書くと、候補に入ります");
-      router.refresh();
     });
   }
 
@@ -110,7 +107,6 @@ export function AiMergeStep({
       setSavedShortId(res.shortId);
       setSaved({ body: res.body, before: currentBody });
       setProposal(null);
-      router.refresh();
     });
   }
 

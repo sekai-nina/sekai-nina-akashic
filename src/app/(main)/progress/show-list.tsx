@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Loader2, PlayCircle } from "lucide-react";
 import type { EpisodeStatus, ShowEpisodeRow, TargetStatus } from "@/lib/domain/show-progress";
 import { SHOWS, type ShowKey } from "@/lib/progress/shows";
@@ -85,7 +84,6 @@ function EpisodeRow({
   canPublish: boolean;
 }) {
   const show = SHOWS[showKey];
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   // 行を足すフォーム。本編の行が済んだあとも番外編の行は足せる (ひななり)
@@ -96,7 +94,6 @@ function EpisodeRow({
     startTransition(async () => {
       const res = await setShowProgressAction(showKey, row.episode, target, status, note);
       if (!res.ok) setError(res.error);
-      else router.refresh();
     });
   }
 
@@ -217,7 +214,6 @@ function EpisodeRow({
           canPublish={canPublish}
           onDone={() => {
             setAdding(null);
-            router.refresh();
           }}
           onCancel={() => setAdding(null)}
         />

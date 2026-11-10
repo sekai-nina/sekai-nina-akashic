@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { ExternalLink, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -13,7 +12,6 @@ import type { MeetGreetArticleReports } from "@/lib/domain/meetgreet-featured";
  * ★ は記事本文の `![rep]` そのもの。押すと記事が push 待ちになり、push でサイトに出る。
  */
 export function FeaturedReports({ id, data }: { id: string; data: MeetGreetArticleReports }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -29,7 +27,6 @@ export function FeaturedReports({ id, data }: { id: string; data: MeetGreetArtic
         return;
       }
       setMsg(null);
-      router.refresh();
     });
   }
 

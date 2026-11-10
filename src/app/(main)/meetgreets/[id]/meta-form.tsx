@@ -72,7 +72,6 @@ export function MetaForm({
         return;
       }
       setEditing(false);
-      router.refresh();
     });
   }
 

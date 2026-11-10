@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Shirt } from "lucide-react";
 import { setPreviewsFromAssetAction } from "../../meetgreets/actions";
@@ -14,7 +13,6 @@ import type { PreviewTarget } from "@/lib/domain/meetgreet-preview";
  * 開催予定の回は先に /meetgreets で作っておく。
  */
 export function MeetGreetPreviewButton({ assetId, targets }: { assetId: string; targets: PreviewTarget[] }) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [values, setValues] = useState<Record<string, string>>(() =>
@@ -39,7 +37,6 @@ export function MeetGreetPreviewButton({ assetId, targets }: { assetId: string; 
         return;
       }
       setMsg(res.updated > 0 ? `${res.updated} 回分を保存しました` : "変更はありません");
-      router.refresh();
     });
   }
 

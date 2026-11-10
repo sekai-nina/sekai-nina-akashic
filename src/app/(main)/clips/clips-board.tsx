@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Check, FileText, FolderPlus, Loader2, Search, Trash2, X } from "lucide-react";
 import { deleteClipsAction, moveClipsAction, updateClipNoteAction } from "./actions";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -68,7 +67,6 @@ const UNLOCATED_BADGE = (
 );
 
 export function ClipsBoard({ clips, dossiers, currentUserId, canEdit }: ClipsBoardProps) {
-  const router = useRouter();
   const [query, setQuery] = useState("");
   const [entityId, setEntityId] = useState<string | null>(null);
   const [mineOnly, setMineOnly] = useState(false);
@@ -164,7 +162,6 @@ export function ClipsBoard({ clips, dossiers, currentUserId, canEdit }: ClipsBoa
         return;
       }
       setSelected(new Set());
-      router.refresh();
     });
   };
 
@@ -324,7 +321,6 @@ export function ClipsBoard({ clips, dossiers, currentUserId, canEdit }: ClipsBoa
         dossiers={dossiers}
         onMoved={() => {
           setSelected(new Set());
-          router.refresh();
         }}
       />
     </div>
@@ -353,7 +349,6 @@ function ClipCardView({
   const [noteDraft, setNoteDraft] = useState(clip.note);
   const [noteError, setNoteError] = useState<string | null>(null);
   const [isSaving, startSave] = useTransition();
-  const router = useRouter();
 
   const saveNote = () => {
     setNoteError(null);
@@ -364,7 +359,6 @@ function ClipCardView({
         return;
       }
       setEditingNote(false);
-      router.refresh();
     });
   };
 

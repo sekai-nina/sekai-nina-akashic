@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { updateLiveAction } from "../actions";
 
@@ -12,7 +11,6 @@ const inputCls =
  * 空なら #坂井新奈 だけで集める (ライブ当日は本人の名前だけの投稿が多いので、それでも拾える)
  */
 export function ReportTagsForm({ liveId, tags }: { liveId: string; tags: string[] }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [text, setText] = useState(tags.map((t) => `#${t}`).join(" "));
   const [msg, setMsg] = useState<string | null>(null);
@@ -26,7 +24,6 @@ export function ReportTagsForm({ liveId, tags }: { liveId: string; tags: string[
     startTransition(async () => {
       const res = await updateLiveAction(liveId, { reportTags: next });
       setMsg(res.ok ? "保存しました (収集の条件も更新)" : `エラー: ${res.error}`);
-      if (res.ok) router.refresh();
     });
   }
 

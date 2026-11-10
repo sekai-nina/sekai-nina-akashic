@@ -307,7 +307,6 @@ function DayFooter({ talk }: { talk: TalkDay }) {
         const result = await setMaterialClipProgressAction("talk", talk.day, "done", true);
         if (!result.ok) return setError(result.error);
         if (nextHref) router.push(nextHref);
-        else router.refresh();
       } catch { setError(L.failed); }
     });
   };

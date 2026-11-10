@@ -152,7 +152,6 @@ export function SketchStep({
       setMsg(`${res.candidates.length} 枚できました`);
       setRevisionOf(null);
       setRevisionNote("");
-      router.refresh();
     });
   }
 
@@ -172,8 +171,6 @@ export function SketchStep({
       }
       setMsg(rect ? "切り抜きを保存しました" : "切り抜きを外しました");
       setCropping(null);
-      // 枠は生成のときにサーバーが読む。画面の表示も合わせ直す
-      router.refresh();
     });
   }
 
@@ -208,7 +205,6 @@ export function SketchStep({
         error: e instanceof Error ? e.message : "通信に失敗しました",
       }));
       setMsg(res.ok ? "確定しました (記事のサムネになります)" : `エラー: ${res.error}`);
-      if (res.ok) router.refresh();
     });
   }
 

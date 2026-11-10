@@ -1,7 +1,6 @@
 "use client";
 
 import { Suspense, use, useRef, useState, useTransition, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { COVERAGE_LABELS as L, formatDate, jstDayString } from "@/lib/utils";
 import type { CollectionSourceDTO, SourceItemStats } from "@/lib/domain/coverage";
 import type { DataSourceKind, ItemRule } from "@prisma/client";
@@ -123,8 +122,6 @@ function TabButton({
 function SourceList({ sources, stats, canEdit }: {
   sources: Source[]; stats: Promise<Record<string, SourceItemStats>>; canEdit: boolean;
 }) {
-  const router = useRouter();
-  const [, startTransition] = useTransition();
   const [openKey, setOpenKey] = useState<string | null>(null);
 
   // 無効化されたものはソース管理タブでのみ表示
@@ -163,7 +160,6 @@ function SourceList({ sources, stats, canEdit }: {
                 onClose={() => setOpenKey(null)}
                 onDone={() => {
                   setOpenKey(null);
-                  startTransition(() => router.refresh());
                 }}
               />
             ))}
@@ -296,7 +292,6 @@ const inputCls =
 const labelCls = "block text-xs text-slate-500 mt-2 mb-1";
 
 function DataSourceSettings({ dataSources, canEdit }: { dataSources: Source[]; canEdit: boolean }) {
-  const router = useRouter();
   const [, startTransition] = useTransition();
   const [adding, setAdding] = useState(false);
   const [key, setKey] = useState("");
@@ -324,7 +319,6 @@ function DataSourceSettings({ dataSources, canEdit }: { dataSources: Source[]; c
       if (!res.ok) setErr(res.error);
       else {
         reset();
-        router.refresh();
       }
     });
   }
@@ -389,7 +383,6 @@ function DataSourceSettings({ dataSources, canEdit }: { dataSources: Source[]; c
 }
 
 function DataSourceRow({ ds, canEdit }: { ds: Source; canEdit: boolean }) {
-  const router = useRouter();
   const [, startTransition] = useTransition();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(ds.name);
@@ -419,7 +412,6 @@ function DataSourceRow({ ds, canEdit }: { ds: Source; canEdit: boolean }) {
       if (!res.ok) setErr(res.error);
       else {
         setEditing(false);
-        router.refresh();
       }
     });
   }
