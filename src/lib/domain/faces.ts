@@ -6,8 +6,8 @@
  * withClearance の中で触る。キーの持ち主のクリアランスより上の画像は見えない。
  * 例外は queue (listFaceQueue) だけで、重いので RLS をバイパスして classification を明示で絞る。
  */
-import { Prisma } from "@prisma/client";
-import { classificationFilterSql } from "@/lib/classification";
+import { Prisma, type ClearanceLevel } from "@prisma/client";
+import { accessibleClassifications, classificationFilterSql } from "@/lib/classification";
 import { prismaInternal, withClearance } from "@/lib/db";
 import { downloadFromDrive, downloadRangeFromDrive } from "@/lib/drive";
 import { decideFace, FACE_ROLE_LABEL, matchReviewedFaces, type FaceWriteInput, type ReviewedFace } from "@/lib/faces/policy";
@@ -46,10 +46,6 @@ const targetWhere = {
   ],
 } satisfies Prisma.AssetWhereInput;
 
-/**
- * まだこのモデルで処理していない画像。新しいものから返す。
- * 残りの件数は画像全体 (約 7 万枚) を数えるので、`withCount` のときだけ数える (毎回のポーリングでは数えない)
- */
 type QueueItem = {
   id: string;
   kind: "image" | "video";
@@ -61,6 +57,7 @@ type QueueItem = {
 
 /**
  * 推論ワーカーの queue: まだこのモデルで処理していない対象 (targetWhere と同じ条件)。新しい順。
+ * 残りの件数は画像全体 (約 7 万枚) を数えるので、`withCount` のときだけ数える (毎回のポーリングでは数えない)
  *
  * **RLS をバイパスして classification を明示で絞る** (CLAUDE.md の「重い集計は prismaInternal + classificationFilterSql」)。
  * RLS 越しの Prisma の問い合わせだと、トークのタグの付いた AssetEntity 約 8 万行すべてと、処理済みの FaceScan
@@ -70,6 +67,8 @@ type QueueItem = {
  * 条件を変えたら targetWhere も合わせる。
  */
 export async function listFaceQueue(clearance: string, modelVersion: string, limit: number, withCount = false) {
+  // 知らないクリアランスは RLS と同じく 0 件にする (classificationFilterSql が `IN ()` の構文エラーになるため先に返す)
+  if (accessibleClassifications(clearance as ClearanceLevel).length === 0) return { items: [], remaining: withCount ? 0 : null };
   const where = Prisma.sql`
     a."storageProvider" = 'gdrive' AND a."storageKey" IS NOT NULL
     AND ${classificationFilterSql(clearance)}
