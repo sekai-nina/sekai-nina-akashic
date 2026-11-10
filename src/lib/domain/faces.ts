@@ -83,11 +83,22 @@ export async function listFaceQueue(clearance: string, modelVersion: string, lim
       )
     )
     AND NOT EXISTS (SELECT 1 FROM "FaceScan" s WHERE s."assetId" = a.id AND s."modelVersion" = ${modelVersion})`;
-  const [items, remaining] = await Promise.all([
-    prismaInternal.$queryRaw<QueueItem[]>(Prisma.sql`
+  const itemsSql = Prisma.sql`
       SELECT a.id, a.kind::text AS kind, a."mimeType", a."fileSize", a."thumbnailUrl", a."createdAt"
       FROM "Asset" a WHERE ${where}
-      ORDER BY a."createdAt" DESC LIMIT ${limit}`),
+      ORDER BY a."createdAt" DESC LIMIT ${limit}`;
+  const started = performance.now();
+  const [items, remaining] = await Promise.all([
+    prismaInternal.$queryRaw<QueueItem[]>(itemsSql).then(async (rows) => {
+      // 本番だけ 1.5〜5 秒かかる (手元からは同じ SQL が 0.14 秒) 原因を見るため、遅いときだけ実行計画を残す。分かったら外す (#416)
+      if (performance.now() - started >= 1_000) {
+        const plan = await prismaInternal
+          .$queryRaw<{ "QUERY PLAN": string }[]>(Prisma.sql`EXPLAIN (ANALYZE, BUFFERS) ${itemsSql}`)
+          .catch((e: unknown) => [{ "QUERY PLAN": String(e) }]);
+        console.warn(`[slow-queue-plan] ${Math.round(performance.now() - started)}ms\n${plan.map((r) => r["QUERY PLAN"]).join("\n")}`);
+      }
+      return rows;
+    }),
     withCount
       ? prismaInternal
           .$queryRaw<{ n: number }[]>(Prisma.sql`SELECT count(*)::int AS n FROM "Asset" a WHERE ${where}`)
