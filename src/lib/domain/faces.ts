@@ -92,6 +92,12 @@ export async function listFaceQueue(clearance: string, modelVersion: string, lim
     prismaInternal.$queryRaw<QueueItem[]>(itemsSql).then(async (rows) => {
       // 本番だけ 1.5〜5 秒かかる (手元からは同じ SQL が 0.14 秒) 原因を見るため、遅いときだけ実行計画を残す。分かったら外す (#416)
       if (performance.now() - started >= 1_000) {
+        const again = performance.now();
+        await prismaInternal.$queryRaw(itemsSql);
+        const againMs = Math.round(performance.now() - again);
+        const ping = performance.now();
+        await prismaInternal.$queryRaw`SELECT 1`;
+        console.warn(`[slow-queue-again] first ${Math.round(again - started)}ms again ${againMs}ms ping ${Math.round(performance.now() - ping)}ms`);
         const plan = await prismaInternal
           .$queryRaw<{ "QUERY PLAN": string }[]>(Prisma.sql`EXPLAIN (ANALYZE, BUFFERS) ${itemsSql}`)
           .catch((e: unknown) => [{ "QUERY PLAN": String(e) }]);
