@@ -45,7 +45,34 @@ export interface MaterialAsset {
   sourceRecords: { url: string | null; title: string | null; publisher: string | null }[];
 }
 
-/** 一覧・アセット詳細・保存時で同じ JST の素材キーを使う。 */
+/**
+ * URL 系ソースの素材は本文アセット (kind=text) ごとに数える (#429)。キーは `asset:<本文アセット id>`。
+ * 雑誌の 1 冊に Amazon と X の告知の 2 URL が付いていても 1 件にし、ページ画像・ブログ画像は
+ * 同じ URL の本文アセットに含める。本文アセットの無い URL (インスタ・動画) は URL をそのままキーにする。
+ */
+export const TEXT_ASSET_KEY_PREFIX = "asset:";
+export const textAssetKey = (assetId: string) => `${TEXT_ASSET_KEY_PREFIX}${assetId}`;
+export function textAssetIdOfKey(key: string): string | null {
+  return key.startsWith(TEXT_ASSET_KEY_PREFIX) ? key.slice(TEXT_ASSET_KEY_PREFIX.length) || null : null;
+}
+
+/** URL ごとの所属。同じ URL に本文アセットが複数あれば (二重取り込み) 最も古いものに寄せる */
+export interface UrlMaterial { key: string; title: string | null }
+
+/** URL ごとに導出した素材を、所属する本文アセットごとに 1 件へまとめる。日付は最も早いもの */
+export function mergeUrlItems(items: MaterialItem[], byUrl: Map<string, UrlMaterial>): MaterialItem[] {
+  const merged = new Map<string, MaterialItem>();
+  for (const item of items) {
+    const group = byUrl.get(item.itemKey);
+    const key = group?.key ?? item.itemKey;
+    const prev = merged.get(key);
+    const itemDate = [prev?.itemDate, item.itemDate].filter((d): d is string => !!d).sort()[0] ?? null;
+    merged.set(key, { ...item, itemKey: key, itemDate, itemTitle: group?.title ?? prev?.itemTitle ?? item.itemTitle });
+  }
+  return [...merged.values()];
+}
+
+/** 一覧・アセット詳細・保存時で同じ JST の素材キーを使う。URL 系は本文アセットに寄せる前の URL を返す */
 export function itemKeysForAsset(source: MaterialSource, asset: MaterialAsset): string[] {
   const records = asset.sourceRecords.filter((sr) =>
     matchesLikeOr(sr.publisher, source.publisherPattern) && matchesLikeOr(sr.title, source.titlePattern));

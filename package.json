@@ -39,7 +39,8 @@
     "cli:fix-insta-dash": "tsx src/cli/fix-insta-story-dash.ts",
     "cli:fix-youtube-publisher": "tsx src/cli/fix-youtube-publisher.ts",
     "cli:import-meetgreet-upcoming": "tsx src/cli/import-meetgreet-upcoming.ts",
-    "cli:refresh-nina-mentions": "tsx src/cli/refresh-nina-mentions.ts"
+    "cli:refresh-nina-mentions": "tsx src/cli/refresh-nina-mentions.ts",
+    "cli:rekey-material-clip-status": "tsx src/cli/rekey-material-clip-status.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

@@ -8,7 +8,12 @@ const mocks = vi.hoisted(() => {
     asset: { findMany: vi.fn(), findUnique: vi.fn() },
     article: { findMany: vi.fn() }, dossierItem: { groupBy: vi.fn() }, $queryRaw: vi.fn(), $executeRaw: vi.fn(),
   };
-  return { tx, withClearance: vi.fn(), withSession: vi.fn(), derived: vi.fn(), derive: vi.fn(), authors: vi.fn(), mentions: vi.fn(), audit: vi.fn() };
+  return {
+    tx, withClearance: vi.fn(), withSession: vi.fn(), derived: vi.fn(), derive: vi.fn(), authors: vi.fn(), mentions: vi.fn(), audit: vi.fn(),
+    // URL → 本文アセット (#429)。既定は空 (= 本文アセットの無い URL はそのままキー)
+    texts: new Map<string, { id: string; title: string }>(),
+    assetIds: [] as { id: string }[],
+  };
 });
 vi.mock("@/lib/db", () => ({ withClearance: mocks.withClearance, withSession: mocks.withSession }));
 vi.mock("next/cache", () => ({ unstable_cache: (fn: () => unknown) => fn }));
@@ -39,7 +44,24 @@ const a = {
     { url, title: "ブログ画像", publisher: "公式ブログ", classification: "internal" },
   ],
 };
-const item = (key: string) => ({ itemKey: key, itemDate: new Date("2026-10-16T00:00:00Z"), itemTitle: key });
+const item = (key: string, date = "2026-10-16") => ({ itemKey: key, itemDate: new Date(`${date}T00:00:00Z`), itemTitle: key });
+
+/** 生 SQL に埋めた配列 (URL・アセット id) を取り出す */
+const arraysOf = (values: unknown[]): string[][] => values.flatMap((v) =>
+  Array.isArray(v) ? [v as string[]]
+    : v && typeof v === "object" && "values" in v ? arraysOf((v as { values: unknown[] }).values) : []);
+/** $queryRaw を SQL の種類で振り分ける。URL → 本文アセット・本文アセット → URL・アセット id の 3 種 */
+function fakeQueryRaw(strings: TemplateStringsArray, ...values: unknown[]) {
+  const sql = strings.join("?");
+  const [list = []] = arraysOf(values);
+  if (sql.includes("array_agg")) {
+    return Promise.resolve(list.map((u) => ({ url: u, textId: mocks.texts.get(u)?.id ?? null, textTitle: mocks.texts.get(u)?.title ?? null })));
+  }
+  if (sql.includes("SELECT DISTINCT sr.url")) {
+    return Promise.resolve([...mocks.texts].filter(([, t]) => list.includes(t.id)).map(([u]) => ({ url: u })));
+  }
+  return Promise.resolve(mocks.assetIds);
+}
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -52,10 +74,13 @@ beforeEach(() => {
   mocks.tx.materialClipStatus.upsert.mockResolvedValue({ id: "status" });
   mocks.tx.asset.findMany.mockResolvedValue([a]);
   mocks.tx.asset.findUnique.mockResolvedValue(a);
-  mocks.tx.$queryRaw.mockResolvedValue([{ id: "a1" }]);
+  mocks.texts.clear();
+  mocks.assetIds = [{ id: "a1" }];
+  mocks.tx.$queryRaw.mockImplementation(fakeQueryRaw);
   mocks.tx.dossierItem.groupBy.mockResolvedValue([{ assetId: "a1", _count: { _all: 3 } }]);
   mocks.derived.mockResolvedValue([item(url)]);
-  mocks.derive.mockResolvedValue([item(url)]);
+  mocks.derive.mockImplementation(async (_tx, _source, opts?: { onlyKeys?: string[] }) =>
+    (opts?.onlyKeys ?? [url]).filter((k) => k === url).map((k) => item(k)));
   mocks.authors.mockResolvedValue([url]);
   mocks.mentions.mockResolvedValue([]);
 });
@@ -108,7 +133,7 @@ describe("素材のクリップ進捗の一覧", () => {
     expect(result.total).toBe(1);
   });
   it("行のリンク先は画像より本文のアセットを優先する", async () => {
-    mocks.tx.$queryRaw.mockResolvedValue([{ id: "img" }, { id: "a1" }]);
+    mocks.assetIds = [{ id: "img" }, { id: "a1" }];
     mocks.tx.asset.findMany.mockResolvedValue([{ ...a, id: "img", kind: "image" }, a]);
     expect((await listMaterialClipProgress(user, "blog")).items[0].assetId).toBe("a1");
   });
@@ -196,4 +221,60 @@ it("出典レコードのないラジオ録音も一覧の件数と保存時の�
   expect(mocks.tx.$queryRaw.mock.calls[0][0].join("?")).toContain('LEFT JOIN "SourceRecord"');
   await setMaterialClipProgress({ ...user, clearance: "restricted" }, "radio", "radio1:1", { done: true });
   expect(mocks.tx.materialClipStatus.upsert.mock.calls[0][0].create).toMatchObject({ classification: "confidential" });
+});
+
+describe("URL 系の素材は本文アセットごとに数える (#429)", () => {
+  const amazon = "https://www.amazon.test/dp/1";
+  const x = "https://x.test/status/1";
+  const magazine = { ...source, key: "magazine", itemRule: "source_url", publisherPattern: "EX大衆%" };
+  const issue = {
+    ...a, id: "t1", title: "EX大衆 2026年7月号",
+    sourceRecords: [
+      { url: null, title: "EX大衆 2026年7月号", publisher: "EX大衆" },
+      { url: x, title: "EX大衆 X 6/17 画像", publisher: "EX大衆" },
+      { url: amazon, title: "EX大衆 2026年7月号", publisher: "EX大衆" },
+    ],
+  };
+  beforeEach(() => {
+    mocks.tx.dataSource.findUnique.mockResolvedValue(magazine);
+    mocks.tx.dataSource.findMany.mockResolvedValue([magazine]);
+    mocks.texts.set(x, { id: "t1", title: "EX大衆 2026年7月号" }).set(amazon, { id: "t1", title: "EX大衆 2026年7月号" });
+    mocks.assetIds = [{ id: "t1" }];
+    mocks.tx.asset.findMany.mockResolvedValue([issue]);
+    mocks.tx.asset.findUnique.mockResolvedValue(issue);
+    mocks.tx.dossierItem.groupBy.mockResolvedValue([{ assetId: "t1", _count: { _all: 2 } }]);
+    const dates: Record<string, string> = { [x]: "2026-06-17", [amazon]: "2026-06-15" };
+    mocks.derive.mockImplementation(async (_tx, _source, opts?: { onlyKeys?: string[] }) =>
+      (opts?.onlyKeys ?? []).filter((k) => dates[k]).map((k) => item(k, dates[k])));
+    mocks.authors.mockResolvedValue([]);
+  });
+
+  it("1 冊に URL が 2 つあっても 1 件。言及が片方の URL だけでも、もう片方の日付を含める", async () => {
+    mocks.mentions.mockResolvedValue([x]);
+    mocks.tx.materialClipStatus.findMany.mockResolvedValue([{ itemKey: "asset:t1", done: true, included: true }]);
+    const result = await listMaterialClipProgress(user, "magazine");
+    expect(result).toMatchObject({ total: 1, done: 1 });
+    expect(result.items).toMatchObject([
+      { itemKey: "asset:t1", itemTitle: "EX大衆 2026年7月号", itemDate: "2026-06-15", assetId: "t1", clipCount: 2, done: true, automatic: true },
+    ]);
+  });
+  it("本文アセットの無い URL (インスタ・動画) は URL のまま", async () => {
+    mocks.texts.clear();
+    mocks.mentions.mockResolvedValue([x, amazon]);
+    const result = await listMaterialClipProgress(user, "magazine");
+    expect(result.items.map((i) => i.itemKey).sort()).toEqual([amazon, x].sort());
+  });
+  it("本文アセットのキーで保存し、導出できない本文アセットのキーには書かない", async () => {
+    await setMaterialClipProgress(user, "magazine", "asset:t1", { done: true });
+    expect(mocks.tx.materialClipStatus.upsert.mock.calls[0][0].create).toMatchObject({ itemKey: "asset:t1", done: true });
+    await expect(setMaterialClipProgress(user, "magazine", "asset:forged", { done: true })).rejects.toThrow("素材が見つかりません");
+    // URL のキーは、本文アセットに属するなら受け付けない (2 重に数えないため)
+    await expect(setMaterialClipProgress(user, "magazine", amazon, { done: true })).rejects.toThrow("素材が見つかりません");
+  });
+  it("アセット詳細もボタンは 1 つ", async () => {
+    mocks.tx.materialClipStatus.findMany.mockResolvedValue([{ dataSourceKey: "magazine", itemKey: "asset:t1", done: true }]);
+    expect(await findMaterialClipProgressForAsset("t1", "internal")).toEqual([
+      { sourceKey: "magazine", itemKey: "asset:t1", itemDate: null, itemTitle: "EX大衆 2026年7月号", done: true },
+    ]);
+  });
 });
