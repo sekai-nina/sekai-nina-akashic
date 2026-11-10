@@ -100,6 +100,8 @@ export default async function FacesPage({ searchParams }: { searchParams: Promis
           faces={faces.map((f) => ({ ...f, predictedName: f.predictedEntityId ? nameOf.get(f.predictedEntityId) ?? "?" : "?" }))}
           members={members}
           mode={mode}
+          entityId={entityId}
+          page={page}
           canEdit={canEdit}
           nav={nav}
         />

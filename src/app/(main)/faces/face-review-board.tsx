@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Check, ExternalLink, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { FaceDecision } from "@/lib/domain/face-review";
-import { submitFaceReview } from "./actions";
+import { submitFaceReviewAndNext } from "./actions";
 
 type Face = {
   id: string;
@@ -30,20 +30,27 @@ const TILE = 112;
  * - 自動で付いた顔 (auto): ほとんどが本人なので、何も選ばなければ「推定どおり」。違う顔だけを選ぶ
  */
 export function FaceReviewBoard({
-  faces,
+  faces: initialFaces,
   members,
   mode,
+  entityId,
+  page,
   canEdit,
   nav,
 }: {
   faces: Face[];
   members: Member[];
   mode: "pending" | "auto";
+  /** 一覧の条件。保存したら同じ条件の次の顔を Action から受け取って差し替える */
+  entityId: string | null;
+  page: number;
   canEdit: boolean;
   /** [ ] で前後のメンバー、t で確認待ち ⇄ 自動で付いた顔 */
   nav: { prevMember: string | null; nextMember: string | null; otherMode: string };
 }) {
   const router = useRouter();
+  // 保存のたびに次の顔へ差し替える (画面全体は描き直さない)
+  const [faces, setFaces] = useState(initialFaces);
   const defaultChoice: Choice = useMemo(() => (mode === "pending" ? { action: "reject" } : { action: "confirm" }), [mode]);
   const toggledChoice: Choice = mode === "pending" ? { action: "confirm" } : { action: "reject" };
   const [choices, setChoices] = useState<Map<string, Choice>>(new Map());
@@ -96,14 +103,19 @@ export function FaceReviewBoard({
     });
     setMessage(null);
     startTransition(async () => {
-      const r = await submitFaceReview(decisions);
+      const r = await submitFaceReviewAndNext(decisions, { mode, entityId, page });
       if (!r.ok) {
         setMessage(`保存できませんでした: ${r.error}`);
         return;
       }
+      const nameOf = new Map(members.map((m) => [m.id, m.name]));
+      setFaces(r.next.map((f) => ({ ...f, predictedName: f.predictedEntityId ? nameOf.get(f.predictedEntityId) ?? "?" : "?" })));
+      setChoices(new Map());
+      setCursor(0);
+      setPicker(null);
       setMessage(`${r.result.updated} 顔を保存しました (タグ +${r.result.tagsAdded} / -${r.result.tagsRemoved})`);
     });
-  }, [canEdit, saving, faces, choiceOf]);
+  }, [canEdit, saving, faces, choiceOf, mode, entityId, page, members]);
 
   // キーボード
   useEffect(() => {
@@ -177,6 +189,10 @@ export function FaceReviewBoard({
 
   const focused = faces[cursor];
   const names = [...new Set(faces.map((f) => f.predictedName))];
+
+  if (faces.length === 0) {
+    return <p className="text-sm text-slate-500 py-12 text-center">{message ? `${message}。` : ""}この条件の顔はもうありません。</p>;
+  }
 
   return (
     <div className="flex gap-4 items-start">

@@ -6,6 +6,8 @@ import { requireRole } from "@/lib/auth/require-role";
 import { invalidateAssetList } from "@/lib/cache";
 import {
   FACE_REVIEW_CACHE_TAG,
+  listReviewFaces,
+  type ReviewFace,
   FaceReviewInputError,
   REVIEW_MAX_DECISIONS,
   reviewFaces,
@@ -36,6 +38,37 @@ export async function submitFaceReview(input: unknown): Promise<ReviewActionResu
     // (クライアントから描き直しを頼むと、もう 1 往復増える。docs/performance.md)
     refresh();
     return { ok: true, result };
+  } catch (err) {
+    if (err instanceof FaceReviewInputError) return { ok: false, error: err.message };
+    throw err;
+  }
+}
+
+const View = z.object({
+  mode: z.enum(["pending", "auto"]),
+  entityId: z.string().min(1).nullable(),
+  page: z.number().int().min(1),
+});
+
+export type ReviewAndNextResult = { ok: true; result: FaceReviewResult; next: ReviewFace[] } | { ok: false; error: string };
+
+/**
+ * 顔の確認の画面用: 保存して、同じ条件の次の 1 ページ分の顔を返す。
+ * 画面全体を描き直さない (refresh を呼ばない)。描き直すと一覧とメンバーごとの数を全部引き直すまで
+ * 「保存中」のまま数秒待たされていた。保存した顔は条件 (status) から外れるので、同じページ番号で引けば次の顔になる。
+ * メニューの数は古いまま (次に画面を開いたとき裏で数え直した値になる)。
+ */
+export async function submitFaceReviewAndNext(input: unknown, view: unknown): Promise<ReviewAndNextResult> {
+  const user = await requireRole(["admin", "member"]);
+  const parsed = Decisions.safeParse(input);
+  const v = View.safeParse(view);
+  if (!parsed.success || !v.success) return { ok: false, error: "送った内容の形が違います" };
+  try {
+    const result = await reviewFaces(user, parsed.data);
+    if (result.tagsAdded > 0 || result.tagsRemoved > 0) invalidateAssetList();
+    revalidateTag(FACE_REVIEW_CACHE_TAG, "max");
+    const next = await listReviewFaces(user.clearance, v.data.mode, v.data.entityId, v.data.page);
+    return { ok: true, result, next };
   } catch (err) {
     if (err instanceof FaceReviewInputError) return { ok: false, error: err.message };
     throw err;
