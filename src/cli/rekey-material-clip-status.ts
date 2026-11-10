@@ -14,7 +14,7 @@
 import type { ClearanceLevel, MaterialClipStatus } from "@prisma/client";
 import { prismaInternal } from "@/lib/db";
 import { isAboveClearance } from "@/lib/classification";
-import { MATERIAL_SOURCE_KEYS, TEXT_ASSET_KEY_PREFIX } from "@/lib/clip-progress/material-items";
+import { MATERIAL_SOURCE_KEYS, TEXT_ASSET_KEY_PREFIX, textAssetIdOfKey, textAssetKey } from "@/lib/clip-progress/material-items";
 import { urlMaterials } from "@/lib/domain/material-clip-progress";
 
 const APPLY = process.argv.includes("--apply");
@@ -46,20 +46,27 @@ async function main() {
         where: { dataSourceKey: source.key, itemKey: { in: [...moves.keys()] } },
       });
       const existingByKey = new Map(existing.map((e) => [e.itemKey, e]));
+      // 移した先の本文アセットの機密も継承する (アプリの保存と同じく、状態行は素材より低い機密にしない)
+      const targets = await tx.asset.findMany({
+        where: { id: { in: [...moves.keys()].flatMap((k) => textAssetIdOfKey(k) ?? []) } },
+        select: { id: true, classification: true },
+      });
+      const targetClassification = new Map(targets.map((t) => [textAssetKey(t.id), t.classification]));
       console.log(`${source.key}: ${rows.length} 行のうち ${rows.length - unchanged} 行を ${moves.size} 件の本文アセットへ移す (URL のまま ${unchanged} 行)`);
 
       for (const [target, olds] of moves) {
         const keep = existingByKey.get(target);
         const all = keep ? [keep, ...olds] : olds;
-        const classification = all.map((r) => r.classification)
-          .reduce((max: ClearanceLevel, c) => (isAboveClearance(c, max) ? c : max), all[0].classification);
+        const classification = [source.classification, targetClassification.get(target), ...all.map((r) => r.classification)]
+          .filter((c): c is ClearanceLevel => !!c)
+          .reduce((max, c) => (isAboveClearance(c, max) ? c : max));
         const latest = [...all].sort((x, y) => y.updatedAt.getTime() - x.updatedAt.getTime())[0];
         const data = {
           itemKey: target, done: all.some((r) => r.done), included: all.some((r) => r.included),
           classification, updatedById: latest.updatedById,
         };
         const [first, ...rest] = keep ? [keep, ...olds] : olds;
-        console.log(`  ${olds.map((o) => o.itemKey).join(", ")} → ${target}${keep ? " (既存の行にまとめる)" : ""} 済=${data.done}`);
+        console.log(`  ${olds.map((o) => o.itemKey).join(", ")} → ${target}${keep ? " (既存の行にまとめる)" : ""} 済=${data.done} 機密=${classification}`);
         if (!APPLY) continue;
         // 消すのは同じ本文アセットにまとめた残りの行だけ (id で指定)
         const restIds = rest.map((r) => r.id);

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { isMaterialSourceKey } from "@/lib/clip-progress/material-items";
+import { isMaterialSourceKey, textAssetIdOfKey } from "@/lib/clip-progress/material-items";
 import {
   MATERIAL_AUTHOR_FILTERS, MaterialProgressInputError, listMaterialClipProgress, type MaterialAuthorFilter,
 } from "@/lib/domain/material-clip-progress";
@@ -53,7 +53,7 @@ export default async function MaterialProgressPage({ params, searchParams }: {
             <div className="min-w-0 flex-1">
               <div className="break-words text-sm font-medium">
                 {sourceKey === "talk" ? <Link className="text-indigo-700 hover:underline" href={`/progress/materials/talk/${item.itemKey}`}>{item.itemTitle || item.itemKey}</Link>
-                  : item.assetId ? <Link className="text-indigo-700 hover:underline" href={`/assets/${item.assetId}`}>{item.itemTitle || item.itemKey}</Link>
+                  : item.assetId || textAssetIdOfKey(item.itemKey) ? <Link className="text-indigo-700 hover:underline" href={`/assets/${item.assetId ?? textAssetIdOfKey(item.itemKey)}`}>{item.itemTitle || item.itemKey}</Link>
                   : item.articleShortId ? <Link className="text-indigo-700 hover:underline" href={`/articles/${item.articleShortId}`}>{item.itemTitle}</Link>
                     : <a className="text-indigo-700 hover:underline" href={/^https?:\/\//.test(item.itemKey) ? item.itemKey : undefined} target="_blank" rel="noreferrer">{item.itemTitle || item.itemKey}</a>}
               </div>

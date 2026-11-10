@@ -101,11 +101,11 @@ async function urlsForKeys(tx: TransactionClient, source: DataSource, keys: stri
  * 別の URL (雑誌の Amazon と X の告知など) も引き足し、日付をそろえる。
  */
 async function deriveUrlMaterials(
-  tx: TransactionClient, source: DataSource, seedUrls: string[],
+  tx: TransactionClient, source: DataSource, seedUrls: string[], { siblings: expand = true } = {},
 ): Promise<{ items: MaterialItem[]; byUrl: Map<string, UrlMaterial> }> {
   const byUrl = await urlMaterials(tx, source, seedUrls);
   const keys = new Set([...byUrl.values()].map((g) => g.key));
-  const siblings = (await urlsForKeys(tx, source, [...keys].filter((k) => textAssetIdOfKey(k))))
+  const siblings = !expand ? [] : (await urlsForKeys(tx, source, [...keys].filter((k) => textAssetIdOfKey(k))))
     .filter((u) => !byUrl.has(u));
   if (siblings.length) {
     for (const [url, group] of await urlMaterials(tx, source, siblings)) if (keys.has(group.key)) byUrl.set(url, group);
@@ -119,7 +119,9 @@ async function deriveMaterialsByKeys(tx: TransactionClient, source: DataSource, 
   if (!keys.length) return [];
   if (source.itemRule === "talk_date") return (await deriveItems(tx, source, { onlyKeys: keys })).map(toMaterial);
   const wanted = new Set(keys);
-  const { items } = await deriveUrlMaterials(tx, source, await urlsForKeys(tx, source, keys));
+  // urlsForKeys が本文アセットの URL を全部返すので、同じ本文アセットの別 URL を引き直さない。
+  // URL のキーが本文アセットに属する場合は、まとめた後のキーが違うので下で落ちる (2 重に数えない)
+  const { items } = await deriveUrlMaterials(tx, source, await urlsForKeys(tx, source, keys), { siblings: false });
   return items.filter((i) => wanted.has(i.itemKey));
 }
 

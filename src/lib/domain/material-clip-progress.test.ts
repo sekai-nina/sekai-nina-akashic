@@ -271,6 +271,28 @@ describe("URL 系の素材は本文アセットごとに数える (#429)", () =>
     // URL のキーは、本文アセットに属するなら受け付けない (2 重に数えないため)
     await expect(setMaterialClipProgress(user, "magazine", amazon, { done: true })).rejects.toThrow("素材が見つかりません");
   });
+  it("ページ画像は同じ URL の本文アセットに含め、クリップ数を足し合わせる", async () => {
+    const page = { ...issue, id: "img1", kind: "image", title: "p1", sourceRecords: [{ url: x, title: "EX大衆 X 6/17 画像", publisher: "EX大衆" }] };
+    mocks.assetIds = [{ id: "img1" }, { id: "t1" }];
+    mocks.tx.asset.findMany.mockResolvedValue([page, issue]);
+    mocks.tx.dossierItem.groupBy.mockResolvedValue([{ assetId: "t1", _count: { _all: 2 } }, { assetId: "img1", _count: { _all: 5 } }]);
+    mocks.mentions.mockResolvedValue([x]);
+    const result = await listMaterialClipProgress(user, "magazine");
+    expect(result.items).toMatchObject([{ itemKey: "asset:t1", assetId: "t1", clipCount: 7 }]);
+  });
+  it("ブログの本人著・言及も本文アセットのキーで分ける", async () => {
+    const blogUrl = "https://blog.test/self";
+    const otherUrl = "https://blog.test/other";
+    mocks.tx.dataSource.findUnique.mockResolvedValue(source);
+    mocks.texts.set(blogUrl, { id: "self", title: "本人のブログ" }).set(otherUrl, { id: "other", title: "他メンバーのブログ" });
+    mocks.derive.mockImplementation(async (_tx, _source, opts?: { onlyKeys?: string[] }) =>
+      (opts?.onlyKeys ?? []).filter((k) => k === blogUrl || k === otherUrl).map((k) => item(k)));
+    mocks.authors.mockResolvedValue([blogUrl]);
+    mocks.mentions.mockResolvedValue([otherUrl]);
+    const all = await listMaterialClipProgress(user, "blog");
+    expect(all.authorTotals).toEqual({ all: 2, self: 1, others: 1 });
+    expect((await listMaterialClipProgress(user, "blog", { author: "self" })).items.map((i) => i.itemKey)).toEqual(["asset:self"]);
+  });
   it("アセット詳細もボタンは 1 つ", async () => {
     mocks.tx.materialClipStatus.findMany.mockResolvedValue([{ dataSourceKey: "magazine", itemKey: "asset:t1", done: true }]);
     expect(await findMaterialClipProgressForAsset("t1", "internal")).toEqual([
