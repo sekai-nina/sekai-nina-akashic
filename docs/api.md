@@ -1382,15 +1382,18 @@ body は省略可（`subject` を省くと既定のコミットメッセージ�
 |---|---|---|---|
 | `after` | string | - | 前のページの `next` |
 | `limit` | number | 1000 | 1〜1000 |
+| `updatedAfter` | ISO8601 | - | 付けると**差分**を返す（#420）。下を参照 |
 
 ```json
 {
   "items": [
-    { "id": "cm...", "assetId": "cm...", "entityId": "cm...", "modelVersion": "buffalo_l@1", "embedding": "<base64>", "reviewedAt": "2026-11-10T03:00:00.000Z" }
+    { "id": "cm...", "assetId": "cm...", "entityId": "cm...", "modelVersion": "buffalo_l@1", "embedding": "<base64>", "reviewedAt": "2026-11-10T03:00:00.000Z", "updatedAt": "2026-11-10T03:00:00.000Z" }
   ],
   "next": null
 }
 ```
+
+**差分（`updatedAfter`）**: その時刻より後に変わった、人が見た顔（確定・却下）を `(updatedAt, id)` の昇順で返す。`next` は `"<updatedAt>|<id>"` の形で、そのまま `after` に渡す。正解が無い顔（メンバー以外・誰か分からない。判断し直して手本から外れた顔を含む）は `entityId: null`・`embedding: null` で返すので、呼ぶ側は手本から外す。人が判断を変えたときと、推論し直しで判断を引き継いだとき（#386。特徴量の差し替え）に `updatedAt` が進む。アセットごと消えた顔は差分に出ないので、ワーカーは 1 日 1 回全部を取り直す
 
 ### GET /faces/appearances
 

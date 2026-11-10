@@ -333,7 +333,7 @@ export async function listFaceReferences(clearance: string, after: string | unde
       where: { status: { in: ["confirmed", "rejected"] }, confirmedEntityId: { not: null }, ...(after ? { id: { gt: after } } : {}) },
       orderBy: { id: "asc" },
       take: limit,
-      select: { id: true, assetId: true, confirmedEntityId: true, embedding: true, modelVersion: true, reviewedAt: true },
+      select: { id: true, assetId: true, confirmedEntityId: true, embedding: true, modelVersion: true, reviewedAt: true, updatedAt: true },
     })
   );
   return rows.map((r) => ({
@@ -343,6 +343,46 @@ export async function listFaceReferences(clearance: string, after: string | unde
     modelVersion: r.modelVersion,
     embedding: Buffer.from(r.embedding).toString("base64"),
     reviewedAt: r.reviewedAt,
+    // 差分を取り始める時刻に使う (#420)
+    updatedAt: r.updatedAt,
+  }));
+}
+
+/**
+ * 参照の差分 (#420): `updatedAfter` より後に変わった、人が見た顔。`(updatedAt, id)` の昇順。
+ * ワーカーは初回だけ listFaceReferences で全部取り、以降はこれで差分だけを取って手本を差し替える。
+ * 正解が null の行 (メンバー以外・誰か分からない) も `entityId: null` で返す。判断し直して手本から外れた顔を、
+ * 呼ぶ側が消せるように (その行には特徴量を付けない)。
+ * 確定・却下の行は人が判断を変えたときと、推論し直しで判断を引き継いだとき (#386。枠・特徴量の差し替え) に updatedAt が進む
+ */
+export async function listFaceReferenceChanges(
+  clearance: string,
+  updatedAfter: Date,
+  cursor: { updatedAt: Date; id: string } | null,
+  limit: number
+) {
+  const rows = await withClearance(clearance, (tx) =>
+    tx.faceDetection.findMany({
+      where: {
+        status: { in: ["confirmed", "rejected"] },
+        updatedAt: { gt: updatedAfter },
+        ...(cursor
+          ? { OR: [{ updatedAt: { gt: cursor.updatedAt } }, { updatedAt: cursor.updatedAt, id: { gt: cursor.id } }] }
+          : {}),
+      },
+      orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
+      take: limit,
+      select: { id: true, assetId: true, confirmedEntityId: true, embedding: true, modelVersion: true, reviewedAt: true, updatedAt: true },
+    })
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    assetId: r.assetId,
+    entityId: r.confirmedEntityId,
+    modelVersion: r.modelVersion,
+    embedding: r.confirmedEntityId ? Buffer.from(r.embedding).toString("base64") : null,
+    reviewedAt: r.reviewedAt,
+    updatedAt: r.updatedAt,
   }));
 }
 

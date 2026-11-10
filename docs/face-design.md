@@ -94,7 +94,7 @@ pgvector は使わない。今は「似た顔を DB で検索する」場面が�
 | GET | `/faces/queue` | まだこのモデルで処理していない画像（処理済み・失敗として記録済みは出ない） |
 | GET | `/faces/assets/:id/original` | 元画像。`/api/drive-image` はログインのセッションが要るので別に持つ。4.4 MB 超は 413（Vercel の応答上限）で、ワーカーはサムネイルに落とす |
 | PUT | `/faces/assets/:id` | 1 枚の推論結果を書き込む |
-| GET | `/faces/references` | 参照に足す顔。**人が確定した顔だけ**（自動で付けた顔を返すと、間違いが参照に混ざって広がる） |
+| GET | `/faces/references` | 参照に足す顔。**人が確定した顔だけ**（自動で付けた顔を返すと、間違いが参照に混ざって広がる）。`updatedAfter` で差分だけ（#420。ワーカーは 10 分ごとに差分、1 日 1 回全部） |
 
 ハートビート（`POST /api/v1/jobs/:key/runs`）も `face_worker` のキーで送れる。ただしジョブ名が `omokage.` で始まるものだけ（#389。他の bot のジョブを偽れないように）。
 
