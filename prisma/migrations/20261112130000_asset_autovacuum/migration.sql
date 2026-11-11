@@ -1,0 +1,12 @@
+-- Asset の autovacuum を早める (#435)。
+--
+-- Asset は統計を取り始めてから一度も autovacuum されていなかった (2026-11-12: autovacuum_count 0、
+-- 死んだ行 13,872 / 生きている行 144,729)。既定の閾値は「行数の 20% + 50」(約 2.9 万行) で、
+-- cron が少しずつ書き換える Asset はなかなか届かない。vacuum されないと visibility map が埋まらず
+-- (all-visible 1,596 / 9,076 ページ)、Index Only Scan でも本体を読みに行く。
+-- Asset_thumbnail_pending_idx (20261112120000) を張っても Heap Fetches が 67,351 件出ていた。
+--
+-- 閾値を 2% (約 2,900 行) にして、死んだ行の掃除と visibility map の更新をこまめにさせる。
+-- 挿入だけの場合 (insert_scale_factor) も同じにする。設定を変えるだけで、テーブルは書き換えない。
+-- GRANT は要らない。
+ALTER TABLE "Asset" SET (autovacuum_vacuum_scale_factor = 0.02, autovacuum_vacuum_insert_scale_factor = 0.02);
