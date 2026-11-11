@@ -388,19 +388,40 @@ export async function runAllChecks(ctx: CheckContext): Promise<CheckRun[]> {
   const defs = await getCheckDefinitions();
   const started = Date.now();
   const runs: CheckRun[] = [];
+  const durations: { key: string; ms: number }[] = [];
   for (const def of defs) {
     const left = EVALUATION_BUDGET_MS - (Date.now() - started);
     if (left <= 0) {
       runs.push({ def, failure: "評価の時間切れ (予算内に順番が回らなかった)" });
       continue;
     }
+    const t = Date.now();
     try {
       runs.push({ def, outcome: await withTimeout(def.run(ctx), Math.min(CHECK_TIMEOUT_MS, left)) });
     } catch (e) {
       runs.push({ def, failure: e instanceof Error ? e.message : String(e) });
     }
+    durations.push({ key: def.key, ms: Date.now() - t });
   }
+  logRunSummary(runs, durations, Date.now() - started);
   return runs;
+}
+
+/**
+ * どのチェックが遅い・測れなかったかを Vercel のログに残す (#433)。
+ * /status には「N 件を測れず」しか出ず、どれが遅いかは後から分からなかったため。
+ * キーと所要時間・理由だけで、detail (記事名など) は出さない
+ */
+function logRunSummary(runs: CheckRun[], durations: { key: string; ms: number }[], totalMs: number) {
+  const slowest = [...durations]
+    .sort((a, b) => b.ms - a.ms)
+    .slice(0, 5)
+    .map((d) => `${d.key}=${d.ms}ms`)
+    .join(" ");
+  const failed = runs.filter((r) => r.failure).map((r) => `${r.def.key} (${r.failure})`);
+  const line = `[status] ${runs.length} 本 / 計 ${totalMs}ms / 遅い順: ${slowest}`;
+  if (failed.length) console.warn(`${line} / 測れず ${failed.length} 件: ${failed.join(", ")}`);
+  else console.log(line);
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
