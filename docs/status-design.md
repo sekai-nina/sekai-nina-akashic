@@ -62,7 +62,7 @@
 
 ## 4. 評価と通知（`src/lib/status/evaluate.ts`）
 
-- **Vercel Cron `*/15 * * * *` → `GET /api/cron/status`**（`vercel.json`）。`CRON_SECRET` の Bearer で保護し（定数時間比較）、未設定なら 503 で何もしない（fail-closed）。admin の「今すぐ評価」も同じ関数を呼ぶ。**直近 30 秒以内に評価済みなら何もしない**（cron と手動の重なりで二重通知しない）
+- **Vercel Cron `7,22,37,52 * * * *` → `GET /api/cron/status`**（`vercel.json`）。0・15・30・45 分の文字起こし・OCR の cron（最長 300 秒）と同じ時刻に走ると評価が遅れ、チェックが 15 秒の上限に当たって「評価そのもの」が注意と正常を往復したので、7 分ずらしてある（#433）。評価の最後に、所要時間の長い 5 本と測れなかったチェック（キーと理由）を `[status]` で始まる 1 行でログに出す。`CRON_SECRET` の Bearer で保護し（定数時間比較）、未設定なら 503 で何もしない（fail-closed）。admin の「今すぐ評価」も同じ関数を呼ぶ。**直近 30 秒以内に評価済みなら何もしない**（cron と手動の重なりで二重通知しない）
 - 全チェックを並列に走らせ、1 つの例外・タイムアウトは error として扱って他は続ける
 - 前回と同じ status なら `since` を引き継ぐ。定義から消えた key の行は消す
 - **通知の判定**（`decideNotification`）は**前回の status ではなく `notifiedStatus`（最後に通知できた status）と比べる**: ok/unknown → warn/error の第一報、warn ↔ error の変化、warn/error → ok の復旧、**warn/error のまま 24h 経過のリマインド**。unknown への遷移は出さない（トークン未設定などの構成の話）。`notify: false` のチェックは出さない

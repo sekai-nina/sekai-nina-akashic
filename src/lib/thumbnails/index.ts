@@ -9,6 +9,10 @@ import { uploadToR2, isR2Configured, getR2PublicUrl } from "@/lib/r2";
  * Drive 以外 (discord_url / external_url / local_none) は CLI が処理できないので含めない。
  * `R2_PUBLIC_URL` が空だと `startsWith: ""` が全件に一致して条件が壊れるので、呼び出し側は
  * `isR2Configured()` を先に見る。
+ *
+ * `/status` の件数は索引 `Asset_thumbnail_pending_idx` (storageProvider, kind, thumbnailUrl
+ * WHERE storageKey IS NOT NULL) の Index Only Scan で数える (#435)。条件の列を増やすと本体を読みに行き、
+ * DB のメモリに載っていないとき 8〜9 秒に戻るので、増やすなら索引も張り直す。
  */
 export function thumbnailPendingWhere(): Prisma.AssetWhereInput {
   const publicUrl = process.env.R2_PUBLIC_URL ?? "";

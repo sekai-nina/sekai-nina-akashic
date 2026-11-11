@@ -1,0 +1,16 @@
+-- /status の「サムネイル未生成」(process.thumbnails_pending) 用の索引 (#435)。
+--
+-- `thumbnailPendingWhere()` は kind IN (image, video) / storageProvider = gdrive / storageKey IS NOT NULL /
+-- (thumbnailUrl IS NULL OR NOT LIKE '<R2_PUBLIC_URL>%')。NOT LIKE は索引で絞れないので、これまでは
+-- kind の索引から画像・動画 約 9 万行を拾い、Asset の本体を約 9,000 ページ読んでいた。DB のメモリに
+-- 載っていないと 8〜9 秒かかり、チェック 1 本の上限 15 秒に近かった (2026-11-12 の評価で 8,982ms)。
+--
+-- 条件の列をすべて索引に持たせ、Index Only Scan で数える (使い捨てのローカル Postgres で 6,201 → 1,076 ページ)。
+-- 部分索引の条件を storageKey IS NOT NULL だけにしているのは、Prisma が enum を
+-- `CAST($n::text AS "StorageProvider")` のパラメータで送るため。storageProvider = 'gdrive' を条件に
+-- 入れると、プランナが部分索引の条件に当てはまると証明できず、索引が使われない (同じ検証で確認)。
+--
+-- schema.prisma では WHERE 付きの索引を書けないので migration だけで張る。`migrate diff` の出力に
+-- この索引の DROP が出ても捨てる。新しいテーブルではないので GRANT は要らない。Asset (約 14.5 万行) に
+-- 普通の CREATE INDEX を張るので、数秒だけ書き込みが待たされる。
+CREATE INDEX "Asset_thumbnail_pending_idx" ON "Asset"("storageProvider", "kind", "thumbnailUrl") WHERE "storageKey" IS NOT NULL;
