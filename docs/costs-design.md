@@ -10,6 +10,7 @@
 | akashic `src/lib/meetgreet/sketch.ts` | OpenAI `gpt-image-2.5-sunburst` | ミーグリのスケッチ生成 | `akashic.meetgreet_sketch` |
 | akashic `src/lib/article-workflow/llm.ts` | Anthropic `claude-opus-5` | 記事本文の生成（スナップ等、#171） | `akashic.article_body` |
 | akashic `src/lib/ocr/claude.ts` | Anthropic `claude-opus-5-5` | 画像の OCR（雑誌のページ等、#379） | `akashic.ocr` |
+| akashic `src/lib/discoveries/llm.ts` | Anthropic `claude-opus-5-5` | 今日の発見の材料・できあがる味・確信度の下書き（#432） | `akashic.discovery` |
 | bot `blog_watch/discovery.py` | OpenAI `gpt-5.4-mini` | 今日の発見の抽出 | `bot.discovery` |
 | bot `ocr/ai_provider.py` | OpenAI `gpt-5.2` | 画像 OCR | `bot.ocr` |
 | bot `github_sync/ai/openai_impl.py` | OpenAI `gpt-4o` | メッセージ解析 | `bot.github_sync` |

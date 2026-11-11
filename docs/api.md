@@ -93,6 +93,7 @@ APIキーは `pnpm cli:keygen <user-email> <key-name> [permissions]` で発行�
 | PUT | `/faces/assets/:id` | face_worker | 顔認識: 1 枚の推論結果を書き込む（閾値以上は人物タグを自動で付ける） |
 | GET | `/faces/references` | face_worker | 顔認識: 参照に足す顔（人が確定した顔だけ） |
 | GET | `/faces/appearances` | read | 顔認識: その人物が写っている画像のうち、指定時刻以降に登録されたもの（書き手が本人のものは除く） |
+| GET | `/discoveries` | read | 今日の発見の全件（通し番号・材料・できあがる味・確信度つき） |
 | GET | `/insta/targets` | 有効なキー | insta-watch が見張るハンドルの一覧 |
 | GET / POST | `/insta/account` | 有効なキー / write | story 取得に使うアカウントの状態 |
 | GET | `/insta/jobs` | read | story ジョブ一覧（iPad ワーカー） |
@@ -2630,3 +2631,54 @@ for item in results["items"]:
 `/dossiers/[id]/article` は一般ドシエに加え、ミーグリ・ライブの記事プレビュー／保存にも対応する。生成対象はServer Actionがドシエから解決し、ミーグリ・ライブはそれぞれの既存記事に追記する。開催情報・レポ・スケッチの編集は既存画面に残す。
 
 これは画面の入口の統一であり、REST / MCP の契約は変更しない。既存のミーグリ・ライブの記事APIはそのまま使用できる。一般ドシエ向けAPIをミーグリ・ライブへ転用しない。詳細は [article-workflow-phase2-design.md](./article-workflow-phase2-design.md) を参照。
+
+## 今日の発見 (Discoveries)
+
+坂井新奈ブログの「今日の発見」を、発見 1 件ごとに返す（#432）。1 本のブログに発見が 2 つあれば 2 件。サイトの「今日の発見ノート」と一覧記事がビルド時に読む。
+行は LLM の下書き（`pnpm cli:draft-discoveries`）が作り、人が確かめて直す。読める範囲はキーの持ち主のクリアランスで決まる（RLS。親アセットの classification に従う）。
+
+### GET /discoveries
+
+全件を古い順に返す。数百件なのでページングしない。
+
+**レスポンス:**
+
+```json
+{
+  "items": [
+    {
+      "no": 24,
+      "id": "cm…",
+      "assetId": "cm…",
+      "position": 0,
+      "heading": "充電100%のときより78%くらいのほうが安心する",
+      "excerpt": "充電100％のときより、78％くらいのほうがなんか安心する！",
+      "isFood": false,
+      "ingredients": [],
+      "result": null,
+      "confidence": "certain",
+      "reviewed": false,
+      "date": "2025-10-19",
+      "blogTitle": "坂井新奈ブログ「きょう！」",
+      "url": "https://www.hinatazaka46.com/s/official/diary/detail/…"
+    }
+  ],
+  "total": 101,
+  "foods": { "はちみつ": "seasoning", "バナナ": "fruit", "プリン": "sweet" }
+}
+```
+
+| フィールド | 説明 |
+|---|---|
+| `no` | 通し番号（1 始まり）。ブログの日付（JST）→ 公式ブログの記事番号 → ブログ内の順（`position`）で振る。保存していないので、並びが変われば振り直る |
+| `heading` | 一覧に出す見出し。発見が 1 件の回は bot の見出し（`annotation`）と同じ |
+| `excerpt` | ブログ本文のうち、その発見の部分（改行込み） |
+| `isFood` | 食べ物の発見か。`false` なら `ingredients` は空、`result` は `null` |
+| `ingredients` | 材料。本人が書いたとおりの名前で、表記ゆれだけ揃える |
+| `result` | 「〇〇になる」型の発見のできあがる味（例: バナナ＋マヨネーズ → `プリン`）。それ以外は `null` |
+| `confidence` | `certain`（言い切り）/ `maybe`（かも）/ `hearsay`（らしい） |
+| `reviewed` | 人が確かめたか。`false` は LLM の下書きのまま |
+| `date` | ブログの日付（JST, `YYYY-MM-DD`） |
+| `url` | 公式ブログの URL。無ければ `null` |
+| `foods` | 材料・できあがる味の名前 → 分類。`fruit`（果物）/ `vegetable`（野菜）/ `sweet`（甘いもの）/ `dish`（主食・おかず）/ `dairy`（乳製品）/ `seasoning`（調味料）/ `drink`（飲み物）。返した発見に出てくる名前だけ。分類がまだの名前は入らない |
+

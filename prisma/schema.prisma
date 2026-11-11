@@ -301,6 +301,8 @@ model Asset {
   anniversaries     Anniversary[]
   faceDetections    FaceDetection[]
   faceScans         FaceScan[]
+  discoveries       Discovery[]
+  discoveryDraftAttempt DiscoveryDraftAttempt?
   tiktokVideo       TiktokVideo?
 
   @@index([sha256])
@@ -2158,4 +2160,89 @@ model FaceScan {
 
   @@id([assetId, modelVersion])
   @@index([modelVersion])
+}
+
+/// 今日の発見 (#432)。坂井新奈ブログの「今日の発見」コーナーを、発見 1 件ごとに 1 行で持つ。
+/// 1 本のブログに発見が 2 つあれば 2 行 (position 0, 1)。サイトの「今日の発見ノート」と一覧記事の正。
+/// 保護テーブル。自前の classification は持たず、親 Asset の classification で RLS を効かせる (AssetEntity と同じ形)。
+/// 行は LLM の下書き (`pnpm cli:draft-discoveries`・15 分 cron) が作り、人が確かめて直す。
+/// **reviewedAt が立っている行は自動処理が上書きしない。**
+model Discovery {
+  id          String              @id @default(cuid())
+  assetId     String
+  asset       Asset               @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  /// ブログの中での順番 (0 始まり)。通し番号はブログの日付・記事番号・この順で振る (保存しない)
+  position    Int
+  /// 一覧に出す見出し (例「ケーキとプリンを一緒に食べると革命」)。発見が 1 件の回は annotation と同じ
+  heading     String
+  /// ブログ本文のうち、この発見の部分 (改行込み)。発見が 1 件の回は extracted と同じ
+  excerpt     String
+  /// 食べ物の発見か (「充電は 78% のほうが安心する」は false)。false なら材料・できあがりは空
+  isFood      Boolean
+  /// 材料。本人が書いたとおりの名前で、表記ゆれ (チョコ / チョコレート) だけ揃える
+  ingredients String[]
+  /// 「〇〇になる」型の発見のできあがる味 (バナナ＋マヨネーズ → プリン)。それ以外は null
+  result      String?
+  confidence  DiscoveryConfidence
+  /// 下書きした LLM のモデル。人が作った行は null
+  draftModel  String?
+  /// 人が確かめた (直した) 時刻。立っていれば自動処理は触らない
+  reviewedAt  DateTime?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  /// assetId で引く索引も兼ねる (先頭列)
+  @@unique([assetId, position])
+}
+
+/// 今日の発見の下書きを cron が試した記録 (#432)。ブログ 1 本に 1 行。
+/// Claude が下書きを返さない・失敗し続けるブログを 15 分ごとにやり直し続けないよう、試した回数を数えて上限で止める
+/// (`FaceScan` と同じく「失敗も記録して列から外す」)。行ができたブログは使わない。やり直すときは行を消すか CLI で流す。
+/// 保護テーブル。自前の classification は持たず、親 Asset の classification で RLS を効かせる
+model DiscoveryDraftAttempt {
+  assetId     String   @id
+  asset       Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  attempts    Int      @default(0)
+  /// 最後に失敗した理由 (画面に出してよい文言だけ。API の生のエラーは入れない)。成功したら null
+  lastError   String?
+  lastTriedAt DateTime @default(now())
+}
+
+/// 今日の発見の確信度 (#432)
+enum DiscoveryConfidence {
+  /// 言い切り (「革命です」「美味しい」)
+  certain
+  /// かも (「美味しい可能性✨️」「〜な予感」)
+  maybe
+  /// らしい (人から聞いた・試していない「ジューシーさが増すらしい!」)
+  hearsay
+}
+
+/// 今日の発見の食べ物の分類 (#432)。材料 (`Discovery.ingredients`) とできあがる味 (`Discovery.result`) の名前ごとに 1 行。
+/// サイトの「今日の発見ノート」で、材料・なりたい味のチップを分類の見出しごとに並べるのに使う。
+/// 非保護テーブル (`Entity` と同じ扱い)。中身は「はちみつ → 調味料」のような一般の食べ物の名前と分類だけで、
+/// どのブログに出たかは持たない。行は LLM の下書きが作り、**分類が付いている名前は自動処理が上書きしない**
+model DiscoveryFood {
+  name      String       @id
+  category  FoodCategory
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+}
+
+/// 今日の発見の食べ物の分類 (#432)。並びはサイトの見出しの順
+enum FoodCategory {
+  /// 果物 (りんご・みかん・いちご)
+  fruit
+  /// 野菜・いも・豆 (きゅうり・じゃがいも・枝豆)
+  vegetable
+  /// 甘いもの (お菓子・デザート・アイス・あんこ)
+  sweet
+  /// 主食・おかず (パン・そば・唐揚げ・刺身・海苔)
+  dish
+  /// 乳製品・卵 (ヨーグルト・チーズ・牛乳)
+  dairy
+  /// 調味料・油・香辛料 (醤油・はちみつ・塩・オリーブオイル)
+  seasoning
+  /// 飲み物 (コーラ・ミルクティー・コーヒー)
+  drink
 }
