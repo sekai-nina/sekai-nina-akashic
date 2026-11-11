@@ -245,6 +245,7 @@ model Asset {
   storageProvider    StorageProvider @default(local_none)
   storageKey         String?
   storageUrl         String?
+  /// /status のサムネイル未生成チェック用に部分索引 (Asset_thumbnail_pending_idx) を migration で張っている (Prisma では書けない)
   thumbnailUrl       String?
   messageBodyPreview String?
   classification     ClearanceLevel  @default(internal)
