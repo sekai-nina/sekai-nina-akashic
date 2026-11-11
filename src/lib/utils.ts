@@ -111,6 +111,17 @@ export function formatDate(date: Date | string | null, includeTime = false): str
   });
 }
 
+/** 今日の発見の食べ物の分類 (`FoodCategory`, #432) */
+export const FOOD_CATEGORY_LABELS: Record<string, string> = {
+  fruit: "果物",
+  vegetable: "野菜",
+  sweet: "甘いもの",
+  dish: "主食・おかず",
+  dairy: "乳製品",
+  seasoning: "調味料",
+  drink: "飲み物",
+};
+
 export const ASSET_KIND_LABELS: Record<string, string> = {
   image: "画像",
   video: "動画",
