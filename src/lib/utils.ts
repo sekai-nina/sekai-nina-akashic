@@ -122,6 +122,13 @@ export const FOOD_CATEGORY_LABELS: Record<string, string> = {
   drink: "飲み物",
 };
 
+/** 今日の発見の確信度 (`DiscoveryConfidence`, #432) */
+export const DISCOVERY_CONFIDENCE_LABELS: Record<string, string> = {
+  certain: "言い切り",
+  maybe: "かも",
+  hearsay: "らしい",
+};
+
 export const ASSET_KIND_LABELS: Record<string, string> = {
   image: "画像",
   video: "動画",
