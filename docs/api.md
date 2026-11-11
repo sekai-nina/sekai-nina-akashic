@@ -2658,7 +2658,7 @@ for item in results["items"]:
       "result": null,
       "confidence": "certain",
       "reviewed": false,
-      "date": "2026-02-14",
+      "date": "2025-10-19",
       "blogTitle": "坂井新奈ブログ「きょう！」",
       "url": "https://www.hinatazaka46.com/s/official/diary/detail/…"
     }
