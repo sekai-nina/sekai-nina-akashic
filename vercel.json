@@ -35,6 +35,10 @@
     {
       "path": "/api/cron/discoveries",
       "schedule": "11,26,41,56 * * * *"
+    },
+    {
+      "path": "/api/cron/discovery-icons",
+      "schedule": "3,18,33,48 * * * *"
     }
   ]
 }

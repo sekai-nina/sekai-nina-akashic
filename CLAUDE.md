@@ -200,7 +200,7 @@ src/
 | Cloudflare R2 | サムネイル等 | S3 互換。`isR2Configured()` で任意化 |
 | Google Drive | 画像ソース | OAuth2（個人）/ サービスアカウント（共有ドライブ）の 2 方式 |
 | X (Twitter) | recent search | 有料プラン必須 |
-| OpenAI | 口コミ抽出（Structured Outputs） | 利用量は `/costs` に自己申告する |
+| OpenAI | 口コミ抽出（Structured Outputs）・ミーグリのスケッチ・今日の発見の食べ物アイコン（画像 API） | 利用量は `/costs` に自己申告する |
 | Groq | 音声・動画の文字起こし（whisper-large-v3） | `internal` 以下だけ送る。利用量は課金秒数で `/costs` に自己申告 |
 
 環境変数は `.env.example` 参照。必須は `DATABASE_URL` / `DIRECT_URL` / `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` / `SUPABASE_SECRET_KEY`。
@@ -212,7 +212,7 @@ src/
 - **Web: Vercel**。`vercel.json` で **region `hnd1` 固定**（Supabase ap-northeast-1 とのコロケーション。既定の iad1 だとページ読み込みが 5-8 秒かかった）
 - **CI**: `.github/workflows/ci.yml` が push to `main` で `pnpm typecheck` を回すだけ（Discord bot は撤去済み）
 - **PR の Discord 通知**: `.github/workflows/pr-discord.yml` が PR の作成・下書き解除・マージを #akashic に流す（secret `DISCORD_WEBHOOK_URL`、Webhook 名「Akashic PR」）
-- **Vercel Cron**: `vercel.json` の `7,22,37,52 * * * *` が `GET /api/cron/status`（他の 15 分 cron と重ねない。#433）、`*/10 * * * *` が `GET /api/cron/insta-jobs`（story ジョブの失効回収と再送）、`*/15 * * * *` が `GET /api/cron/nina-mentions`（本文が新奈に言及しているアセットに `Asset.mentionsNina` を付け外し）、`*/15 * * * *` が `GET /api/cron/transcribe`（坂井新奈のトークを Groq で文字起こし。`docs/transcribe-design.md`）、`*/15 * * * *` が `GET /api/cron/ocr`（子アセット一覧の「選択して OCR」で頼まれた画像だけを Claude で OCR。`docs/ocr-design.md`）、`11,26,41,56 * * * *` が `GET /api/cron/discoveries`（登録から 30 日以内の今日の発見のブログに、発見ごとの行 (`Discovery`) と食べ物の分類を Claude で下書きする。3 回試してだめなブログは `DiscoveryDraftAttempt` に残して外し、`/status` に出す。他の 15 分 cron と重ねない。#432）、`0 3 * * *`（UTC = 12:00 JST）が `GET /api/cron/costs`、`0 0 * * *`（09:00 JST）が `GET /api/cron/mentions` を呼ぶ（すべて `CRON_SECRET` 必須。未設定なら 503 で何もしない。認証は `src/lib/cron/auth.ts`）
+- **Vercel Cron**: `vercel.json` の `7,22,37,52 * * * *` が `GET /api/cron/status`（他の 15 分 cron と重ねない。#433）、`*/10 * * * *` が `GET /api/cron/insta-jobs`（story ジョブの失効回収と再送）、`*/15 * * * *` が `GET /api/cron/nina-mentions`（本文が新奈に言及しているアセットに `Asset.mentionsNina` を付け外し）、`*/15 * * * *` が `GET /api/cron/transcribe`（坂井新奈のトークを Groq で文字起こし。`docs/transcribe-design.md`）、`*/15 * * * *` が `GET /api/cron/ocr`（子アセット一覧の「選択して OCR」で頼まれた画像だけを Claude で OCR。`docs/ocr-design.md`）、`11,26,41,56 * * * *` が `GET /api/cron/discoveries`（登録から 30 日以内の今日の発見のブログに、発見ごとの行 (`Discovery`) と食べ物の分類を Claude で下書きする。3 回試してだめなブログは `DiscoveryDraftAttempt` に残して外し、`/status` に出す。他の 15 分 cron と重ねない。#432）、`3,18,33,48 * * * *` が `GET /api/cron/discovery-icons`（今日の発見の食べ物のうちアイコンがまだの名前に、OpenAI の画像 API でイラストのアイコンを 4 枚ずつ作る。3 回作れない名前は外して `/status` に出す。#436）、`0 3 * * *`（UTC = 12:00 JST）が `GET /api/cron/costs`、`0 0 * * *`（09:00 JST）が `GET /api/cron/mentions` を呼ぶ（すべて `CRON_SECRET` 必須。未設定なら 503 で何もしない。認証は `src/lib/cron/auth.ts`）
 - `instrumentation.ts` が起動時に Prisma を事前接続（pooler の ~800ms コールドコネクト回避）
 
 ## ドキュメント

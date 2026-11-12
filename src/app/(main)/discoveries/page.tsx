@@ -9,6 +9,9 @@ import { DiscoveryEditor } from "./discovery-editor";
 import { FoodsTable } from "./foods-table";
 import { RetryButton } from "./retry-button";
 
+// 「材料と分類」のアイコンの作り直し (Server Action) は OpenAI の画像生成で 15〜20 秒、最悪 90 秒かかる
+export const maxDuration = 300;
+
 type Tab = "review" | "foods" | "all";
 
 const TABS: [Tab, string][] = [

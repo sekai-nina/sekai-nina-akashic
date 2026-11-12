@@ -11,7 +11,12 @@ import {
   saveReviewedBlog,
   setFoodCategory,
 } from "@/lib/domain/discovery-review";
+import { regenerateFoodIcon } from "@/lib/domain/discovery-icons";
+import { getR2PublicUrl } from "@/lib/r2";
 import { formatZodError } from "@/lib/zod-error";
+import { z } from "zod";
+
+const FoodIconNoteSchema = z.string().max(200);
 
 const requireMember = () => requireRole(["admin", "member"]);
 
@@ -57,6 +62,23 @@ export async function renameFoodAction(from: string, to: string) {
     const changed = await renameFood(user.clearance, f.data, t.data);
     revalidatePath("/discoveries");
     return { ok: true as const, changed };
+  } catch (e) {
+    return { ok: false as const, error: errorMessage(e) };
+  }
+}
+
+/**
+ * 食べ物のアイコンを作り直す (#436)。`note` は直す指示 (次からの作り直しでも使い続ける)。15〜20 秒かかる。
+ * 画面の描き直しはしない (変わるのはこの行のアイコンだけなので、返した URL を画面が使う)
+ */
+export async function regenerateFoodIconAction(name: string, note: string) {
+  const user = await requireMember();
+  const n = FoodNameSchema.safeParse(name);
+  const t = FoodIconNoteSchema.safeParse(note);
+  if (!n.success || !t.success) return { ok: false as const, error: "名前か指示が正しくありません" };
+  try {
+    const key = await regenerateFoodIcon(user.clearance, n.data, t.data);
+    return { ok: true as const, url: getR2PublicUrl(key) };
   } catch (e) {
     return { ok: false as const, error: errorMessage(e) };
   }

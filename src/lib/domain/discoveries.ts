@@ -318,10 +318,9 @@ export interface DiscoveryView {
   url: string | null;
 }
 
-/** 食べ物の名前 → 分類。非保護テーブルなので素の `prisma` */
-export async function listFoodCategories(): Promise<Record<string, FoodCategoryValue>> {
-  const rows = await prisma.discoveryFood.findMany({ select: { name: true, category: true } });
-  return Object.fromEntries(rows.map((r) => [r.name, r.category]));
+/** 食べ物の名前 → 分類とアイコンの R2 key (#436)。アイコンがまだの名前は iconKey が空文字 */
+export async function listFoodRows(): Promise<{ name: string; category: FoodCategoryValue; iconKey: string }[]> {
+  return prisma.discoveryFood.findMany({ select: { name: true, category: true, iconKey: true } });
 }
 
 /** 通し番号付きの全件 (古い順)。RLS 越しに読む */

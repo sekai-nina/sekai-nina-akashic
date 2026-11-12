@@ -2664,7 +2664,8 @@ for item in results["items"]:
     }
   ],
   "total": 101,
-  "foods": { "はちみつ": "seasoning", "バナナ": "fruit", "プリン": "sweet" }
+  "foods": { "はちみつ": "seasoning", "バナナ": "fruit", "プリン": "sweet" },
+  "foodIcons": { "バナナ": "https://r2.sekai-nina.com/discoveries/food-icons/3f2a…-1794453577000.webp" }
 }
 ```
 
@@ -2681,4 +2682,5 @@ for item in results["items"]:
 | `date` | ブログの日付（JST, `YYYY-MM-DD`） |
 | `url` | 公式ブログの URL。無ければ `null` |
 | `foods` | 材料・できあがる味の名前 → 分類。`fruit`（果物）/ `vegetable`（野菜）/ `sweet`（甘いもの）/ `dish`（主食・おかず）/ `dairy`（乳製品）/ `seasoning`（調味料）/ `drink`（飲み物）。返した発見に出てくる名前だけ。分類がまだの名前は入らない |
+| `foodIcons` | 名前 → イラストのアイコンの URL（#436。256px 四方の透過 webp）。`foods` に入る名前のうち、アイコンができたものだけ。作り直すと URL が変わる（前の URL もしばらく残す）。15 分 cron（`/api/cron/discovery-icons`）が OpenAI の画像 API で作り、人が確認ページ（`/discoveries` の「材料と分類」）で指示を付けて作り直す。外部 AI に出してよいブログ（internal 以下）に出てくる名前だけを作る |
 

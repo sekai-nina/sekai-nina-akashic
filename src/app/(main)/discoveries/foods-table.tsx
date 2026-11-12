@@ -2,17 +2,21 @@
 
 import { useState, useTransition } from "react";
 import { FOOD_CATEGORY_LABELS } from "@/lib/utils";
-import { renameFoodAction, setFoodCategoryAction } from "./actions";
+import { regenerateFoodIconAction, renameFoodAction, setFoodCategoryAction } from "./actions";
 
 export interface FoodTableRow {
   name: string;
   asIngredient: number;
   asResult: number;
   category: string | null;
+  iconUrl: string | null;
+  iconNote: string;
+  iconFailures: number;
+  iconBlocked: boolean;
 }
 
 /**
- * 材料・できあがる味の名前の一覧。分類は選ぶとすぐ保存する。名前の変更は、その名前を使う発見の数を
+ * 材料・できあがる味の名前の一覧。分類は選ぶとすぐ保存する。アイコン (#436) は cron が作り、ここで指示を付けて作り直せる (作ったものがサイトの次のビルドで出る)。名前の変更は、その名前を使う発見の数を
  * 見せてから全部の発見で書き換える (変更先が既にある名前なら統合)
  */
 export function FoodsTable({ rows, canEdit }: { rows: FoodTableRow[]; canEdit: boolean }) {
@@ -38,6 +42,7 @@ export function FoodsTable({ rows, canEdit }: { rows: FoodTableRow[]; canEdit: b
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-xs text-slate-500">
             <tr>
+              <th className="text-left px-3 py-2 font-medium">アイコン</th>
               <th className="text-left px-3 py-2 font-medium">名前</th>
               <th className="text-right px-3 py-2 font-medium">材料</th>
               <th className="text-right px-3 py-2 font-medium">できあがり</th>
@@ -93,6 +98,9 @@ function FoodRow({ row, canEdit }: { row: FoodTableRow; canEdit: boolean }) {
   return (
     <tr className="border-t border-slate-100 align-top">
       <td className="px-3 py-2">
+        <FoodIcon row={row} canEdit={canEdit} />
+      </td>
+      <td className="px-3 py-2">
         {renaming ? (
           <div className="space-y-1">
             <input
@@ -143,5 +151,81 @@ function FoodRow({ row, canEdit }: { row: FoodTableRow; canEdit: boolean }) {
         )}
       </td>
     </tr>
+  );
+}
+
+/** cron の上限 (`FOOD_ICON_MAX_FAILURES`) と同じ。クライアントから domain を読まないよう写しておく */
+const ICON_MAX_FAILURES = 3;
+
+/** アイコンと作り直し。指示は次からの作り直しでも使い続ける */
+function FoodIcon({ row, canEdit }: { row: FoodTableRow; canEdit: boolean }) {
+  const [pending, startTransition] = useTransition();
+  // ここで作ったものを優先し、無ければ props (cron が作ったものは画面の描き直しで入る)
+  const [madeUrl, setMadeUrl] = useState<string | null>(null);
+  const url = madeUrl ?? row.iconUrl;
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState(row.iconNote);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  function regenerate() {
+    const had = !!url;
+    setMsg("作っています (20 秒ほど)…");
+    startTransition(async () => {
+      const res = await regenerateFoodIconAction(row.name, note);
+      if (res.ok) {
+        setMadeUrl(res.url);
+        setOpen(false);
+        setMsg(`${had ? "作り直しました" : "作りました"} (サイトには次のビルドで出ます)`);
+      } else setMsg(`エラー: ${res.error}`);
+    });
+  }
+
+  return (
+    <div className="space-y-1 w-40">
+      {url ? (
+        // R2 の画像。next/image の最適化は要らない (256px の webp)
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={url} alt={`${row.name} のアイコン`} width={48} height={48} className="h-12 w-12" />
+      ) : (
+        <div className="h-12 w-12 rounded-md border border-dashed border-slate-300 grid place-items-center text-[10px] text-slate-400 text-center leading-tight whitespace-pre-line">
+          {row.iconBlocked
+            ? "機密の\nため\n作らない"
+            : !row.category
+              ? "分類が\nまだ"
+              : row.iconFailures >= ICON_MAX_FAILURES
+                ? "作れな\nかった"
+                : "作る\n待ち"}
+        </div>
+      )}
+      {canEdit && row.category && !row.iconBlocked && !open && (
+        <button type="button" onClick={() => setOpen(true)} disabled={pending} className="text-xs text-sky-700 hover:underline">
+          {url ? "作り直す" : "いま作る"}
+        </button>
+      )}
+      {open && (
+        <div className="space-y-1">
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            disabled={pending}
+            rows={2}
+            maxLength={200}
+            placeholder="直してほしい点 (例: 葉っぱではなく焼き菓子のお饅頭に)"
+            aria-label={`${row.name} のアイコンを直す指示`}
+            className="w-full px-2 py-1 rounded-md border border-slate-300 text-xs"
+          />
+          <div className="flex gap-2">
+            <button type="button" onClick={regenerate} disabled={pending}
+              className="px-2 py-1 rounded-md bg-slate-900 text-white text-xs disabled:opacity-50">
+              作る
+            </button>
+            <button type="button" onClick={() => setOpen(false)} disabled={pending} className="px-2 py-1 rounded-md border border-slate-200 text-xs">
+              やめる
+            </button>
+          </div>
+        </div>
+      )}
+      {msg && <div className="text-xs text-slate-500" role="status">{msg}</div>}
+    </div>
   );
 }
