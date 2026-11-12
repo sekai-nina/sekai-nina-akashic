@@ -62,6 +62,8 @@ export const TIKTOK_JOB_KEY = "bot.tiktok_watch";
 export const NINA_MENTIONS_JOB_KEY = "cron.nina_mentions";
 /** 今日の発見の下書き (`/api/cron/discoveries`、#432) */
 export const DISCOVERY_JOB_KEY = "cron.discovery";
+/** 今日の発見の食べ物アイコン (`/api/cron/discovery-icons`、#436) */
+export const DISCOVERY_ICON_JOB_KEY = "cron.discovery_icon";
 
 /** 坂井新奈のトークの文字起こし (`/api/cron/transcribe`、#282) */
 export const TRANSCRIBE_JOB_KEY = "cron.transcribe";
@@ -89,6 +91,7 @@ export const EXPECTED_JOBS: { key: string; name: string; group: CheckGroup }[] =
   { key: TRANSCRIBE_JOB_KEY, name: "トークの文字起こし (15 分)", group: "process" },
   { key: OCR_JOB_KEY, name: "画像の OCR (15 分)", group: "process" },
   { key: DISCOVERY_JOB_KEY, name: "今日の発見の下書き (15 分)", group: "process" },
+  { key: DISCOVERY_ICON_JOB_KEY, name: "今日の発見のアイコン (15 分)", group: "process" },
   { key: "worker.stats", name: "stats-worker (ダッシュボード集計)", group: "workers" },
   { key: "worker.drive_backup", name: "Drive バックアップ", group: "workers" },
   { key: "worker.sync", name: "sekai-nina-sync", group: "workers" },

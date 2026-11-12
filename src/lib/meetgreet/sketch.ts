@@ -170,7 +170,8 @@ export async function loadAssetImage(
 export async function loadR2Image(key: string, filename: string): Promise<SketchSourceImage> {
   const url = getR2PublicUrl(key);
   if (!/^https?:\/\//.test(url)) throw new SketchConfigError("R2_PUBLIC_URL が未設定です");
-  const res = await fetch(url);
+  // 止まった R2 で呼び出し側の maxDuration を食い潰さない
+  const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
   if (!res.ok) throw new SketchError(`画像を読めませんでした (${res.status}): ${key}`);
   return {
     filename,

@@ -16,6 +16,8 @@ import { Prisma } from "@prisma/client";
 import { withClearance, prisma, prismaInternal } from "@/lib/db";
 import { DISCOVERY_CONFIDENCES, FOOD_CATEGORIES, type FoodCategoryValue } from "@/lib/discoveries/core";
 import { AUTO_DRAFT_MAX_ATTEMPTS, DISCOVERY_TAG_NAME, type DiscoveryView } from "./discoveries";
+import { getR2PublicUrl } from "@/lib/r2";
+import { loadSendableFoodNames } from "./discovery-icons";
 import { toJstDateOnly } from "@/lib/utils";
 
 /** 確認ページで直す発見 1 件 (ブログの中の順に並べる。position は保存時に振り直す) */
@@ -139,16 +141,42 @@ export interface FoodRow {
   asResult: number;
   /** 分類。まだなら null */
   category: FoodCategoryValue | null;
+  /** イラストのアイコンの URL (#436)。まだなら null */
+  iconUrl: string | null;
+  /** アイコンを作り直すときの人の指示 */
+  iconNote: string;
+  /** cron が作れなかった回数 (上限で cron があきらめる) */
+  iconFailures: number;
+  /** 機密のブログにしか出てこない名前なので、アイコンを作らない (外部 AI に送れない) */
+  iconBlocked: boolean;
 }
 
 /** 見える発見 (`all`) に出てくる名前の一覧 (分類がまだのもの → 回数の多い順) */
 export async function listFoods(all: DiscoveryView[]): Promise<FoodRow[]> {
-  const foods = await prisma.discoveryFood.findMany({ select: { name: true, category: true } });
-  const category = new Map(foods.map((f) => [f.name, f.category as FoodCategoryValue]));
+  const [foods, sendable] = await Promise.all([
+    prisma.discoveryFood.findMany({
+      select: { name: true, category: true, iconKey: true, iconNote: true, iconFailures: true },
+    }),
+    loadSendableFoodNames(),
+  ]);
+  const byName = new Map(foods.map((f) => [f.name, f]));
   const rows = new Map<string, FoodRow>();
   const row = (name: string) => {
     let r = rows.get(name);
-    if (!r) rows.set(name, (r = { name, asIngredient: 0, asResult: 0, category: category.get(name) ?? null }));
+    if (!r) {
+      const f = byName.get(name);
+      r = {
+        name,
+        asIngredient: 0,
+        asResult: 0,
+        category: (f?.category as FoodCategoryValue | undefined) ?? null,
+        iconUrl: f?.iconKey ? getR2PublicUrl(f.iconKey) : null,
+        iconNote: f?.iconNote ?? "",
+        iconFailures: f?.iconFailures ?? 0,
+        iconBlocked: !sendable.has(name),
+      };
+      rows.set(name, r);
+    }
     return r;
   };
   for (const d of all) {
@@ -192,7 +220,18 @@ export async function renameFood(clearance: string, from: string, to: string): P
       tx.discoveryFood.findUnique({ where: { name: from } }),
       tx.discoveryFood.findUnique({ where: { name: to } }),
     ]);
-    if (src && !dst) await tx.discoveryFood.create({ data: { name: to, category: src.category } });
+    // 名前の変更はたいてい表記ゆれの統一なので、アイコンと直す指示も引き継ぐ (R2 の画像は消さないので同じ key を共有してよい)
+    if (src && !dst) {
+      await tx.discoveryFood.create({
+        data: {
+          name: to,
+          category: src.category,
+          iconKey: src.iconKey,
+          iconNote: src.iconNote,
+          iconUpdatedAt: src.iconUpdatedAt,
+        },
+      });
+    }
     return n;
   });
   // 見えないブログも含めて、まだ元の名前を使っているか (RLS をバイパスして数える。件数だけで中身は返さない)
