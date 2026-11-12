@@ -2225,6 +2225,13 @@ enum DiscoveryConfidence {
 model DiscoveryFood {
   name      String       @id
   category  FoodCategory
+  /// イラストのアイコンの R2 key (#436)。空文字ならまだ無い (cron が作る)
+  iconKey       String    @default("")
+  /// アイコンを作り直すときの人の指示 (「葉っぱではなくお饅頭に」)。次からの作り直しでも使い続ける
+  iconNote      String    @default("")
+  /// cron がアイコンを作れなかった回数。上限に達したら cron は外す (人が作り直すと 0 に戻る)
+  iconFailures  Int       @default(0)
+  iconUpdatedAt DateTime?
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 }
