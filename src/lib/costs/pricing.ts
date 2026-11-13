@@ -9,6 +9,7 @@ import type { LlmProvider } from "@prisma/client";
  *   - Anthropic: claude-api スキルの単価表 (2026-06-24 時点のキャッシュ。5.5 世代は 2026-10-06 時点)
  *   - Google:    https://ai.google.dev/gemini-api/docs/pricing (2026-09-19)
  *   - Groq:      https://groq.com/pricing (2026-10-27)
+ *   - OpenAI gpt-transcribe: https://developers.openai.com/api/docs/models/gpt-transcribe (2026-11-14)
  *
  * **表に無いモデルは金額を出さない** (null)。勝手に近いモデルの値を当てると、
  * 「安く出ているから大丈夫」と誤読する。未登録は /costs に警告として出す。
@@ -32,6 +33,9 @@ const anthropic = (input: number, output: number, cachedInput = input * 0.1): Mo
 
 export const PRICING: Record<LlmProvider, Record<string, ModelPricing>> = {
   openai: {
+    // **音声の文字起こしは秒数で課金する**ので、inputTokens に課金秒数 (応答の usage.seconds) を入れる。
+    // $0.0045 / 分 = $0.0045 / 60 秒 → 100 万秒あたり $75
+    "gpt-transcribe": { input: (0.0045 / 60) * 1_000_000, output: 0 },
     "gpt-4o": { input: 2.5, output: 10 },
     "gpt-4o-mini": { input: 0.15, output: 0.6 },
     "gpt-4.1": { input: 2, output: 8 },
@@ -86,6 +90,7 @@ export const PRICING: Record<LlmProvider, Record<string, ModelPricing>> = {
     "gemini-embedding-2": { input: 0.2, output: 0 },
   },
   groq: {
+    // 2026-11-14 に OpenAI の gpt-transcribe へ切り替えた。過去の利用量の換算のために残す。
     // **音声の文字起こしは秒数で課金する**ので、inputTokens に課金秒数 (1 回あたり最低 10 秒) を入れる。
     // $0.111 / 時間 = $0.111 / 3600 秒 → 100 万秒あたり $30.833
     "whisper-large-v3": { input: 0.111 / 3600 * 1_000_000, output: 0 },
@@ -132,6 +137,11 @@ export function computeCostUsd(provider: LlmProvider, model: string, tokens: Tok
     1_000_000;
   // 小数 6 桁で丸める (DB の Decimal(12,6) に合わせる)
   return Math.round(usd * 1_000_000) / 1_000_000;
+}
+
+/** inputTokens にトークンではなく音声の課金秒数を入れているモデル (文字起こし) */
+export function isBilledBySeconds(provider: LlmProvider, model: string): boolean {
+  return provider === "groq" || model === "gpt-transcribe";
 }
 
 /** 単価表に載っているモデル名の一覧 (画面の「価格未登録」の判定に使う) */

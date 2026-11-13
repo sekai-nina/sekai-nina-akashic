@@ -1,11 +1,11 @@
 /**
  * MP4 / M4A (ISO BMFF) に音声トラックがあるかを、ボックスを辿るだけで判定する (#282)。デコードはしない。
  *
- * 画面だけで音声トラックの無い動画は、Groq に送っても `no_audio_stream` で返ってくるだけなので、
+ * 画面だけで音声トラックの無い動画は、OpenAI に送っても 400 (`Audio file might be corrupted or unsupported`) で返ってくるだけなので、
  * 送る前にここで落とす。`moov > trak > mdia > hdlr` の handler_type が `soun` のトラックを探す。
  * moov がファイル末尾にあっても全体をメモリに持っているので問題ない。
  *
- * 戻り値: true = 音声トラックあり / false = 無い / null = MP4 として読めない (判定せず Groq に任せる)
+ * 戻り値: true = 音声トラックあり / false = 無い / null = MP4 として読めない (判定せず OpenAI に任せる)
  */
 export function mp4HasAudioTrack(data: Uint8Array): boolean | null {
   try {

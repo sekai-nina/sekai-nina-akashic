@@ -39,7 +39,7 @@ describe("mp4HasAudioTrack", () => {
     expect(mp4HasAudioTrack(new Uint8Array([...ftyp, ...mdat, ...box("moov", track("soun"))]))).toBe(true);
   });
 
-  it("MP4 でなければ null (判定せず Groq に任せる)", () => {
+  it("MP4 でなければ null (判定せず OpenAI に任せる)", () => {
     expect(mp4HasAudioTrack(new TextEncoder().encode("ID3 not an mp4 file at all"))).toBeNull();
     expect(mp4HasAudioTrack(new Uint8Array(0))).toBeNull();
   });

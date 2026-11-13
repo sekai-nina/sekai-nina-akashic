@@ -10,6 +10,7 @@ import {
   ALL_PROVIDERS,
 } from "@/lib/costs/report";
 import { isAnthropicAdminConfigured, isOpenAiAdminConfigured } from "@/lib/costs/providers";
+import { isBilledBySeconds } from "@/lib/costs/pricing";
 import { CREDIT_WARN_DAYS, fillMissingDays } from "@/lib/costs/summary";
 import { describeRate, formatMoney } from "@/lib/costs/currency";
 import {
@@ -252,8 +253,8 @@ export default async function CostsPage() {
                     <td className="px-4 py-1.5 text-right text-slate-500">{r.requests.toLocaleString("ja-JP")}</td>
                     <td className="px-4 py-1.5 text-right text-slate-500">
                       {r.inputTokens.toLocaleString("ja-JP")}
-                      {/* Groq の文字起こしはトークンではなく音声の課金秒数を入れている */}
-                      {r.provider === LlmProvider.groq && " 秒"}
+                      {/* 文字起こしはトークンではなく音声の課金秒数を入れている */}
+                      {isBilledBySeconds(r.provider, r.model) && " 秒"}
                     </td>
                     <td className="px-4 py-1.5 text-right text-slate-500">{r.outputTokens.toLocaleString("ja-JP")}</td>
                     <td className="px-4 py-1.5 text-right font-medium">
