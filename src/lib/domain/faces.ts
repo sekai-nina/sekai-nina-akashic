@@ -27,12 +27,22 @@ export const ORIGINAL_MAX_BYTES = 4_400_000;
 /** 元画像を Drive から取る時間の上限。route の maxDuration (30 秒) に収める */
 const DRIVE_DOWNLOAD_TIMEOUT_MS = 20_000;
 
-/** 動画は、タグがこれのものだけを対象にする (#403)。番組・配信などの長い動画は対象にしない (#394) */
+/** トークの動画のタグ (#403)。番組・配信などの長い動画は対象にしない (#394) */
 export const FACE_VIDEO_TAG = "トーク";
 /** 対象にする動画の大きさの上限。2026-11 時点でトークの動画は最大 65 MB */
 export const FACE_VIDEO_MAX_BYTES = 200_000_000;
 
-/** 顔認識の対象: Drive に実体がある画像と、トークの動画 (#403) */
+/**
+ * Instagram の動画のタイトルに入る文字列。insta-watch が「<アカウント> video 2026-07-22T11:18」と付ける
+ * (出典もタグも付かないのでタイトルで見分ける。2026-11 時点で 126 本がちょうどこれに当たる)
+ */
+export const FACE_INSTA_VIDEO_TITLE = " video 20";
+
+/**
+ * 顔認識の対象: Drive に実体がある画像と、短い動画 (FACE_VIDEO_MAX_BYTES まで)。
+ * 動画はトーク (#403)・TikTok (TiktokVideo に紐づく)・Instagram の動画 (タイトル) だけ。番組・配信などの長い動画は対象にしない (#394)。
+ * 条件を変えたら queueWhere (生 SQL) も合わせる
+ */
 const targetWhere = {
   storageProvider: "gdrive",
   storageKey: { not: null },
@@ -41,7 +51,11 @@ const targetWhere = {
     {
       kind: "video",
       fileSize: { lte: FACE_VIDEO_MAX_BYTES },
-      entities: { some: { entity: { type: "tag", canonicalName: FACE_VIDEO_TAG } } },
+      OR: [
+        { entities: { some: { entity: { type: "tag", canonicalName: FACE_VIDEO_TAG } } } },
+        { tiktokVideo: { isNot: null } },
+        { title: { contains: FACE_INSTA_VIDEO_TITLE } },
+      ],
     },
   ],
 } satisfies Prisma.AssetWhereInput;
@@ -99,9 +113,13 @@ function queueWhere(clearance: string, modelVersion: string) {
       a.kind = 'image'
       OR (
         a.kind = 'video' AND a."fileSize" <= ${FACE_VIDEO_MAX_BYTES}
-        AND EXISTS (
-          SELECT 1 FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId"
-          WHERE ae."assetId" = a.id AND e.type = 'tag' AND e."canonicalName" = ${FACE_VIDEO_TAG}
+        AND (
+          EXISTS (
+            SELECT 1 FROM "AssetEntity" ae JOIN "Entity" e ON e.id = ae."entityId"
+            WHERE ae."assetId" = a.id AND e.type = 'tag' AND e."canonicalName" = ${FACE_VIDEO_TAG}
+          )
+          OR EXISTS (SELECT 1 FROM "TiktokVideo" t WHERE t."assetId" = a.id)
+          OR strpos(a.title, ${FACE_INSTA_VIDEO_TITLE}) > 0
         )
       )
     )
@@ -198,7 +216,7 @@ export async function writeFaceResults(clearance: string, assetId: string, input
   return withClearance(clearance, async (tx) => {
     // 同じ画像への書き込みが重なっても、タグの付け外しが食い違わないよう Asset の行をロックする。
     // RLS 下なので見えない行は 0 件になる (FOR UPDATE は UPDATE のポリシーも見るが、条件は SELECT と同じクリアランス。
-    // 見えない行は 404 にするのが正しいので、prismaInternal に替えない)。対象は queue と同じ (Drive に実体がある画像とトークの動画。動画の条件はタグを見るので下で確かめる)
+    // 見えない行は 404 にするのが正しいので、prismaInternal に替えない)。対象は queue と同じ (Drive に実体がある画像と短い動画。動画の条件はタグ・TikTok・タイトルを見るので下で確かめる)
     const locked = await tx.$queryRaw<{ id: string; ninaAbsent: boolean }[]>`
       SELECT id, "ninaAbsent" FROM "Asset"
       WHERE id = ${assetId} AND kind IN ('image', 'video') AND "storageProvider" = 'gdrive' AND "storageKey" IS NOT NULL
