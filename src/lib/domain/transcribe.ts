@@ -3,7 +3,7 @@ import { prismaInternal, withClearance } from "@/lib/db";
 import { recordUsage } from "@/lib/costs/usage";
 import { downloadFromDrive } from "@/lib/drive";
 import { NINA_ENTITY_ID } from "@/lib/nina";
-import { GROQ_MAX_BYTES, GROQ_TRANSCRIBE_MODEL, GroqTranscribeError, transcribeWithGroq } from "@/lib/transcribe/groq";
+import { TRANSCRIBE_MAX_BYTES, TRANSCRIBE_MODEL, TranscribeError, transcribeAudio } from "@/lib/transcribe/openai";
 import { mp4HasAudioTrack } from "@/lib/transcribe/mp4";
 import { addTextRevision } from "./text-revisions";
 
@@ -13,7 +13,7 @@ import { addTextRevision } from "./text-revisions";
  * - 15 分ごとの cron (`/api/cron/transcribe`) が坂井新奈のトークを自動で回す (`autoTranscribeWhere`)
  * - それ以外はアセット詳細の「文字起こし」ボタンで 1 件ずつ回す
  *
- * **外部 (Groq, 米国) に送るのは `public` / `internal` だけ。** `confidential` 以上は送らない (ユーザー判断)。
+ * **外部 (OpenAI, 米国) に送るのは `public` / `internal` だけ。** `confidential` 以上は送らない (ユーザー判断)。
  * 結果は `AssetText(textType = transcript)` に置く。`normalizedContent` の PGroonga 索引でそのまま検索に載る。
  */
 
@@ -47,13 +47,20 @@ export function transcribeBlockedReason(asset: {
  */
 export function autoTranscribeWhere(): Prisma.AssetWhereInput {
   return {
+    ...talkWhere(),
+    transcribedAt: null,
+    // 人が入れた文字起こしは上書きしない
+    texts: { none: { textType: "transcript" } },
+  };
+}
+
+/** 坂井新奈のトークで、外部に送ってよいもの (文字起こし済みかは問わない) */
+export function talkWhere(): Prisma.AssetWhereInput {
+  return {
     kind: { in: ["audio", "video"] },
     storageProvider: "gdrive",
     storageKey: { not: null },
     classification: { in: TRANSCRIBABLE_CLEARANCES },
-    transcribedAt: null,
-    // 人が入れた文字起こしは上書きしない
-    texts: { none: { textType: "transcript" } },
     AND: [
       { entities: { some: { entityId: NINA_ENTITY_ID } } },
       { entities: { some: { entity: { type: "tag", canonicalName: TALK_TAG } } } },
@@ -61,7 +68,7 @@ export function autoTranscribeWhere(): Prisma.AssetWhereInput {
   };
 }
 
-const ASSET_SELECT = {
+export const ASSET_SELECT = {
   id: true,
   kind: true,
   mimeType: true,
@@ -71,9 +78,9 @@ const ASSET_SELECT = {
   classification: true,
 } as const;
 
-type TargetAsset = Prisma.AssetGetPayload<{ select: typeof ASSET_SELECT }>;
+export type TargetAsset = Prisma.AssetGetPayload<{ select: typeof ASSET_SELECT }>;
 
-/** Drive からの取得の上限。cron の 1 件は「取得 + Groq (GROQ_TIMEOUT_MS)」で収まる */
+/** Drive からの取得の上限。cron の 1 件は「取得 + OpenAI (TRANSCRIBE_TIMEOUT_MS)」で収まる */
 const DRIVE_TIMEOUT_MS = 30_000;
 
 export type TranscribeOutcome =
@@ -92,11 +99,11 @@ function isDriveNotFound(e: unknown): boolean {
   return err?.status === 404 || err?.response?.status === 404 || err?.code === 404;
 }
 
-/** Drive から落として Groq に送る。DB には書かない (書き込みは `saveOutcome`) */
+/** Drive から落として OpenAI に送る。DB には書かない (書き込みは `saveOutcome`) */
 async function runTranscription(asset: TargetAsset): Promise<TranscribeOutcome> {
   const blocked = transcribeBlockedReason(asset);
   if (blocked) return { kind: "failed", error: blocked };
-  if (asset.fileSize != null && asset.fileSize > GROQ_MAX_BYTES) {
+  if (asset.fileSize != null && asset.fileSize > TRANSCRIBE_MAX_BYTES) {
     return { kind: "failed", error: `ファイルが ${Math.round(asset.fileSize / 1024 / 1024)} MB で、25 MB を超えています` };
   }
 
@@ -118,18 +125,18 @@ async function runTranscription(asset: TargetAsset): Promise<TranscribeOutcome> 
   }
 
   try {
-    const result = await transcribeWithGroq(data, asset.mimeType);
+    const result = await transcribeAudio(data, asset.mimeType);
     // 利用量を /costs に自己申告する。失敗しても文字起こしは止めない (集計より本処理が優先)
     await recordUsage({
-      provider: "groq",
-      model: GROQ_TRANSCRIBE_MODEL,
+      provider: "openai",
+      model: TRANSCRIBE_MODEL,
       feature: TRANSCRIBE_FEATURE,
       inputTokens: result.billedSec,
       requests: 1,
     }).catch((e) => console.warn(`[transcribe] 利用量の記録に失敗: ${message(e)}`));
     return { kind: "done", text: result.text };
   } catch (e) {
-    if (e instanceof GroqTranscribeError) {
+    if (e instanceof TranscribeError) {
       return e.permanent ? { kind: "failed", error: e.message } : { kind: "retry", error: e.message, stopBatch: e.stopBatch };
     }
     throw e;
@@ -155,10 +162,21 @@ async function saveOutcome(
     );
     if (!saved) return;
   }
-  const error = outcome.kind === "failed" ? outcome.error : null;
+  if (outcome.kind === "failed") {
+    // やり直し (ボタン・cli:retranscribe-talks) が失敗しても、本文があるなら前の状態のままにする
+    // (本文があるのに「できなかった」と出さない)
+    await withClearance(
+      clearance,
+      (tx) => tx.$executeRaw`
+        UPDATE "Asset" SET "transcribedAt" = NOW(), "transcribeError" = ${outcome.error}
+        WHERE id = ${assetId}
+          AND NOT EXISTS (SELECT 1 FROM "AssetText" t WHERE t."assetId" = ${assetId} AND t."textType" = 'transcript')`,
+    );
+    return;
+  }
   await withClearance(
     clearance,
-    (tx) => tx.$executeRaw`UPDATE "Asset" SET "transcribedAt" = NOW(), "transcribeError" = ${error} WHERE id = ${assetId}`,
+    (tx) => tx.$executeRaw`UPDATE "Asset" SET "transcribedAt" = NOW(), "transcribeError" = NULL WHERE id = ${assetId}`,
   );
 }
 
@@ -171,6 +189,20 @@ export interface AutoTranscribeResult {
   stopped: boolean;
   /** まだ残っている件数 (今回の分を除く) */
   remaining: number;
+}
+
+/**
+ * 1 件を文字起こしして書く (cron と、やり直しの CLI `cli:retranscribe-talks`)。書き込みは対象の上限の
+ * `internal` で `withClearance` を通す。想定外の例外も「次の回にやり直す」にして呼び手を落とさない
+ */
+export async function transcribeAndSaveAsInternal(asset: TargetAsset): Promise<TranscribeOutcome> {
+  try {
+    const outcome = await runTranscription(asset);
+    if (outcome.kind !== "retry") await saveOutcome(asset.id, outcome, "internal");
+    return outcome;
+  } catch (e) {
+    return { kind: "retry", error: `想定外の失敗: ${message(e)}` };
+  }
 }
 
 /**
@@ -193,13 +225,7 @@ export async function autoTranscribe(opts: { limit: number; budgetMs: number }):
   const result: AutoTranscribeResult = { done: 0, empty: 0, failed: 0, retry: 0, stopped: false, remaining: 0 };
   for (const asset of targets) {
     if (Date.now() - startedAt > opts.budgetMs) break;
-    let outcome: TranscribeOutcome;
-    try {
-      outcome = await runTranscription(asset);
-      if (outcome.kind !== "retry") await saveOutcome(asset.id, outcome, "internal");
-    } catch (e) {
-      outcome = { kind: "retry", error: `想定外の失敗: ${message(e)}` };
-    }
+    const outcome = await transcribeAndSaveAsInternal(asset);
     if (outcome.kind === "retry") {
       result.retry++;
       console.warn(`[transcribe] ${asset.id}: ${outcome.error}`);
@@ -219,7 +245,7 @@ export async function autoTranscribe(opts: { limit: number; budgetMs: number }):
 
 /**
  * アセット詳細のボタン用。見えないアセット (RLS) と対象外 (`confidential` 以上など) は弾く。
- * Groq の待ちはトランザクションの外で行う (withClearance の 15 秒上限に当たるため)
+ * OpenAI の待ちはトランザクションの外で行う (withClearance の 15 秒上限に当たるため)
  */
 export async function transcribeAssetForUser(
   assetId: string,

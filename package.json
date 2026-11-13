@@ -40,6 +40,7 @@
     "cli:fix-youtube-publisher": "tsx src/cli/fix-youtube-publisher.ts",
     "cli:import-meetgreet-upcoming": "tsx src/cli/import-meetgreet-upcoming.ts",
     "cli:refresh-nina-mentions": "tsx src/cli/refresh-nina-mentions.ts",
+    "cli:retranscribe-talks": "tsx src/cli/retranscribe-talks.ts",
     "cli:rekey-material-clip-status": "tsx src/cli/rekey-material-clip-status.ts",
     "cli:draft-discoveries": "tsx src/cli/draft-discoveries.ts",
     "cli:food-icons": "tsx src/cli/food-icons.ts"
