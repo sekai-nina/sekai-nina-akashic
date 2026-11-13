@@ -93,6 +93,8 @@ APIキーは `pnpm cli:keygen <user-email> <key-name> [permissions]` で発行�
 | PUT | `/faces/assets/:id` | face_worker | 顔認識: 1 枚の推論結果を書き込む（閾値以上は人物タグを自動で付ける） |
 | GET | `/faces/references` | face_worker | 顔認識: 参照に足す顔（人が確定した顔だけ） |
 | GET | `/faces/appearances` | read | 顔認識: その人物が写っている画像のうち、指定時刻以降に登録されたもの（書き手が本人のものは除く） |
+| GET | `/faces/review-feed` | read | 顔認識: Discord で 1 顔ずつ確認してもらう顔（確認待ちと、書き手が本人ではない画像の自動の顔） |
+| POST | `/faces/reviews` | write | 顔認識: 顔の確定・却下（画面の「顔の確認」と同じ規則） |
 | GET | `/discoveries` | read | 今日の発見の全件（通し番号・材料・できあがる味・確信度つき） |
 | GET | `/insta/targets` | 有効なキー | insta-watch が見張るハンドルの一覧 |
 | GET / POST | `/insta/account` | 有効なキー / write | story 取得に使うアカウントの状態 |
@@ -1427,6 +1429,43 @@ body は省略可（`subject` を省くと既定のコミットメッセージ�
 ```
 
 `parent` は `parent_child` の親（ブログ本文など）。無ければ `null`。
+
+### GET /faces/review-feed
+
+Discord で 1 顔ずつ確認してもらう顔（#441）。`createdAfter` 以降に登録された画像の、その人物と推定された顔。登録の古い順。権限は `read`。discord bot が 1 分おきに叩き、1 顔ずつ ✅ / ❌ を付けられる形で流す。
+
+- 確認待ち（`pending`）はすべて。自動（`auto`）は、その人物が書き手（`author`。親の書き手も見る）ではない画像だけ（= `/faces/appearances` で転送される顔）
+- 動画の顔（`frameSec` あり）は出さない。確定・却下した顔はもう出ない
+- パラメータは `/faces/appearances` と同じ（`entityId` / `createdAfter`（14 日前まで）/ `limit`（1〜200、既定 50））
+
+```json
+{
+  "items": [
+    {
+      "id": "cm...", "assetId": "cm...", "status": "pending", "similarity": 0.36, "bbox": [0.41, 0.18, 0.55, 0.39],
+      "assetTitle": "下田衣珠季トーク 2026.11.13 17:00", "createdAt": "2026-11-13T08:10:00.000Z",
+      "mimeType": "image/jpeg", "fileSize": 161884, "thumbnailUrl": "https://r2.sekai-nina.com/...",
+      "authors": ["下田衣珠季"], "url": null
+    }
+  ]
+}
+```
+
+`bbox` は画像の幅・高さに対する 0〜1 の割合（x1, y1, x2, y2）。`url` は出典（無ければ親の出典）。
+
+### POST /faces/reviews
+
+顔の確定・却下を保存する（#441）。画面の「顔の確認」（`/faces`）と同じ規則（[face-design.md の「確認」](./face-design.md)）。権限は `write`。判断した人（`reviewedById`）はキーの持ち主になる。確定・却下済みの顔も判断し直せる（上書き）。
+
+```json
+{ "decisions": [{ "faceId": "cm...", "action": "confirm" }] }
+```
+
+`action` は `confirm`（推定どおり）/ `reject`（推定のメンバーではない）/ `nonmember`（メンバー以外）/ `other`（別のメンバー。`entityId` も付ける）。1 回に 100 顔まで。
+
+- 200: `{ "updated": 1, "tagsAdded": 1, "tagsRemoved": 0 }`
+- 400: 形が違う・同じ顔が重複・推定の無い顔を `confirm`
+- 404: 見えない・無い顔がある（クリアランスより上・モデルの版を上げて作り直された）。一部だけ保存はしない
 
 ## クリップ (Clips)
 
