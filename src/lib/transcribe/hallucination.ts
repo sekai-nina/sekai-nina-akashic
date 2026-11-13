@@ -19,7 +19,7 @@ const HALLUCINATIONS = [
 ];
 
 function bare(text: string): string {
-  return text.normalize("NFKC").replace(/[\s。、.,!！?？…・「」]/g, "");
+  return text.normalize("NFKC").replace(/[\s。、.,!！?？…・「」『』（）()]/g, "");
 }
 
 const HALLUCINATION_SET = new Set(HALLUCINATIONS.map(bare));

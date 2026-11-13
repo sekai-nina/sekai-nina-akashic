@@ -9,6 +9,8 @@ describe("isHallucination", () => {
   it("決まり文句だけの文は捨てる (句読点・空白の違いは無視)", () => {
     expect(isHallucination(" ご視聴ありがとうございました。")).toBe(true);
     expect(isHallucination("ご視聴ありがとうございました!")).toBe(true);
+    expect(isHallucination("『ご視聴ありがとうございました』")).toBe(true);
+    expect(isHallucination("（ご視聴ありがとうございました）")).toBe(true);
   });
 
   it("文の中の決まり文句は残す", () => {

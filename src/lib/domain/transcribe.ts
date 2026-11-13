@@ -162,10 +162,21 @@ async function saveOutcome(
     );
     if (!saved) return;
   }
-  const error = outcome.kind === "failed" ? outcome.error : null;
+  if (outcome.kind === "failed") {
+    // やり直し (ボタン・cli:retranscribe-talks) が失敗しても、本文があるなら前の状態のままにする
+    // (本文があるのに「できなかった」と出さない)
+    await withClearance(
+      clearance,
+      (tx) => tx.$executeRaw`
+        UPDATE "Asset" SET "transcribedAt" = NOW(), "transcribeError" = ${outcome.error}
+        WHERE id = ${assetId}
+          AND NOT EXISTS (SELECT 1 FROM "AssetText" t WHERE t."assetId" = ${assetId} AND t."textType" = 'transcript')`,
+    );
+    return;
+  }
   await withClearance(
     clearance,
-    (tx) => tx.$executeRaw`UPDATE "Asset" SET "transcribedAt" = NOW(), "transcribeError" = ${error} WHERE id = ${assetId}`,
+    (tx) => tx.$executeRaw`UPDATE "Asset" SET "transcribedAt" = NOW(), "transcribeError" = NULL WHERE id = ${assetId}`,
   );
 }
 
@@ -184,7 +195,7 @@ export interface AutoTranscribeResult {
  * 1 件を文字起こしして書く (cron と、やり直しの CLI `cli:retranscribe-talks`)。書き込みは対象の上限の
  * `internal` で `withClearance` を通す。想定外の例外も「次の回にやり直す」にして呼び手を落とさない
  */
-export async function transcribeInternal(asset: TargetAsset): Promise<TranscribeOutcome> {
+export async function transcribeAndSaveAsInternal(asset: TargetAsset): Promise<TranscribeOutcome> {
   try {
     const outcome = await runTranscription(asset);
     if (outcome.kind !== "retry") await saveOutcome(asset.id, outcome, "internal");
@@ -214,7 +225,7 @@ export async function autoTranscribe(opts: { limit: number; budgetMs: number }):
   const result: AutoTranscribeResult = { done: 0, empty: 0, failed: 0, retry: 0, stopped: false, remaining: 0 };
   for (const asset of targets) {
     if (Date.now() - startedAt > opts.budgetMs) break;
-    const outcome = await transcribeInternal(asset);
+    const outcome = await transcribeAndSaveAsInternal(asset);
     if (outcome.kind === "retry") {
       result.retry++;
       console.warn(`[transcribe] ${asset.id}: ${outcome.error}`);

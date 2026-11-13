@@ -10,6 +10,10 @@ describe("isFileProblem", () => {
     expect(isFileProblem(415, "")).toBe(true);
     // 音声トラックの無い動画を送ったときの実際の応答 (2026-11-14)
     expect(isFileProblem(400, openAiError("Audio file might be corrupted or unsupported", "file"))).toBe(true);
+    // 長すぎる音声は model を含むが、ファイルの問題 (全件を止めない)
+    expect(
+      isFileProblem(400, openAiError("audio duration 1556 seconds is longer than 1500 seconds which is the maximum for this model", null)),
+    ).toBe(true);
   });
 
   it("要求のほうが悪い 400 はファイルのせいにしない (全件が失敗扱いになるのを防ぐ)", () => {

@@ -2,7 +2,8 @@
  * 文字起こし済みの坂井新奈のトークを gpt-transcribe でやり直す (Groq の whisper-large-v3 から切り替えたとき用)。
  *
  * - 対象は `--before` より前に文字起こしした、失敗していないトーク。やり直すと `transcribedAt` が今になるので、
- *   途中で止まっても同じ `--before` で流し直せば残りだけを拾う
+ *   途中で止まっても同じ `--before` で流し直せば残りだけを拾う (本文があって「送り直しても直らない」で
+ *   失敗したものは前の状態のまま残すので、流し直すたびに拾って失敗として出る。課金はされない)
  * - 旧本文は `addTextRevision` で版に残る。抜粋 (クリップ・記事の出典) の範囲も探し直す
  * - **人が手で直した本文 (文字起こしのあとに本文が更新されたもの) は飛ばす**
  * - 喋っていなかった (本文が空になった) ときは既存の本文を消さない (cron と同じ)
@@ -13,7 +14,7 @@
  */
 import "dotenv/config";
 import { prismaInternal } from "@/lib/db";
-import { ASSET_SELECT, talkWhere, transcribeInternal, type TargetAsset } from "@/lib/domain/transcribe";
+import { ASSET_SELECT, talkWhere, transcribeAndSaveAsInternal, type TargetAsset } from "@/lib/domain/transcribe";
 import { isTranscribeConfigured } from "@/lib/transcribe/openai";
 
 const APPLY = process.argv.includes("--apply");
@@ -38,6 +39,11 @@ async function main() {
   const beforeArg = arg("--before");
   if (APPLY && !beforeArg) {
     console.error("--apply には --before <ISO 日時> が要ります (流し直したときに同じものを 2 回やらないため)");
+    process.exit(1);
+  }
+  // 日付だけ・時差なしは UTC / 手元の時刻に化けるので、時差付きの ISO 日時だけを受ける
+  if (beforeArg && !/T.*(Z|[+-]\d{2}:?\d{2})$/.test(beforeArg)) {
+    console.error(`--before は時差付きの ISO 日時で渡す (例: 2026-11-14T12:00:00+09:00): ${beforeArg}`);
     process.exit(1);
   }
   const before = beforeArg ? new Date(beforeArg) : new Date();
@@ -77,7 +83,7 @@ async function main() {
   async function worker() {
     while (!stopped && next < targets.length) {
       const asset: TargetAsset & { title: string } = targets[next++];
-      const outcome = await transcribeInternal(asset);
+      const outcome = await transcribeAndSaveAsInternal(asset);
       if (outcome.kind === "retry") {
         counts.retry++;
         console.warn(`  再試行 ${asset.title} (${asset.id}): ${outcome.error}`);

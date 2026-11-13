@@ -93,6 +93,9 @@ export function isFileProblem(status: number, body: string): boolean {
   } catch {
     // JSON でなければ本文で見る
   }
+  // 「audio duration 1556 seconds is longer than 1500 seconds which is the maximum for this model」は
+  // model を含むが、長すぎる音声 (ファイルの問題) なので先に拾う
+  if (/duration.*(longer|maximum|exceed)/i.test(body)) return true;
   if (/prompt|keyword|model|api[_ ]key|parameter|response_format/i.test(body)) return false;
   return /file|audio|media|format|decod|duration/i.test(body);
 }
@@ -125,8 +128,10 @@ export async function transcribeAudio(data: Buffer, mimeType: string | null): Pr
     throw new TranscribeError(`OpenAI に届きませんでした: ${e instanceof Error ? e.message : String(e)}`, false);
   }
   if (!res.ok) {
-    const body = (await res.text().catch(() => "")).slice(0, 300);
-    const permanent = isFileProblem(res.status, body);
+    // 判定は全文で行う (300 文字で切ると JSON が壊れて error.param を読めない)。メッセージにだけ切って載せる
+    const fullBody = await res.text().catch(() => "");
+    const body = fullBody.slice(0, 300);
+    const permanent = isFileProblem(res.status, fullBody);
     // 5xx は OpenAI の一時的な障害なので、次のファイルは通るかもしれない
     const stopBatch = !permanent && res.status < 500;
     throw new TranscribeError(`OpenAI が ${res.status} を返しました: ${body}`, permanent, stopBatch);
@@ -139,5 +144,7 @@ export async function transcribeAudio(data: Buffer, mimeType: string | null): Pr
     throw new TranscribeError(`OpenAI の応答を読めませんでした: ${e instanceof Error ? e.message : String(e)}`, false);
   }
   const seconds = json.usage?.type === "duration" && typeof json.usage.seconds === "number" ? json.usage.seconds : 0;
+  // 課金秒数が返らないと /costs に 0 円で載る。黙って少なく見せないようにログに残す
+  if (!seconds) console.warn(`[transcribe] OpenAI の応答に課金秒数がありません: ${JSON.stringify(json.usage ?? null)}`);
   return { text: cleanTranscript(json.text ?? ""), billedSec: Math.ceil(seconds) };
 }
