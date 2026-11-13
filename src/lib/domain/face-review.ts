@@ -5,6 +5,7 @@
  * FaceDetection / AssetEntity / Asset は保護テーブルなので withClearance の中で触る。
  */
 import { unstable_cache } from "next/cache";
+import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { classificationFilterSql } from "@/lib/classification";
 import { prismaInternal, withClearance } from "@/lib/db";
@@ -120,6 +121,19 @@ export type FaceDecision =
   | { faceId: string; action: "reject" }
   | { faceId: string; action: "other"; entityId: string }
   | { faceId: string; action: "nonmember" };
+
+/** 画面 (Server Action) と API (`POST /api/v1/faces/reviews`) で受ける判断の形 */
+export const FaceDecisionsInput = z
+  .array(
+    z.discriminatedUnion("action", [
+      z.object({ faceId: z.string().min(1), action: z.literal("confirm") }),
+      z.object({ faceId: z.string().min(1), action: z.literal("reject") }),
+      z.object({ faceId: z.string().min(1), action: z.literal("nonmember") }),
+      z.object({ faceId: z.string().min(1), action: z.literal("other"), entityId: z.string().min(1) }),
+    ])
+  )
+  .min(1)
+  .max(REVIEW_MAX_DECISIONS);
 
 export class FaceReviewInputError extends Error {}
 
@@ -285,6 +299,105 @@ export async function listAssetFaces(clearance: string, assetId: string): Promis
       predictedName: r.predictedEntity?.canonicalName ?? null,
       confirmedEntityId: r.confirmedEntityId,
       confirmedName: r.confirmedEntity?.canonicalName ?? null,
+    }));
+  });
+}
+
+export const REVIEW_FEED_DEFAULT_LIMIT = 50;
+export const REVIEW_FEED_MAX_LIMIT = 200;
+
+export type ReviewFeedFace = {
+  id: string;
+  assetId: string;
+  status: "auto" | "pending";
+  similarity: number | null;
+  bbox: [number, number, number, number];
+  assetTitle: string;
+  createdAt: string;
+  mimeType: string | null;
+  fileSize: number | null;
+  thumbnailUrl: string | null;
+  authors: string[];
+  url: string | null;
+};
+
+/**
+ * Discord で 1 顔ずつ確認してもらう顔 (#441)。`createdAfter` 以降に登録された画像の、この人物と推定された顔。登録の古い順。
+ * - 確認待ち (pending) はすべて。人の答えでいちばん手本が増える
+ * - 自動 (auto) は、その人物が書き手ではない画像だけ (= #395 で転送される顔。本人のトーク・ブログは数が多く、確認しても手本はほぼ増えない)
+ * - 動画の顔は出さない (/faces と同じ。コマを切り出せない)
+ * 確定・却下すると pending / auto から外れるので、もう出てこない。登録時刻で切るので、モデルの版を上げても古い画像は出ない
+ */
+export async function listFaceReviewFeed(
+  clearance: string,
+  entityId: string,
+  createdAfter: Date,
+  limit: number
+): Promise<ReviewFeedFace[]> {
+  return withClearance(clearance, async (tx) => {
+    const rows = await tx.faceDetection.findMany({
+      where: {
+        frameSec: null,
+        predictedEntityId: entityId,
+        asset: { kind: "image", createdAt: { gte: createdAfter } },
+        OR: [
+          { status: "pending" },
+          {
+            status: "auto",
+            asset: {
+              entities: { none: { entityId, roleLabel: "author" } },
+              relationsAsTarget: {
+                none: { relationType: "parent_child", source: { entities: { some: { entityId, roleLabel: "author" } } } },
+              },
+            },
+          },
+        ],
+      },
+      orderBy: [{ asset: { createdAt: "asc" } }, { id: "asc" }],
+      take: limit,
+      select: {
+        id: true,
+        assetId: true,
+        status: true,
+        similarity: true,
+        x1: true,
+        y1: true,
+        x2: true,
+        y2: true,
+        asset: {
+          select: {
+            title: true,
+            createdAt: true,
+            mimeType: true,
+            fileSize: true,
+            thumbnailUrl: true,
+            entities: {
+              where: { roleLabel: "author", entity: { type: "person" } },
+              select: { entity: { select: { canonicalName: true } } },
+            },
+            sourceRecords: { where: { url: { not: null } }, select: { url: true }, take: 1 },
+            relationsAsTarget: {
+              where: { relationType: "parent_child" },
+              take: 1,
+              select: { source: { select: { sourceRecords: { where: { url: { not: null } }, select: { url: true }, take: 1 } } } },
+            },
+          },
+        },
+      },
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      assetId: r.assetId,
+      status: r.status as "auto" | "pending",
+      similarity: r.similarity,
+      bbox: [r.x1, r.y1, r.x2, r.y2],
+      assetTitle: r.asset.title,
+      createdAt: r.asset.createdAt.toISOString(),
+      mimeType: r.asset.mimeType,
+      fileSize: r.asset.fileSize,
+      thumbnailUrl: r.asset.thumbnailUrl,
+      authors: r.asset.entities.map((e) => e.entity.canonicalName),
+      url: r.asset.sourceRecords[0]?.url ?? r.asset.relationsAsTarget[0]?.source.sourceRecords[0]?.url ?? null,
     }));
   });
 }

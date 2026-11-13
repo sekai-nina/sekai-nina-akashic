@@ -139,6 +139,14 @@ pgvector は使わない。今は「似た顔を DB で検索する」場面が�
 
 他のメンバーのトーク・ブログに坂井新奈が写っていたら、discord bot（sekai-nina-discord-bot の `face_forward`）が世界新奈の talk / blog チャンネルに流す。bot は `GET /faces/appearances` を数分おきに叩き、流した画像を自分で覚える。坂井新奈が書き手の画像は API が除く。画像は `GET /faces/assets/:id/original`（`read` のキーで取れる）。
 
+## Discord での確認（#441）
+
+坂井新奈と推定された顔を、discord bot（`face_review`）が世界新奈の確認用チャンネルに 1 顔ずつ流し、✅（本人）/ ❌（本人ではない）のリアクションで確定・却下する。確定した顔は 10 分以内にワーカーの手本に入る（#420）。
+
+- 流す顔は `GET /faces/review-feed`: 確認待ちすべてと、転送（#395）される自動の顔。画像には顔の枠を描く
+- **誰のリアクションでも保存する。後から付けたリアクションが正しい**（間違えた人がいても、付け直せば上書きされる）。保存は `POST /faces/reviews`（画面と同じ `reviewFaces`）。判断した人は bot のキーの持ち主になる（Discord の誰が押したかは bot のログに残る）
+- 保存したら、メッセージに結果（誰が・どちらに）を書き足す
+
 ## 本番への適用
 
 migration `20261110000000_face_detection` は本番未適用。適用後に手動 GRANT が要る:

@@ -8,19 +8,11 @@ import {
   FACE_REVIEW_CACHE_TAG,
   listReviewFaces,
   type ReviewFace,
+  FaceDecisionsInput as Decisions,
   FaceReviewInputError,
-  REVIEW_MAX_DECISIONS,
   reviewFaces,
   type FaceReviewResult,
 } from "@/lib/domain/face-review";
-
-const Decision = z.discriminatedUnion("action", [
-  z.object({ faceId: z.string().min(1), action: z.literal("confirm") }),
-  z.object({ faceId: z.string().min(1), action: z.literal("reject") }),
-  z.object({ faceId: z.string().min(1), action: z.literal("nonmember") }),
-  z.object({ faceId: z.string().min(1), action: z.literal("other"), entityId: z.string().min(1) }),
-]);
-const Decisions = z.array(Decision).min(1).max(REVIEW_MAX_DECISIONS);
 
 export type ReviewActionResult = { ok: true; result: FaceReviewResult } | { ok: false; error: string };
 
