@@ -1411,9 +1411,13 @@ body は省略可（`subject` を省くと既定のコミットメッセージ�
 | `entityId` | string | （必須） | 人物のエンティティ。人物でなければ 404 |
 | `createdAfter` | ISO8601 | （必須） | この時刻以降に登録された画像。14 日前まで |
 | `limit` | number | 50 | 1〜200 |
+| `after` | string | — | 前のページの `next`。続きを取る |
+
+**満杯のページ（`limit` 件）には `next`（`"<createdAt の ISO8601>|<id>"`）が付く。** 続きは同じパラメータに `after=<next>` を足して取り、`next` が `null` になるまで繰り返す。Drive の一括取り込みなどで数百件が同じ登録時刻になるので、時刻だけを進めて続きを取ろうとすると同じ所を回る（2026-11-14 に 200 件以上が同じ時刻になり、その後の公式サイトの画像が流れなかった）。
 
 ```json
 {
+  "next": null,
   "items": [
     {
       "id": "cm...", "title": "上村ひなのトーク 2026.11.8 18:09", "createdAt": "2026-11-08T09:19:37.403Z",
@@ -1436,7 +1440,7 @@ Discord で 1 顔ずつ確認してもらう顔（#441）。`createdAfter` 以�
 
 - 確認待ち（`pending`）はすべて。自動（`auto`）は、その人物が書き手（`author`。親の書き手も見る）ではない画像だけ（= `/faces/appearances` で転送される顔）
 - 動画の顔（`frameSec` あり）は出さない。確定・却下した顔はもう出ない
-- パラメータは `/faces/appearances` と同じ（`entityId` / `createdAfter`（14 日前まで）/ `limit`（1〜200、既定 50））
+- パラメータは `/faces/appearances` と同じ（`entityId` / `createdAfter`（14 日前まで）/ `limit`（1〜200、既定 50）/ `after`）。満杯のページには `next` が付く（形は `"<画像の createdAt>|<顔の id>"`）
 
 ```json
 {

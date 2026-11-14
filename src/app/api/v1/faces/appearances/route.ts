@@ -1,11 +1,18 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireApiAuth } from "@/lib/api-auth";
-import { APPEARANCES_DEFAULT_LIMIT, APPEARANCES_MAX_LIMIT, listFaceAppearances } from "@/lib/domain/faces";
+import {
+  APPEARANCES_DEFAULT_LIMIT,
+  APPEARANCES_MAX_LIMIT,
+  listFaceAppearances,
+  nextFeedCursor,
+  parseFeedCursor,
+} from "@/lib/domain/faces";
 
 /**
  * 顔認識 (#395): この人物が写っている画像のうち、`createdAfter` 以降に登録されたもの。登録の古い順。
- * GET /api/v1/faces/appearances?entityId=<id>&createdAfter=<ISO8601>&limit=50
+ * GET /api/v1/faces/appearances?entityId=<id>&createdAfter=<ISO8601>&limit=50[&after=<next>]
+ * 満杯のページには `next` が付く。続きは `after=<next>` で取る (同じ登録時刻の画像が多くても進める。#446)
  * その人物が書き手 (author) の画像は除く。discord bot が他のメンバーのトーク・ブログに写っていたら流すのに使う
  */
 export const dynamic = "force-dynamic";
@@ -35,6 +42,9 @@ export async function GET(request: Request) {
   const entity = await prisma.entity.findFirst({ where: { id: entityId, type: "person" }, select: { id: true } });
   if (!entity) return NextResponse.json({ error: "人物のエンティティが見つかりません" }, { status: 404 });
 
-  const items = await listFaceAppearances(auth.clearance, entityId, createdAfter, limit);
-  return NextResponse.json({ items }, { headers: { "Cache-Control": "no-store" } });
+  const cursor = parseFeedCursor(searchParams.get("after"));
+  if (cursor === "invalid") return NextResponse.json({ error: "after の形が違う" }, { status: 400 });
+
+  const items = await listFaceAppearances(auth.clearance, entityId, createdAfter, cursor, limit);
+  return NextResponse.json({ items, next: nextFeedCursor(items, limit) }, { headers: { "Cache-Control": "no-store" } });
 }
