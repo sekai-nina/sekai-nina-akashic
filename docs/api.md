@@ -91,7 +91,7 @@ APIキーは `pnpm cli:keygen <user-email> <key-name> [permissions]` で発行�
 | GET | `/faces/queue` | face_worker | 顔認識: まだこのモデルで処理していない画像の一覧 |
 | GET | `/faces/assets/:id/original` | face_worker / read | 顔認識: 元画像のバイナリ（4.4 MB まで） |
 | PUT | `/faces/assets/:id` | face_worker | 顔認識: 1 枚の推論結果を書き込む（閾値以上は人物タグを自動で付ける） |
-| GET | `/faces/references` | face_worker | 顔認識: 参照に足す顔（人が確定した顔だけ） |
+| GET | `/faces/references` | face_worker | 顔認識: 参照に足す顔（人が見た顔だけ。メンバーの手本と、却下した「そのメンバーではない」手本） |
 | GET | `/faces/appearances` | read | 顔認識: その人物が写っている画像のうち、指定時刻以降に登録されたもの（書き手が本人のものは除く） |
 | GET | `/faces/review-feed` | read | 顔認識: Discord で 1 顔ずつ確認してもらう顔（確認待ちと、書き手が本人ではない画像の自動の顔） |
 | POST | `/faces/reviews` | write | 顔認識: 顔の確定・却下（画面の「顔の確認」と同じ規則） |
@@ -1379,7 +1379,11 @@ body は省略可（`subject` を省くと既定のコミットメッセージ�
 
 ### GET /faces/references
 
-参照に足す顔。**人が確定した顔だけ**を返す（自動で付けた顔は返さない。間違いが参照に混ざって広がるのを防ぐ）。id の昇順で、`next` が `null` になるまで `after=<next>` で続きを取る。
+参照に足す顔。**人が見た顔（確定・却下）だけ**を返す（自動で付けた顔は返さない。間違いが参照に混ざって広がるのを防ぐ）。id の昇順で、`next` が `null` になるまで `after=<next>` で続きを取る。
+
+- `entityId`: 正解のメンバー。そのメンバーの手本にする
+- `negativeEntityId`（#447）: 推定のメンバーを人が却下し、正解の無い顔（Discord の ❌ など）の、却下されたメンバー。「そのメンバーではない」手本にする。ワーカーは、そのメンバーではない手本のほうが、そのメンバーの手本より 0.05 を超えて近い顔を、そのメンバーと推定しない
+- どちらかがあれば `embedding` が付く
 
 | パラメータ | 型 | デフォルト | 説明 |
 |---|---|---|---|
@@ -1390,13 +1394,14 @@ body は省略可（`subject` を省くと既定のコミットメッセージ�
 ```json
 {
   "items": [
-    { "id": "cm...", "assetId": "cm...", "entityId": "cm...", "modelVersion": "buffalo_l@1", "embedding": "<base64>", "reviewedAt": "2026-11-10T03:00:00.000Z", "updatedAt": "2026-11-10T03:00:00.000Z" }
+    { "id": "cm...", "assetId": "cm...", "entityId": "cm...", "negativeEntityId": null, "modelVersion": "buffalo_l@3", "embedding": "<base64>", "reviewedAt": "2026-11-10T03:00:00.000Z", "updatedAt": "2026-11-10T03:00:00.000Z" },
+    { "id": "cm...", "assetId": "cm...", "entityId": null, "negativeEntityId": "cm...", "modelVersion": "buffalo_l@3", "embedding": "<base64>", "reviewedAt": "2026-11-14T03:00:00.000Z", "updatedAt": "2026-11-14T03:00:00.000Z" }
   ],
   "next": null
 }
 ```
 
-**差分（`updatedAfter`）**: その時刻より後に変わった、人が見た顔（確定・却下）を `(updatedAt, id)` の昇順で返す。`next` は `"<updatedAt>|<id>"` の形で、そのまま `after` に渡す。正解が無い顔（メンバー以外・誰か分からない。判断し直して手本から外れた顔を含む）は `entityId: null`・`embedding: null` で返すので、呼ぶ側は手本から外す。人が判断を変えたときと、推論し直しで判断を引き継いだとき（#386。特徴量の差し替え）に `updatedAt` が進む。アセットごと消えた顔は差分に出ないので、ワーカーは 1 日 1 回全部を取り直す
+**差分（`updatedAfter`）**: その時刻より後に変わった、人が見た顔（確定・却下）を `(updatedAt, id)` の昇順で返す。`next` は `"<updatedAt>|<id>"` の形で、そのまま `after` に渡す。手本にならない顔（メンバー以外。判断し直して手本から外れた顔を含む）は `entityId: null`・`negativeEntityId: null`・`embedding: null` で返すので、呼ぶ側は手本から外す。人が判断を変えたときと、推論し直しで判断を引き継いだとき（#386。特徴量の差し替え）に `updatedAt` が進む。アセットごと消えた顔は差分に出ないので、ワーカーは 1 日 1 回全部を取り直す
 
 ### GET /faces/appearances
 

@@ -13,7 +13,7 @@ import type { ClearanceLevel } from "@prisma/client";
 /**
  * 顔の確認 (#409)。顔認識が自動で付けられなかった顔 (確認待ち) と、自動で付いた顔を人が確定・却下する。
  * 既定は坂井新奈と推定された確認待ちの顔を、似ている順に 40 個ずつ。
- * 人が確定した顔は、ワーカーの参照 (次からの判定の手本) になる。
+ * 人が確定した顔は、ワーカーの参照 (次からの判定の手本) になる。却下した顔は「そのメンバーではない」手本になる (#447)。
  */
 export default async function FacesPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const session = await auth();
@@ -54,7 +54,7 @@ export default async function FacesPage({ searchParams }: { searchParams: Promis
           顔の確認
         </h1>
         <p className="text-sm text-slate-500 mt-1">
-          顔認識の結果を人が確かめます。キーボードだけで回せます (右のキー一覧)。確定した顔は次からの判定の手本になります。
+          顔認識の結果を人が確かめます。キーボードだけで回せます (右のキー一覧)。確定した顔は次からの判定の手本に、却下した顔は「そのメンバーではない」手本になります。
         </p>
       </div>
 

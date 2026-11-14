@@ -95,12 +95,11 @@ export type NewFace = Box & { frameSec: number | null; predictedEntityId: string
  * - 動画で、コマが違っても、人が確定したメンバー (confirmedEntityId) と新しい推定が同じ。
  *   動画はメンバーごとにいちばん似ていた 1 コマだけを書くので、モデルを変えるとコマがずれる
  *
- * ただし、人の答えが新しい推定を覆っていないものは引き継がない (新しい問いとして確認待ちに出す):
- * 却下だけで正解の無い行は、新しい推定が却下したメンバーと同じときだけ引き継ぐ
+ * 却下だけで正解の無い行も、新しい推定を問わず引き継ぐ (#447)。ワーカーはその行を「却下したメンバーではない」手本に
+ * 使うので、同じ顔の新しい推定は却下したメンバーを除いた次に近いメンバーになる。人が答えていないメンバーの
+ * 新しい問いとして出すと、却下した顔のほとんど (約 5,900 顔) が確認待ちか、境目の類似度で別のメンバーの自動に化ける
  */
 export function matchReviewedFaces(faces: NewFace[], reviewed: ReviewedFace[]): Map<number, string> {
-  const covers = (r: ReviewedFace, f: NewFace) =>
-    r.status === "confirmed" || r.confirmedEntityId != null || r.predictedEntityId === f.predictedEntityId;
   const sameFrame = (r: ReviewedFace, f: NewFace) =>
     (r.frameSec == null && f.frameSec == null) ||
     (r.frameSec != null && f.frameSec != null && Math.abs(r.frameSec - f.frameSec) <= SAME_FRAME_SEC);
@@ -108,7 +107,7 @@ export function matchReviewedFaces(faces: NewFace[], reviewed: ReviewedFace[]): 
   const pairs: { i: number; r: ReviewedFace; score: number }[] = [];
   faces.forEach((f, i) => {
     for (const r of reviewed) {
-      if (!sameFrame(r, f) || !covers(r, f)) continue;
+      if (!sameFrame(r, f)) continue;
       const score = iou(r, f);
       if (score >= FACE_INHERIT_IOU) pairs.push({ i, r, score });
     }

@@ -366,35 +366,67 @@ export async function writeFaceResults(clearance: string, assetId: string, input
 }
 
 /**
- * 参照に足す顔: 人が確定した顔だけ。自動で付けた顔は返さない (間違いが参照に混ざって広がるのを防ぐ)。
- * id の昇順で `after` から続きを返す
+ * 参照に返す行: 正解のメンバー (手本) か、人が「推定のメンバーではない」とした顔 (そのメンバーではない手本。#447)。
+ * status の IN を OR の外に出す (OR の中に入れると status の索引を使わず、1 ページ 3.6 秒かかった。外に出すと 0.7 秒)
+ */
+const referenceWhere: Prisma.FaceDetectionWhereInput = {
+  status: { in: ["confirmed", "rejected"] },
+  OR: [{ confirmedEntityId: { not: null } }, { status: "rejected", predictedEntityId: { not: null } }],
+};
+
+const referenceSelect = {
+  id: true,
+  assetId: true,
+  status: true,
+  predictedEntityId: true,
+  confirmedEntityId: true,
+  embedding: true,
+  modelVersion: true,
+  reviewedAt: true,
+  updatedAt: true,
+} satisfies Prisma.FaceDetectionSelect;
+
+/**
+ * 1 行を参照の形にする。
+ * - `entityId`: 正解のメンバー。その人の手本
+ * - `negativeEntityId`: 却下だけで正解の無い顔の、却下されたメンバー。「そのメンバーではない」手本 (#447)
+ * - どちらも無い (メンバー以外・確定で正解なし) なら特徴量を付けない。差分で受けた側は手本から外す
+ */
+function toReference(r: Prisma.FaceDetectionGetPayload<{ select: typeof referenceSelect }>) {
+  const negativeEntityId = r.status === "rejected" && !r.confirmedEntityId ? r.predictedEntityId : null;
+  return {
+    id: r.id,
+    assetId: r.assetId,
+    entityId: r.confirmedEntityId,
+    negativeEntityId,
+    modelVersion: r.modelVersion,
+    embedding: r.confirmedEntityId || negativeEntityId ? Buffer.from(r.embedding).toString("base64") : null,
+    reviewedAt: r.reviewedAt,
+    // 差分を取り始める時刻に使う (#420)
+    updatedAt: r.updatedAt,
+  };
+}
+
+/**
+ * 参照に足す顔: 人が見た顔だけ。自動で付けた顔は返さない (間違いが参照に混ざって広がるのを防ぐ)。
+ * 正解のメンバーの手本と、却下した顔の「そのメンバーではない」手本 (#447) を返す。id の昇順で `after` から続きを返す
  */
 export async function listFaceReferences(clearance: string, after: string | undefined, limit: number) {
   const rows = await withClearance(clearance, (tx) =>
     tx.faceDetection.findMany({
-      where: { status: { in: ["confirmed", "rejected"] }, confirmedEntityId: { not: null }, ...(after ? { id: { gt: after } } : {}) },
+      where: { ...referenceWhere, ...(after ? { id: { gt: after } } : {}) },
       orderBy: { id: "asc" },
       take: limit,
-      select: { id: true, assetId: true, confirmedEntityId: true, embedding: true, modelVersion: true, reviewedAt: true, updatedAt: true },
+      select: referenceSelect,
     })
   );
-  return rows.map((r) => ({
-    id: r.id,
-    assetId: r.assetId,
-    entityId: r.confirmedEntityId as string,
-    modelVersion: r.modelVersion,
-    embedding: Buffer.from(r.embedding).toString("base64"),
-    reviewedAt: r.reviewedAt,
-    // 差分を取り始める時刻に使う (#420)
-    updatedAt: r.updatedAt,
-  }));
+  return rows.map(toReference);
 }
 
 /**
  * 参照の差分 (#420): `updatedAfter` より後に変わった、人が見た顔。`(updatedAt, id)` の昇順。
  * ワーカーは初回だけ listFaceReferences で全部取り、以降はこれで差分だけを取って手本を差し替える。
- * 正解が null の行 (メンバー以外・誰か分からない) も `entityId: null` で返す。判断し直して手本から外れた顔を、
- * 呼ぶ側が消せるように (その行には特徴量を付けない)。
+ * 手本にならない行 (メンバー以外) も特徴量なしで返す。判断し直して手本から外れた顔を、呼ぶ側が消せるように。
  * 確定・却下の行は人が判断を変えたときと、推論し直しで判断を引き継いだとき (#386。枠・特徴量の差し替え) に updatedAt が進む
  */
 export async function listFaceReferenceChanges(
@@ -414,18 +446,10 @@ export async function listFaceReferenceChanges(
       },
       orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
       take: limit,
-      select: { id: true, assetId: true, confirmedEntityId: true, embedding: true, modelVersion: true, reviewedAt: true, updatedAt: true },
+      select: referenceSelect,
     })
   );
-  return rows.map((r) => ({
-    id: r.id,
-    assetId: r.assetId,
-    entityId: r.confirmedEntityId,
-    modelVersion: r.modelVersion,
-    embedding: r.confirmedEntityId ? Buffer.from(r.embedding).toString("base64") : null,
-    reviewedAt: r.reviewedAt,
-    updatedAt: r.updatedAt,
-  }));
+  return rows.map(toReference);
 }
 
 /** アセット詳細で子アセットの顔をまとめるときの上限 (ブログ 1 記事の画像は多くて数十枚) */

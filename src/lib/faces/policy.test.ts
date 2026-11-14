@@ -159,10 +159,11 @@ describe("matchReviewedFaces (#386)", () => {
     expect([...m]).toEqual([[1, "r1"]]);
   });
 
-  it("却下だけで正解の無い顔は、新しい推定が却下したメンバーと同じときだけ引き継ぐ", () => {
+  it("却下だけで正解の無い顔は、新しい推定が別のメンバーでも引き継ぐ (#447)", () => {
     const r = reviewed("r1", box(0.1, 0.1, 0.3, 0.3), { status: "rejected", predictedEntityId: "x", confirmedEntityId: null });
     expect(matchReviewedFaces([face(box(0.1, 0.1, 0.3, 0.3), { predictedEntityId: "x" })], [r]).size).toBe(1);
-    expect(matchReviewedFaces([face(box(0.1, 0.1, 0.3, 0.3), { predictedEntityId: "y" })], [r]).size).toBe(0);
+    expect(matchReviewedFaces([face(box(0.1, 0.1, 0.3, 0.3), { predictedEntityId: "y" })], [r]).size).toBe(1);
+    expect(matchReviewedFaces([face(box(0.1, 0.1, 0.3, 0.3), { predictedEntityId: null })], [r]).size).toBe(1);
   });
 
   it("却下でも正解が付いていれば、推定が違っても引き継ぐ", () => {
