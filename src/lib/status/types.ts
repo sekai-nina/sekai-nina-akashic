@@ -45,15 +45,16 @@ export interface CheckContext {
  * データ由来の鮮度チェックの閾値 (時間)。DataSource.key ごと。
  *
  * 直近 60 日の登録間隔の実測 (最大ギャップ) から: blog 70h / talk 40h / Lemino 168h。
- * YouTube 系はチャンネルごとの実測 (2026-10 時点の最大ギャップ: 公式チャンネル 309h / 日向坂ちゃんねる 652h)。
  * ここに無い DataSource (雑誌・SNS・完結した番組) は見ない。
+ *
+ * YouTube (official_ch / hinachan) は投稿間隔が読めず (公式チャンネルは 2 週間以上空くことがある)、
+ * 鮮度で見ると壊れていなくても warn になる。bot.youtube_watch のハートビート
+ * (巡回が成功しているか) だけで見る。
  */
 export const SOURCE_FRESHNESS_MAX_AGE_HOURS: Record<string, number> = {
   blog: 72,
   talk: 48,
   hinaai: 24 * 10,
-  official_ch: 24 * 16,
-  hinachan: 24 * 30,
 };
 
 /** tiktok-watch (#179) のハートビート key。`/admin/tiktok` からも参照する */
