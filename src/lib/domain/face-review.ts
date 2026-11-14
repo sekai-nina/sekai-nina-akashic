@@ -11,6 +11,7 @@ import { classificationFilterSql } from "@/lib/classification";
 import { prismaInternal, withClearance } from "@/lib/db";
 import { FACE_ROLE_LABEL } from "@/lib/faces/policy";
 import { NINA_ENTITY_ID } from "@/lib/nina";
+import type { FeedCursor } from "@/lib/domain/faces";
 
 export const REVIEW_PAGE_SIZE = 40;
 /** 1 回に確定・却下できる顔の数 (1 ページ分＋余裕) */
@@ -332,6 +333,7 @@ export async function listFaceReviewFeed(
   clearance: string,
   entityId: string,
   createdAfter: Date,
+  cursor: FeedCursor | null,
   limit: number
 ): Promise<ReviewFeedFace[]> {
   return withClearance(clearance, async (tx) => {
@@ -340,6 +342,19 @@ export async function listFaceReviewFeed(
         frameSec: null,
         predictedEntityId: entityId,
         asset: { kind: "image", createdAt: { gte: createdAfter } },
+        // 続き (#446): 並びは画像の登録時刻・顔の ID。cursor.id は顔の ID
+        ...(cursor
+          ? {
+              AND: [
+                {
+                  OR: [
+                    { asset: { createdAt: { gt: cursor.createdAt } } },
+                    { asset: { createdAt: cursor.createdAt }, id: { gt: cursor.id } },
+                  ],
+                },
+              ],
+            }
+          : {}),
         OR: [
           { status: "pending" },
           {

@@ -502,6 +502,27 @@ export async function getFaceSummary(clearance: string, assetId: string) {
   });
 }
 
+/**
+ * 登録の古い順に返す一覧 (`/faces/appearances`・`/faces/review-feed`) の続きの位置。
+ * 一括取り込みでは数百件が同じ登録時刻になるので、時刻だけでは続きを取れない (#446)。形は "<createdAt の ISO8601>|<id>"
+ */
+export type FeedCursor = { createdAt: Date; id: string };
+
+/** `after` を読む。無ければ null、形が違えば "invalid" */
+export function parseFeedCursor(after: string | null): FeedCursor | null | "invalid" {
+  if (!after) return null;
+  const [iso, id] = after.split("|");
+  const at = new Date(iso);
+  if (!id || Number.isNaN(at.getTime())) return "invalid";
+  return { createdAt: at, id };
+}
+
+/** 満杯のページなら最後の要素から次の `after` を作る。満杯でなければ null (もう無い) */
+export function nextFeedCursor(page: { createdAt: Date; id: string }[], limit: number): string | null {
+  const last = page[page.length - 1];
+  return page.length === limit && last ? `${last.createdAt.toISOString()}|${last.id}` : null;
+}
+
 export const APPEARANCES_DEFAULT_LIMIT = 50;
 export const APPEARANCES_MAX_LIMIT = 200;
 /** 本文のプレビューの長さ (Discord に流すとき用) */
@@ -526,13 +547,22 @@ function appearingFaceWhere(entityId: string) {
  * - 顔認識は登録の数分後に付くので、bot は少し前からの範囲を毎回聞き直し、流したかどうかは自分で覚える
  * - 登録時刻で切るので、モデルの版を上げて全画像を処理し直しても古い画像は出てこない
  */
-export async function listFaceAppearances(clearance: string, entityId: string, createdAfter: Date, limit: number) {
+export async function listFaceAppearances(
+  clearance: string,
+  entityId: string,
+  createdAfter: Date,
+  cursor: FeedCursor | null,
+  limit: number
+) {
   return withClearance(clearance, async (tx) => {
     const notAuthor = { entities: { none: { entityId, roleLabel: "author" } } };
     const assets = await tx.asset.findMany({
       where: {
         ...targetWhere,
         createdAt: { gte: createdAfter },
+        ...(cursor
+          ? { OR: [{ createdAt: { gt: cursor.createdAt } }, { createdAt: cursor.createdAt, id: { gt: cursor.id } }] }
+          : {}),
         faceDetections: { some: appearingFaceWhere(entityId) },
         ...notAuthor,
         relationsAsTarget: { none: { relationType: "parent_child", source: { entities: { some: { entityId, roleLabel: "author" } } } } },
