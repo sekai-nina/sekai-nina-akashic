@@ -4,10 +4,11 @@ import { listFaceReferenceChanges, listFaceReferences, REFERENCES_MAX_LIMIT } fr
 import { FACE_WORKER_PERMISSION } from "@/lib/faces/policy";
 
 /**
- * 顔認識 (#384): 参照に足す顔 (人が確定した顔だけ)。推論ワーカーがアー写と合わせて使う。
+ * 顔認識 (#384): 参照に足す顔 (人が見た顔だけ)。推論ワーカーがアー写と合わせて使う。
+ * `entityId` はそのメンバーの手本、`negativeEntityId` は人が却下した「そのメンバーではない」手本 (#447)。
  * - 全部: GET /api/v1/faces/references?after=<id>&limit=1000 — id の昇順。`next` が null になるまで続きを取る
  * - 差分 (#420): GET /api/v1/faces/references?updatedAfter=<ISO8601>&after=<next>&limit=1000 —
- *   その時刻より後に変わった、人が見た顔を `(updatedAt, id)` の昇順で。`entityId: null` は手本から外す顔
+ *   その時刻より後に変わった、人が見た顔を `(updatedAt, id)` の昇順で。`embedding: null` は手本から外す顔
  */
 export const dynamic = "force-dynamic";
 
