@@ -365,8 +365,10 @@ export async function writeFaceResults(clearance: string, assetId: string, input
   });
 }
 
-/** 参照に返す行: 正解のメンバー (手本) か、人が「推定のメンバーではない」とした顔 (そのメンバーではない手本。#447) */
-// status の IN を外に出す (OR の中に入れると status の索引を使わず、1 ページ 3.6 秒かかった。外に出すと 0.7 秒)
+/**
+ * 参照に返す行: 正解のメンバー (手本) か、人が「推定のメンバーではない」とした顔 (そのメンバーではない手本。#447)。
+ * status の IN を OR の外に出す (OR の中に入れると status の索引を使わず、1 ページ 3.6 秒かかった。外に出すと 0.7 秒)
+ */
 const referenceWhere: Prisma.FaceDetectionWhereInput = {
   status: { in: ["confirmed", "rejected"] },
   OR: [{ confirmedEntityId: { not: null } }, { status: "rejected", predictedEntityId: { not: null } }],
