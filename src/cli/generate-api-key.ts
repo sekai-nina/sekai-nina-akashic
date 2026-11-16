@@ -17,6 +17,7 @@ import { WORKER_PERMISSION } from "@/lib/insta/jobs";
 import { ARTICLE_PUSH_PERMISSION } from "@/lib/articles/append";
 import { CLIP_PERMISSION } from "@/lib/clips/errors";
 import { FACE_WORKER_PERMISSION } from "@/lib/faces/policy";
+import { SCENE_WORKER_PERMISSION } from "@/lib/video-scenes/policy";
 
 const prisma = new PrismaClient();
 
@@ -26,7 +27,7 @@ const prisma = new PrismaClient();
  * `clip` は POST /api/v1/clips だけを通す (Discord の返信からクリップ。#286)。
  * `face_worker` は /api/v1/faces だけを通す (顔認識の推論ワーカー。#384)
  */
-const KNOWN_PERMISSIONS = ["read", "write", WORKER_PERMISSION, ARTICLE_PUSH_PERMISSION, CLIP_PERMISSION, FACE_WORKER_PERMISSION];
+const KNOWN_PERMISSIONS = ["read", "write", WORKER_PERMISSION, ARTICLE_PUSH_PERMISSION, CLIP_PERMISSION, FACE_WORKER_PERMISSION, SCENE_WORKER_PERMISSION];
 
 async function main() {
   const [, , email, name, permissionsArg] = process.argv;

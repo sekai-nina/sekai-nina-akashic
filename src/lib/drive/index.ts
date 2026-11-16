@@ -50,6 +50,17 @@ export function isDriveEnabled(): boolean {
   return hasOAuth || hasServiceAccount;
 }
 
+/** 場面素材は公開権限を付けない。公開フォルダからの権限継承も避ける。 */
+export async function isPrivateSceneFolder(folderId: string): Promise<boolean> {
+  const auth = getAuth();
+  if (!auth) return false;
+  const drive = google.drive({ version: "v3", auth: auth as Parameters<typeof google.drive>[0]["auth"] });
+  const result = await drive.files.get({ fileId: folderId, fields: "mimeType,trashed,permissions(type)", supportsAllDrives: true });
+  const permissions = result.data.permissions;
+  return result.data.mimeType === "application/vnd.google-apps.folder" && result.data.trashed !== true &&
+    Array.isArray(permissions) && permissions.length > 0 && permissions.every((p) => p.type === "user" || p.type === "group");
+}
+
 /**
  * テキストコンテンツを .txt ファイルとしてDriveにバックアップする。
  * レスポンスをブロックしないよう、呼び出し側で .catch() して使う想定。
