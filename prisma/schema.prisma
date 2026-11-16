@@ -303,6 +303,7 @@ model Asset {
   faceScans         FaceScan[]
   discoveries       Discovery[]
   discoveryDraftAttempt DiscoveryDraftAttempt?
+  videoSceneTasks   VideoSceneTask[]
   tiktokVideo       TiktokVideo?
 
   @@index([sha256])
@@ -314,6 +315,47 @@ model Asset {
   @@index([createdAt])
   @@index([classification])
   @@unique([discordGuildId, discordChannelId, discordMessageId])
+}
+
+/// 動画の場面候補の生成と、保存範囲を絞った動画の書き出し (#394)。
+/// classification は親 Asset の現在値に従う。推論・エンコードは外部ワーカーで行う。
+model VideoSceneTask {
+  id            String   @id @default(cuid())
+  assetId       String
+  asset         Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  requestKey    String   @unique
+  kind          String
+  status        String   @default("queued")
+  startSec      Float?
+  endSec        Float?
+  result        Json     @default("{}")
+  error         String?
+  leaseToken    String?
+  leaseUntil    DateTime?
+  attempts      Int      @default(0)
+  requestedById String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  files VideoSceneFile[]
+
+  @@index([assetId, kind, createdAt])
+  @@index([status, createdAt])
+}
+
+/// 場面のスクショ・動画。公開 URL を作らず、親動画の現在の機密で配信する。
+model VideoSceneFile {
+  id          String @id @default(cuid())
+  taskId      String
+  task        VideoSceneTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  slot        String
+  storageKey  String?
+  filename    String
+  mimeType    String
+  fileSize    Int?
+  createdAt   DateTime @default(now())
+
+  @@unique([taskId, slot])
 }
 
 model AssetText {
