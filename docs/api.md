@@ -1,5 +1,29 @@
 # Akashic REST API v1
 
+## 動画の場面ワーカー（#394）
+
+`POST /api/v1/video-scenes/tasks`。`video_scene_worker` または `write` の API キーかつ admin / member。ワーカー専用の member / internal ユーザーには `video_scene_worker` だけを持たせる（他の書き込み API は使えない）。JSON の `operation` で操作を分ける。すべてキーの clearance で `withClearance` を通し、元動画が見えない依頼には触れない。
+
+| operation | 入力 | 応答 |
+|---|---|---|
+| `claim` | 任意で `kind:"export"` | `{task: null}` または `{task: {id, kind, assetId, startSec, endSec, leaseToken, asset: {title, classification, fileSize}}}`。1 件を処理中にする。export を優先。kind を指定すると export だけを取得 |
+| `discover` | なし | `{task: null}` または分析の依頼。本人の人物タグ・確定した顔を持つ新しい未依頼の動画を 1 件だけキューに足す |
+| `heartbeat` | `taskId`, `token` | `{ok:true}`。有効な処理の期限を 10 分先へ延長 |
+| `upload` | `taskId`, `token`, `slot`, `mimeType` | `{fileId, uploadUrl}`。Drive の resumable URL。slot は英数字・`_`・`-` の 1〜80 文字。MIME は image/jpeg / video/mp4 |
+| `uploaded` | `taskId`, `token`, `fileId`, `driveFileId` | 保存したファイルの `id,mimeType,fileSize`。Drive の保存先・appProperties・MIME・容量を確認する。公開権限を付けない |
+| `complete` | `taskId`, `token`, `result` | `{ok:true}`。この依頼にアップロードしたファイルだけで生成結果を確定 |
+| `fail` | `taskId`, `token` | `{ok:true}`。画面には一般的なエラーだけを表示。外部サービスのエラー本文は送らない |
+
+claim / discover 以外の処理中の操作は claim の `leaseToken` を `token` に渡す。有効期限切れ・別のトークンは 409、不正な入力は 400、容量超過の JSON は 413。生成・アップロードの JSON 上限は 1 MB。画像は 4 MB 以下、動画は 100 MB 以下。アップロード URL・token・API キーはログに出さない。
+
+分析の `result` は `{duration, scenes:[{id,start,end,videoFileId,posterFileId,shots:[{fileId,time}]}]}`。秒数は有限で動画内。表紙は同じ場面の shots に含まれること。3 分以下の動画の `videoFileId` は null、長い動画の 1 場面の動画は 90 秒以内。本人が検出されない場合は scenes を空にして正常終了する。
+
+書き出しの `result` は `{fileId}`。登録された同じ依頼の MP4 の ID に限る。範囲指定の依頼は画面の Server Action で作り、0.1 秒単位・90 秒以内をサーバーで確認する。分析済みなら動画の長さもサーバーで確認し、未分析ならワーカーの ffprobe で動画外の範囲を拒否する。
+
+元動画・生成物の読み取りは `GET /api/video-scenes/media/:id`（元動画は `?source=1`）。セッションまたは read / video_scene_worker キーで認証する。`Range: bytes=<start>-<end>` を指定すると最大 4 MB の 206 と `Content-Range` を返す。開放端・末尾の Range にも対応。すべて `private, no-store`。存在しない／見えない対象は 404。
+
+画面の状況確認用の `GET /api/video-scenes/assets/:assetId` と `GET /api/video-scenes/tasks/:taskId` はセッション認証だけ。leaseToken と Drive のキーは返さない。詳細は [動画の場面の設計](./video-scenes-design.md)。
+
 Akashicのデータを外部システムから操作するためのREST API。
 
 > AI アシスタントから使う場合は、同じ API キーで叩ける **MCP サーバー**がある → [docs/mcp.md](./mcp.md)
