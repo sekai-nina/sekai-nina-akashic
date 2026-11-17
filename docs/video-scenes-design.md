@@ -26,6 +26,8 @@
 
 配信は認証済み `/api/video-scenes/media/:id`（元動画は `?source=1`）。4 MB ごとの Range、`private, no-store`。画像は 4 MB 以下、動画は 100 MB 以下。保存時も選んだファイルだけを Range でつなぎ、途中のログインページや異なる範囲は保存しない。
 
+ブラウザの配信はセッションと通常の MFA を維持する。Cookie を持たないワーカーの元動画取得は、API キー認証専用の `/api/v1/video-scenes/assets/:assetId/source` を使う。
+
 ## ワーカー
 
 `scripts/video-scene-worker.py` を omokage と同じ Python 環境で動かす。必要なのは InsightFace / numpy / OpenCV と ffmpeg / ffprobe。HTTP・推論・エンコードを Web の応答中に行わない。顔認識の参照は `--refs` に NPZ（`ids`, `matrix`）を渡す。参照の更新は omokage 側と同じ運用で行う。
@@ -44,6 +46,8 @@ python scripts/video-scene-worker.py --refs /path/to/refs-full.npz --max-jobs 1 
 作業用の一時ファイルは処理後に削除する。Drive へのアップロード途中でプロセスが失われた場合、未登録の Drive ファイルが残る可能性がある。自動削除は行わず、専用フォルダの appProperties によって対象を下見してから整理する。
 
 元動画を見ながらの範囲指定は、場面候補の分析前でも依頼できる。未分析ならワーカーの ffprobe で実際の長さを確かめ、動画外の範囲は出力しない。`--export-only` は保存用の書き出しだけを処理する。分析中に保存を待たせない運用では、分析用 timer と書き出し専用 timer を分ける。`--export-only` と `--discover` は併用不可。1 依頼の出力はサムネイルを含め最大 1,000 ファイル。
+
+`deploy/video-scenes-*.service` / `.timer` は sekai のユーザーユニット。コードは `~/akashic-video-scenes/scripts`、参照は `data/refs-full.npz`、鍵は `~/.config/akashic-video-scenes/worker.env`（0600）へ配置する。Python は既存の `~/sekai-nina-omokage/.venv` を使う。分析は完了後10分、書き出しは完了後1分ごとに1件。分析 CPU 100% / 1800 MB、書き出し CPU 50% / 512 MB に制限し、既存サービスは変更しない。timer は1件の実地確認後に有効化する。
 
 ## 適用順と検証
 
