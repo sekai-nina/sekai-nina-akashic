@@ -51,6 +51,7 @@ import { TextsSection, type TextRange } from "./texts-section";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { entityClearanceWhere } from "@/lib/domain/entities";
+import { SCENE_LABELS } from "@/lib/video-scenes/labels";
 
 
 function RichTextContent({
@@ -392,6 +393,11 @@ export default async function AssetDetailPage({
             </Link>
           </span>
         </div>
+      )}
+      {asset.kind === "video" && asset.storageProvider === "gdrive" && asset.storageKey && (
+        <Link href={`/video-scenes/${asset.id}`} className="mb-4 block rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-medium text-sky-800">
+          {SCENE_LABELS.title} → 元動画・スクショ・切り抜きから選ぶ
+        </Link>
       )}
       {(prevAsset || nextAsset) && (
         <nav className="mb-3 flex items-stretch gap-2 text-xs">
@@ -764,6 +770,7 @@ export default async function AssetDetailPage({
           <NinaAppearancePanel assetId={asset.id} initial={ninaAppearanceOf(asset)} editable={isEditor} />
           {faces.length > 0 && (
             <FacesPanel
+              assetId={asset.kind === "video" && asset.storageProvider === "gdrive" && asset.storageKey ? asset.id : undefined}
               faces={faces}
               imageUrl={asset.thumbnailUrl}
               members={faceMembers}

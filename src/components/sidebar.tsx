@@ -1,6 +1,7 @@
 "use client";
 
 import { COVERAGE_LABELS } from "@/lib/utils";
+import { SCENE_LABELS } from "@/lib/video-scenes/labels";
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -58,6 +59,7 @@ const navItems = [
   { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/entities", label: "エンティティ", icon: Tag },
   { href: "/faces", label: "顔の確認", icon: ScanFace },
+  { href: "/video-scenes", label: SCENE_LABELS.title, icon: Clapperboard },
   { href: "/places", label: "聖地マップ", icon: MapPin },
   { href: "/anniversaries", label: "記念日", icon: CalendarHeart },
   { href: "/announcements", label: "お知らせ", icon: Megaphone },

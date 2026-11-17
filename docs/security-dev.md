@@ -58,6 +58,10 @@ const clearance = auth.clearance;
 | Entity を一覧・検索でユーザーに返す | `listEntities` / `searchEntities` / `getEntityById`（`entityClearanceWhere` を通す） |
 | 生 SQL で Entity を一致条件に使う（返さなくても） | `e."type" <> 'place' OR EXISTS (SELECT 1 FROM "Place" p WHERE p."entityId" = e."id")` を入れる（`withClearance` の中でだけ有効。`src/lib/search/index.ts` の `visibleEntity`。#345） |
 
+## 動画の場面の生成物（#394）
+
+`VideoSceneTask` と `VideoSceneFile` も保護テーブル。Task → 親 Asset、File → Task の存在チェックを 4 操作の RLS で行い、元動画の現在の機密で絞る。汎用 Asset に生成時点の機密を写す方式にはしない。読み書きは `withClearance`、依頼とワーカーの操作は admin / member。生成物は anyone / domain 公開のない専用 Drive フォルダに置き、公開 R2 や `finalizeDriveUpload` を通さない。配信はセッションまたは read キーによる認証と RLS を通した Range 応答だけ。アップロードしたファイルは Drive の appProperties と有効な lease の両方で検査する → [設計](./video-scenes-design.md)。
+
 ## 保護テーブル一覧
 
 以下のテーブルに RLS が設定されています。素の `prisma` でアクセスすると 0 行が返ります。

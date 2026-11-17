@@ -32,11 +32,13 @@ function shownName(f: AssetFace): string {
  * 動画 (トーク) の顔は、サムネイルが別のコマなので切り抜かず、何秒目かだけを出す
  */
 export function FacesPanel({
+  assetId,
   faces,
   imageUrl,
   members,
   editable,
 }: {
+  assetId?: string;
   faces: AssetFace[];
   imageUrl: string | null;
   members: { id: string; name: string; generation: number }[];
@@ -71,7 +73,8 @@ export function FacesPanel({
               {f.frameSec == null ? (
                 <FaceCrop src={imageUrl} bbox={f.bbox} size={56} />
               ) : (
-                <span className="absolute inset-0 flex items-center justify-center text-xs text-white">{f.frameSec.toFixed(1)}秒</span>
+                assetId ? <Link href={`/video-scenes/${assetId}?t=${f.frameSec}`} className="absolute inset-0 flex items-center justify-center text-xs text-white underline">{f.frameSec.toFixed(1)}秒</Link>
+                  : <span className="absolute inset-0 flex items-center justify-center text-xs text-white">{f.frameSec.toFixed(1)}秒</span>
               )}
             </div>
             <div className="min-w-0 flex-1">

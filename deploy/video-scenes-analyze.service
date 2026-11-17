@@ -1,0 +1,17 @@
+[Unit]
+Description=Akashic 動画の場面候補を1件生成
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/akashic-video-scenes
+EnvironmentFile=%h/.config/akashic-video-scenes/worker.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=%h/sekai-nina-omokage/.venv/bin/python scripts/video-scene-worker.py --refs data/refs-full.npz --max-jobs 1 --discover
+TimeoutStartSec=125min
+Nice=15
+CPUQuota=100%
+MemoryMax=1800M
+PrivateTmp=true
+NoNewPrivileges=true
+

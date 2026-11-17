@@ -9,3 +9,5 @@ uploads/
 .claude/worktrees/
 
 __pycache__/
+reports/face-clip-trial-v2/
+.env*

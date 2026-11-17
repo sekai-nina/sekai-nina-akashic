@@ -174,6 +174,10 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON "FaceScan" TO app_runtime;
 
 ワーカー用のキーは `internal` の専用ユーザーに発行する（`pnpm cli:keygen <email> omokage-worker face_worker`）。段階 1 で作った `omokage@akashic.local`（`read` のキー）を使い回してよい。
 
+## 動画のスクショ・切り抜き（#394）
+
+元動画を見ながら瞬間を残す入口と、事前に生成した場面から選ぶ入口を `/video-scenes` にまとめる。短い動画はスクショだけ、長い動画は小さいリアクションも候補に残す。選んだ範囲だけをスマホに保存し、編集・投稿はスマホ側で行う。データ・ワーカー・適用手順は [動画の場面の設計](./video-scenes-design.md)。本番反映は未実施。
+
 ## 確かめたこと
 
 - `decideFace` と入力の検証は vitest（`src/lib/faces/policy.test.ts`）
