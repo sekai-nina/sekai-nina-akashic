@@ -20,7 +20,7 @@ claim / discover 以外の処理中の操作は claim の `leaseToken` を `toke
 
 書き出しの `result` は `{fileId}`。登録された同じ依頼の MP4 の ID に限る。範囲指定の依頼は画面の Server Action で作り、0.1 秒単位・90 秒以内をサーバーで確認する。分析済みなら動画の長さもサーバーで確認し、未分析ならワーカーの ffprobe で動画外の範囲を拒否する。
 
-元動画・生成物の読み取りは `GET /api/video-scenes/media/:id`（元動画は `?source=1`）。セッションまたは read / video_scene_worker キーで認証する。`Range: bytes=<start>-<end>` を指定すると最大 4 MB の 206 と `Content-Range` を返す。開放端・末尾の Range にも対応。すべて `private, no-store`。存在しない／見えない対象は 404。
+ブラウザの元動画・生成物の読み取りは `GET /api/video-scenes/media/:id`（元動画は `?source=1`）。セッションと通常の MFA を必要とする。ワーカーは Cookie 不要の `GET /api/v1/video-scenes/assets/:assetId/source` を read / video_scene_worker キーで利用する。いずれもキー／セッションの clearance で元動画を確認する。`Range: bytes=<start>-<end>` を指定すると最大 4 MB の 206 と `Content-Range` を返す。開放端・末尾の Range にも対応。すべて `private, no-store`。存在しない／見えない対象は 404。
 
 画面の状況確認用の `GET /api/video-scenes/assets/:assetId` と `GET /api/video-scenes/tasks/:taskId` はセッション認証だけ。leaseToken と Drive のキーは返さない。詳細は [動画の場面の設計](./video-scenes-design.md)。
 
