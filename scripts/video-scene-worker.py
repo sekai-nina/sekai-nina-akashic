@@ -219,7 +219,7 @@ class Api:
             while total is None or offset < total:
                 if time.monotonic() > deadline:
                     raise TimeoutError("処理時間の上限です")
-                req = urllib.request.Request(self.base + "/api/video-scenes/media/" + urllib.parse.quote(asset_id) + "?source=1",
+                req = urllib.request.Request(self.base + "/api/v1/video-scenes/assets/" + urllib.parse.quote(asset_id) + "/source",
                                              headers={"Authorization": "Bearer " + self.key, "Range": f"bytes={offset}-{offset + CHUNK - 1}"})
                 with OPENER.open(req, timeout=40) as response:
                     match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)", response.headers.get("Content-Range", ""))

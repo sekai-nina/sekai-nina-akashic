@@ -20,11 +20,11 @@ describe("素材の認証", () => {
     expect((await GET(new Request("https://local/media"), context)).status).toBe(404);
     expect(mocks.file).toHaveBeenCalledWith("internal", "file"); expect(mocks.response).not.toHaveBeenCalled();
   });
-  it("元動画は read キーで、そのキーの clearance で取得する", async () => {
-    mocks.apiAuth.mockResolvedValue({ clearance: "public" }); mocks.source.mockResolvedValue({ storageKey: "drive" });
+  it("ブラウザの元動画はセッションの clearance で取得する", async () => {
+    mocks.auth.mockResolvedValue({ user: { clearance: "public" } }); mocks.source.mockResolvedValue({ storageKey: "drive" });
     mocks.response.mockResolvedValue(new Response(null, { status: 206 }));
     const request = new Request("https://local/media?source=1", { headers: { Authorization: "Bearer ak_test", Range: "bytes=0-1" } });
     expect((await GET(request, context)).status).toBe(206);
-    expect(mocks.apiAuth).toHaveBeenCalledWith(request, ["video_scene_worker", "read"]); expect(mocks.source).toHaveBeenCalledWith("public", "file");
+    expect(mocks.apiAuth).not.toHaveBeenCalled(); expect(mocks.source).toHaveBeenCalledWith("public", "file");
   });
 });
