@@ -1,0 +1,17 @@
+[Unit]
+Description=Akashic スマホ保存用の動画を1件書き出す
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/akashic-video-scenes
+EnvironmentFile=%h/.config/akashic-video-scenes/worker.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=%h/sekai-nina-omokage/.venv/bin/python scripts/video-scene-worker.py --export-only --max-jobs 1
+TimeoutStartSec=125min
+Nice=10
+CPUQuota=50%
+MemoryMax=512M
+PrivateTmp=true
+NoNewPrivileges=true
+

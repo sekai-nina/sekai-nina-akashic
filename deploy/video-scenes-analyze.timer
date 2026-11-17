@@ -1,0 +1,11 @@
+[Unit]
+Description=Akashic 動画の場面候補を順番に準備
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=10min
+RandomizedDelaySec=30s
+Unit=video-scenes-analyze.service
+
+[Install]
+WantedBy=timers.target

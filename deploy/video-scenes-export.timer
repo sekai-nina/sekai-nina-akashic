@@ -1,0 +1,11 @@
+[Unit]
+Description=Akashic の保存用動画の依頼を確認
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=1min
+RandomizedDelaySec=5s
+Unit=video-scenes-export.service
+
+[Install]
+WantedBy=timers.target
