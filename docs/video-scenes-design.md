@@ -56,9 +56,11 @@ python scripts/video-scene-worker.py --refs /path/to/refs-full.npz --max-jobs 1 
 3. Web を反映し、ワーカーに専用 API キー・API URL・参照ファイルを設定する。最初は `--max-jobs 1` で 1 件確かめる。
 4. 元動画から範囲を選ぶ → 書き出し → スマホで保存、と、候補から元動画の前後を見る動線を実機で確かめる。その後に timer を有効にする。
 
-この実装時点では **本番 migration・Web 反映・ワーカーの常駐化は未実施**。
+2026-11-18 に本番反映済み（#449）。migration と両テーブルの `app_runtime` GRANT、専用非公開 Drive フォルダ、専用 member/internal ユーザーの `video_scene_worker` キー、Web、sekai の分析・書き出し timer を適用した。既存の omokage-worker は変更していない。
+
+実動画1本で、専用キーによる元動画の Range 取得、顔認識からスクショ1枚の生成、3秒の保存用MP4（855,389 bytes）、Drive上の非公開権限・実バイト数・JPEG/MP4形式を確認した。MP4はH.264/1280×720、3.003秒。publicからの非表示、専用キーによる他APIの拒否も確認済み。Vercelの反映時エラーログは0件。運用の確認は `systemctl --user list-timers 'video-scenes-*'` と `journalctl --user -u video-scenes-analyze -u video-scenes-export` で行う。
 
 - ローカル PostgreSQL: `node scripts/check-video-scenes-rls.mjs`。.env を読まず、ネットワークを持たない一時コンテナを作って終了時に破棄する。8 ポリシー、下位・未設定 clearance、書き込み拒否、親の再分類、保存範囲の制約を検証する。
 - TypeScript: `pnpm typecheck` / `pnpm test`。認可・期限切れ・他の依頼の生成物の拒否・Range / 保存・画面の SSR を含む。
 - オフラインの生成検証: `video-scene-worker.py render --source <動画> --out <一時フォルダ> --kind analyze --frames <保存済みの frames.json>`。`--kind export --start 5 --end 12` は指定範囲だけの動画を作る。
-- ブラウザと実機の操作、稼働中ワーカーを通す検証は本番未反映のため未実施。
+- 稼働中ワーカーを通す検証は上記のとおり実施。ブラウザ接続が利用できず、ブラウザ／スマホでのシーク・保存操作は未確認。
