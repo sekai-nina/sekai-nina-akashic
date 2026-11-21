@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => {
 });
 vi.mock("@/lib/db", () => ({ withClearance: mocks.withClearance }));
 vi.mock("@/lib/drive", () => ({ getDriveFileMeta: mocks.getDriveFileMeta, createResumableUploadSession: mocks.createResumableUploadSession, isPrivateSceneFolder: mocks.isPrivateSceneFolder }));
-import { requestSceneTask, requireSceneEditor, updateSceneTask, completeSceneFile, initiateSceneFile, sceneProgress, SceneLeaseError } from "./video-scenes";
+import { requestSceneTask, requireSceneEditor, updateSceneTask, completeSceneFile, initiateSceneFile, sceneProgress, claimSceneTask, SceneLeaseError } from "./video-scenes";
 
 const actor = { id: "member", role: "member", clearance: "internal" };
 const token = "e59d286e-d029-44cb-9fb3-9b59555c33e4";
@@ -58,6 +58,15 @@ describe("場面生成の権限と重複", () => {
 });
 
 describe("ワーカーの期限と生成物の検査", () => {
+  it("再開用の版は返すが、元動画の Drive キーは返さない", async () => {
+    mocks.getDriveFileMeta.mockResolvedValue({ sha256: "a".repeat(64) });
+    mocks.tx.videoSceneTask.update.mockResolvedValue({ id: "task", asset: { title: "動画", classification: "internal", fileSize: 800_000_000, storageKey: "private-drive-key", updatedAt: new Date("2026-11-20T00:00:00Z") } });
+    const result = await claimSceneTask(actor);
+    expect(result?.asset.sourceRevision).toMatch(/^[a-f0-9]{64}$/);
+    expect(result?.asset.sourceSha256).toBe("a".repeat(64));
+    expect(result?.asset).not.toHaveProperty("storageKey");
+    expect(result?.asset).not.toHaveProperty("updatedAt");
+  });
   it("同じ依頼の正しい生成物だけで ready にできる", async () => {
     mocks.tx.videoSceneTask.findUnique.mockResolvedValue(task());
     mocks.tx.videoSceneFile.findMany.mockResolvedValue([{ id: "photo", mimeType: "image/jpeg", fileSize: 1000 }]);
