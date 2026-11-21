@@ -183,3 +183,33 @@ describe("matchReviewedFaces (#386)", () => {
     expect(matchReviewedFaces([face(box(0.1, 0.1, 0.3, 0.3))], [r]).size).toBe(0);
   });
 });
+
+describe("動画の坂井新奈の時間的な裏付け", () => {
+  const video = { ...ctx, isVideo: true };
+  const face = { predictedEntityId: NINA, similarity: 0.7 };
+  const evidence = { version: "nina-temporal-v1" as const, distinctBins: 2, spanSec: 0.5 };
+  it("最高点だけの旧ワーカーは確認待ち", () => {
+    expect(decideFace(face, video)).toBe("pending");
+    expect(decideFace(face, ctx)).toBe("auto");
+    expect(decideFace({ ...face, predictedEntityId: "other" }, video)).toBe("auto");
+  });
+  it("2枠と0.5秒の両方が必要", () => {
+    expect(decideFace({ ...face, videoEvidence: evidence }, video)).toBe("auto");
+    expect(decideFace({ ...face, videoEvidence: { ...evidence, distinctBins: 1 } }, video)).toBe("pending");
+    expect(decideFace({ ...face, videoEvidence: { ...evidence, spanSec: 0.49 } }, video)).toBe("pending");
+  });
+  it("裏付けがあっても人の否定や類似度閾値を優先する", () => {
+    const supported = { ...face, videoEvidence: evidence };
+    expect(decideFace(supported, { ...video, ninaAbsent: true })).toBe("pending");
+    expect(decideFace(supported, { ...video, rejectedEntityIds: new Set([NINA]) })).toBe("pending");
+    expect(decideFace({ ...supported, similarity: 0.39 }, video)).toBe("pending");
+  });
+  it("裏付けの未知の版や不正な値を入力時に拒否する", () => {
+    const base = { bbox: [0, 0, 1, 1], detScore: 0.9, embedding: unitEmbedding().toString("base64"), ...face };
+    const valid = { modelVersion: "buffalo_l@3:video1", faces: [{ ...base, videoEvidence: evidence }] };
+    expect(FaceWriteBody.safeParse(valid).success).toBe(true);
+    for (const bad of [{ ...evidence, version: "unknown" }, { ...evidence, distinctBins: 1.5 }, { ...evidence, spanSec: NaN }]) {
+      expect(FaceWriteBody.safeParse({ ...valid, faces: [{ ...base, videoEvidence: bad }] }).success).toBe(false);
+    }
+  });
+});

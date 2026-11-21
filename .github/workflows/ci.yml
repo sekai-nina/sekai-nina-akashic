@@ -20,5 +20,11 @@ jobs:
       - run: pnpm db:generate
       - run: pnpm typecheck
       - run: pnpm test
+      # 動画の時間的な裏付けの評価（標準ライブラリのみ・DB 接続なし）
+      - run: python3 scripts/evaluate-video-evidence-test.py
+      - run: python3 scripts/collect-video-evidence-test.py
+      - run: python3 scripts/prepare-video-benchmark-test.py
+      - run: python3 scripts/report-video-benchmark-test.py
+      - run: python3 scripts/evaluate-video-negative-bank-test.py
       # 本番 DB を守る PreToolUse フックの判定 (.claude/hooks/guard-prod-db.py)
       - run: python3 -m unittest discover -s .claude/hooks

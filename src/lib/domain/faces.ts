@@ -86,14 +86,14 @@ type QueueItem = {
  * 候補はインスタンスのメモリに置く (インスタンスごとに 1 回引く)。5 分の間に消された・上のクリアランスに変えられた
  * 画像はワーカーの元画像の取得で 404 になり、ワーカーの読み飛ばしに入る。新しく入った画像は最長 5 分待つ。
  */
-export async function listFaceQueue(clearance: string, modelVersion: string, limit: number, withCount = false) {
+export async function listFaceQueue(clearance: string, modelVersion: string, limit: number, withCount = false, videoModelVersion = modelVersion) {
   // 知らないクリアランスは RLS と同じく 0 件にする (classificationFilterSql が `IN ()` の構文エラーになるため先に返す)
   if (accessibleClassifications(clearance as ClearanceLevel).length === 0) return { items: [], remaining: withCount ? 0 : null };
   const [items, remaining] = await Promise.all([
-    queueItems(clearance, modelVersion, limit),
+    queueItems(clearance, modelVersion, limit, videoModelVersion),
     withCount
       ? prismaInternal
-          .$queryRaw<{ n: number }[]>(Prisma.sql`SELECT count(*)::int AS n FROM "Asset" a WHERE ${queueWhere(clearance, modelVersion)}`)
+          .$queryRaw<{ n: number }[]>(Prisma.sql`SELECT count(*)::int AS n FROM "Asset" a WHERE ${queueWhere(clearance, modelVersion, videoModelVersion)}`)
           .then((r) => r[0]?.n ?? 0)
       : Promise.resolve(null),
   ]);
@@ -105,7 +105,7 @@ const QUEUE_CANDIDATES = 500;
 const QUEUE_CANDIDATES_TTL_MS = 5 * 60_000;
 const queueCandidates = new Map<string, { at: number; items: QueueItem[]; full: boolean }>();
 
-function queueWhere(clearance: string, modelVersion: string) {
+function queueWhere(clearance: string, modelVersion: string, videoModelVersion: string) {
   return Prisma.sql`
     a."storageProvider" = 'gdrive' AND a."storageKey" IS NOT NULL
     AND ${classificationFilterSql(clearance)}
@@ -123,35 +123,35 @@ function queueWhere(clearance: string, modelVersion: string) {
         )
       )
     )
-    AND NOT EXISTS (SELECT 1 FROM "FaceScan" s WHERE s."assetId" = a.id AND s."modelVersion" = ${modelVersion})`;
+    AND NOT EXISTS (SELECT 1 FROM "FaceScan" s WHERE s."assetId" = a.id AND s."modelVersion" = CASE WHEN a.kind = 'video' THEN ${videoModelVersion} ELSE ${modelVersion} END)`;
 }
 
-async function fetchQueueCandidates(clearance: string, modelVersion: string) {
+async function fetchQueueCandidates(clearance: string, modelVersion: string, videoModelVersion: string) {
   const items = await prismaInternal.$queryRaw<QueueItem[]>(Prisma.sql`
     SELECT a.id, a.kind::text AS kind, a."mimeType", a."fileSize", a."thumbnailUrl", a."createdAt"
-    FROM "Asset" a WHERE ${queueWhere(clearance, modelVersion)}
+    FROM "Asset" a WHERE ${queueWhere(clearance, modelVersion, videoModelVersion)}
     ORDER BY a."createdAt" DESC LIMIT ${QUEUE_CANDIDATES}`);
   return { at: Date.now(), items, full: items.length === QUEUE_CANDIDATES };
 }
 
-async function queueItems(clearance: string, modelVersion: string, limit: number): Promise<QueueItem[]> {
-  const key = `${clearance}\t${modelVersion}`;
+async function queueItems(clearance: string, modelVersion: string, limit: number, videoModelVersion: string): Promise<QueueItem[]> {
+  const key = `${clearance}\t${modelVersion}\t${videoModelVersion}`;
   let entry = queueCandidates.get(key);
   let fresh = false;
   if (!entry || Date.now() - entry.at > QUEUE_CANDIDATES_TTL_MS) {
-    entry = await fetchQueueCandidates(clearance, modelVersion);
+    entry = await fetchQueueCandidates(clearance, modelVersion, videoModelVersion);
     fresh = true;
   } else if (entry.items.length > 0) {
     // 前に引いた候補から、その後に処理済みになったものを落とす (主キーで引くだけなので軽い)
     const scanned = await prismaInternal.faceScan.findMany({
-      where: { modelVersion, assetId: { in: entry.items.map((i) => i.id) } },
-      select: { assetId: true },
+      where: { modelVersion: { in: [...new Set([modelVersion, videoModelVersion])] }, assetId: { in: entry.items.map((i) => i.id) } },
+      select: { assetId: true, modelVersion: true },
     });
-    const done = new Set(scanned.map((s) => s.assetId));
-    entry = { ...entry, items: entry.items.filter((i) => !done.has(i.id)) };
+    const done = new Set(scanned.map((s) => `${s.assetId}\t${s.modelVersion}`));
+    entry = { ...entry, items: entry.items.filter((i) => !done.has(`${i.id}\t${i.kind === "video" ? videoModelVersion : modelVersion}`)) };
   }
   // 使い切りそうなら引き直す (候補が上限まであった = まだ後ろに残っているかもしれないとき)
-  if (!fresh && entry.full && entry.items.length < limit) entry = await fetchQueueCandidates(clearance, modelVersion);
+  if (!fresh && entry.full && entry.items.length < limit) entry = await fetchQueueCandidates(clearance, modelVersion, videoModelVersion);
   queueCandidates.set(key, entry);
   return entry.items.slice(0, limit);
 }
@@ -217,13 +217,13 @@ export async function writeFaceResults(clearance: string, assetId: string, input
     // 同じ画像への書き込みが重なっても、タグの付け外しが食い違わないよう Asset の行をロックする。
     // RLS 下なので見えない行は 0 件になる (FOR UPDATE は UPDATE のポリシーも見るが、条件は SELECT と同じクリアランス。
     // 見えない行は 404 にするのが正しいので、prismaInternal に替えない)。対象は queue と同じ (Drive に実体がある画像と短い動画。動画の条件はタグ・TikTok・タイトルを見るので下で確かめる)
-    const locked = await tx.$queryRaw<{ id: string; ninaAbsent: boolean }[]>`
-      SELECT id, "ninaAbsent" FROM "Asset"
+    const locked = await tx.$queryRaw<{ id: string; ninaAbsent: boolean; kind: string }[]>`
+      SELECT id, "ninaAbsent", kind::text FROM "Asset"
       WHERE id = ${assetId} AND kind IN ('image', 'video') AND "storageProvider" = 'gdrive' AND "storageKey" IS NOT NULL
       FOR UPDATE`;
     if (locked.length === 0) throw new FaceAssetNotFoundError();
     if ((await tx.asset.count({ where: { id: assetId, ...targetWhere } })) === 0) throw new FaceAssetNotFoundError();
-    const { ninaAbsent } = locked[0];
+    const { ninaAbsent, kind } = locked[0];
 
     const recordScan = (faceCount: number, error: string | null) =>
       tx.faceScan.upsert({
@@ -317,7 +317,7 @@ export async function writeFaceResults(clearance: string, assetId: string, input
     const rows = input.faces.flatMap((f, i) => {
       if (inherited.has(i)) return [];
       const [x1, y1, x2, y2] = f.bbox;
-      const status = decideFace(f, { ninaEntityId: NINA_ENTITY_ID, ninaAbsent, rejectedEntityIds });
+      const status = decideFace(f, { ninaEntityId: NINA_ENTITY_ID, ninaAbsent, rejectedEntityIds, isVideo: kind === "video" });
       return {
         assetId,
         modelVersion: input.modelVersion,
