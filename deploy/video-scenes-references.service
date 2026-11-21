@@ -1,0 +1,18 @@
+[Unit]
+Description=Akashic 場面生成用の確定・却下手本を同期
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/sekai-nina-omokage
+EnvironmentFile=%h/sekai-nina-omokage/.env
+Environment=OPENBLAS_NUM_THREADS=1
+Environment=OMP_NUM_THREADS=1
+ExecStart=%h/sekai-nina-omokage/.venv/bin/python %h/akashic-video-scenes/scripts/sync-scene-references.py --omokage-root %h/sekai-nina-omokage --out %h/akashic-video-scenes/data/refs-full.npz
+TimeoutStartSec=5min
+CPUQuota=50%
+MemoryMax=512M
+Nice=15
+UMask=0077
+PrivateTmp=true
+NoNewPrivileges=true

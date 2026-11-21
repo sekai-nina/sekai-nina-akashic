@@ -34,6 +34,38 @@ def face_at(frame):
     return max(faces, key=lambda f: f["sim"], default=None)
 
 
+def temporal_support(frames, index, face):
+    """自動タグより広い候補用: 強い単発か、同じ顔の連続2コマ。顔の大きさは問わない。"""
+    def eligible(f):
+        return (f is not None and f["who"] == NINA and f.get("trackId") == face.get("trackId") and
+                f["det"] >= .5 and f["sim"] >= .4 and
+                (f.get("runnerUp") is None or f["sim"] - f["runnerUp"] >= .05 - 1e-6))
+    if not face.get("trackId") or not eligible(face):
+        return False
+    if face["det"] >= .65 and face["sim"] >= .5:
+        return True
+    for direction in (-1, 1):
+        other = index + direction
+        if not 0 <= other < len(frames):
+            continue
+        later = max(index, other)
+        gap = abs(frames[index]["t"] - frames[other]["t"])
+        if (not frames[later].get("sceneCut") and 0 < gap <= .51 and
+                any(eligible(f) for f in frames[other]["faces"])):
+            return True
+    return False
+
+
+def selected_face(meta, index):
+    """構図の切り出しと採用判定は同じ顔を使う。高得点の単発誤検出を優先しない。"""
+    frame = meta["frames"][index]
+    if not meta.get("trackingVersion"):
+        return face_at(frame)
+    supported = [f for f in frame["faces"] if f["who"] == NINA and
+                 temporal_support(meta["frames"], index, f)]
+    return max(supported, key=lambda f: f["sim"], default=None) or face_at(frame)
+
+
 def silence_points(src, duration):
     probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0", str(src)], capture_output=True, check=True)
     if not probe.stdout.strip():
@@ -111,7 +143,7 @@ def descriptors(src, meta, compact=False):
                 motion += np.mean(np.abs(gray.astype(float) - last_gray), axis=1)
             last_gray = gray.astype(float)
             last = whole
-            f = face_at(frame)
+            f = selected_face(meta, index)
             if not f:
                 if not compact:
                     result.append(None)
@@ -172,12 +204,13 @@ def make_plan(meta, desc, cuts, pauses):
     duration = meta["duration"]
     hits, uncertain = [], 0
     for i, fr in enumerate(frames):
-        f = face_at(fr)
+        f = selected_face(meta, i)
         if not f or desc[i] is None:
             continue
         neighbors = [face_at(other) for other in frames[max(0, i - 2):i + 3]]
         # 0.40 の単発誤検出は要確認として数え、強い根拠か近傍の支持を求める。
-        supported = f["det"] >= .65 and (f["sim"] >= .5 or sum(n is not None and n["sim"] >= .45 for n in neighbors) >= 2)
+        supported = (temporal_support(frames, i, f) if meta.get("trackingVersion") else
+                     f["det"] >= .65 and (f["sim"] >= .5 or sum(n is not None and n["sim"] >= .45 for n in neighbors) >= 2))
         if not supported:
             uncertain += 1
             continue
