@@ -122,7 +122,7 @@ export async function sceneProgress(clearance: string, assetId: string) {
 
 export async function claimSceneTask(user: Actor, onlyExport = false) {
   requireSceneEditor(user);
-  return withClearance(user.clearance, async (tx) => {
+  const task = await withClearance(user.clearance, async (tx) => {
     const now = new Date();
     await tx.videoSceneTask.updateMany({ where: { status: "processing", attempts: { gte: 3 }, leaseUntil: { lt: now } },
       data: { status: "failed", error: "処理が完了しませんでした。もう一度生成してください", leaseToken: null, leaseUntil: null } });
@@ -135,8 +135,14 @@ export async function claimSceneTask(user: Actor, onlyExport = false) {
     return tx.videoSceneTask.update({ where: { id: rows[0].id }, data: {
       status: "processing", leaseToken: randomUUID(), leaseUntil: new Date(now.getTime() + SCENE_TASK_LEASE_MS), attempts: { increment: 1 }, error: null,
     }, select: { id: true, kind: true, assetId: true, startSec: true, endSec: true, leaseToken: true,
-      asset: { select: { title: true, classification: true, fileSize: true } } } });
+      asset: { select: { title: true, classification: true, fileSize: true, storageKey: true, updatedAt: true } } } });
   });
+  if (!task) return null;
+  // Drive のネットワーク待ちで DB のトランザクションを保持しない。
+  const { storageKey, updatedAt, ...asset } = task.asset;
+  const sourceSha256 = storageKey ? (await getDriveFileMeta(storageKey))?.sha256 ?? null : null;
+  const sourceRevision = createHash("sha256").update(JSON.stringify([storageKey, updatedAt.toISOString(), asset.fileSize, sourceSha256])).digest("hex");
+  return { ...task, asset: { ...asset, sourceRevision, sourceSha256 } };
 }
 
 /** 常駐側が指定したときだけ、新しい本人関連の動画を 1 本ずつ先に処理する。 */

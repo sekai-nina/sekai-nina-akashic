@@ -22,6 +22,18 @@ def sample(duration=400, times=(20, 20.5), similarity=.6, size=.05):
 
 
 class PlanTests(unittest.TestCase):
+    def test_compact_descriptors_preserve_selection_without_float_copies(self):
+        meta, desc = sample(times=(20, 20.5, 40, 40.5))
+        compact = trial.CompactDescriptors(len(desc))
+        for i, d in enumerate(desc):
+            compact.set(i, d["scene"], d["face"])
+        expected = trial.make_plan(meta, desc, [], [])
+        actual = trial.make_plan(meta, compact, [], [])
+        self.assertEqual([s["t"] for s in expected["shots"]], [s["t"] for s in actual["shots"]])
+        self.assertEqual(expected["clips"], actual["clips"])
+        self.assertEqual(compact.scene.dtype, np.uint8)
+        self.assertEqual(compact.face.dtype, np.uint8)
+
     def test_short_video_has_screenshots_and_no_clips(self):
         meta, desc = sample(duration=30)
         plan = trial.make_plan(meta, desc, [], [])

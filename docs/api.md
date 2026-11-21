@@ -6,7 +6,7 @@
 
 | operation | 入力 | 応答 |
 |---|---|---|
-| `claim` | 任意で `kind:"export"` | `{task: null}` または `{task: {id, kind, assetId, startSec, endSec, leaseToken, asset: {title, classification, fileSize}}}`。1 件を処理中にする。export を優先。kind を指定すると export だけを取得 |
+| `claim` | 任意で `kind:"export"` | `{task: null}` または `{task: {id, kind, assetId, startSec, endSec, leaseToken, asset: {title, classification, fileSize, sourceRevision, sourceSha256}}}`。1 件を処理中にする。export を優先。kind を指定すると export だけを取得。sourceRevision は保存先・更新時刻・容量・Drive上のSHA-256を混ぜた不透明な識別子。sourceSha256は元ファイルのSHA-256（取得できない場合null）で、ダウンロード後の検証に使う。Drive キーは返さない |
 | `discover` | なし | `{task: null}` または分析の依頼。本人の人物タグ・確定した顔を持つ新しい未依頼の動画を 1 件だけキューに足す |
 | `heartbeat` | `taskId`, `token` | `{ok:true}`。有効な処理の期限を 10 分先へ延長 |
 | `upload` | `taskId`, `token`, `slot`, `mimeType` | `{fileId, uploadUrl}`。Drive の resumable URL。slot は英数字・`_`・`-` の 1〜80 文字。MIME は image/jpeg / video/mp4 |

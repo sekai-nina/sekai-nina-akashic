@@ -51,21 +51,48 @@ def silence_points(src, duration):
     return pauses
 
 
-def descriptors(src, meta):
+class CompactDescriptors:
+    """全コマの構図をuint8で保持。比較時だけ必要な2コマを浮動小数にする。"""
+    def __init__(self, count):
+        self.scene = np.zeros((count, 18, 32), dtype=np.uint8)
+        self.face = np.zeros((count, 24, 24), dtype=np.uint8)
+        self.valid = np.zeros(count, dtype=np.bool_)
+
+    @classmethod
+    def from_arrays(cls, scene, face, valid, count):
+        if scene.shape != (count, 18, 32) or face.shape != (count, 24, 24) or valid.shape != (count,) or scene.dtype != np.uint8 or face.dtype != np.uint8 or valid.dtype != np.bool_:
+            raise ValueError("保存した構図情報の形式が違います")
+        result = cls.__new__(cls)
+        result.scene, result.face, result.valid = scene, face, valid
+        return result
+
+    def __len__(self):
+        return len(self.valid)
+
+    def __getitem__(self, index):
+        return {"scene": self.scene[index], "face": self.face[index]} if self.valid[index] else None
+
+    def set(self, index, scene, face):
+        self.scene[index] = np.rint(scene * 255).astype(np.uint8)
+        self.face[index] = np.rint(face * 255).astype(np.uint8)
+        self.valid[index] = True
+
+
+def descriptors(src, meta, compact=False):
     """動画を順に縮小デコードし、構図・顔の見た目の違いとカット候補を得る。"""
     width = 320
     height = int(meta["height"] * width / meta["width"]) // 2 * 2
     step = meta["step"]
     proc = subprocess.Popen([
-        "ffmpeg", "-v", "error", "-nostdin", "-ss", str(step / 2), "-i", str(src), "-vf",
+        "ffmpeg", "-v", "error", "-nostdin", "-threads", "1", "-filter_threads", "1", "-ss", str(step / 2), "-i", str(src), "-vf",
         f"tpad=stop_mode=clone:stop_duration=1,fps=fps={1 / step},scale={width}:{height}",
         "-frames:v", str(len(meta["frames"])),
         "-f", "rawvideo", "-pix_fmt", "bgr24", "-threads", "1", "pipe:1",
     ], stdout=subprocess.PIPE)
-    result, cuts, last, last_gray = [], [], None, None
+    result, cuts, last, last_gray = CompactDescriptors(len(meta["frames"])) if compact else [], [], None, None
     motion = np.zeros(height, dtype=float)
     try:
-        for frame in meta["frames"]:
+        for index, frame in enumerate(meta["frames"]):
             size = width * height * 3
             data = bytearray()
             while len(data) < size:
@@ -86,15 +113,20 @@ def descriptors(src, meta):
             last = whole
             f = face_at(frame)
             if not f:
-                result.append(None)
+                if not compact:
+                    result.append(None)
                 continue
             x1, y1, x2, y2 = f["box"]
             crop = gray[max(0, int(y1 * height)):min(height, int(y2 * height)), max(0, int(x1 * width)):min(width, int(x2 * width))]
             if not crop.size:
-                result.append(None)
+                if not compact:
+                    result.append(None)
                 continue
             face_img = cv2.resize(crop, (24, 24)).astype(float) / 255
-            result.append({"scene": whole, "face": face_img})
+            if compact:
+                result.set(index, whole, face_img)
+            else:
+                result.append({"scene": whole, "face": face_img})
         # 端数の余分なコマを読み切り、デコーダを正常終了させる。
         while proc.stdout.read(65536):
             pass
@@ -125,8 +157,11 @@ def quality(f):
 
 
 def different(a, b):
-    scene = float(np.mean(np.abs(a["desc"]["scene"] - b["desc"]["scene"])))
-    face = float(np.mean(np.abs(a["desc"]["face"] - b["desc"]["face"])))
+    def values(desc, key):
+        value = desc[key]
+        return value.astype(np.float32) / 255 if value.dtype == np.uint8 else value
+    scene = float(np.mean(np.abs(values(a["desc"], "scene") - values(b["desc"], "scene"))))
+    face = float(np.mean(np.abs(values(a["desc"], "face") - values(b["desc"], "face"))))
     pose = abs(a["face"]["yaw"] - b["face"]["yaw"])
     size = abs((a["face"]["box"][3] - a["face"]["box"][1]) - (b["face"]["box"][3] - b["face"]["box"][1]))
     return scene > .12 or face > .13 or pose > .12 or size > .08
