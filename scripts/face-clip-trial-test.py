@@ -22,6 +22,52 @@ def sample(duration=400, times=(20, 20.5), similarity=.6, size=.05):
 
 
 class PlanTests(unittest.TestCase):
+    def test_group_distractor_does_not_hide_supported_target(self):
+        meta, desc = self.temporal()
+        target = meta["frames"][0]["faces"][0]
+        meta["frames"][0]["faces"].append({**target, "trackId": "distractor", "sim": .44})
+        self.assertEqual(trial.selected_face(meta, 0)["trackId"], "one")
+        self.assertEqual(trial.selected_face(meta, 1)["trackId"], "one")
+        plan = trial.make_plan(meta, desc, [], [])
+        self.assertEqual(len(plan["clips"]), 1)
+        self.assertEqual(plan["uncertainFrames"], 0)
+
+    def temporal(self, similarity=.43, times=(20, 20.5)):
+        meta, desc = sample(times=times, similarity=similarity, size=.02)
+        meta["trackingVersion"] = "test"
+        for fr in meta["frames"]:
+            fr["faces"][0].update(trackId="one", runnerUp=.30, det=.55)
+        return meta, desc
+
+    def test_temporal_keeps_small_reaction_with_two_same_person_frames(self):
+        meta, desc = self.temporal()
+        self.assertEqual(len(trial.make_plan(meta, desc, [], [])["clips"]), 1)
+
+    def test_temporal_does_not_borrow_support_from_another_person(self):
+        meta, desc = self.temporal()
+        meta["frames"][1]["faces"][0]["trackId"] = "other-person"
+        self.assertEqual(trial.make_plan(meta, desc, [], [])["clips"], [])
+
+    def test_temporal_does_not_bridge_cut_or_gap(self):
+        meta, desc = self.temporal()
+        meta["frames"][1]["sceneCut"] = True
+        self.assertEqual(trial.make_plan(meta, desc, [], [])["clips"], [])
+        meta, desc = self.temporal(times=(20, 21))
+        self.assertEqual(trial.make_plan(meta, desc, [], [])["clips"], [])
+
+    def test_temporal_does_not_promote_competitor_or_single_weak_hit(self):
+        meta, desc = self.temporal()
+        for fr in meta["frames"]:
+            fr["faces"][0]["runnerUp"] = .42
+        self.assertEqual(trial.make_plan(meta, desc, [], [])["clips"], [])
+        meta, desc = self.temporal(times=(20,))
+        self.assertEqual(trial.make_plan(meta, desc, [], [])["clips"], [])
+
+    def test_temporal_preserves_strong_brief_appearance(self):
+        meta, desc = self.temporal(similarity=.6, times=(20,))
+        meta["frames"][0]["faces"][0]["det"] = .8
+        self.assertEqual(len(trial.make_plan(meta, desc, [], [])["clips"]), 1)
+
     def test_compact_descriptors_preserve_selection_without_float_copies(self):
         meta, desc = sample(times=(20, 20.5, 40, 40.5))
         compact = trial.CompactDescriptors(len(desc))

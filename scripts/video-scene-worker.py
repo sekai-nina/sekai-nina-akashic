@@ -33,9 +33,10 @@ import urllib.request
 CHUNK = 4_000_000
 MAX_FILE = 100_000_000
 MAX_SOURCE = 2_000_000_000
-ANALYSIS_VERSION = "stream-chunks-v1"
+ANALYSIS_VERSION = "scene-temporal-v2"
 CHUNK_SECONDS = 60
 MAX_OUTPUT = 2_000_000_000
+NINA_ID = "cmmtp8vrg0004mo381neyztvn"
 
 
 def digest(path):
@@ -195,6 +196,14 @@ def load_trial():
     return module
 
 
+def load_evidence():
+    # #452 の200本評価と同じ負例判定・匿名追跡を共用する。
+    spec = importlib.util.spec_from_file_location("video_evidence", Path(__file__).with_name("collect-video-evidence.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def analyze_source(source, refs, checkpoint=None):
     """omokage と同じ buffalo_l と参照のコサイン類似度で動画を走査する。"""
     import cv2
@@ -202,19 +211,27 @@ def analyze_source(source, refs, checkpoint=None):
     import onnxruntime as ort
     from insightface.app import FaceAnalysis
 
-    with np.load(refs, allow_pickle=True) as archive:
+    with np.load(refs, allow_pickle=False) as archive:
         ids = archive["ids"]
         matrix = archive["matrix"].astype(np.float32)
+        negative_ids = archive["negative_ids"]
+        negative_matrix = archive["negative_matrix"].astype(np.float32)
     if matrix.ndim != 2 or matrix.shape[1] != 512 or len(ids) != len(matrix) or not len(ids) or not np.isfinite(matrix).all():
         raise ValueError("参照の特徴量の形式が違います")
     norms = np.linalg.norm(matrix, axis=1, keepdims=True)
     if np.any(norms <= 0):
         raise ValueError("参照に空の特徴量があります")
     matrix /= norms
-    members, inverse = np.unique(ids, return_inverse=True)
-    order = np.argsort(inverse, kind="stable")
-    matrix = np.ascontiguousarray(matrix[order])
-    starts = np.searchsorted(inverse[order], np.arange(len(members)))
+    if negative_matrix.shape != (len(negative_ids), 512) or not np.isfinite(negative_matrix).all():
+        raise ValueError("却下した顔の特徴量の形式が違います")
+    if len(negative_ids):
+        norms = np.linalg.norm(negative_matrix, axis=1, keepdims=True)
+        if np.any(norms <= 0):
+            raise ValueError("却下した顔に空の特徴量があります")
+        negative_matrix /= norms
+    evidence = load_evidence()
+    scorer = evidence.Scorer(ids, matrix, negative_ids, negative_matrix)
+    tracker, previous = evidence.Tracker(), None
     app = None
     cap = cv2.VideoCapture(str(source))
     try:
@@ -240,9 +257,12 @@ def analyze_source(source, refs, checkpoint=None):
             path = checkpoint / f"faces-{begin:06d}.json" if checkpoint else None
             if path and path.is_file():
                 saved = json.loads(path.read_text())
-                if [fr["t"] for fr in saved] != times:
+                if [fr["t"] for fr in saved["frames"]] != times:
                     raise ValueError("途中保存した時刻が一致しません")
-                frames.extend(saved)
+                tracker.tracks = saved["tracks"]
+                tracker.next_id = saved["nextId"]
+                previous = np.asarray(saved["previous"], dtype=np.float32)
+                frames.extend(saved["frames"])
                 print(f"faces {finish:.1f}/{duration:.1f}s cached", flush=True)
                 continue
             if app is None:
@@ -258,29 +278,39 @@ def analyze_source(source, refs, checkpoint=None):
                 for t, data in zip(times, stream, strict=True):
                     image = np.frombuffer(data, np.uint8).reshape(h, w, 3)
                     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+                    thumbnail = cv2.resize(image, (32, 32)).astype(np.float32)
+                    cut = previous is not None and float(np.abs(thumbnail - previous).mean()) > 55
+                    previous = thumbnail
                     faces = []
+                    detected = []
                     for face in app.get(image):
                         if face.det_score < .5:
                             continue
-                        similarities = np.maximum.reduceat(matrix @ face.normed_embedding.astype(np.float32), starts)
-                        best = int(np.argmax(similarities))
+                        embedding = face.normed_embedding.astype(np.float32)
+                        prediction = scorer.predict(embedding, NINA_ID)
                         x1, y1, x2, y2 = map(float, face.bbox)
                         crop = gray[max(0, int(y1)):min(h, int(y2)), max(0, int(x1)):min(w, int(x2))]
                         sharp = float(cv2.Laplacian(crop, cv2.CV_64F).var()) if crop.size > 100 else 0
                         eye_mid = (face.kps[0] + face.kps[1]) / 2
                         eye_distance = float(np.linalg.norm(face.kps[1] - face.kps[0])) or 1
                         yaw = abs(float(face.kps[2][0] - eye_mid[0])) / eye_distance
-                        faces.append({"who": str(members[best]), "sim": round(float(similarities[best]), 3),
+                        faces.append({"who": prediction["predictedEntityId"] if prediction else None,
+                                      "sim": prediction["similarity"] if prediction else -1,
+                                      "runnerUp": prediction["runnerUpSimilarity"] if prediction else None,
                                       "box": [x1 / w, y1 / h, x2 / w, y2 / h], "det": round(float(face.det_score), 3),
                                       "sharp": round(sharp, 1), "yaw": round(yaw, 3)})
-                    chunk.append({"t": t, "faces": faces})
+                        detected.append({"box": faces[-1]["box"], "embedding": embedding.tolist()})
+                    for face, track in zip(faces, tracker.assign(detected, t, cut), strict=True):
+                        face["trackId"] = track
+                    chunk.append({"t": t, "sceneCut": cut, "faces": faces})
             finally:
                 stream.close()
             if path:
-                write_json(path, chunk)
+                write_json(path, {"frames": chunk, "tracks": tracker.tracks, "nextId": tracker.next_id, "previous": previous.tolist()})
             frames.extend(chunk)
             print(f"faces {finish:.1f}/{duration:.1f}s saved", flush=True)
-        return {"duration": duration, "width": width, "height": height, "fps": fps, "step": step, "frames": frames}
+        return {"duration": duration, "width": width, "height": height, "fps": fps, "step": step,
+                "trackingVersion": "anonymous-iou0.1-cos0.6-gap1.1-cut55@1", "frames": frames}
     finally:
         cap.release()
 
@@ -529,7 +559,11 @@ def process(api, task, refs, timeout, cache_dir=None):
                 raise ValueError("取得した元動画のチェックサムが一致しません")
             command = [sys.executable, str(Path(__file__).resolve()), "render", "--source", str(source), "--out", str(root / "out"), "--kind", task["kind"], "--checkpoint-dir", str(root / "checkpoints")]
             if refs:
-                command += ["--refs", str(refs)]
+                # 同期は原子的置換。実行中の参照を固定してハッシュと実データを一致させる。
+                pinned_refs = root / "refs.npz"
+                shutil.copyfile(refs, pinned_refs)
+                os.chmod(pinned_refs, 0o600)
+                command += ["--refs", str(pinned_refs)]
             if task["kind"] == "export":
                 command += ["--start", str(task["startSec"]), "--end", str(task["endSec"])]
             # CPU の使い切りを避け、処理時間にも上限を付ける。

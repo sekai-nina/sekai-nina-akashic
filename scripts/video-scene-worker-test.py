@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch, Mock, call
 
 import numpy as np
@@ -125,14 +126,16 @@ class CheckpointTests(unittest.TestCase):
                 FakeModel.calls += 1
                 if FakeModel.calls == FakeModel.fail_at:
                     raise RuntimeError("interrupted")
-                return []
+                return [SimpleNamespace(det_score=.9, normed_embedding=np.ones(512, np.float32) / np.sqrt(512),
+                        bbox=np.array([20, 20, 50, 60]), kps=np.array([[27, 30], [43, 30], [35, 40]]))]
         self_test = self
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             source = root / "source.mp4"
             subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=160x90:rate=10:duration=2", "-c:v", "libx264", "-threads", "1", str(source)], check=True)
             refs = root / "refs.npz"
-            np.savez(refs, ids=np.array(["test"]), matrix=np.ones((1, 512), dtype=np.float32))
+            np.savez(refs, ids=np.array(["test"]), matrix=np.ones((1, 512), dtype=np.float32),
+                     negative_ids=np.array([], dtype=str), negative_matrix=np.empty((0, 512), np.float32))
             checkpoint = root / "checkpoint"
             checkpoint.mkdir()
             with patch("insightface.app.FaceAnalysis", FakeModel), patch.object(worker, "CHUNK_SECONDS", 1):
@@ -146,6 +149,28 @@ class CheckpointTests(unittest.TestCase):
             self.assertEqual(FakeModel.calls, 4)
             self.assertEqual(len(result["frames"]), 8)
             self.assertEqual([f["t"] for f in result["frames"]], [.12, .38, .62, .88, 1.12, 1.38, 1.62, 1.88])
+            self.assertTrue(result["trackingVersion"])
+            self.assertEqual(len({f["faces"][0]["trackId"] for f in result["frames"]}), 1)
+            FakeModel.calls = 0
+            with patch("insightface.app.FaceAnalysis", FakeModel), patch.object(worker, "CHUNK_SECONDS", 1):
+                fresh = worker.analyze_source(source, refs)
+            self.assertEqual(result, fresh)
+
+    def test_negative_references_exclude_only_the_rejected_member(self):
+        e = worker.load_evidence()
+        positive = np.zeros((2, 512), np.float32)
+        positive[0, :2] = [.6, .8]
+        positive[1, :2] = [.8, .6]
+        negative = np.zeros((1, 512), np.float32)
+        negative[0, 0] = 1
+        query = negative[0]
+        scorer = e.Scorer(["other", worker.NINA_ID], positive, [worker.NINA_ID], negative)
+        self.assertEqual(scorer.predict(query, worker.NINA_ID)["predictedEntityId"], "other")
+        # 無関係なメンバーの却下を本人の負例に流用しない。
+        scorer = e.Scorer(["other", worker.NINA_ID], positive, ["unknown"], negative)
+        result = scorer.predict(query, worker.NINA_ID)
+        self.assertEqual(result["predictedEntityId"], worker.NINA_ID)
+        self.assertAlmostEqual(result["runnerUpSimilarity"], .6)
 
 
 if __name__ == "__main__":
