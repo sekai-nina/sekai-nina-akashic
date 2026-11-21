@@ -21,6 +21,10 @@ export async function GET(request: Request) {
   if (!MODEL_VERSION_PATTERN.test(modelVersion)) {
     return NextResponse.json({ error: "modelVersion は必須 (英数字と . _ @ : - の 64 文字まで)" }, { status: 400 });
   }
+  const videoModelVersion = searchParams.get("videoModelVersion") ?? modelVersion;
+  if (!MODEL_VERSION_PATTERN.test(videoModelVersion)) {
+    return NextResponse.json({ error: "videoModelVersion は英数字と . _ @ : - の 64 文字まで" }, { status: 400 });
+  }
   const limit = Number(searchParams.get("limit") ?? QUEUE_DEFAULT_LIMIT);
   if (!Number.isInteger(limit) || limit < 1 || limit > QUEUE_MAX_LIMIT) {
     return NextResponse.json({ error: `limit は 1..${QUEUE_MAX_LIMIT}` }, { status: 400 });
@@ -28,7 +32,7 @@ export async function GET(request: Request) {
 
   const withCount = searchParams.get("count") === "1";
   const queryStarted = performance.now();
-  const { items, remaining } = await listFaceQueue(auth.clearance, modelVersion, limit, withCount);
+  const { items, remaining } = await listFaceQueue(auth.clearance, modelVersion, limit, withCount, videoModelVersion);
   // ワーカーが 30 秒ごとに叩くので、遅いときだけどこで待ったかを残す (#416)
   const queryMs = performance.now() - queryStarted;
   if (authMs + queryMs >= 1_000) {

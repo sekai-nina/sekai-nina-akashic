@@ -10,4 +10,5 @@ uploads/
 
 __pycache__/
 reports/face-clip-trial-v2/
+reports/video-evidence/
 .env*

@@ -40,6 +40,13 @@ export const MODEL_VERSION_PATTERN = /^[A-Za-z0-9._@:-]{1,64}$/;
 /** 特徴量の L2 ノルムの許容誤差 (float32 の丸めで 1 から少しずれる) */
 const EMBEDDING_NORM_TOLERANCE = 0.01;
 
+/** ワーカーが同じ匿名トラック・候補差0.05・最大間隔1秒で集計した裏付け。 */
+export const VideoEvidence = z.object({
+  version: z.literal("nina-temporal-v1"),
+  distinctBins: z.number().int().min(0).max(10000),
+  spanSec: z.number().min(0).max(86400),
+}).strict();
+
 export type AutoDecision = "auto" | "pending";
 
 /**
@@ -49,14 +56,18 @@ export type AutoDecision = "auto" | "pending";
  * - 同じアセットで人が却下済みのメンバー → pending
  */
 export function decideFace(
-  face: { predictedEntityId: string | null; similarity: number | null },
-  ctx: { ninaEntityId: string; ninaAbsent: boolean; rejectedEntityIds: ReadonlySet<string> },
+  face: { predictedEntityId: string | null; similarity: number | null; videoEvidence?: z.infer<typeof VideoEvidence> },
+  ctx: { ninaEntityId: string; ninaAbsent: boolean; rejectedEntityIds: ReadonlySet<string>; isVideo?: boolean },
   threshold = FACE_AUTO_THRESHOLD
 ): AutoDecision {
   const { predictedEntityId, similarity } = face;
   if (!predictedEntityId || similarity == null || similarity < threshold) return "pending";
   if (predictedEntityId === ctx.ninaEntityId && ctx.ninaAbsent) return "pending";
   if (ctx.rejectedEntityIds.has(predictedEntityId)) return "pending";
+  if (ctx.isVideo && predictedEntityId === ctx.ninaEntityId) {
+    const evidence = face.videoEvidence;
+    if (evidence?.version !== "nina-temporal-v1" || evidence.distinctBins < 2 || evidence.spanSec < 0.5) return "pending";
+  }
   return "auto";
 }
 
@@ -176,6 +187,7 @@ export const FaceInput = z
     similarity: z.number().min(-1).max(1).nullable(),
     /** 動画の何秒目の顔か (#403)。画像は省く */
     frameSec: z.number().min(0).max(24 * 3600).nullable().optional(),
+    videoEvidence: VideoEvidence.optional(),
   })
   .strict();
 
