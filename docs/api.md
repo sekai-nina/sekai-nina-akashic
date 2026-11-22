@@ -6,15 +6,18 @@
 
 | operation | 入力 | 応答 |
 |---|---|---|
-| `claim` | 任意で `kind:"export"` | `{task: null}` または `{task: {id, kind, assetId, startSec, endSec, leaseToken, asset: {title, classification, fileSize, sourceRevision, sourceSha256}}}`。1 件を処理中にする。export を優先。kind を指定すると export だけを取得。sourceRevision は保存先・更新時刻・容量・Drive上のSHA-256を混ぜた不透明な識別子。sourceSha256は元ファイルのSHA-256（取得できない場合null）で、ダウンロード後の検証に使う。Drive キーは返さない |
+| `claim` | 任意で `kind:"export"` | `{task: null}` または `{task: {id, kind, assetId, startSec, endSec, leaseToken, asset: {title, classification, fileSize, sourceRevision, sourceSha256, sourceDriveFileId, sourceBytes}}}`。1 件を処理中にする。export を優先。kind を指定すると export だけを取得。sourceRevision は保存先・更新時刻・容量・Drive上のSHA-256を混ぜた不透明な識別子。sourceSha256は元ファイルのSHA-256（取得できない場合null）で、取得後の検証に使う。sourceDriveFileIdは当該元動画だけの直接取得用Drive ID、sourceBytesはDrive実容量（不明時null、2GB超も表現可能）。OAuth tokenは返さない |
 | `discover` | なし | `{task: null}` または分析の依頼。本人の人物タグ・確定した顔を持つ新しい未依頼の動画を 1 件だけキューに足す |
 | `heartbeat` | `taskId`, `token` | `{ok:true}`。有効な処理の期限を 10 分先へ延長 |
+| `yield` | `taskId`, `token` | `{ok:true}`。分析の正常な区間終了。同じ依頼を queued に戻し、lease・クラッシュ試行回数を解放する。継続は最大128回。書き出し依頼・古いleaseは不可 |
 | `upload` | `taskId`, `token`, `slot`, `mimeType` | `{fileId, uploadUrl}`。Drive の resumable URL。slot は英数字・`_`・`-` の 1〜80 文字。MIME は image/jpeg / video/mp4 |
 | `uploaded` | `taskId`, `token`, `fileId`, `driveFileId` | 保存したファイルの `id,mimeType,fileSize`。Drive の保存先・appProperties・MIME・容量を確認する。公開権限を付けない |
 | `complete` | `taskId`, `token`, `result` | `{ok:true}`。この依頼にアップロードしたファイルだけで生成結果を確定 |
-| `fail` | `taskId`, `token` | `{ok:true}`。画面には一般的なエラーだけを表示。外部サービスのエラー本文は送らない |
+| `fail` | `taskId`, `token`、任意で `code:"source-staging-required"` | `{ok:true}`。画面には一般的なエラーか、Vercel転送量を抑えるための元動画直接取得待ちを表示。外部サービスのエラー本文は送らない |
 
 claim / discover 以外の処理中の操作は claim の `leaseToken` を `token` に渡す。有効期限切れ・別のトークンは 409、不正な入力は 400、容量超過の JSON は 413。生成・アップロードの JSON 上限は 1 MB。画像は 4 MB 以下、動画は 100 MB 以下。アップロード URL・token・API キーはログに出さない。
+
+claim の task には `files:[{id}]` も含む。同じ依頼の登録済みファイルIDだけを返し、ローカルのSHA-256台帳と合わせてアップロードの再利用に使う。生成物のDriveキーは返さない。1依頼は最大4,000ファイル・2,000場面。手動でfailedを再試行した場合は継続回数もリセットする。
 
 分析の `result` は `{duration, scenes:[{id,start,end,videoFileId,posterFileId,shots:[{fileId,time}]}]}`。秒数は有限で動画内。表紙は同じ場面の shots に含まれること。3 分以下の動画の `videoFileId` は null、長い動画の 1 場面の動画は 90 秒以内。本人が検出されない場合は scenes を空にして正常終了する。
 
