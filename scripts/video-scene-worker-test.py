@@ -17,6 +17,194 @@ spec.loader.exec_module(worker)
 
 
 class CheckpointTests(unittest.TestCase):
+    def test_drive_actual_size_is_used_when_database_int_size_is_null(self):
+        task = {"id": "task", "asset": {"sourceRevision": "rev", "sourceSha256": "a"*64,
+                                          "fileSize": None, "sourceBytes": 2_200_000_000}}
+        with tempfile.TemporaryDirectory() as d:
+            with patch.object(worker.shutil, "disk_usage", return_value=SimpleNamespace(free=20_000_000_000)):
+                with worker.workspace(task, Path(d)) as root:
+                    self.assertTrue(root.is_dir())  # 20GB入力扱いの32GB予約ではなく13GB予約。
+        self.assertEqual(worker.source_bytes(task), 2_200_000_000)
+        del task["asset"]["sourceBytes"]
+        task["asset"]["fileSize"] = 100
+        self.assertEqual(worker.source_bytes(task), 100)
+
+    def test_definitive_lease_denial_does_not_wait_for_three_heartbeats(self):
+        for status in (401, 403, 404, 409):
+            api, stopped, lost = Mock(), Mock(), Mock()
+            stopped.wait.return_value = False
+            api.post.side_effect = worker.urllib.error.HTTPError("https://example.test", status, "denied", {}, None)
+            worker.maintain_lease(api, {}, stopped, lost)
+            self.assertEqual(api.post.call_count, 1)
+            lost.set.assert_called_once()
+
+    def test_renderer_wait_checks_cancellation_each_second(self):
+        child, active = Mock(), Mock(side_effect=[None, RuntimeError("lease lost")])
+        child.wait.side_effect = subprocess.TimeoutExpired("renderer", 1)
+        with self.assertRaisesRegex(RuntimeError, "lease lost"):
+            worker.wait_renderer(child, worker.time.monotonic()+60, 60, active)
+        child.wait.assert_called_once_with(timeout=1)
+
+    def test_direct_source_does_not_request_video_via_vercel(self):
+        with tempfile.TemporaryDirectory() as d:
+            payload = b"source"
+            task = {"id": "task", "assetId": "asset", "leaseToken": "token", "kind": "analyze",
+                    "asset": {"fileSize": 6, "sourceRevision": "rev", "sourceSha256": worker.hashlib.sha256(payload).hexdigest(),
+                              "sourceDriveFileId": "drive-file"}}
+            api, direct = Mock(), Mock()
+            direct.download.side_effect = lambda file_id, path, *args: path.write_bytes(payload)
+            child = Mock()
+            child.wait.return_value = 75
+            with patch.object(worker.subprocess, "Popen", return_value=child), patch.object(worker, "stop_process_group"):
+                self.assertFalse(worker.process(api, task, None, 60, Path(d), drive=direct))
+            api.download.assert_not_called()
+            self.assertEqual(direct.download.call_args.args[0], "drive-file")
+            self.assertEqual([c.args[0] for c in api.post.call_args_list], ["heartbeat", "yield"])
+
+    def test_uploaded_files_are_not_uploaded_again_after_yield(self):
+        with tempfile.TemporaryDirectory() as d:
+            payload = b"source"
+            task = {"id":"task", "assetId":"asset", "leaseToken":"token", "kind":"analyze", "files":[],
+                    "asset":{"fileSize":6, "sourceRevision":"rev", "sourceSha256":worker.hashlib.sha256(payload).hexdigest()}}
+            api = Mock()
+            api.download.side_effect = lambda asset,path,deadline,**kwargs:path.write_bytes(payload)
+            api.upload.side_effect = lambda task,file,deadline:"id-"+file["slot"]
+            def renderer(command, **kwargs):
+                out=Path(command[command.index("--out")+1]);out.mkdir(exist_ok=True)
+                files=[]
+                for slot in ("S", "thumb-S"):
+                    photo=out/(slot+".jpg");photo.write_bytes(b"photo")
+                    files.append({"slot":slot,"path":str(photo),"mimeType":"image/jpeg","sha256":worker.digest(photo)})
+                result={"duration":1,"scenes":[{"id":"scene","start":0,"end":1,"videoFileId":None,"posterFileId":"S","shots":[{"fileId":"S","time":.5}]}]}
+                worker.write_json(out/"render.json",{"files":files,"result":result})
+                child=Mock();child.wait.return_value=0;return child
+            with patch.object(worker.subprocess,"Popen",side_effect=renderer),patch.object(worker,"stop_process_group"):
+                with patch.object(worker,"slice_boundary",side_effect=[None,worker.SliceYield()]):
+                    self.assertFalse(worker.process(api,task,None,60,Path(d)))
+                task["files"]=[{"id":"id-S"}]
+                self.assertTrue(worker.process(api,task,None,60,Path(d)))
+            self.assertEqual(api.upload.call_count,2)
+            self.assertEqual([c.args[1]["slot"] for c in api.upload.call_args_list],["S","thumb-S"])
+            self.assertEqual([c.args[0] for c in api.post.call_args_list],["yield","complete"])
+            self.assertEqual(list(Path(d).iterdir()),[])
+
+    def test_transient_job_retries_are_bounded(self):
+        with tempfile.TemporaryDirectory() as d:
+            task={"id":"task","assetId":"asset","leaseToken":"token","kind":"analyze",
+                  "asset":{"fileSize":6,"sourceRevision":"rev","sourceSha256":"a"*64}}
+            api=Mock()
+            api.download.side_effect=worker.urllib.error.HTTPError("https://example.test",500,"temporary",{},None)
+            for _ in range(3):
+                self.assertFalse(worker.process(api,task,None,60,Path(d)))
+            with self.assertRaises(worker.urllib.error.HTTPError):
+                worker.process(api,task,None,60,Path(d))
+            self.assertEqual([c.args[0] for c in api.post.call_args_list],["yield","yield","yield","fail"])
+
+    def setUp(self):
+        disk = patch.object(worker.shutil, "disk_usage", return_value=SimpleNamespace(free=100_000_000_000))
+        disk.start()
+        self.addCleanup(disk.stop)
+
+    def test_disk_reservation_deducts_cached_data_and_bounds_unknown_size(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            with patch.object(worker.shutil, "disk_usage", return_value=SimpleNamespace(free=20_000_000_000)):
+                with self.assertRaises(ValueError):
+                    worker.reserve_space(root, None)
+                with (root / "source.mp4").open("wb") as f:
+                    f.truncate(20_000_000_000)
+                worker.reserve_space(root, 20_000_000_000)
+                (root / "out").mkdir()
+                with (root / "out/clip.mp4").open("wb") as f:
+                    f.truncate(10_000_000_000)
+                with patch.object(worker.shutil, "disk_usage", return_value=SimpleNamespace(free=2_100_000_000)):
+                    worker.reserve_space(root, 20_000_000_000)
+
+    def test_interrupted_reference_pin_does_not_leave_partial_target(self):
+        with tempfile.TemporaryDirectory() as d:
+            source, target = Path(d) / "input.npz", Path(d) / "refs.npz"
+            source.write_bytes(b"complete")
+            def broken(src, dst):
+                dst.write(b"partial")
+                raise OSError("interrupted")
+            with patch.object(worker.shutil, "copyfileobj", side_effect=broken), self.assertRaises(OSError):
+                worker.pin_references(source, target)
+            self.assertFalse(target.exists())
+            worker.pin_references(source, target)
+            self.assertEqual(target.read_bytes(), b"complete")
+            source.write_bytes(b"updated")
+            worker.pin_references(source, target)
+            self.assertEqual(target.read_bytes(), b"complete")
+
+    def test_large_proxy_download_stops_before_writing_body(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "source.mp4"
+            api = worker.Api("https://example.test", "ak_test")
+            with patch.object(api, "source_chunk", return_value=(206, "bytes 0-3999999/9000000000", b"x")):
+                with self.assertRaises(worker.SourceStagingRequired):
+                    api.download("asset", path, worker.time.monotonic()+60)
+            self.assertEqual(path.stat().st_size, 0)
+
+    def test_three_hour_analysis_advances_across_sixty_bounded_slices(self):
+        model = Mock()
+        model.get.return_value = []
+        cap = Mock()
+        metadata = {worker.load_trial().cv2.CAP_PROP_FPS: 30,
+                    worker.load_trial().cv2.CAP_PROP_FRAME_COUNT: 324000,
+                    worker.load_trial().cv2.CAP_PROP_FRAME_WIDTH: 160,
+                    worker.load_trial().cv2.CAP_PROP_FRAME_HEIGHT: 90}
+        cap.get.side_effect = metadata.get
+        data = bytes(160 * 90 * 3)
+        def decoded(source, begin, count, step, width, height):
+            yield from (data for _ in range(count))
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            refs = root / "refs.npz"
+            np.savez(refs, ids=np.array(["test"]), matrix=np.ones((1, 512), np.float32),
+                     negative_ids=np.array([], dtype=str), negative_matrix=np.empty((0, 512), np.float32))
+            checkpoint = root / "checkpoint"
+            checkpoint.mkdir()
+            with patch("cv2.VideoCapture", return_value=cap), patch("insightface.app.FaceAnalysis", return_value=model), patch.object(worker, "decoded_frames", decoded), patch("builtins.print"):
+                for limit in range(3, 181, 3):
+                    def boundary(_):
+                        if len(list(checkpoint.glob("faces-*.json"))) >= limit:
+                            raise worker.SliceYield()
+                    with patch.object(worker, "slice_boundary", boundary), self.assertRaises(worker.SliceYield):
+                        worker.analyze_source(root / "unused.mp4", refs, checkpoint, deadline=1)
+                    self.assertEqual(len(list(checkpoint.glob("faces-*.json"))), limit)
+                result = worker.analyze_source(root / "unused.mp4", refs, checkpoint)
+            self.assertEqual(result["duration"], 10800)
+            self.assertEqual(len(result["frames"]), 21600)
+            self.assertEqual(model.get.call_count, 21600)  # 完了済みコマの再推論なし。
+
+    def test_cooperative_child_exit_retains_cache_without_marking_failed(self):
+        with tempfile.TemporaryDirectory() as d:
+            source_bytes = b"source"
+            task = {"id":"task", "assetId":"asset", "leaseToken":"token", "kind":"analyze",
+                    "asset":{"fileSize":6, "sourceRevision":"rev", "sourceSha256":worker.hashlib.sha256(source_bytes).hexdigest()}}
+            api = Mock()
+            api.download.side_effect = lambda asset, path, deadline, **kwargs: path.write_bytes(source_bytes)
+            child = Mock()
+            child.wait.return_value = 75
+            with patch.object(worker.subprocess, "Popen", return_value=child), patch.object(worker, "stop_process_group"):
+                self.assertFalse(worker.process(api, task, None, 60, Path(d)))
+            self.assertTrue(list(Path(d).glob("*/source.mp4")))
+            self.assertEqual([c.args[0] for c in api.post.call_args_list], ["yield"])
+
+    def test_source_get_retries_transient_but_not_permission_errors(self):
+        api = worker.Api("https://example.test", "ak_test")
+        class Response(io.BytesIO):
+            status = 206
+            headers = {"Content-Range":"bytes 0-0/1"}
+        req = worker.urllib.request.Request("https://example.test/source")
+        with patch.object(worker.OPENER, "open", side_effect=[TimeoutError(), Response(b"x")]), patch.object(worker.time, "sleep"):
+            self.assertEqual(api.source_chunk(req, worker.time.monotonic()+60)[2], b"x")
+        denied = worker.urllib.error.HTTPError(req.full_url,403,"denied",{},None)
+        with patch.object(worker.OPENER,"open",side_effect=denied) as opened:
+            with self.assertRaises(worker.urllib.error.HTTPError):
+                api.source_chunk(req,worker.time.monotonic()+60)
+            self.assertEqual(opened.call_count,1)
+
     def test_incomplete_descriptor_archive_is_recomputed(self):
         trial = worker.load_trial()
         desc = trial.CompactDescriptors(2)

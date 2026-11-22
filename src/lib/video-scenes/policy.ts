@@ -24,7 +24,7 @@ export const SceneManifest = z.object({
     videoFileId: id.nullable(),
     posterFileId: id,
     shots: z.array(z.object({ fileId: id, time: seconds })).max(16),
-  })).max(500),
+  })).max(2000),
 }).superRefine((m, ctx) => {
   const seen = new Set<string>();
   for (const [i, scene] of m.scenes.entries()) {

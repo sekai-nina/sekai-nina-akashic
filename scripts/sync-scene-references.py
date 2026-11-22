@@ -6,6 +6,7 @@ import argparse
 import base64
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import tempfile
@@ -115,7 +116,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--omokage-root", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--continuation-cache-dir", type=Path)
     args = parser.parse_args()
+    if args.out.is_file() and args.continuation_cache_dir and args.continuation_cache_dir.is_dir():
+        for entry in args.continuation_cache_dir.iterdir():
+            marker = entry / ".continuing"
+            if (not entry.is_symlink() and re.fullmatch(r"[a-f0-9]{64}", entry.name) and
+                    (entry / ".scene-cache").is_file() and (entry / "refs.npz").is_file() and
+                    marker.is_file() and time.time() - marker.stat().st_mtime < 86400):
+                print("継続中の固定手本を再利用（同期省略）")
+                return
     key = os.environ.get("AKASHIC_FACE_KEY", "")
     if not key.startswith("ak_"):
         raise ValueError("顔ワーカーの専用鍵が必要です")

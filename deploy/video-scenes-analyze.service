@@ -8,7 +8,7 @@ WorkingDirectory=%h/akashic-video-scenes
 EnvironmentFile=%h/.config/akashic-video-scenes/worker.env
 Environment=PYTHONUNBUFFERED=1
 ExecStartPre=/usr/bin/systemctl --user start video-scenes-references.service
-ExecStart=%h/sekai-nina-omokage/.venv/bin/python scripts/video-scene-worker.py --refs data/refs-full.npz --cache-dir %h/.cache/akashic-video-scenes --max-jobs 1 --discover
+ExecStart=%h/sekai-nina-omokage/.venv/bin/python scripts/video-scene-worker.py --refs data/refs-full.npz --cache-dir %h/.cache/akashic-video-scenes --source-cache-dir %h/akashic-video-scenes/data/source-cache --drive-credentials %h/.config/akashic-video-scenes/drive-readonly.json --max-jobs 1 --discover
 TimeoutStartSec=125min
 Nice=15
 CPUQuota=100%

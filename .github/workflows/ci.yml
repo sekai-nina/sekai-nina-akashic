@@ -26,5 +26,7 @@ jobs:
       - run: python3 scripts/prepare-video-benchmark-test.py
       - run: python3 scripts/report-video-benchmark-test.py
       - run: python3 scripts/evaluate-video-negative-bank-test.py
+      # Drive直接取得の認証・Range再開・失効停止（標準ライブラリのみ）
+      - run: python3 scripts/scene-drive-source-test.py
       # 本番 DB を守る PreToolUse フックの判定 (.claude/hooks/guard-prod-db.py)
       - run: python3 -m unittest discover -s .claude/hooks

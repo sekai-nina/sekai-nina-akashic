@@ -7,7 +7,7 @@ Type=oneshot
 WorkingDirectory=%h/akashic-video-scenes
 EnvironmentFile=%h/.config/akashic-video-scenes/worker.env
 Environment=PYTHONUNBUFFERED=1
-ExecStart=%h/sekai-nina-omokage/.venv/bin/python scripts/video-scene-worker.py --export-only --max-jobs 1
+ExecStart=%h/sekai-nina-omokage/.venv/bin/python scripts/video-scene-worker.py --export-only --source-cache-dir %h/akashic-video-scenes/data/source-cache --drive-credentials %h/.config/akashic-video-scenes/drive-readonly.json --max-jobs 1
 TimeoutStartSec=125min
 Nice=10
 CPUQuota=50%
