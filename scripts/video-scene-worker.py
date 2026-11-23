@@ -635,7 +635,7 @@ def wait_renderer(child, deadline, timeout, check_active):
             continue
 
 
-def process(api, task, refs, timeout, cache_dir=None, slice_seconds=1200, source_cache_dir=None, max_proxy_bytes=200_000_000, drive=None):
+def process(api, task, refs, timeout, cache_dir=None, slice_seconds=1200, source_cache_dir=None, max_proxy_bytes=200_000_000, drive=None, sync_references=False):
     deadline = time.monotonic() + timeout
     stopped = threading.Event()
     lost = threading.Event()
@@ -653,6 +653,11 @@ def process(api, task, refs, timeout, cache_dir=None, slice_seconds=1200, source
         if drive:
             api.post("heartbeat", **lease)  # 直接取得の直前にも現在のRLS/leaseを確認。
         check_active()
+        if sync_references and task["kind"] == "analyze":
+            # 空の待ち行列では呼ばない。face keyは専用サービスだけが持つ。
+            subprocess.run(["systemctl", "--user", "start", "video-scenes-references.service"],
+                           check=True, timeout=min(300, max(1, deadline-time.monotonic())))
+            check_active()
         if source_bytes(task) and source_bytes(task) > MAX_SOURCE:
             raise ValueError("元動画は 20 GB までです")
         with workspace(task, cache_dir) as root:
@@ -803,6 +808,7 @@ def main():
     parser.add_argument("--source-cache-dir", type=Path, help="Vercelを経由せず取得した私有元動画のSHA256キャッシュ")
     parser.add_argument("--proxy-source-max-bytes", type=int, default=200_000_000)
     parser.add_argument("--drive-credentials", type=Path, help="サーバー専用Drive読み取り認証JSON（0600）")
+    parser.add_argument("--sync-references", action="store_true", help="分析依頼があるときだけ専用サービスで手本を同期")
     parser.add_argument("--discover", action="store_true")
     parser.add_argument("--export-only", action="store_true", help="保存範囲の書き出しだけを処理する")
     args = parser.parse_args()
@@ -829,7 +835,7 @@ def main():
             break
         print(f"{task['id']}: {task['kind']} を処理", flush=True)
         try:
-            completed = process(api, task, args.refs, args.job_timeout, args.cache_dir, args.slice_seconds, args.source_cache_dir, args.proxy_source_max_bytes, drive)
+            completed = process(api, task, args.refs, args.job_timeout, args.cache_dir, args.slice_seconds, args.source_cache_dir, args.proxy_source_max_bytes, drive, args.sync_references)
             print(f"{task['id']}: {'完了' if completed else '途中保存・継続待ち'}", flush=True)
         except Exception as error:
             failures += 1

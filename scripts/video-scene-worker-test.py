@@ -17,6 +17,24 @@ spec.loader.exec_module(worker)
 
 
 class CheckpointTests(unittest.TestCase):
+    def test_idle_poll_does_not_sync_references(self):
+        api = Mock()
+        api.post.return_value = {"task": None}
+        with patch.object(worker.sys, "argv", ["worker", "--sync-references"]), \
+                patch.dict(worker.os.environ, {"AKASHIC_VIDEO_WORKER_KEY": "ak_test"}), \
+                patch.object(worker, "Api", return_value=api), patch.object(worker.subprocess, "run") as run:
+            worker.main()
+        run.assert_not_called()
+
+    def test_active_analysis_syncs_references_inside_heartbeat_lifetime(self):
+        task = {"id":"task", "assetId":"asset", "leaseToken":"token", "kind":"analyze", "asset":{"fileSize":1}}
+        api = Mock()
+        api.download.side_effect = RuntimeError("stop after sync")
+        with patch.object(worker.subprocess, "run") as run, self.assertRaisesRegex(RuntimeError, "stop after sync"):
+            worker.process(api, task, None, 60, sync_references=True)
+        run.assert_called_once()
+        self.assertEqual(run.call_args.args[0], ["systemctl", "--user", "start", "video-scenes-references.service"])
+
     def test_drive_actual_size_is_used_when_database_int_size_is_null(self):
         task = {"id": "task", "asset": {"sourceRevision": "rev", "sourceSha256": "a"*64,
                                           "fileSize": None, "sourceBytes": 2_200_000_000}}
