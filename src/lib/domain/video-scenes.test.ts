@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => {
     $executeRaw: vi.fn(), $queryRaw: vi.fn(),
     asset: { findFirst: vi.fn() },
     videoSceneTask: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn(), updateMany: vi.fn(), findMany: vi.fn() },
-    videoSceneFile: { findMany: vi.fn(), findFirst: vi.fn(), update: vi.fn(), upsert: vi.fn() },
+    videoSceneFile: { findMany: vi.fn(), findFirst: vi.fn(), count: vi.fn(), update: vi.fn(), upsert: vi.fn() },
   };
   return { tx, getDriveFileMeta: vi.fn(), createResumableUploadSession: vi.fn(), isPrivateSceneFolder: vi.fn(), withClearance: vi.fn(async (_clearance, fn) => fn(tx)) };
 });
@@ -58,12 +58,35 @@ describe("場面生成の権限と重複", () => {
 });
 
 describe("ワーカーの期限と生成物の検査", () => {
-  it("再開用の版は返すが、元動画の Drive キーは返さない", async () => {
-    mocks.getDriveFileMeta.mockResolvedValue({ sha256: "a".repeat(64) });
+  it("大容量元動画の直接取得待ちは、安全な定型メッセージにする",async()=>{
+    mocks.tx.videoSceneTask.findUnique.mockResolvedValue(task());
+    await updateSceneTask(actor,"task",token,"fail",{code:"source-staging-required"});
+    expect(mocks.tx.videoSceneTask.update).toHaveBeenCalledWith(expect.objectContaining({data:expect.objectContaining({status:"failed",error:expect.stringContaining("直接取得")})}));
+  });
+  it("正常な区間終了は失敗にせずキューへ戻し、期限と試行回数を解放する", async () => {
+    mocks.tx.videoSceneTask.findUnique.mockResolvedValue({ ...task(), result: { continuations: 2 } });
+    await updateSceneTask(actor, "task", token, "yield");
+    expect(mocks.tx.videoSceneTask.update).toHaveBeenCalledWith(expect.objectContaining({ data: {
+      status: "queued", attempts: 0, leaseToken: null, leaseUntil: null, result: { continuations: 3 },
+    } }));
+  });
+  it("継続は古いlease・書き出し・128回超を拒否する", async () => {
+    mocks.tx.videoSceneTask.findUnique.mockResolvedValue({ ...task(), leaseToken: "old" });
+    await expect(updateSceneTask(actor, "task", token, "yield")).rejects.toBeInstanceOf(SceneLeaseError);
+    mocks.tx.videoSceneTask.findUnique.mockResolvedValue({ ...task(), kind: "export" });
+    await expect(updateSceneTask(actor, "task", token, "yield")).rejects.toThrow("分析依頼");
+    mocks.tx.videoSceneTask.findUnique.mockResolvedValue({ ...task(), result: { continuations: 128 } });
+    await expect(updateSceneTask(actor, "task", token, "yield")).rejects.toThrow("上限");
+    expect(mocks.tx.videoSceneTask.update).not.toHaveBeenCalled();
+  });
+  it("直接取得用のDrive ID・実容量と再開用の版を認可済みclaimに返す", async () => {
+    mocks.getDriveFileMeta.mockResolvedValue({ sha256: "a".repeat(64), size: 9_000_000_000 });
     mocks.tx.videoSceneTask.update.mockResolvedValue({ id: "task", asset: { title: "動画", classification: "internal", fileSize: 800_000_000, storageKey: "private-drive-key", updatedAt: new Date("2026-11-20T00:00:00Z") } });
     const result = await claimSceneTask(actor);
     expect(result?.asset.sourceRevision).toMatch(/^[a-f0-9]{64}$/);
     expect(result?.asset.sourceSha256).toBe("a".repeat(64));
+    expect(result?.asset.sourceDriveFileId).toBe("private-drive-key");
+    expect(result?.asset.sourceBytes).toBe(9_000_000_000);
     expect(result?.asset).not.toHaveProperty("storageKey");
     expect(result?.asset).not.toHaveProperty("updatedAt");
   });
@@ -111,7 +134,8 @@ describe("ワーカーの期限と生成物の検査", () => {
   });
   it("上限件数でも既存スロットは再試行でき、新規スロットは増やせない", async () => {
     mocks.tx.videoSceneTask.findUnique.mockResolvedValue(task());
-    mocks.tx.videoSceneFile.findMany.mockResolvedValue(Array.from({ length: 1000 }, (_, i) => ({ id: `f${i}`, slot: `S${i}` })));
+    mocks.tx.videoSceneFile.count.mockResolvedValue(4000);
+    mocks.tx.videoSceneFile.findFirst.mockResolvedValueOnce({ id: "f0" }).mockResolvedValueOnce(null);
     mocks.tx.videoSceneFile.upsert.mockResolvedValue({ id: "f0", filename: "task-S0.jpg" });
     mocks.createResumableUploadSession.mockResolvedValue("https://www.googleapis.com/upload/opaque");
     await expect(initiateSceneFile(actor, "task", token, "S0", "image/jpeg")).resolves.toHaveProperty("fileId", "f0");

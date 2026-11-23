@@ -14,6 +14,11 @@ describe("保存範囲", () => {
 });
 
 describe("場面の生成結果", () => {
+  it("長尺の500超の場面を受け付け、2000超は拒否する",()=>{
+    const scenes=Array.from({length:2001},(_,i)=>({id:`s${i}`,start:i*40,end:i*40+30,videoFileId:`v${i}`,posterFileId:`p${i}`,shots:[{fileId:`p${i}`,time:i*40+15}]}));
+    expect(SceneManifest.safeParse({duration:24000,scenes:scenes.slice(0,546)}).success).toBe(true);
+    expect(SceneManifest.safeParse({duration:86400,scenes}).success).toBe(false);
+  });
   it("短い動画にはスクショだけを受け付ける", () => {
     const short = manifest(180);
     expect(SceneManifest.safeParse(short).success).toBe(false);

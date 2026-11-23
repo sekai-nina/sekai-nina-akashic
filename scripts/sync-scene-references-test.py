@@ -2,6 +2,7 @@ import base64
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import tempfile
 import types
@@ -16,6 +17,34 @@ spec.loader.exec_module(sync)
 
 
 class SyncTests(unittest.TestCase):
+    def test_continuation_skips_reference_api_only_with_recent_owned_checkpoint(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            out = root / "refs.npz"
+            out.write_bytes(b"existing")
+            cache = root / "cache"
+            entry = cache / ("a" * 64)
+            entry.mkdir(parents=True)
+            (entry / ".scene-cache").touch()
+            (entry / "refs.npz").touch()
+            marker = entry / ".continuing"
+            marker.touch()
+            argv = ["sync", "--omokage-root", str(root), "--out", str(out),
+                    "--continuation-cache-dir", str(cache)]
+            with patch.object(sync.sys, "argv", argv), patch.dict(os.environ, {"AKASHIC_FACE_KEY": "ak_test"}), \
+                    patch.object(sync, "references", return_value=[]) as fetch, \
+                    patch.object(sync, "arrays", return_value={"ids": [], "negative_ids": []}), \
+                    patch.object(sync, "save"), patch("builtins.print"):
+                sync.main()
+                fetch.assert_not_called()
+                os.utime(marker, (0, 0))
+                sync.main()
+                self.assertEqual(fetch.call_count, 1)
+                marker.touch()
+                (entry / ".scene-cache").unlink()
+                sync.main()
+                self.assertEqual(fetch.call_count, 2)
+
     def test_save_is_private_atomic_and_stable_for_identical_content(self):
         values = dict(ids=np.array(["nina"]), matrix=np.ones((1, 512)),
                       negative_ids=np.array([], dtype=str), negative_matrix=np.empty((0, 512)))

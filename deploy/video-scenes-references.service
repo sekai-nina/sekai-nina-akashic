@@ -8,7 +8,7 @@ WorkingDirectory=%h/sekai-nina-omokage
 EnvironmentFile=%h/sekai-nina-omokage/.env
 Environment=OPENBLAS_NUM_THREADS=1
 Environment=OMP_NUM_THREADS=1
-ExecStart=%h/sekai-nina-omokage/.venv/bin/python %h/akashic-video-scenes/scripts/sync-scene-references.py --omokage-root %h/sekai-nina-omokage --out %h/akashic-video-scenes/data/refs-full.npz
+ExecStart=%h/sekai-nina-omokage/.venv/bin/python %h/akashic-video-scenes/scripts/sync-scene-references.py --omokage-root %h/sekai-nina-omokage --out %h/akashic-video-scenes/data/refs-full.npz --continuation-cache-dir %h/.cache/akashic-video-scenes
 TimeoutStartSec=5min
 CPUQuota=50%
 MemoryMax=512M

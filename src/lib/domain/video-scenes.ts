@@ -93,7 +93,7 @@ export async function requestSceneTask(user: Actor, assetId: string, range?: unk
     const existing = await tx.videoSceneTask.findUnique({ where: { requestKey: key }, select: taskSelect });
     if (existing && existing.status !== "failed") return existing;
     if (existing) return tx.videoSceneTask.update({ where: { id: existing.id }, data: {
-      status: "queued", error: null, attempts: 0, leaseToken: null, leaseUntil: null,
+      status: "queued", error: null, attempts: 0, leaseToken: null, leaseUntil: null, result: {},
     }, select: taskSelect });
     return tx.videoSceneTask.create({ data: { assetId, requestKey: key, kind, startSec: bounds?.start, endSec: bounds?.end, requestedById: user.id }, select: taskSelect });
   });
@@ -135,14 +135,17 @@ export async function claimSceneTask(user: Actor, onlyExport = false) {
     return tx.videoSceneTask.update({ where: { id: rows[0].id }, data: {
       status: "processing", leaseToken: randomUUID(), leaseUntil: new Date(now.getTime() + SCENE_TASK_LEASE_MS), attempts: { increment: 1 }, error: null,
     }, select: { id: true, kind: true, assetId: true, startSec: true, endSec: true, leaseToken: true,
+      files: { where: { storageKey: { not: null } }, select: { id: true } },
       asset: { select: { title: true, classification: true, fileSize: true, storageKey: true, updatedAt: true } } } });
   });
   if (!task) return null;
   // Drive のネットワーク待ちで DB のトランザクションを保持しない。
   const { storageKey, updatedAt, ...asset } = task.asset;
-  const sourceSha256 = storageKey ? (await getDriveFileMeta(storageKey))?.sha256 ?? null : null;
+  const sourceMeta = storageKey ? await getDriveFileMeta(storageKey) : null;
+  const sourceSha256 = sourceMeta?.sha256 ?? null;
   const sourceRevision = createHash("sha256").update(JSON.stringify([storageKey, updatedAt.toISOString(), asset.fileSize, sourceSha256])).digest("hex");
-  return { ...task, asset: { ...asset, sourceRevision, sourceSha256 } };
+  return { ...task, asset: { ...asset, sourceRevision, sourceSha256,
+    sourceDriveFileId: storageKey, sourceBytes: sourceMeta?.size ?? null } };
 }
 
 /** 常駐側が指定したときだけ、新しい本人関連の動画を 1 本ずつ先に処理する。 */
@@ -166,7 +169,7 @@ async function leased(tx: TransactionClient, taskId: string, token: string) {
   return task;
 }
 
-export async function updateSceneTask(user: Actor, taskId: string, token: string, operation: "heartbeat" | "fail" | "complete", result?: unknown) {
+export async function updateSceneTask(user: Actor, taskId: string, token: string, operation: "heartbeat" | "fail" | "complete" | "yield", result?: unknown) {
   requireSceneEditor(user);
   return withClearance(user.clearance, async (tx) => {
     const task = await leased(tx, taskId, token);
@@ -175,7 +178,20 @@ export async function updateSceneTask(user: Actor, taskId: string, token: string
       return;
     }
     if (operation === "fail") {
-      await tx.videoSceneTask.update({ where: { id: taskId }, data: { status: "failed", error: "動画を処理できませんでした。ワーカーのログを確認してください", leaseToken: null, leaseUntil: null } });
+      const message = (result as { code?: string })?.code === "source-staging-required"
+        ? "Vercelの転送量を抑えるため、元動画の直接取得が必要です"
+        : "動画を処理できませんでした。ワーカーのログを確認してください";
+      await tx.videoSceneTask.update({ where: { id: taskId }, data: { status: "failed", error: message, leaseToken: null, leaseUntil: null } });
+      return;
+    }
+    if (operation === "yield") {
+      if (task.kind !== "analyze") throw new SceneInputError("分析依頼だけを継続できます");
+      const previous = task.result as { continuations?: number };
+      const continuations = (previous?.continuations ?? 0) + 1;
+      if (continuations > 128) throw new SceneInputError("継続処理の上限に達しました");
+      await tx.videoSceneTask.update({ where: { id: taskId }, data: {
+        status: "queued", attempts: 0, leaseToken: null, leaseUntil: null, result: { continuations },
+      } });
       return;
     }
     const files = await tx.videoSceneFile.findMany({ where: { taskId, storageKey: { not: null } }, select: fileSelect });
@@ -207,8 +223,11 @@ export async function initiateSceneFile(user: Actor, taskId: string, token: stri
   if (!folderId || !await isPrivateSceneFolder(folderId)) throw new SceneInputError("場面素材の非公開 Drive フォルダを設定してください");
   const file = await withClearance(user.clearance, async (tx) => {
     await leased(tx, taskId, token);
-    const count = await tx.videoSceneFile.findMany({ where: { taskId }, take: 1001, select: { id: true, slot: true } });
-    if (count.length >= 1000 && !count.some((file) => file.slot === slot)) throw new SceneInputError("この動画の候補数が上限に達しました");
+    const [count, existing] = await Promise.all([
+      tx.videoSceneFile.count({ where: { taskId } }),
+      tx.videoSceneFile.findFirst({ where: { taskId, slot }, select: { id: true } }),
+    ]);
+    if (count >= 4000 && !existing) throw new SceneInputError("この動画の候補数が上限に達しました");
     const filename = `${taskId}-${slot}.${mimeType === "image/jpeg" ? "jpg" : "mp4"}`;
     return tx.videoSceneFile.upsert({ where: { taskId_slot: { taskId, slot } },
       create: { taskId, slot, filename, mimeType }, update: { filename, mimeType, storageKey: null, fileSize: null } });

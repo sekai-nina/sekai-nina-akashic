@@ -32,11 +32,24 @@ import urllib.request
 
 CHUNK = 4_000_000
 MAX_FILE = 100_000_000
-MAX_SOURCE = 2_000_000_000
+MAX_SOURCE = 20_000_000_000
 ANALYSIS_VERSION = "scene-temporal-v2"
 CHUNK_SECONDS = 60
-MAX_OUTPUT = 2_000_000_000
+MAX_OUTPUT = 10_000_000_000
 NINA_ID = "cmmtp8vrg0004mo381neyztvn"
+
+
+class SliceYield(Exception):
+    """正常な途中終了。失敗にせず、同じ依頼の続きを次回処理する。"""
+
+
+class SourceStagingRequired(Exception):
+    """大容量の元動画をVercel経由で取得しない。直接取得を待つ。"""
+
+
+def slice_boundary(deadline):
+    if deadline is not None and time.monotonic() >= deadline:
+        raise SliceYield()
 
 
 def digest(path):
@@ -64,6 +77,42 @@ def cached_json(path, create):
     if path:
         write_json(path, value)
     return value
+
+
+def source_bytes(task):
+    # Prisma Intに収まらない2GB超の入力はDrive実容量を優先する。
+    actual = task["asset"].get("sourceBytes")
+    return actual if actual is not None else task["asset"].get("fileSize")
+
+
+def reserve_space(root, source_bytes):
+    # 保存済み分は追加の空き容量に数えない。未知の容量は最大値で予約する。
+    source_bytes = min(MAX_SOURCE, source_bytes or MAX_SOURCE)
+    cached_source = (root / "source.mp4").stat().st_size if (root / "source.mp4").is_file() else 0
+    cached_output = sum(p.stat().st_size for p in (root / "out").glob("*") if p.is_file() and not p.is_symlink())
+    expected_output = min(MAX_OUTPUT, 4 * source_bytes)
+    required = max(0, source_bytes - cached_source) + max(0, expected_output - cached_output) + 2_000_000_000
+    if shutil.disk_usage(root).free < required:
+        raise ValueError("途中保存に必要な空き容量がありません")
+
+
+def copy_atomically(source, target):
+    temporary = target.with_suffix(".tmp")
+    try:
+        with source.open("rb") as src, temporary.open("wb") as dst:
+            os.chmod(temporary, 0o600)
+            shutil.copyfileobj(src, dst)
+            dst.flush()
+            os.fsync(dst.fileno())
+        temporary.replace(target)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def pin_references(source, target):
+    if not target.exists():
+        copy_atomically(source, target)
 
 
 @contextmanager
@@ -94,8 +143,6 @@ def workspace(task, cache_dir):
             except BlockingIOError:
                 continue
             shutil.rmtree(entry)
-    if shutil.disk_usage(cache_dir).free < 6_000_000_000:
-        raise ValueError("途中保存に必要な空き容量がありません")
     root = cache_dir / key
     if root.exists() and not (root / ".scene-cache").is_file():
         raise ValueError("自分が作ったキャッシュ以外は使用できません")
@@ -107,6 +154,7 @@ def workspace(task, cache_dir):
     with (root / ".lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         try:
+            reserve_space(root, source_bytes(task))
             yield root
         except BaseException:
             raise
@@ -204,7 +252,7 @@ def load_evidence():
     return module
 
 
-def analyze_source(source, refs, checkpoint=None):
+def analyze_source(source, refs, checkpoint=None, deadline=None):
     """omokage と同じ buffalo_l と参照のコサイン類似度で動画を走査する。"""
     import cv2
     import numpy as np
@@ -272,6 +320,7 @@ def analyze_source(source, refs, checkpoint=None):
                 options.inter_op_num_threads = 1
                 app = FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"], allowed_modules=["detection", "recognition"], sess_options=options)
                 app.prepare(ctx_id=-1, det_size=(640, 640))
+            slice_boundary(deadline)
             chunk = []
             stream = decoded_frames(source, begin, len(times), step, w, h)
             try:
@@ -309,13 +358,14 @@ def analyze_source(source, refs, checkpoint=None):
                 write_json(path, {"frames": chunk, "tracks": tracker.tracks, "nextId": tracker.next_id, "previous": previous.tolist()})
             frames.extend(chunk)
             print(f"faces {finish:.1f}/{duration:.1f}s saved", flush=True)
+            slice_boundary(deadline)
         return {"duration": duration, "width": width, "height": height, "fps": fps, "step": step,
                 "trackingVersion": "anonymous-iou0.1-cos0.6-gap1.1-cut55@1", "frames": frames}
     finally:
         cap.release()
 
 
-def render_local(source, target, kind, refs=None, frames=None, start=None, end=None, checkpoint=None):
+def render_local(source, target, kind, refs=None, frames=None, start=None, end=None, checkpoint=None, deadline=None):
     """ネットワークを使わない生成本体。保存済みの顔判定でオフライン検証もできる。"""
     trial = load_trial()
     target = target.resolve()
@@ -339,13 +389,13 @@ def render_local(source, target, kind, refs=None, frames=None, start=None, end=N
 
     def register(slot, path, mime):
         nonlocal output_size
-        if len(files) >= 1000:
+        if len(files) >= 4000:
             raise ValueError("場面のファイル数が 1 件あたりの上限を超えました")
         if not path.is_file() or not 0 < path.stat().st_size <= (CHUNK if mime == "image/jpeg" else MAX_FILE):
             raise ValueError("生成したファイルが容量の上限を超えました")
         output_size += path.stat().st_size
         if output_size > MAX_OUTPUT:
-            raise ValueError("生成した素材の合計が 2 GB を超えました")
+            raise ValueError("生成した素材の合計が 10 GB を超えました")
         record = {"slot": slot, "path": str(path), "mimeType": mime, "sha256": digest(path)}
         files.append(record)
         if checkpoint:
@@ -379,7 +429,8 @@ def render_local(source, target, kind, refs=None, frames=None, start=None, end=N
         else:
             if not refs or not refs.is_file():
                 raise ValueError("参照の特徴量ファイルがありません")
-            meta = cached_json(checkpoint / "faces.json" if checkpoint else None, lambda: analyze_source(source, refs, checkpoint))
+            meta = cached_json(checkpoint / "faces.json" if checkpoint else None, lambda: analyze_source(source, refs, checkpoint, deadline))
+        slice_boundary(deadline)
         print("stage descriptors", flush=True)
         import numpy as np
         descriptor_path = checkpoint / "descriptors.npz" if checkpoint else None
@@ -397,24 +448,36 @@ def render_local(source, target, kind, refs=None, frames=None, start=None, end=N
                     os.fsync(handle.fileno())
                 temporary.replace(descriptor_path)
         print("stage silence", flush=True)
+        slice_boundary(deadline)
         pauses = cached_json(checkpoint / "pauses.json" if checkpoint else None, lambda: trial.silence_points(source, meta["duration"]))
         plan = trial.make_plan(meta, desc, cuts, pauses)
         shots = list(plan["shots"])
         groups = [{"number": 1, "start": 0, "end": meta["duration"]}] if plan["short"] and shots else plan["clips"]
-        scenes = []
-        chosen = {}
-        for number, group in enumerate(groups, 1):
-            print(f"stage render {number}/{len(groups)}", flush=True)
+        if len(groups) > 2000:
+            raise ValueError("場面数が 2000 件の上限を超えました")
+        prepared = []
+        photo_times = set()
+        for group in groups:
             begin, finish = group["start"], group["end"]
             candidates = [s for s in shots if begin <= s["t"] <= finish]
             if not candidates:
-                options = [(fr, trial.face_at(fr)) for fr in meta["frames"] if begin <= fr["t"] <= finish]
+                options = [(fr, trial.selected_face(meta, i)) for i, fr in enumerate(meta["frames"]) if begin <= fr["t"] <= finish]
                 options = [(fr, f) for fr, f in options if f is not None]
                 if not options:
                     continue
                 fr, f = max(options, key=lambda x: trial.quality(x[1]))
                 candidates = [{"t": fr["t"], "score": trial.quality(f)}]
             candidates = sorted(sorted(candidates, key=lambda s: -s["score"])[:16], key=lambda s: s["t"])
+            prepared.append((group, candidates))
+            photo_times.update(s["t"] for s in candidates)
+        if 2 * len(photo_times) + (0 if plan["short"] else len(prepared)) > 4000:
+            raise ValueError("場面のファイル数が 4000 件の上限を超えました")
+        scenes = []
+        chosen = {}
+        for number, (group, candidates) in enumerate(prepared, 1):
+            slice_boundary(deadline)
+            print(f"stage render {number}/{len(groups)}", flush=True)
+            begin, finish = group["start"], group["end"]
             poster = max(candidates, key=lambda s: s["score"])
             rows = []
             for shot in candidates:
@@ -461,7 +524,24 @@ class Api:
         with OPENER.open(req, timeout=40) as response:
             return json.load(response)
 
-    def download(self, asset_id, path, deadline):
+    def source_chunk(self, req, deadline, check_active=lambda: None):
+        for attempt in range(3):
+            check_active()
+            if time.monotonic() > deadline:
+                raise TimeoutError("元動画の取得時間の上限です")
+            try:
+                with OPENER.open(req, timeout=40) as response:
+                    result = response.status, response.headers.get("Content-Range", ""), response.read(CHUNK + 1)
+                check_active()
+                return result
+            except (urllib.error.URLError, TimeoutError) as error:
+                if isinstance(error, urllib.error.HTTPError) and error.code not in (429, 500, 502, 503, 504):
+                    raise
+                if attempt == 2:
+                    raise
+                time.sleep(attempt + 1)
+
+    def download(self, asset_id, path, deadline, max_proxy_bytes=200_000_000):
         total = None
         offset = path.stat().st_size if path.exists() else 0
         # 再開時にも末尾の 1 byte を再取得し、総容量・認可を現在の API で確かめる。
@@ -473,19 +553,22 @@ class Api:
                     raise TimeoutError("処理時間の上限です")
                 req = urllib.request.Request(self.base + "/api/v1/video-scenes/assets/" + urllib.parse.quote(asset_id) + "/source",
                                              headers={"Authorization": "Bearer " + self.key, "Range": f"bytes={offset}-{offset + CHUNK - 1}"})
-                with OPENER.open(req, timeout=40) as response:
-                    match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)", response.headers.get("Content-Range", ""))
-                    if response.status != 206 or not match or int(match[1]) != offset:
-                        raise ValueError("元動画の取得範囲が一致しません")
-                    current_total = int(match[3])
-                    if current_total > MAX_SOURCE or (total is not None and total != current_total):
-                        raise ValueError("元動画の容量が上限を超えるか、取得中に変わりました")
-                    total = current_total
-                    chunk = response.read(CHUNK + 1)
-                    if not chunk or len(chunk) > CHUNK or len(chunk) != int(match[2]) - offset + 1:
-                        raise ValueError("元動画の取得が途中で止まりました")
-                    handle.write(chunk)
-                    offset += len(chunk)
+                status, content_range, chunk = self.source_chunk(req, deadline)
+                match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)", content_range)
+                if status != 206 or not match or int(match[1]) != offset:
+                    raise ValueError("元動画の取得範囲が一致しません")
+                current_total = int(match[3])
+                if current_total > MAX_SOURCE or (total is not None and total != current_total):
+                    raise ValueError("元動画の容量が上限を超えるか、取得中に変わりました")
+                total = current_total
+                if total - offset > max_proxy_bytes:
+                    raise SourceStagingRequired()
+                if offset == max(0, path.stat().st_size - 1):
+                    reserve_space(path.parent, total)
+                if not chunk or len(chunk) > CHUNK or len(chunk) != int(match[2]) - offset + 1:
+                    raise ValueError("元動画の取得が途中で止まりました")
+                handle.write(chunk)
+                offset += len(chunk)
 
     def upload(self, task, file, deadline):
         lease = {"taskId": task["id"], "token": task["leaseToken"]}
@@ -526,34 +609,73 @@ class Api:
         return init["fileId"]
 
 
-def process(api, task, refs, timeout, cache_dir=None):
+def maintain_lease(api, lease, stopped, lost):
+    failures = 0
+    while not stopped.wait(45):
+        try:
+            api.post("heartbeat", **lease)
+            failures = 0
+        except Exception as error:
+            failures += 1
+            denied = isinstance(error, urllib.error.HTTPError) and error.code in (401, 403, 404, 409)
+            if denied or failures >= 3:
+                lost.set()
+                return
+
+
+def wait_renderer(child, deadline, timeout, check_active):
+    while True:
+        check_active()
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired("renderer", timeout)
+        try:
+            return child.wait(timeout=min(1, remaining))
+        except subprocess.TimeoutExpired:
+            continue
+
+
+def process(api, task, refs, timeout, cache_dir=None, slice_seconds=1200, source_cache_dir=None, max_proxy_bytes=200_000_000, drive=None):
     deadline = time.monotonic() + timeout
     stopped = threading.Event()
     lost = threading.Event()
     lease = {"taskId": task["id"], "token": task["leaseToken"]}
+    resumable = bool(cache_dir and task["asset"].get("sourceRevision") and task["asset"].get("sourceSha256"))
+    root = None
 
-    def heartbeat():
-        failures = 0
-        while not stopped.wait(45):
-            try:
-                api.post("heartbeat", **lease)
-                failures = 0
-            except Exception:
-                failures += 1
-                if failures >= 3:
-                    lost.set()
-                    return
+    def check_active():
+        if lost.is_set():
+            raise RuntimeError("処理の権限または有効期限が失効しました")
 
-    thread = threading.Thread(target=heartbeat, daemon=True)
+    thread = threading.Thread(target=maintain_lease, args=(api, lease, stopped, lost), daemon=True)
     thread.start()
     try:
-        if task["asset"]["fileSize"] and task["asset"]["fileSize"] > MAX_SOURCE:
-            raise ValueError("元動画は 2 GB までです")
+        if drive:
+            api.post("heartbeat", **lease)  # 直接取得の直前にも現在のRLS/leaseを確認。
+        check_active()
+        if source_bytes(task) and source_bytes(task) > MAX_SOURCE:
+            raise ValueError("元動画は 20 GB までです")
         with workspace(task, cache_dir) as root:
             source = root / "source.mp4"
-            print("stage download", flush=True)
-            api.download(task["assetId"], source, deadline)
             expected_hash = task["asset"].get("sourceSha256")
+            if source_cache_dir and expected_hash and re.fullmatch(r"[a-f0-9]{64}", expected_hash):
+                staged = source_cache_dir / (expected_hash + ".mp4")
+                if (staged.is_file() and not staged.is_symlink() and staged.stat().st_size <= MAX_SOURCE and
+                        (not source.exists() or source.stat().st_size != staged.stat().st_size)):
+                    if shutil.disk_usage(root).free < staged.stat().st_size + 2_000_000_000:
+                        raise ValueError("直接取得した元動画を固定する空き容量がありません")
+                    copy_atomically(staged, source)
+            print("stage download", flush=True)
+            if drive:
+                # claimは現在のRLSを通した元動画だけを返す。credentialは親だけが保持する。
+                drive.download(task["asset"].get("sourceDriveFileId"), source, deadline,
+                    lambda req, end: api.source_chunk(req, end, check_active=check_active), reserve_space, check_active)
+            else:
+                known_size = source_bytes(task)
+                if known_size and known_size - (source.stat().st_size if source.exists() else 0) > max_proxy_bytes:
+                    raise SourceStagingRequired()
+                api.download(task["assetId"], source, deadline, max_proxy_bytes=max_proxy_bytes)
+            check_active()
             if expected_hash and digest(source) != expected_hash:
                 source.unlink()
                 raise ValueError("取得した元動画のチェックサムが一致しません")
@@ -561,9 +683,10 @@ def process(api, task, refs, timeout, cache_dir=None):
             if refs:
                 # 同期は原子的置換。実行中の参照を固定してハッシュと実データを一致させる。
                 pinned_refs = root / "refs.npz"
-                shutil.copyfile(refs, pinned_refs)
-                os.chmod(pinned_refs, 0o600)
+                pin_references(refs, pinned_refs)
                 command += ["--refs", str(pinned_refs)]
+            if resumable and task["kind"] == "analyze":
+                command += ["--slice-seconds", str(slice_seconds)]
             if task["kind"] == "export":
                 command += ["--start", str(task["startSec"]), "--end", str(task["endSec"])]
             # CPU の使い切りを避け、処理時間にも上限を付ける。
@@ -572,19 +695,33 @@ def process(api, task, refs, timeout, cache_dir=None):
             env.pop("AKASHIC_VIDEO_WORKER_KEY", None)
             child = subprocess.Popen(command, env=env, start_new_session=True)
             try:
-                code = child.wait(timeout=max(1, deadline - time.monotonic()))
+                code = wait_renderer(child, deadline, timeout, check_active)
+                if code == 75 and resumable:
+                    raise SliceYield()
                 if code:
                     raise subprocess.CalledProcessError(code, command)
             finally:
                 # timeout / 中断時は ffmpeg を含む子プロセス群を残さない。
                 stop_process_group(child)
             rendered = json.loads((root / "out/render.json").read_text())
+            uploaded_path = root / "uploaded.json"
+            uploaded = json.loads(uploaded_path.read_text()) if uploaded_path.exists() else {}
+            registered = {f["id"] for f in task.get("files", [])}
             ids = {}
+            upload_deadline = min(deadline, time.monotonic() + slice_seconds) if resumable else deadline
             for file in rendered["files"]:
                 print(f"stage upload {len(ids) + 1}/{len(rendered['files'])}", flush=True)
                 if lost.is_set():
                     raise RuntimeError("処理の有効期限を更新できませんでした")
+                saved = uploaded.get(file["slot"])
+                if saved and saved["id"] in registered and saved["sha256"] == file["sha256"]:
+                    ids[file["slot"]] = saved["id"]
+                    continue
+                if resumable:
+                    slice_boundary(upload_deadline)
                 ids[file["slot"]] = api.upload(task, file, deadline)
+                uploaded[file["slot"]] = {"id": ids[file["slot"]], "sha256": file["sha256"]}
+                write_json(uploaded_path, uploaded)
             result = rendered["result"]
             if task["kind"] == "export":
                 result["fileId"] = ids[result["fileId"]]
@@ -595,10 +732,41 @@ def process(api, task, refs, timeout, cache_dir=None):
                         scene["videoFileId"] = ids[scene["videoFileId"]]
                     for shot in scene["shots"]:
                         shot["fileId"] = ids[shot["fileId"]]
+            check_active()
             api.post("complete", **lease, result=result)
-    except Exception:
+            return True
+    except SliceYield:
+        if lost.is_set():
+            raise RuntimeError("処理の有効期限を更新できませんでした")
+        continuing = root / ".continuing"
+        continuing.touch(mode=0o600)
         try:
-            api.post("fail", **lease)
+            api.post("yield", **lease)
+        except Exception:
+            continuing.unlink(missing_ok=True)
+            raise
+        return False
+    except Exception as error:
+        transient = isinstance(error, (urllib.error.URLError, TimeoutError, subprocess.TimeoutExpired))
+        if isinstance(error, urllib.error.HTTPError):
+            transient = error.code in (429, 500, 502, 503, 504)
+        if transient and resumable and task["kind"] == "analyze" and root and root.is_dir():
+            retry_path = root / "transient-retries.json"
+            retries = json.loads(retry_path.read_text()) if retry_path.exists() else 0
+            if retries < 3:
+                write_json(retry_path, retries + 1)
+                continuing = root / ".continuing"
+                continuing.touch(mode=0o600)
+                try:
+                    api.post("yield", **lease)
+                except Exception:
+                    continuing.unlink(missing_ok=True)
+                    raise
+                return False
+        if root and root.is_dir():
+            (root / ".continuing").unlink(missing_ok=True)
+        try:
+            api.post("fail", **lease, **({"code": "source-staging-required"} if isinstance(error, SourceStagingRequired) else {}))
         except Exception:
             pass
         raise
@@ -618,14 +786,23 @@ def main():
         parser.add_argument("--start", type=float)
         parser.add_argument("--end", type=float)
         parser.add_argument("--checkpoint-dir", type=Path)
+        parser.add_argument("--slice-seconds", type=int)
         args = parser.parse_args(sys.argv[2:])
-        render_local(args.source, args.out, args.kind, args.refs, args.frames, args.start, args.end, args.checkpoint_dir)
+        try:
+            render_local(args.source, args.out, args.kind, args.refs, args.frames, args.start, args.end, args.checkpoint_dir,
+                         time.monotonic() + args.slice_seconds if args.slice_seconds else None)
+        except SliceYield:
+            raise SystemExit(75)
         return
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--refs", type=Path)
     parser.add_argument("--cache-dir", type=Path, help="途中結果の専用非公開ディレクトリ")
     parser.add_argument("--max-jobs", type=int, default=1, choices=range(1, 101))
     parser.add_argument("--job-timeout", type=int, default=7200, choices=range(60, 21601))
+    parser.add_argument("--slice-seconds", type=int, default=1200, choices=range(1, 3601))
+    parser.add_argument("--source-cache-dir", type=Path, help="Vercelを経由せず取得した私有元動画のSHA256キャッシュ")
+    parser.add_argument("--proxy-source-max-bytes", type=int, default=200_000_000)
+    parser.add_argument("--drive-credentials", type=Path, help="サーバー専用Drive読み取り認証JSON（0600）")
     parser.add_argument("--discover", action="store_true")
     parser.add_argument("--export-only", action="store_true", help="保存範囲の書き出しだけを処理する")
     args = parser.parse_args()
@@ -635,6 +812,12 @@ def main():
     if not key.startswith("ak_"):
         parser.error("AKASHIC_VIDEO_WORKER_KEY を設定してください")
     api = Api(os.environ.get("AKASHIC_BASE_URL", ""), key)
+    drive = None
+    if args.drive_credentials:
+        spec = importlib.util.spec_from_file_location("scene_drive_source", Path(__file__).with_name("scene-drive-source.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        drive = module.DriveSource(args.drive_credentials)
     failures = 0
     for _ in range(args.max_jobs):
         task = api.post("claim", **({"kind": "export"} if args.export_only else {}))["task"]
@@ -646,12 +829,13 @@ def main():
             break
         print(f"{task['id']}: {task['kind']} を処理", flush=True)
         try:
-            process(api, task, args.refs, args.job_timeout, args.cache_dir)
-            print(f"{task['id']}: 完了", flush=True)
+            completed = process(api, task, args.refs, args.job_timeout, args.cache_dir, args.slice_seconds, args.source_cache_dir, args.proxy_source_max_bytes, drive)
+            print(f"{task['id']}: {'完了' if completed else '途中保存・継続待ち'}", flush=True)
         except Exception as error:
             failures += 1
             # URL・認証ヘッダが含まれうる例外本文をログに出さない。
-            print(f"{task['id']}: 失敗 ({type(error).__name__})", file=sys.stderr, flush=True)
+            detail = f"HTTP {error.code}" if isinstance(error, urllib.error.HTTPError) else type(error).__name__
+            print(f"{task['id']}: 失敗 ({detail})", file=sys.stderr, flush=True)
     if failures:
         raise SystemExit(1)
 
