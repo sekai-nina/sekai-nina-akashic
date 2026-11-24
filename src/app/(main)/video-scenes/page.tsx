@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { listSceneVideos } from "@/lib/domain/video-scenes";
 import { formatDate } from "@/lib/utils";
 import { SCENE_LABELS as L, mediaSize } from "@/lib/video-scenes/policy";
+import { SCENE_VIDEO_KINDS, SCENE_VIDEO_KIND_LABELS, parseSceneVideoKind, type SceneVideoKind } from "@/lib/video-scenes/filters";
 
 const STATUS_STYLE: Record<string, string> = {
   ready: "bg-emerald-500/90 text-white",
@@ -19,12 +20,21 @@ const STEPS = [
   { icon: Smartphone, title: "スマホに保存", body: "そのまま投稿用に仕上げる" },
 ];
 
-export default async function VideoScenesPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
+function listHref(kind: SceneVideoKind | null, page = 1) {
+  const q = new URLSearchParams();
+  if (kind) q.set("kind", kind);
+  if (page > 1) q.set("page", String(page));
+  const s = q.toString();
+  return s ? `/video-scenes?${s}` : "/video-scenes";
+}
+
+export default async function VideoScenesPage({ searchParams }: { searchParams: Promise<{ page?: string; kind?: string }> }) {
   const session = await auth();
   if (!session?.user) notFound();
   const query = await searchParams;
   const page = Math.min(5000, Math.max(1, Math.floor(Number(query.page) || 1)));
-  const videos = await listSceneVideos(session.user.clearance, page);
+  const kind = parseSceneVideoKind(query.kind);
+  const videos = await listSceneVideos(session.user.clearance, page, kind);
   return <div className="mx-auto max-w-6xl">
     <header className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-sky-600 via-sky-500 to-cyan-400 p-6 text-white shadow-sm sm:p-8">
       <Clapperboard aria-hidden className="absolute -right-6 -top-6 h-40 w-40 rotate-12 text-white/10" />
@@ -37,7 +47,10 @@ export default async function VideoScenesPage({ searchParams }: { searchParams: 
       </li>)}</ol>
     </header>
 
-    {videos.length > 0 && <ul className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{videos.map((v) => {
+    <nav aria-label="データの種類" className="mt-6 flex flex-wrap gap-2">{[null, ...SCENE_VIDEO_KINDS].map((k) => <Link key={k ?? "all"} href={listHref(k)} aria-current={k === kind ? "page" : undefined}
+      className={`rounded-full border px-3.5 py-1.5 text-sm transition ${k === kind ? "border-sky-700 bg-sky-700 font-medium text-white shadow-sm" : "border-slate-300 bg-white text-slate-700 hover:border-sky-400 hover:text-sky-700"}`}>{k ? SCENE_VIDEO_KIND_LABELS[k] : "すべて"}</Link>)}</nav>
+
+    {videos.length > 0 && <ul className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{videos.map((v) => {
       const status = v.videoSceneTasks[0]?.status;
       const thumb = v.thumbnailUrl?.includes("/thumbnails/") ? v.thumbnailUrl : null;
       return <li key={v.id}><Link prefetch={false} href={`/video-scenes/${v.id}`} className="group block h-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-sky-300 hover:shadow-md">
@@ -56,7 +69,7 @@ export default async function VideoScenesPage({ searchParams }: { searchParams: 
         </div>
       </Link></li>;
     })}</ul>}
-    {!videos.length && <div className="mt-6 rounded-xl border border-dashed border-slate-300 py-14 text-center"><Film aria-hidden className="mx-auto h-10 w-10 text-slate-300" /><p className="mt-3 text-sm text-slate-500">この条件の動画はありません。動画のアセット詳細からも開けます。</p></div>}
-    <nav className="mt-6 flex justify-between text-sm">{page > 1 ? <Link href={`/video-scenes?page=${page - 1}`} className="rounded-lg border border-slate-300 bg-white px-4 py-2 hover:bg-slate-50">← 前へ</Link> : <span />}{videos.length === 25 && <Link href={`/video-scenes?page=${page + 1}`} className="rounded-lg border border-slate-300 bg-white px-4 py-2 hover:bg-slate-50">次へ →</Link>}</nav>
+    {!videos.length && <div className="mt-4 rounded-xl border border-dashed border-slate-300 py-14 text-center"><Film aria-hidden className="mx-auto h-10 w-10 text-slate-300" /><p className="mt-3 text-sm text-slate-500">この条件の動画はありません。動画のアセット詳細からも開けます。</p></div>}
+    <nav className="mt-6 flex justify-between text-sm">{page > 1 ? <Link href={listHref(kind, page - 1)} className="rounded-lg border border-slate-300 bg-white px-4 py-2 hover:bg-slate-50">← 前へ</Link> : <span />}{videos.length === 25 && <Link href={listHref(kind, page + 1)} className="rounded-lg border border-slate-300 bg-white px-4 py-2 hover:bg-slate-50">次へ →</Link>}</nav>
   </div>;
 }
