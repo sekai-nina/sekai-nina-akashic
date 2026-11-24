@@ -34,7 +34,7 @@ export async function listSceneVideos(clearance: string, page: number) {
     ] },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: 25, skip: (page - 1) * 25,
-    select: { id: true, title: true, fileSize: true, videoSceneTasks: {
+    select: { id: true, title: true, fileSize: true, thumbnailUrl: true, canonicalDate: true, videoSceneTasks: {
       where: { kind: "analyze", requestKey: { startsWith: `${SCENE_VERSION}:` } },
       take: 1, select: taskSelect,
     } },
