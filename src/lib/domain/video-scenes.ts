@@ -8,6 +8,7 @@ import {
   ExportRange, SceneManifest, SCENE_VERSION, SCENE_TASK_LEASE_MS, MAX_MEDIA_BYTES,
   type SceneMedia, type SceneView, type VideoScenesView, MEDIA_CHUNK_BYTES,
 } from "@/lib/video-scenes/policy";
+import { sceneVideoKindWhere, type SceneVideoKind } from "@/lib/video-scenes/filters";
 
 type Actor = { id: string; role: string; clearance: string };
 export class SceneInputError extends Error {}
@@ -25,13 +26,13 @@ function media(f: { id: string; mimeType: string; fileSize: number | null }): Sc
   return { ...f, kind: f.mimeType.startsWith("image/") ? "image" : "video" };
 }
 
-export async function listSceneVideos(clearance: string, page: number) {
+export async function listSceneVideos(clearance: string, page: number, kind: SceneVideoKind | null = null) {
   return withClearance(clearance, (tx) => tx.asset.findMany({
-    where: { ...videoWhere, OR: [
+    where: { ...videoWhere, AND: [{ OR: [
       { entities: { some: { entityId: NINA_ENTITY_ID } } },
       { faceDetections: { some: { confirmedEntityId: NINA_ENTITY_ID } } },
       { videoSceneTasks: { some: {} } },
-    ] },
+    ] }, sceneVideoKindWhere(kind)] },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: 25, skip: (page - 1) * 25,
     select: { id: true, title: true, fileSize: true, thumbnailUrl: true, canonicalDate: true, videoSceneTasks: {
