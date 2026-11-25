@@ -87,6 +87,8 @@ python scripts/video-scene-worker.py --refs /path/to/refs-full.npz --max-jobs 1 
 
 `deploy/video-scenes-*.service` / `.timer` は sekai のユーザーユニット。コードは `~/akashic-video-scenes/scripts`、参照は `data/refs-full.npz`、鍵は `~/.config/akashic-video-scenes/worker.env`（0600）へ配置する。Python は既存の `~/sekai-nina-omokage/.venv` を使う。分析は完了後10分、書き出しは完了後1分ごとに1件。分析 CPU 100% / 1800 MB、書き出し CPU 50% / 512 MB に制限し、既存サービスは変更しない。timer は1件の実地確認後に有効化する。
 
+場面・スクショの時刻は、送る直前に `clamp_manifest` で動画の長さの内側に収める（区切りを 0.01 秒に丸めると最後の場面が長さをわずかに超え、サーバーが完了を HTTP 400 で拒否するため。途中保存した古い結果にも効く）。動画の最後ちょうどのコマは ffmpeg が何も書かずに正常終了するので、`extract_frame` が少し前にずらして取り直す。
+
 ## 一覧の絞り込み（種類・長さ）
 
 `/video-scenes` の一覧は `?kind=` / `?length=` / `?sort=` で絞り込み・並べ替えができる。条件は `src/lib/video-scenes/filters.ts`。
