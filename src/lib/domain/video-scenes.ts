@@ -8,6 +8,7 @@ import {
   ExportRange, SceneManifest, SCENE_VERSION, SCENE_TASK_LEASE_MS, MAX_MEDIA_BYTES,
   type SceneMedia, type SceneView, type VideoScenesView, MEDIA_CHUNK_BYTES,
 } from "@/lib/video-scenes/policy";
+import { SCENE_FAILED_MESSAGE } from "@/lib/video-scenes/labels";
 import { sceneVideoKindWhere, sceneVideoLengthWhere, sceneVideoOrderBy, type SceneVideoQuery } from "@/lib/video-scenes/filters";
 
 type Actor = { id: string; role: string; clearance: string };
@@ -181,7 +182,7 @@ export async function updateSceneTask(user: Actor, taskId: string, token: string
     if (operation === "fail") {
       const message = (result as { code?: string })?.code === "source-staging-required"
         ? "Vercelの転送量を抑えるため、元動画の直接取得が必要です"
-        : "動画を処理できませんでした。ワーカーのログを確認してください";
+        : SCENE_FAILED_MESSAGE;
       await tx.videoSceneTask.update({ where: { id: taskId }, data: { status: "failed", error: message, leaseToken: null, leaseUntil: null } });
       return;
     }

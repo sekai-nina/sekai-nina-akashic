@@ -36,6 +36,7 @@ export default async function VideoScenesPage({ searchParams }: { searchParams: 
   const page = Math.min(5000, Math.max(1, Math.floor(Number(query.page) || 1)));
   const q: SceneVideoQuery = { kind: parseSceneVideoKind(query.kind), length: parseSceneVideoLength(query.length), sort: parseSceneVideoSort(query.sort) };
   const videos = await listSceneVideos(session.user.clearance, page, q);
+  const back = sceneVideoListHref(q, page).split("?")[1];
   return <div className="mx-auto max-w-6xl">
     <header className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-sky-600 via-sky-500 to-cyan-400 p-6 text-white shadow-sm sm:p-8">
       <Clapperboard aria-hidden className="absolute -right-6 -top-6 h-40 w-40 rotate-12 text-white/10" />
@@ -57,14 +58,14 @@ export default async function VideoScenesPage({ searchParams }: { searchParams: 
     {videos.length > 0 && <ul className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{videos.map((v) => {
       const status = v.videoSceneTasks[0]?.status;
       const thumb = v.thumbnailUrl?.includes("/thumbnails/") ? v.thumbnailUrl : null;
-      return <li key={v.id}><Link prefetch={false} href={`/video-scenes/${v.id}`} className="group block h-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-sky-300 hover:shadow-md">
+      return <li key={v.id}><Link prefetch={false} href={back ? `/video-scenes/${v.id}?back=${encodeURIComponent(back)}` : `/video-scenes/${v.id}`} className="group block h-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-sky-300 hover:shadow-md">
         <div className="relative aspect-video bg-gradient-to-br from-slate-800 to-slate-950">
           {thumb ? <img src={thumb} alt="" loading="lazy" className="h-full w-full object-cover transition duration-300 group-hover:scale-105" />
             : <Film aria-hidden className="absolute inset-0 m-auto h-10 w-10 text-white/30" />}
           <span className="absolute inset-0 flex items-center justify-center bg-black/0 transition group-hover:bg-black/25">
             <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/90 text-sky-700 opacity-0 shadow transition group-hover:opacity-100"><Play size={20} className="ml-0.5" /></span>
           </span>
-          {status && <span className={`absolute left-2 top-2 rounded-full px-2.5 py-0.5 text-xs font-medium shadow ${STATUS_STYLE[status] ?? "bg-slate-700/90 text-white"}`}>{L[status as keyof typeof L] ?? status}</span>}
+          <span className={`absolute left-2 top-2 rounded-full px-2.5 py-0.5 text-xs font-medium shadow ${status ? STATUS_STYLE[status] ?? "bg-slate-700/90 text-white" : "bg-white/85 text-slate-700"}`}>{status ? L[status as keyof typeof L] ?? status : L.none}</span>
           <span className="absolute bottom-2 right-2 rounded bg-black/75 px-1.5 py-0.5 text-xs font-medium tabular-nums text-white">{formatVideoDuration(v.durationSec) ?? "長さ不明"}</span>
         </div>
         <div className="p-3">
