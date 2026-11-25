@@ -270,6 +270,12 @@ model Asset {
   ocrAt              DateTime?
   /// OCR できなかった理由。成功したら null に戻す
   ocrError           String?
+  /// 動画の長さ (秒)。15 分ごとの cron (`/api/cron/video-durations`) が Drive の videoMediaMetadata から埋める。
+  /// Drive が長さを持っていない (処理待ち・作れない形式) ものは null のまま「長さ不明」
+  durationSec        Float?
+  /// 長さを Drive に問い合わせた最後の時刻と回数。取れなければ 1 日おきに 3 回までやり直す
+  durationProbedAt   DateTime?
+  durationProbeCount Int             @default(0)
 
   // Discord metadata
   discordGuildId    String?
