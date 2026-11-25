@@ -85,6 +85,37 @@ def source_bytes(task):
     return actual if actual is not None else task["asset"].get("fileSize")
 
 
+def clamp_manifest(result):
+    """場面・スクショの時刻を動画の長さの内側に収める。
+
+    場面の区切りは 0.01 秒に丸めるので、最後の場面の終わりが長さをわずかに超えることがある
+    (テレ東音楽祭: 終わり 191.16 > 長さ 191.1576)。サーバーは長さを超える場面を拒否 (HTTP 400) するので、
+    送る直前に必ず通す。途中保存した古い結果にも効く。
+    """
+    duration = result["duration"]
+    scenes = []
+    for scene in result["scenes"]:
+        start = min(max(0.0, scene["start"]), duration)
+        end = min(scene["end"], duration)
+        if end <= start:
+            continue
+        shots = [{**shot, "time": min(max(shot["time"], start), end)} for shot in scene["shots"]]
+        scenes.append({**scene, "start": start, "end": end, "shots": shots})
+    return {**result, "scenes": scenes}
+
+
+def extract_frame(trial, source, path, t, vf=None):
+    """t のコマを 1 枚抜く。動画の最後ちょうどのコマは ffmpeg がエラーにせず何も書かないので、少し前にずらして取り直す。"""
+    for at in (t, t - .25, t - .5, t - 1, 0):
+        at = max(0.0, at)
+        if path.exists():
+            path.unlink()
+        trial.extract(source, path, at, *([vf] if vf else []))
+        if path.is_file() and path.stat().st_size > 0:
+            return
+    raise ValueError("場面のコマを抜き出せませんでした")
+
+
 def reserve_space(root, source_bytes):
     # 保存済み分は追加の空き容量に数えない。未知の容量は最大値で予約する。
     source_bytes = min(MAX_SOURCE, source_bytes or MAX_SOURCE)
@@ -487,19 +518,19 @@ def render_local(source, target, kind, refs=None, frames=None, start=None, end=N
                     path = target / f"{slot}.jpg"
                     # ネイティブ画角を保ち、ブラウザが 1 応答で読める容量に収める。
                     if not reusable(slot, path):
-                        trial.extract(source, path, t)
+                        extract_frame(trial, source, path, t)
                         if path.stat().st_size > CHUNK:
-                            trial.extract(source, path, t, "scale='min(2048,iw)':-2")
+                            extract_frame(trial, source, path, t, "scale='min(2048,iw)':-2")
                     chosen[t] = register(slot, path, "image/jpeg")
                     thumb = target / f"thumb-{slot}.jpg"
                     if not reusable(f"thumb-{slot}", thumb):
-                        trial.extract(source, thumb, t, "scale='min(640,iw)':-2")
+                        extract_frame(trial, source, thumb, t, "scale='min(640,iw)':-2")
                     register(f"thumb-{slot}", thumb, "image/jpeg")
                 rows.append({"fileId": chosen[t], "time": t})
             scenes.append({"id": f"scene-{number}", "start": begin, "end": finish,
                            "videoFileId": None if plan["short"] else clip(f"C{number:04d}", begin, finish),
                            "posterFileId": chosen[poster["t"]], "shots": rows})
-        result = {"duration": meta["duration"], "scenes": scenes}
+        result = clamp_manifest({"duration": meta["duration"], "scenes": scenes})
     output = {"files": files, "result": result}
     (target / "render.json").write_text(json.dumps(output, ensure_ascii=False))
     if checkpoint:
@@ -727,7 +758,7 @@ def process(api, task, refs, timeout, cache_dir=None, slice_seconds=1200, source
                 ids[file["slot"]] = api.upload(task, file, deadline)
                 uploaded[file["slot"]] = {"id": ids[file["slot"]], "sha256": file["sha256"]}
                 write_json(uploaded_path, uploaded)
-            result = rendered["result"]
+            result = rendered["result"] if task["kind"] == "export" else clamp_manifest(rendered["result"])
             if task["kind"] == "export":
                 result["fileId"] = ids[result["fileId"]]
             else:

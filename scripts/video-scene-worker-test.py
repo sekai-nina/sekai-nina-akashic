@@ -379,5 +379,42 @@ class CheckpointTests(unittest.TestCase):
         self.assertAlmostEqual(result["runnerUpSimilarity"], .6)
 
 
+class ManifestBoundaryTests(unittest.TestCase):
+    def test_last_scene_rounded_past_duration_is_clamped(self):
+        # テレ東音楽祭: 終わりを 0.01 秒に丸めた 191.16 が長さ 191.1576 を超え、完了が HTTP 400 になった
+        result = {"duration": 191.15763333333334, "scenes": [
+            {"id": "scene-7", "start": 169.25, "end": 191.16, "videoFileId": "C7", "posterFileId": "S1",
+             "shots": [{"fileId": "S1", "time": 174.25}, {"fileId": "S2", "time": 191.16}]}]}
+        out = worker.clamp_manifest(result)
+        scene = out["scenes"][0]
+        self.assertLessEqual(scene["end"], result["duration"])
+        self.assertTrue(all(scene["start"] <= s["time"] <= scene["end"] for s in scene["shots"]))
+        self.assertEqual([s["fileId"] for s in scene["shots"]], ["S1", "S2"])
+
+    def test_empty_scene_after_clamp_is_dropped(self):
+        out = worker.clamp_manifest({"duration": 3.1, "scenes": [
+            {"id": "a", "start": 3.2, "end": 3.4, "videoFileId": None, "posterFileId": "S1", "shots": [{"fileId": "S1", "time": 3.3}]}]})
+        self.assertEqual(out["scenes"], [])
+
+    def test_frame_at_the_very_end_falls_back_to_an_earlier_time(self):
+        # 3 秒のトーク: 最後ちょうどの時刻だと ffmpeg が何も書かずに正常終了し、S0001.jpg が無くて落ちた
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "S0001.jpg"
+            calls = []
+            def extract(source, target, t, *rest):
+                calls.append(t)
+                if t < 3.0:
+                    target.write_bytes(b"jpeg")
+            worker.extract_frame(SimpleNamespace(extract=extract), "src.mp4", path, 3.1)
+            self.assertTrue(path.is_file())
+            self.assertEqual(calls[0], 3.1)
+            self.assertLess(calls[-1], 3.0)
+
+    def test_frame_that_never_appears_raises_a_clear_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(ValueError):
+                worker.extract_frame(SimpleNamespace(extract=lambda *a: None), "src.mp4", Path(tmp) / "x.jpg", 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()
