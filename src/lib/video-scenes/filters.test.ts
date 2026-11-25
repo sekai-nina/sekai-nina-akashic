@@ -16,3 +16,25 @@ describe("動画の場面の種類の絞り込み", () => {
     expect(other.NOT).toHaveLength(4);
   });
 });
+
+import { formatVideoDuration, parseSceneVideoLength, parseSceneVideoSort, sceneVideoLengthWhere, sceneVideoListHref } from "./filters";
+
+describe("動画の場面の長さ・並び", () => {
+  it("区切りは 60 秒・600 秒で、境目は長い側に入る", () => {
+    expect(sceneVideoLengthWhere("short")).toEqual({ durationSec: { lt: 60 } });
+    expect(sceneVideoLengthWhere("medium")).toEqual({ durationSec: { gte: 60, lt: 600 } });
+    expect(sceneVideoLengthWhere("long")).toEqual({ durationSec: { gte: 600 } });
+    expect(parseSceneVideoLength("x")).toBeNull();
+    expect(parseSceneVideoSort("x")).toBe("new");
+  });
+  it("URL は既定値を書かず、組み合わせを保つ", () => {
+    expect(sceneVideoListHref({ kind: null, length: null, sort: "new" })).toBe("/video-scenes");
+    expect(sceneVideoListHref({ kind: "program", length: "long", sort: "longest" }, 2)).toBe("/video-scenes?kind=program&length=long&sort=longest&page=2");
+  });
+  it("長さは m:ss、1 時間以上は h:mm:ss", () => {
+    expect(formatVideoDuration(1514.98)).toBe("25:15");
+    expect(formatVideoDuration(2.869)).toBe("0:03");
+    expect(formatVideoDuration(3725)).toBe("1:02:05");
+    expect(formatVideoDuration(null)).toBeNull();
+  });
+});

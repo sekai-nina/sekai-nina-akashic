@@ -8,7 +8,7 @@ import {
   ExportRange, SceneManifest, SCENE_VERSION, SCENE_TASK_LEASE_MS, MAX_MEDIA_BYTES,
   type SceneMedia, type SceneView, type VideoScenesView, MEDIA_CHUNK_BYTES,
 } from "@/lib/video-scenes/policy";
-import { sceneVideoKindWhere, type SceneVideoKind } from "@/lib/video-scenes/filters";
+import { sceneVideoKindWhere, sceneVideoLengthWhere, sceneVideoOrderBy, type SceneVideoQuery } from "@/lib/video-scenes/filters";
 
 type Actor = { id: string; role: string; clearance: string };
 export class SceneInputError extends Error {}
@@ -26,16 +26,16 @@ function media(f: { id: string; mimeType: string; fileSize: number | null }): Sc
   return { ...f, kind: f.mimeType.startsWith("image/") ? "image" : "video" };
 }
 
-export async function listSceneVideos(clearance: string, page: number, kind: SceneVideoKind | null = null) {
+export async function listSceneVideos(clearance: string, page: number, query: SceneVideoQuery) {
   return withClearance(clearance, (tx) => tx.asset.findMany({
     where: { ...videoWhere, AND: [{ OR: [
       { entities: { some: { entityId: NINA_ENTITY_ID } } },
       { faceDetections: { some: { confirmedEntityId: NINA_ENTITY_ID } } },
       { videoSceneTasks: { some: {} } },
-    ] }, sceneVideoKindWhere(kind)] },
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    ] }, sceneVideoKindWhere(query.kind), sceneVideoLengthWhere(query.length)] },
+    orderBy: sceneVideoOrderBy(query.sort),
     take: 25, skip: (page - 1) * 25,
-    select: { id: true, title: true, fileSize: true, thumbnailUrl: true, canonicalDate: true, videoSceneTasks: {
+    select: { id: true, title: true, fileSize: true, durationSec: true, thumbnailUrl: true, canonicalDate: true, videoSceneTasks: {
       where: { kind: "analyze", requestKey: { startsWith: `${SCENE_VERSION}:` } },
       take: 1, select: taskSelect,
     } },
