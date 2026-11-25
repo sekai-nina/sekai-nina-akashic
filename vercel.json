@@ -37,6 +37,10 @@
       "schedule": "11,26,41,56 * * * *"
     },
     {
+      "path": "/api/cron/video-durations",
+      "schedule": "9,24,39,54 * * * *"
+    },
+    {
       "path": "/api/cron/discovery-icons",
       "schedule": "3,18,33,48 * * * *"
     }

@@ -408,6 +408,27 @@ export interface DriveFileMeta {
  * ファイルのメタデータだけ読む (実体は落とさない)。無ければ null。
  * `sha256Checksum` は Drive 側で計算済みの値。resumable 経路の直後でも入っている。
  */
+/**
+ * 動画の長さ (秒) を Drive の videoMediaMetadata から読む。ダウンロードはしない。
+ * - 数値: 長さ
+ * - "missing": Drive が長さを持っていない (処理待ち・作れない形式) か、ファイルが無い (404)
+ * 一時的な失敗 (5xx / 429 / 通信) は throw するので、呼び出し側は回数に数えない
+ */
+export async function getDriveVideoDuration(fileId: string): Promise<number | "missing"> {
+  const auth = getAuth();
+  if (!auth) throw new Error("Drive の認証情報がありません");
+  const drive = google.drive({ version: "v3", auth: auth as Parameters<typeof google.drive>[0]["auth"] });
+  try {
+    const res = await drive.files.get({ fileId, fields: "videoMediaMetadata(durationMillis)", supportsAllDrives: true });
+    const ms = Number(res.data.videoMediaMetadata?.durationMillis);
+    return Number.isFinite(ms) && ms > 0 ? ms / 1000 : "missing";
+  } catch (err) {
+    const e = err as { status?: number; code?: number | string };
+    if (e.status === 404 || e.code === 404 || e.code === "404") return "missing";
+    throw err;
+  }
+}
+
 export async function getDriveFileMeta(fileId: string): Promise<DriveFileMeta | null> {
   const auth = getAuth();
   if (!auth) return null;

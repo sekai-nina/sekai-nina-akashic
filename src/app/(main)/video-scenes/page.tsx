@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Clapperboard, Film, Play, Scissors, Smartphone } from "lucide-react";
@@ -5,7 +6,10 @@ import { auth } from "@/lib/auth";
 import { listSceneVideos } from "@/lib/domain/video-scenes";
 import { formatDate } from "@/lib/utils";
 import { SCENE_LABELS as L, mediaSize } from "@/lib/video-scenes/policy";
-import { SCENE_VIDEO_KINDS, SCENE_VIDEO_KIND_LABELS, parseSceneVideoKind, type SceneVideoKind } from "@/lib/video-scenes/filters";
+import {
+  SCENE_VIDEO_KINDS, SCENE_VIDEO_KIND_LABELS, SCENE_VIDEO_LENGTHS, SCENE_VIDEO_LENGTH_LABELS, SCENE_VIDEO_SORTS, SCENE_VIDEO_SORT_LABELS,
+  formatVideoDuration, parseSceneVideoKind, parseSceneVideoLength, parseSceneVideoSort, sceneVideoListHref, type SceneVideoQuery,
+} from "@/lib/video-scenes/filters";
 
 const STATUS_STYLE: Record<string, string> = {
   ready: "bg-emerald-500/90 text-white",
@@ -20,21 +24,18 @@ const STEPS = [
   { icon: Smartphone, title: "スマホに保存", body: "そのまま投稿用に仕上げる" },
 ];
 
-function listHref(kind: SceneVideoKind | null, page = 1) {
-  const q = new URLSearchParams();
-  if (kind) q.set("kind", kind);
-  if (page > 1) q.set("page", String(page));
-  const s = q.toString();
-  return s ? `/video-scenes?${s}` : "/video-scenes";
+function Chip({ href, active, children }: { href: string; active: boolean; children: ReactNode }) {
+  return <Link href={href} aria-current={active ? "page" : undefined}
+    className={`rounded-full border px-3.5 py-1.5 text-sm transition ${active ? "border-sky-700 bg-sky-700 font-medium text-white shadow-sm" : "border-slate-300 bg-white text-slate-700 hover:border-sky-400 hover:text-sky-700"}`}>{children}</Link>;
 }
 
-export default async function VideoScenesPage({ searchParams }: { searchParams: Promise<{ page?: string; kind?: string }> }) {
+export default async function VideoScenesPage({ searchParams }: { searchParams: Promise<{ page?: string; kind?: string; length?: string; sort?: string }> }) {
   const session = await auth();
   if (!session?.user) notFound();
   const query = await searchParams;
   const page = Math.min(5000, Math.max(1, Math.floor(Number(query.page) || 1)));
-  const kind = parseSceneVideoKind(query.kind);
-  const videos = await listSceneVideos(session.user.clearance, page, kind);
+  const q: SceneVideoQuery = { kind: parseSceneVideoKind(query.kind), length: parseSceneVideoLength(query.length), sort: parseSceneVideoSort(query.sort) };
+  const videos = await listSceneVideos(session.user.clearance, page, q);
   return <div className="mx-auto max-w-6xl">
     <header className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-sky-600 via-sky-500 to-cyan-400 p-6 text-white shadow-sm sm:p-8">
       <Clapperboard aria-hidden className="absolute -right-6 -top-6 h-40 w-40 rotate-12 text-white/10" />
@@ -47,8 +48,11 @@ export default async function VideoScenesPage({ searchParams }: { searchParams: 
       </li>)}</ol>
     </header>
 
-    <nav aria-label="データの種類" className="mt-6 flex flex-wrap gap-2">{[null, ...SCENE_VIDEO_KINDS].map((k) => <Link key={k ?? "all"} href={listHref(k)} aria-current={k === kind ? "page" : undefined}
-      className={`rounded-full border px-3.5 py-1.5 text-sm transition ${k === kind ? "border-sky-700 bg-sky-700 font-medium text-white shadow-sm" : "border-slate-300 bg-white text-slate-700 hover:border-sky-400 hover:text-sky-700"}`}>{k ? SCENE_VIDEO_KIND_LABELS[k] : "すべて"}</Link>)}</nav>
+    <div className="mt-6 space-y-2">
+      <nav aria-label="データの種類" className="flex flex-wrap items-center gap-2"><span className="w-10 text-xs text-slate-500">種類</span>{[null, ...SCENE_VIDEO_KINDS].map((k) => <Chip key={k ?? "all"} href={sceneVideoListHref({ ...q, kind: k })} active={k === q.kind}>{k ? SCENE_VIDEO_KIND_LABELS[k] : "すべて"}</Chip>)}</nav>
+      <nav aria-label="長さ" className="flex flex-wrap items-center gap-2"><span className="w-10 text-xs text-slate-500">長さ</span>{[null, ...SCENE_VIDEO_LENGTHS].map((k) => <Chip key={k ?? "all"} href={sceneVideoListHref({ ...q, length: k })} active={k === q.length}>{k ? SCENE_VIDEO_LENGTH_LABELS[k] : "すべて"}</Chip>)}</nav>
+      <nav aria-label="並び順" className="flex flex-wrap items-center gap-2"><span className="w-10 text-xs text-slate-500">並び</span>{SCENE_VIDEO_SORTS.map((k) => <Chip key={k} href={sceneVideoListHref({ ...q, sort: k })} active={k === q.sort}>{SCENE_VIDEO_SORT_LABELS[k]}</Chip>)}</nav>
+    </div>
 
     {videos.length > 0 && <ul className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{videos.map((v) => {
       const status = v.videoSceneTasks[0]?.status;
@@ -61,15 +65,15 @@ export default async function VideoScenesPage({ searchParams }: { searchParams: 
             <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/90 text-sky-700 opacity-0 shadow transition group-hover:opacity-100"><Play size={20} className="ml-0.5" /></span>
           </span>
           {status && <span className={`absolute left-2 top-2 rounded-full px-2.5 py-0.5 text-xs font-medium shadow ${STATUS_STYLE[status] ?? "bg-slate-700/90 text-white"}`}>{L[status as keyof typeof L] ?? status}</span>}
-          <span className="absolute bottom-2 right-2 rounded bg-black/70 px-1.5 py-0.5 text-[11px] text-white">{mediaSize(v.fileSize)}</span>
+          <span className="absolute bottom-2 right-2 rounded bg-black/75 px-1.5 py-0.5 text-xs font-medium tabular-nums text-white">{formatVideoDuration(v.durationSec) ?? "長さ不明"}</span>
         </div>
         <div className="p-3">
           <p className="line-clamp-2 text-sm font-medium text-slate-900 group-hover:text-sky-700">{v.title || "動画"}</p>
-          <p className="mt-1 flex items-center justify-between text-xs text-slate-500"><span>{formatDate(v.canonicalDate)}</span><span className="text-sky-700">{status === "ready" ? "場面を見る →" : "開く →"}</span></p>
+          <p className="mt-1 flex items-center justify-between text-xs text-slate-500"><span>{[formatDate(v.canonicalDate), v.fileSize != null && mediaSize(v.fileSize)].filter(Boolean).join(" · ")}</span><span className="text-sky-700">{status === "ready" ? "場面を見る →" : "開く →"}</span></p>
         </div>
       </Link></li>;
     })}</ul>}
     {!videos.length && <div className="mt-4 rounded-xl border border-dashed border-slate-300 py-14 text-center"><Film aria-hidden className="mx-auto h-10 w-10 text-slate-300" /><p className="mt-3 text-sm text-slate-500">この条件の動画はありません。動画のアセット詳細からも開けます。</p></div>}
-    <nav className="mt-6 flex justify-between text-sm">{page > 1 ? <Link href={listHref(kind, page - 1)} className="rounded-lg border border-slate-300 bg-white px-4 py-2 hover:bg-slate-50">← 前へ</Link> : <span />}{videos.length === 25 && <Link href={listHref(kind, page + 1)} className="rounded-lg border border-slate-300 bg-white px-4 py-2 hover:bg-slate-50">次へ →</Link>}</nav>
+    <nav className="mt-6 flex justify-between text-sm">{page > 1 ? <Link href={sceneVideoListHref(q, page - 1)} className="rounded-lg border border-slate-300 bg-white px-4 py-2 hover:bg-slate-50">← 前へ</Link> : <span />}{videos.length === 25 && <Link href={sceneVideoListHref(q, page + 1)} className="rounded-lg border border-slate-300 bg-white px-4 py-2 hover:bg-slate-50">次へ →</Link>}</nav>
   </div>;
 }

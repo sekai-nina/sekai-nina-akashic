@@ -87,6 +87,16 @@ python scripts/video-scene-worker.py --refs /path/to/refs-full.npz --max-jobs 1 
 
 `deploy/video-scenes-*.service` / `.timer` は sekai のユーザーユニット。コードは `~/akashic-video-scenes/scripts`、参照は `data/refs-full.npz`、鍵は `~/.config/akashic-video-scenes/worker.env`（0600）へ配置する。Python は既存の `~/sekai-nina-omokage/.venv` を使う。分析は完了後10分、書き出しは完了後1分ごとに1件。分析 CPU 100% / 1800 MB、書き出し CPU 50% / 512 MB に制限し、既存サービスは変更しない。timer は1件の実地確認後に有効化する。
 
+## 一覧の絞り込み（種類・長さ）
+
+`/video-scenes` の一覧は `?kind=` / `?length=` / `?sort=` で絞り込み・並べ替えができる。条件は `src/lib/video-scenes/filters.ts`。
+
+- 種類: 番組・配信 / トーク / TikTok / ゲーム / その他。取り込み元の `SourceRecord.publisher`（`Talk (Sony Music)` / `TikTok` / `ひなこい`・`UNI'S ON AIR` / `Lemino`・`日向坂ちゃんねる`）と番組タグで決め、1 本は 1 種類にだけ入る。Instagram の動画は出典もタグも無いので「その他」
+- 長さ: 〜1分 / 1〜10分 / 10分以上。`Asset.durationSec` を使い、長さ不明（null）はどれにも入らない（「すべて」には出る）
+- 並び: 新しい順（既定）/ 長い順（長さ不明は最後）
+
+`Asset.durationSec` は `GET /api/cron/video-durations`（`9,24,39,54 * * * *`）が、長さが空の gdrive の動画を 400 本ずつ Google Drive の `videoMediaMetadata.durationMillis` から埋める。ダウンロードせず、取り込み側（bot）も触らない。Drive が長さを持っていないもの（処理待ち・作れない形式、ファイルが無い）は 1 日おきに 3 回まで問い合わせ直し、それでも無ければ「長さ不明」のまま。一時的な失敗（5xx / 429）は回数に数えない。件数は `/status` の `cron.video_duration` のメッセージ（「長さ不明 N」）に出る。既存の動画は `pnpm cli:fill-video-durations --apply` で一度に埋める（既定は 50 本だけ問い合わせる下見）。多くが「長さ不明」に残るなら、sekai の場面ワーカーと同じ環境で ffprobe して埋める経路を足す。
+
 ## 適用順と検証
 
 1. migration `20261116000000_video_scene_tasks` と両テーブルへの GRANT を、承認後に適用する。
