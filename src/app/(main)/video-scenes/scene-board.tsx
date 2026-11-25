@@ -7,12 +7,13 @@ import { SCENE_LABELS as L, ExportRange, MAX_EXPORT_SECONDS, mediaSize, sceneTim
 import { sceneMediaUrl, sceneSourceUrl, saveSceneBlob } from "@/lib/video-scenes/download";
 import { generateVideoScenes, exportVideoScene } from "./actions";
 import { SceneDownloadButton } from "./download-button";
+import { LEGACY_SCENE_FAILED_MESSAGE, SCENE_FAILED_MESSAGE } from "@/lib/video-scenes/labels";
 
 const buttonClass = "inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-50 disabled:opacity-50";
 const heroClass = "inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-white/40 bg-white/15 px-3 py-2 text-sm font-medium text-white backdrop-blur-sm transition hover:bg-white/25 disabled:opacity-50";
 const primaryClass = "inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg bg-sky-700 px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-sky-800 disabled:opacity-50";
 
-export function VideoSceneBoard({ initial, editable, initialTime = 0 }: { initial: VideoScenesView; editable: boolean; initialTime?: number }) {
+export function VideoSceneBoard({ initial, editable, initialTime = 0, backHref = "/video-scenes" }: { initial: VideoScenesView; editable: boolean; initialTime?: number; backHref?: string }) {
   const [data, setData] = useState(initial);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sourceMode, setSourceMode] = useState(initialTime > 0 || !initial.scenes.length);
@@ -123,7 +124,7 @@ export function VideoSceneBoard({ initial, editable, initialTime = 0 }: { initia
   return <div className="space-y-6">
     <div className="relative flex flex-wrap items-end justify-between gap-4 overflow-hidden rounded-2xl bg-gradient-to-br from-sky-600 via-sky-500 to-cyan-400 p-5 text-white shadow-sm sm:p-6">
       <Clapperboard aria-hidden className="pointer-events-none absolute -right-4 -top-6 h-32 w-32 rotate-12 text-white/10" />
-      <div className="relative min-w-0"><Link href="/video-scenes" className="text-xs font-semibold tracking-wide text-white/80 hover:text-white">← {L.title}</Link><h1 className="mt-1 text-xl font-bold sm:text-2xl">{data.asset.title || "動画"}</h1>
+      <div className="relative min-w-0"><Link href={backHref} className="text-xs font-semibold tracking-wide text-white/80 hover:text-white">← {L.title}</Link><h1 className="mt-1 text-xl font-bold sm:text-2xl">{data.asset.title || "動画"}</h1>
         <p className="mt-1 flex flex-wrap gap-x-3 text-xs text-white/85">{data.scenes.length > 0 && <span>場面 {data.scenes.length} 件</span>}{duration != null && <span>長さ {sceneTime(duration)}</span>}<span>元動画 {mediaSize(data.asset.fileSize)}</span><Link href={`/assets/${data.asset.id}`} className="underline hover:text-white">元アセットの詳細</Link></p></div>
       <div className="relative flex flex-wrap gap-2">
         <button className={heroClass} onClick={() => { previewEnd.current = null; seek(0, true); }}>{L.source}</button>
@@ -135,7 +136,7 @@ export function VideoSceneBoard({ initial, editable, initialTime = 0 }: { initia
       </div>
     </div>
     {error && <p role="alert" className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
-    {data.task && data.task.status !== "ready" && <p role="status" className={`flex items-center gap-2 rounded-lg p-3 text-sm ${data.task.status === "failed" ? "bg-rose-50 text-rose-800" : "bg-sky-50 text-sky-900"}`}>{working && <Loader2 size={16} className="shrink-0 animate-spin" />}<span><strong>{L[data.task.status as keyof typeof L] ?? data.task.status}</strong>{data.task.error ? ` · ${data.task.error}` : " · 完了した場面はここに表示されます。画面を閉じても処理は続きます。"}</span></p>}
+    {data.task && data.task.status !== "ready" && <p role="status" className={`flex items-center gap-2 rounded-lg p-3 text-sm ${data.task.status === "failed" ? "bg-rose-50 text-rose-800" : "bg-sky-50 text-sky-900"}`}>{working && <Loader2 size={16} className="shrink-0 animate-spin" />}<span><strong>{L[data.task.status as keyof typeof L] ?? data.task.status}</strong>{data.task.error ? ` · ${data.task.error === LEGACY_SCENE_FAILED_MESSAGE ? SCENE_FAILED_MESSAGE : data.task.error}` : " · 完了した場面はここに表示されます。画面を閉じても処理は続きます。"}</span></p>}
 
     <div ref={player} className="scroll-mt-20 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm"><strong className="flex items-center gap-2"><span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${source ? "bg-slate-100 text-slate-700" : "bg-sky-100 text-sky-800"}`}>{source ? "元動画" : "場面"}</span>{source ? "通して見る" : `${sceneTime(active?.start ?? 0)}–${sceneTime(active?.end ?? 0)}`}</strong>
@@ -167,7 +168,7 @@ export function VideoSceneBoard({ initial, editable, initialTime = 0 }: { initia
     {data.exports.length > 0 && <section className="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-4"><h2 className="flex items-center gap-1.5 text-sm font-semibold text-emerald-900"><Film size={16} />保存用に準備した動画</h2><p className="mt-1 text-xs text-slate-500">同じ動画のこのページをスマホで開くと、準備済みの範囲を保存できます。</p><ul className="mt-3 space-y-3">{data.exports.map((e) => <li key={e.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-3 py-2 text-sm shadow-sm"><span>{sceneTime(e.start)}–{sceneTime(e.end)} · {(e.end - e.start).toFixed(1)} 秒</span>{e.file ? <SceneDownloadButton file={e.file} filename={`${data.asset.id}-${e.start}-${e.end}.mp4`} compact /> : <span className="text-xs text-slate-500">{L[e.status as keyof typeof L] ?? e.status}</span>}</li>)}</ul></section>}
 
     <section><h2 className="flex items-center gap-2 text-lg font-semibold"><Images size={20} className="text-sky-700" />{L.browse}{data.scenes.length > 0 && <span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-800">{data.scenes.length}</span>}</h2><p className="mt-1 text-sm text-slate-500">表紙から場面を開くか、スクショだけを保存できます。小さく写る場面も含めています。</p>
-      {!data.scenes.length ? <p className="mt-4 rounded-xl border border-dashed border-slate-300 px-4 py-12 text-center text-sm text-slate-500">{working ? <Loader2 aria-hidden className="mx-auto mb-3 h-8 w-8 animate-spin text-sky-400" /> : <Camera aria-hidden className="mx-auto mb-3 h-8 w-8 text-slate-300" />}{data.task?.status === "ready" ? "本人として拾えた場面がありませんでした。元動画から気になるコマを保存できます。" : "場面候補はまだありません。元動画を見ながら、気になるコマを保存することもできます。"}</p>
+      {!data.scenes.length ? <p className="mt-4 rounded-xl border border-dashed border-slate-300 px-4 py-12 text-center text-sm text-slate-500">{working ? <Loader2 aria-hidden className="mx-auto mb-3 h-8 w-8 animate-spin text-sky-400" /> : <Camera aria-hidden className="mx-auto mb-3 h-8 w-8 text-slate-300" />}{data.task?.status === "ready" ? "本人として拾えた場面がありませんでした。元動画から気になるコマを保存できます。" : (!data.task && editable ? "まだ場面候補を作っていません。上の「場面候補を作る」で作れます（数分〜長尺は数時間）。待たずに、元動画から気になるコマを保存することもできます。" : "場面候補はまだありません。元動画を見ながら、気になるコマを保存することもできます。")}</p>
         : <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{data.scenes.map((s) => <article key={s.id} className={`group overflow-hidden rounded-xl border bg-white shadow-sm transition hover:shadow-md ${s.id === active?.id ? "border-sky-600 ring-2 ring-sky-600" : "border-slate-200"}`}>
           <button type="button" onClick={() => choose(s)} className="relative block aspect-video w-full bg-slate-950" aria-label={`${sceneTime(s.start)} からの場面を開く`}>
             <img src={sceneMediaUrl(s.poster.previewId ?? s.poster.id)} alt="場面の表紙" loading="lazy" className="h-full w-full object-contain transition duration-300 group-hover:scale-[1.03]" />

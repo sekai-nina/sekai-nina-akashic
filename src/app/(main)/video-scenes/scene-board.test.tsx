@@ -24,6 +24,12 @@ describe("動画の場面の画面", () => {
     expect(html).toContain('preload="none"');
     expect(html).not.toContain('href="/api/video-scenes/media/source');
   });
+  it("一覧の条件付きの戻り先と、以前の失敗文の言い換え", () => {
+    const html = renderToStaticMarkup(<VideoSceneBoard initial={{ ...initial, task: { id: "t", status: "failed", error: "動画を処理できませんでした。ワーカーのログを確認してください" } }} editable backHref="/video-scenes?kind=program" />);
+    expect(html).toContain('href="/video-scenes?kind=program"');
+    expect(html).not.toContain("ワーカーのログ");
+    expect(html).toContain("もう一度生成する");
+  });
   it("viewer には生成・範囲の書き出し操作を出さない", () => {
     const html = renderToStaticMarkup(<VideoSceneBoard initial={{ ...initial, task: null }} editable={false} />);
     expect(html).not.toContain("場面候補を作る");

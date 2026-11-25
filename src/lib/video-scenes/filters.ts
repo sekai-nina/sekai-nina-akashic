@@ -87,6 +87,17 @@ export function sceneVideoListHref(q: SceneVideoQuery, page = 1) {
   return s ? `/video-scenes?${s}` : "/video-scenes";
 }
 
+/** 詳細ページの「← 動画の場面」で一覧の条件に戻すため、`?back=` に入れた一覧の検索文字列を安全な一覧 URL に組み直す */
+export function sceneVideoListHrefFromSearch(search: string | undefined) {
+  const params = new URLSearchParams(search ?? "");
+  const page = Math.min(5000, Math.max(1, Math.floor(Number(params.get("page")) || 1)));
+  return sceneVideoListHref({
+    kind: parseSceneVideoKind(params.get("kind") ?? undefined),
+    length: parseSceneVideoLength(params.get("length") ?? undefined),
+    sort: parseSceneVideoSort(params.get("sort") ?? undefined),
+  }, page);
+}
+
 /** カードに出す長さ。1 時間以上は h:mm:ss */
 export function formatVideoDuration(sec: number | null): string | null {
   if (sec == null) return null;

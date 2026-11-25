@@ -38,3 +38,13 @@ describe("動画の場面の長さ・並び", () => {
     expect(formatVideoDuration(null)).toBeNull();
   });
 });
+
+import { sceneVideoListHrefFromSearch } from "./filters";
+
+describe("詳細から一覧の条件に戻る", () => {
+  it("一覧の条件を保ち、知らない値・別のパスは捨てる", () => {
+    expect(sceneVideoListHrefFromSearch("kind=program&length=long&sort=longest&page=3")).toBe("/video-scenes?kind=program&length=long&sort=longest&page=3");
+    expect(sceneVideoListHrefFromSearch(undefined)).toBe("/video-scenes");
+    expect(sceneVideoListHrefFromSearch("kind=evil&next=//example.com")).toBe("/video-scenes");
+  });
+});
